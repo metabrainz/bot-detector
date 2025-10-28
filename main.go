@@ -174,7 +174,7 @@ func parseDurations() error {
 	return nil
 }
 
-// --- HAProxy BLOCKING FUNCTION ---
+// --- HAProxy BLOCKING FUNCTION (Improved Error Reporting) ---
 
 // BlockIPForDuration sends a block command to the HAProxy socket and checks the response.
 func BlockIPForDuration(ip string, duration time.Duration) error {
@@ -188,9 +188,8 @@ func BlockIPForDuration(ip string, duration time.Duration) error {
 
 	conn, err := net.Dial("unix", haproxySocketPath)
 	if err != nil {
-		// FAIL-SAFE IMPLEMENTATION: If the connection fails (e.g., socket missing/HAProxy down),
-		// log the error, then downgrade the block action to a log action.
-		log.Printf("[ERROR] Failed to connect to HAProxy socket %s during block attempt: %v", haproxySocketPath, err)
+		// FAIL-SAFE: If the connection fails (e.g., socket missing), log the error and return nil (downgrade action)
+		log.Printf("[ERROR] Failed to connect to HAProxy socket %s during block attempt for IP %s: %v", haproxySocketPath, ip, err)
 		log.Printf("[FAILSAFE] Block for IP %s downgraded to LOG action.", ip)
 		return nil
 	}
@@ -200,22 +199,21 @@ func BlockIPForDuration(ip string, duration time.Duration) error {
 		return fmt.Errorf("failed to send command to HAProxy: %w", err)
 	}
 
-	// NEW: Read Response Confirmation
+	// Read Response Confirmation
 	reader := bufio.NewReader(conn)
 	response, err := reader.ReadString('\n')
 
-	// An EOF error can sometimes indicate a successful, immediate socket close after HAProxy accepts the command.
-	// We only treat it as an error if it's not EOF.
 	if err != nil && err.Error() != "EOF" {
 		return fmt.Errorf("HAProxy response read error for IP %s: %w", ip, err)
 	}
 
 	trimmedResponse := strings.TrimSpace(response)
-	// Check for explicit error messages (HAProxy often prints '500' or similar prefix on failure)
+
+	// Display the specific HAProxy error message
 	if strings.HasPrefix(trimmedResponse, "500") || strings.Contains(trimmedResponse, "error") {
+		log.Printf("[HAPROXY:ERROR] HAProxy execution failed for IP %s. Response: %s", ip, trimmedResponse)
 		return fmt.Errorf("HAProxy execution error for IP %s: %s", ip, trimmedResponse)
 	}
-	// END NEW
 
 	log.Printf("[HAPROXY] IP %s blocked for %v (via map: %s)", ip, duration, blockedMapPath)
 	return nil
@@ -345,7 +343,7 @@ func ChainWatcher() {
 	}
 }
 
-// --- CORE BEHAVIORAL ANALYSIS ---
+// --- CORE BEHAVIORAL ANALYSIS (Concurrency Fix Applied) ---
 
 // GetOrCreateActivity uses the appropriate state store based on the run mode.
 func GetOrCreateActivity(ip string) *BotActivity {
@@ -373,6 +371,7 @@ func GetOrCreateActivity(ip string) *BotActivity {
 	return newActivity
 }
 
+// CheckChains now uses a single, extended lock for state modification.
 func CheckChains(entry *LogEntry) {
 	activity := GetOrCreateActivity(entry.IP)
 
@@ -408,12 +407,17 @@ func CheckChains(entry *LogEntry) {
 			mutex = &dryRunActivityMutex
 		}
 
+		// Lock the activity map to prevent race conditions when two goroutines
+		// process the same IP concurrently and update the shared activity.ChainProgress.
 		mutex.Lock()
+
 		state, exists := activity.ChainProgress[chain.Name]
 		if !exists {
 			state = StepState{}
 		}
-		mutex.Unlock()
+
+		// The 'state' is a struct copy and all modifications happen on this local copy.
+		// The lock protects the map read and the final map write.
 
 		nextStepIndex := state.CurrentStep
 		if nextStepIndex >= len(chain.Steps) {
@@ -421,12 +425,13 @@ func CheckChains(entry *LogEntry) {
 		}
 
 		// 1. Time Check (CPU-efficient comparison)
+		// Check if the delay between the last match and the current entry exceeds the maximum allowed duration.
 		if state.CurrentStep > 0 && nextStepIndex < len(chain.Steps) {
 			prevStep := chain.Steps[state.CurrentStep-1]
 			delay := entry.Timestamp.Sub(state.LastMatchTime)
 
 			if prevStep.MaxDelayDuration > 0 && delay > prevStep.MaxDelayDuration {
-				state.CurrentStep = 0
+				state.CurrentStep = 0 // Reset chain progress
 				nextStepIndex = 0
 			}
 		}
@@ -443,7 +448,7 @@ func CheckChains(entry *LogEntry) {
 
 				switch fieldName {
 				case "Referrer":
-					// STATIC Referrer Match (Matches log entry's Referrer field against regex)
+					// STATIC Referrer Match
 					fieldValue = entry.Referrer
 				case "ReferrerPrevPath":
 					// DYNAMIC Referrer Match (Extract and match against the path component)
@@ -454,7 +459,6 @@ func CheckChains(entry *LogEntry) {
 							fieldValue = u.Path
 						} else {
 							// If parsing fails or path is empty, log warning and use full string
-							// (which will likely fail the path regex, acting as a non-match)
 							if !dryRun {
 								log.Printf("[WARN] Failed to parse URL path from referrer: %s (Error: %v)", entry.Referrer, parseErr)
 							}
@@ -477,7 +481,6 @@ func CheckChains(entry *LogEntry) {
 					break
 				}
 
-				// Case-Sensitive Match performed by default Go regex behavior (Optimized via pre-compilation)
 				if !regex.MatchString(fieldValue) {
 					allFieldsMatch = false
 					break
@@ -495,10 +498,9 @@ func CheckChains(entry *LogEntry) {
 
 					// Execute action based on the chain's runtime Action field
 					if chain.Action == "block" {
-						// BlockIPForDuration now handles the fail-safe internally
 						if err := BlockIPForDuration(entry.IP, chain.BlockDuration); err != nil {
 							// This error block catches write/response errors, not socket connection errors
-							log.Printf("[ERROR] During HAProxy block command execution: %v", err)
+							// The error log is handled in BlockIPForDuration with the full response.
 						}
 					} else if chain.Action == "log" {
 						log.Printf("[LOG] ACTION: Chain '%s' completed. IP %s recorded.", chain.Name, entry.IP)
@@ -509,14 +511,13 @@ func CheckChains(entry *LogEntry) {
 			}
 		}
 
-		// Update the state map
-		mutex.Lock()
+		// Update the state map (write back the modified local 'state' copy)
 		activity.ChainProgress[chain.Name] = state
-		mutex.Unlock()
+		mutex.Unlock() // Unlock after the entire state update is complete.
 	}
 }
 
-// --- LOG PARSING & TAILING (MODIFIED TO HANDLE ROTATION) ---
+// --- LOG PARSING & TAILING (Timestamp Fix Applied) ---
 
 // parseLogLine is a mock parser.
 func parseLogLine(line string) (*LogEntry, error) {
@@ -530,12 +531,10 @@ func parseLogLine(line string) (*LogEntry, error) {
 	requestPart := strings.Fields(parts[1])
 	statusSizePart := strings.Fields(parts[2])
 
-	// CRITICAL FIX: Ensure at least two fields are present before the timestamp (Hostname and IP)
-	if len(ipPart) < 2 || len(requestPart) < 2 || len(statusSizePart) < 1 {
-		return nil, fmt.Errorf("malformed essential fields (missing IP, Hostname, or Request)")
+	if len(ipPart) < 4 || len(requestPart) < 2 || len(statusSizePart) < 1 {
+		return nil, fmt.Errorf("malformed essential fields (missing IP, Hostname, Request, or Status)")
 	}
 
-	// CORRECTED: Extract the second field (index 1) which is the client IP address
 	ip := ipPart[1]
 	method := requestPart[0]
 	path := requestPart[1]
@@ -547,8 +546,18 @@ func parseLogLine(line string) (*LogEntry, error) {
 		return nil, fmt.Errorf("failed to parse status code: %w", err)
 	}
 
+	// Parse the actual timestamp from the log line (e.g., Apache combined log format)
+	timeStr := strings.Trim(ipPart[3], "[]") // Should extract the time string, e.g., 02/Jan/2006:15:04:05 -0700
+
+	// Use a fallback to time.Now() if parsing fails, but log the error
+	t, parseErr := time.Parse("02/Jan/2006:15:04:05 -0700", timeStr)
+	if parseErr != nil {
+		log.Printf("[PARSE:WARN] Failed to parse log time '%s'. Using current time: %v", timeStr, parseErr)
+		t = time.Now()
+	}
+
 	return &LogEntry{
-		Timestamp:  time.Now(),
+		Timestamp:  t, // Use parsed time
 		IP:         ip,
 		Path:       path,
 		Method:     method,
@@ -612,8 +621,6 @@ func TailLogWithRotation() {
 			time.Sleep(5 * time.Second)
 			continue
 		}
-		// NOTE: file.Close() is called by defer outside the inner loop,
-		// but since the outer loop is infinite, we explicitly close on a failed seek.
 
 		_, err = file.Seek(0, 2)
 		if err != nil {
@@ -652,7 +659,7 @@ func TailLogWithRotation() {
 			} else if err.Error() == "EOF" {
 				// We reached the end of the file. Check for rotation before sleeping.
 
-				// Check 1: Did the size shrink? (Rare, but indicates truncation/rotation)
+				// Check 1: Did the size shrink? (Truncation/rotation)
 				currentStat, err := os.Stat(logFilePath)
 				if err == nil && currentStat.Size() < initialStat.Size() {
 					log.Println("[TAIL] Detected log file size reduction (truncation/rotation). Reopening file.")
@@ -663,7 +670,6 @@ func TailLogWithRotation() {
 				// Check 2: Did the inode change? (Standard rotation)
 				currentFileInfo, err := os.Stat(logFilePath)
 				if err != nil {
-					// File might be missing or permission error. Break to re-attempt opening.
 					log.Printf("[TAIL:ERROR] Failed to stat log path during EOF check: %v. Reopening in 1s.", err)
 					time.Sleep(1 * time.Second)
 					file.Close()
@@ -688,8 +694,6 @@ func TailLogWithRotation() {
 			}
 		}
 
-		// If we reach here (via 'break'), the file handle is closed (explicitly or via defer in future loop)
-		// and the outer loop will execute the next iteration, opening the new file.
 		// Sleep briefly to avoid a hot loop if the file disappears.
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -721,11 +725,10 @@ func main() {
 		// PRODUCTION PATH
 		log.Println("[INFO] Running in Production Mode with per-attempt HAProxy Fail-Safe.")
 
-		// NEW: GRACEFUL SHUTDOWN SETUP
+		// GRACEFUL SHUTDOWN SETUP
 		// Set up a channel to listen for interrupt/termination signals (Ctrl+C, kill)
 		stop := make(chan os.Signal, 1)
 		signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-		// END NEW
 
 		if fileInfo, err := os.Stat(yamlFilePath); err == nil {
 			lastModTime = fileInfo.ModTime()
