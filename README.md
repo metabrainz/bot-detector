@@ -1,8 +1,99 @@
-# Behavioral Bot Detector (bot-detector)
+# **Bot-Detector: Behavioral Threat Mitigation**
 
-The `bot-detector` is a high-performance Go-based utility designed to analyze web access logs in real-time, detect sophisticated, multi-step malicious behavior (bot chains), and dynamically block offending IP addresses using the HAProxy Runtime API.
+Bot-Detector is a high-performance Go application designed to monitor live access logs, identify malicious or anomalous behavior using configurable behavioral chains, and dynamically block offending IP addresses via the HAProxy Runtime API.
 
-The program is optimized for minimal CPU and memory overhead, utilizing pre-compiled regular expressions and a dedicated, timed cleanup routine to prevent memory leaks during long-running operation.
+## **Features**
+
+* **Real-Time Behavioral Analysis:** Uses flexible YAML configurations to detect sequential patterns (e.g., initial probe, specific request, failed login).  
+* **HAProxy Integration:** Executes immediate IP blocking via the HAProxy Runtime Socket.  
+* **High Resilience:** Automatically handles HAProxy socket unavailability by switching the action from block to log for the duration of the outage (**Passive Monitoring Mode**).  
+* **Log Rotation Safe:** Continuously tails live log files, automatically detecting and re-opening the file after log rotation events (e.g., logrotate).  
+* **Graceful Shutdown:** Implements signal handlers (SIGINT, SIGTERM) for safe, controlled process termination.  
+* **Dry Run Mode:** Allows testing behavioral chains against static log files without affecting a live HAProxy instance.
+
+## **Setup and Usage**
+
+### **Step 1: HAProxy Configuration (CRITICAL)**
+
+The bot-detector writes IP block information to a map file, but **HAProxy must be configured to read it and act on it**.  
+You must integrate the following rules into your /etc/haproxy/haproxy.cfg file.
+
+#### **A. Define the Dynamic Map (In global section)**
+
+Add the following directive to the global section to declare the map file and enable HAProxy to monitor it for updates every 5 seconds.
+
+```
+global  
+    # ... your existing global settings ...
+
+    # Declare the dynamic map file managed by bot-detector  
+    map-file blocked_ips_list /etc/haproxy/maps/blocked_ips.map check 5s
+```
+
+#### **B. Implement the Blocking Rule (In Frontends)**
+
+Place these three lines in your primary HTTP and HTTPS frontends, **before** any other static tcp-request content reject rules for highest priority.  
+
+```
+frontend tcpforward_http from base  
+    # ... existing bind and expect-proxy rules ...
+
+    # --- DYNAMIC BOT-DETECTOR BLOCK ---  
+    acl is_blocked src -f blocked_ips_list  
+    tcp-request content reject if is_blocked  
+    # ----------------------------------
+
+    # ... remaining whitelist/blocklist rules ...
+```
+
+#### **C. Finalize Setup**
+
+1. **Create Map File:** Ensure the map file exists and is empty:
+
+```bash
+   mkdir -p /etc/haproxy/maps  
+   touch /etc/haproxy/maps/blocked_ips.map
+```
+
+3. **Permissions:** Set file permissions so the user running bot-detector can **write** to the map file, and the user running haproxy can **read** it.  
+4. **Reload HAProxy:** Safely reload your HAProxy configuration.
+
+### **Step 2: Running the Bot-Detector**
+
+The application is configured using command-line flags.
+
+#### **Production Mode (Live Tailing)**
+
+Run the application pointing to your live log file, HAProxy socket, and map file.  
+
+```bash
+./bot-detector \  
+    -log-path "/var/log/http/access.log" \
+    -socket-path "/run/haproxy/admin.sock" \
+    -map-path "/etc/haproxy/maps/blocked_ips.map" \  
+    -yaml-path "chains.yaml" \
+    -cleanup-interval "5m" \  
+    -idle-timeout "1h"
+```
+
+#### **Dry Run Mode (Testing)**
+
+Use `-dry-run` to test your chains against a static log file. This will process the file once and log all match actions without attempting to connect to HAProxy.  
+
+```bash
+# test_access.log contains the log lines you want to test  
+./bot-detector -dry-run -test-log "test_access.log" -yaml-path "chains.yaml"
+```
+
+## **Resilience and Logging**
+
+### **Passive Monitoring Mode (HAProxy Fail-Safe)**
+
+If the HAProxy socket (`-socket-path`) is unavailable during a block attempt (e.g., HAProxy is restarting or down), the program will immediately log the connection error and **downgrade the action to log** for that event. It will continue attempting the block for subsequent events.  
+
+### **Log Rotation Handling**
+
+The bot-detector monitors the unique file identifier (inode) of the log file. If the file is renamed or truncated (as happens during logrotate), the application detects the change, closes the old handle, and re-opens the new log file to ensure continuous log processing.
 
 ## ⚙️ Building the Application
 
@@ -10,26 +101,20 @@ To compile the source code, you must first initialize the Go module and fetch th
 
 1. **Initialize the Go Module:**
 
-```
-
+```bash
 go mod init bot_detector
-
 ```
 
 2. **Fetch Dependencies:**
 
-```
-
+```bash
 go mod tidy
-
 ```
 
 3. **Build the Executable:**
 
-```
-
+```bash
 go build -o bot-detector main.go
-
 ```
 
 This will produce a single executable named `bot-detector`.
@@ -53,14 +138,12 @@ Production mode tails a live log file, monitors rule changes, cleans up idle sta
 
 **Example Command (Recommended for Production):**
 
-```
-
-sudo ./bot-detector  
-\--log-path "/var/log/nginx/access.log"  
-\--socket-path "/var/run/haproxy/admin.sock"  
-\--map-path "/etc/haproxy/maps/blocked\_ips.map"  
-\--idle-timeout "30m"
-
+```bash
+./bot-detector \
+--log-path "/var/log/nginx/access.log" \  
+--socket-path "/var/run/haproxy/admin.sock" \  
+--map-path "/etc/haproxy/maps/blocked_ips.map" \  
+--idle-timeout "30m"
 ```
 
 ### 2. Dry Run Mode
@@ -74,84 +157,112 @@ Dry Run mode is for testing your behavioral rules without connecting to HAProxy 
 
 **Example Command (Testing Rules):**
 
+```bash
+./bot-detector --dry-run \  
+--yaml-path "test_rules.yaml" \
+--test-log "large_test_data.log"
 ```
 
-./bot-detector --dry-run  
-\--yaml-path "test\_rules.yaml"  
-\--test-log "large\_test\_data.log"
+# **Behavioral Chains Configuration File (chains.yaml)**
 
-```
+This file defines the sequential behavioral chains used by the bot-detector to identify and act upon suspicious traffic patterns.  
+The file is structured as a top-level map containing a single key, chains, which holds an array of individual chain definitions.
 
-## 🧩 Configuration File Example (`chains.yaml`)
+## **Root Structure**
 
-The behavioral chains are defined in a YAML file, specifying a sequence of steps that must occur within specific time windows to trigger an action.
+| Field | Type | Description |
+| :---- | :---- | :---- |
+| chains | array of object | The list of behavioral chains to be loaded. |
 
-Each chain requires an **`action`** field, which determines the system's response when the chain is completed:
+## **BehavioralChain Definition (Top Level)**
 
-* **`block`**: The IP address is immediately added to the HAProxy block map for the duration specified by `block_duration`.
+Each item in the chains array must conform to the following structure:
 
-* **`log`**: The detection is logged to the system output, but *no* block command is sent to HAProxy. This is ideal for testing new chains in a live production environment without risking disruption.
+| Field | Type | Required | Description |
+| :---- | :---- | :---- | :---- |
+| **name** | string | Yes | A unique, descriptive name for the chain (e.g., API-Abuse-Low-Agent). |
+| **steps** | array of object | Yes | The sequential list of steps that define the malicious pattern. |
+| **action** | string | Yes | The action to take when the chain is successfully completed by an IP. **Must be one of:** `block` or `log`. |
+| **block_duration** | string | No | The duration for which the IP should be blocked if action is block. Format: Go duration string (e.g., "5m", "1h", "30m", "1h30m"). **Required if action is block**. |
 
-The core fields you can match against are: **IP, Path, Method, UserAgent, Referrer, and StatusCode.**
+## **Step Definition**
 
-### `chains.yaml`
+Each step in the steps array defines a specific log entry characteristic that must occur in sequence to progress the chain.
 
-```yaml
+| Field | Type | Required | Description |
+| :---- | :---- | :---- | :---- |
+| **order** | integer | Yes | The sequence number of the step (starting at 1). Steps are processed numerically. |
+| **field_matches** | map\[string\]string | Yes | A set of key-value pairs where the key is a field from the log line (e.g., **Method**, **StatusCode**, **Path**, **UserAgent**) and the value is a **Go Regular Expression** that must match the corresponding log entry field. |
+| **max_delay** | string | Yes | The maximum allowed time gap between the *previous* successful step and this step. Format: Go duration string (e.g., "10s", "1m"). |
 
-version: "1.0"
+### `field_matches`
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| **IP** | `string` | The client IP address. |
+| **Method** | `string` | The HTTP request method (e.g., `GET`, `POST`). |
+| **Path** | `string` | The requested URL path. |
+| **StatusCode** | `int` | The HTTP response status code (e.g., `200`, `404`). |
+| **Referrer** | `string` | The HTTP Referer header value. |
+| **UserAgent** | `string` | The HTTP User-Agent header value. |
+
+## **Example chains.yaml**
+
+This example defines two chains: one for logging suspicious scanning and one for blocking a brute-force-like sequence.  
 chains:
 
-# --- CHAIN 1: The Account Takeover Pre-scan ---
+```yaml  
+  # 1. CHAIN: Credential Stuffing / Brute Force  
+  - name: Login-Brute-Force  
+    action: block  
+    block_duration: "1h"  
+    steps:  
+      - order: 1  
+        max_delay: "5m"  
+        field_matches:  
+          Method: "POST"  
+          Path: "^/api/login$"  
+          # Must result in a 401 Unauthorized  
+          StatusCode: "^401$" 
 
-# Goal: Block users who first probe for a sensitive path and then immediately
+      - order: 2  
+        max_delay: "10s"  
+        field_matches:  
+          Method: "POST"  
+          Path: "^/api/login$"  
+          StatusCode: "^401$" 
 
-# attempt a high volume of login attempts.
+      - order: 3  
+        max_delay: "5s"  
+        field_matches:  
+          Method: "POST"  
+          Path: "^/api/login$"  
+          StatusCode: "^401$" 
 
-  - name: "Login-Bruteforce-Attempt"
-    action: "block"
-    block_duration: "2h"
-    steps:
+  # 2. CHAIN: Content Scraper (Log Only)  
+  - name: Content-Scraper-Fast  
+    action: log  
+    steps:  
+      - order: 1  
+        max_delay: "5m"  
+        field_matches:  
+          Method: "GET"  
+          # Request an article page  
+          Path: "^/article/\\d+$"  
+          # User agent might be suspicious  
+          UserAgent: "(?i)(curl|wget|python-requests)" 
 
-    # Step 1: Probe a known sensitive file
+      - order: 2  
+        max_delay: "1s"  
+        field_matches:  
+          Method: "GET"  
+          # Request another article page very quickly  
+          Path: "^/article/\\d+$"
 
-      - order: 1
-        field_matches:
-        Path: "/wp-admin/includes/version.php"
-        StatusCode: "404|403" # Look for failure responses
-
-    # Step 2: Immediate follow-up with multiple login attempts
-
-      - order: 2
-        field_matches:
-        Path: "/login.html"
-        Method: "POST"
-        max_delay: "15s" # This step must occur within 15 seconds of Step 1
-
-# --- CHAIN 2: The Evasion Scanner ---
-
-# Goal: Block IPs that scrape a public page followed by an administrative area,
-
-# but use a known bot User Agent and try to appear like a normal browser.
-
-  - name: "Evasion-Scraper"
-    action: "log" # Using 'log' for testing purposes
-    block_duration: "10m"
-    steps:
-
-    # Step 1: Hit a public page
-
-      - order: 1
-        field_matches:
-        Path: "^/products/[a-z0-9-]+$"
-        UserAgent: "(?i)Mozilla/5.0.*Chrome" # Use common browser UA regex to avoid detection
-        # Note: If max_delay is omitted, it defaults to no maximum delay for the next step.
-
-    # Step 2: Hit a private/admin endpoint
-
-      - order: 2
-        field_matches:
-        Path: "/admin/stats"
-        StatusCode: "401" # Check for Unauthorized access
-        max_delay: "3m" # Must occur within 3 minutes of Step 1
-
+      - order: 3  
+        max_delay: "1s"  
+        field_matches:  
+          Method: "GET"  
+          # Request a third article page very quickly  
+          Path: "^/article/\\d+$"
 ```
