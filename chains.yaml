@@ -1,0 +1,125 @@
+version: "1.0"
+chains:
+
+# --- Original Chain (Confirmed Working) ---
+
+- name: "Suspect"
+  action: "block"
+  block_duration: "2h"
+  steps:
+
+  - order: 1
+    field_matches:
+      Path: "^/set-language/"
+      Method: "HEAD"
+      StatusCode: "302"
+
+  - order: 2
+    field_matches:
+      Path: "^/recording/"
+      Method: "GET"
+    max_delay: "10s"
+
+# --- Mimics Python Script's 'setlang' (Language Redirect Abuse) ---
+
+- name: "SetLang-Redirect-Abuse"
+  action: "block"
+  block_duration: "1h"
+  steps:
+
+  # Step 1: Initial probe GET /set-language/ (302)
+  - order: 1
+    field_matches:
+      Path: "^/set-language/"
+      Method: "GET"
+      StatusCode: "302"
+      Referrer: "^-$"
+
+  # Step 2: Immediate follow-up request (the redirect target)
+  - order: 2
+    field_matches:
+      Path: "^/"
+      Method: "GET"
+    max_delay: "5s"
+
+# --- Mimics Python Script's '303' (Track-to-Release-Scan) ---
+
+- name: "Track-to-Release-Scan"
+  action: "block"
+  block_duration: "1h"
+  steps:
+
+  # Step 1: Initial probe GET /track/ (303)
+  - order: 1
+    field_matches:
+      Path: "^/track/"
+      Method: "GET"
+      StatusCode: "303"
+      Referrer: "^-$"
+
+  # Step 2: Immediate successful GET to a /release/ page (200)
+  - order: 2
+    field_matches:
+      Path: "^/release/"
+      Method: "GET"
+      StatusCode: "200"
+    max_delay: "5s"
+
+# --- NEW CHAIN 4: Excessive API Requests with Low-Quality Agent (2 RPS Limit) ---
+
+# Goal: Detect bots rapidly hitting the /ws/2/ API endpoint using User Agents
+# that indicate automated access. Triggered if 3 requests occur in under 1 second total.
+
+- name: "API-Abuse-Low-Agent"
+  action: "block"
+  block_duration: "30m"
+  steps:
+
+  # Step 1: Hit API endpoint with a low-quality or generic User Agent
+  - order: 1
+    field_matches:
+      Path: "^/ws/2/"
+      UserAgent: "(?i)python|curl|requests|wget|go-http-client" # Case-insensitive regex match
+
+  # Step 2: Hit the same API endpoint again very quickly (below 0.5s limit)
+  - order: 2
+    field_matches:
+      Path: "^/ws/2/"
+    max_delay: "0.4s" # Tightened to catch 2 RPS violation
+
+  # Step 3: A third rapid hit confirms the automated sequence (below 0.5s limit)
+  - order: 3
+    field_matches:
+      Path: "^/ws/2/"
+    max_delay: "0.4s" # Tightened to catch 2 RPS violation
+
+# --- NEW CHAIN 5: User-Agent Spoofing/Scanning ---
+
+# Goal: Detect a single IP attempting to scan different admin paths while rapidly
+# switching User Agents (e.g., Firefox -> Chrome -> Safari) to bypass simple fingerprinting.
+
+- name: "UA-Spoofing-Scan"
+  action: "log"
+  block_duration: "1h30m"
+  steps:
+
+  # Step 1: Probe a sensitive path using Firefox UA
+  - order: 1
+    field_matches:
+      Path: "^/admin"
+      UserAgent: "(?i)Firefox"
+
+  # Step 2: Probe a different sensitive path using Chrome UA immediately after
+  - order: 2
+    field_matches:
+      Path: "^/status"
+      UserAgent: "(?i)Chrome"
+    max_delay: "10s"
+
+  # Step 3: Probe a third sensitive path using Safari UA
+  - order: 3
+    field_matches:
+      Path: "^/config"
+      UserAgent: "(?i)Safari"
+    max_delay: "10s"
+
