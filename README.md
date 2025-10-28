@@ -204,7 +204,46 @@ Each step in the steps array defines a specific log entry characteristic that mu
 | **Path** | `string` | The requested URL path. |
 | **StatusCode** | `int` | The HTTP response status code (e.g., `200`, `404`). |
 | **Referrer** | `string` | The HTTP Referer header value. |
+| **ReferrerPrevPath** | `string` | Special, see below |
 | **UserAgent** | `string` | The HTTP User-Agent header value. |
+
+#### `ReferrerPrevPath` Field
+
+The `ReferrerPrevPath` field is a **special, internal identifier** used within a `StepDefYAML` configuration to enable a specific type of sequential log matching in a behavioral chain.
+
+##### Purpose
+
+The primary purpose of `ReferrerPrevPath` is to validate that the **current request** originated from a **specific path** visited in the **previous step** of the chain.
+
+It is specifically designed to model typical user flows, such as submitting a form or clicking a navigation link, where the current request's `Referrer` header should logically contain the path of the previous page in the sequence.
+
+##### How it Works
+
+1.  **YAML Definition:** When defining a step in your `chains.yaml`, you specify a regular expression under the key `ReferrerPrevPath`. This regex should describe the expected **path** of the page that should have been visited immediately prior to the current request.
+
+    ```yaml
+    # Example YAML snippet for a behavioral chain step:
+    steps:
+      - order: 2
+        field_matches:
+          # The regex must match a path component (e.g., "/login").
+          # This regex is matched against the full Referrer header value.
+          "ReferrerPrevPath": "/login$"
+    ```
+
+2.  **Runtime Matching:** When the system processes a log entry for a potential match on this step, it performs the following check:
+    * It extracts the **full value of the `Referrer` header** from the current log entry (`entry.Referrer`).
+    * It matches this `Referrer` value against the regular expression defined for `ReferrerPrevPath` in the YAML configuration.
+
+##### Key Distinction from `Referrer`
+
+| Field Identifier | Log Entry Value Matched | Regex Intent (Expected Content) |
+| :--- | :--- | :--- |
+| **`Referrer`** | `entry.Referrer` (The full referrer string) | To match a specific referrer **host, domain, or full URL pattern** (e.g., `^https?://evil\.com/`). |
+| **`ReferrerPrevPath`** | **`entry.Referrer`** (The full referrer string) | To match a specific **path component** within the referrer URL (e.g., `/user/profile$`). |
+
+By using `ReferrerPrevPath`, the chain author signals that the regex is path-focused, ensuring the sequential integrity of the bot's observed behavior.
+---
 
 ## **Example chains.yaml**
 
