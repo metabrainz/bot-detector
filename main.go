@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/url"
 	"os"
-	"os/signal" // ADDED: For graceful shutdown
+	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
@@ -344,7 +345,7 @@ func ChainWatcher() {
 	}
 }
 
-// --- CORE BEHAVIORAL ANALYSIS (No changes needed here) ---
+// --- CORE BEHAVIORAL ANALYSIS ---
 
 // GetOrCreateActivity uses the appropriate state store based on the run mode.
 func GetOrCreateActivity(ip string) *BotActivity {
@@ -445,9 +446,25 @@ func CheckChains(entry *LogEntry) {
 					// STATIC Referrer Match (Matches log entry's Referrer field against regex)
 					fieldValue = entry.Referrer
 				case "ReferrerPrevPath":
-					// DYNAMIC Referrer Match (Assumes the regex describes the previous path,
-					// but matches against the current log entry's Referrer field)
-					fieldValue = entry.Referrer
+					// DYNAMIC Referrer Match (Extract and match against the path component)
+					if entry.Referrer != "" {
+						u, parseErr := url.Parse(entry.Referrer)
+						if parseErr == nil && u.Path != "" {
+							// Successfully parsed; use only the path for matching
+							fieldValue = u.Path
+						} else {
+							// If parsing fails or path is empty, log warning and use full string
+							// (which will likely fail the path regex, acting as a non-match)
+							if !dryRun {
+								log.Printf("[WARN] Failed to parse URL path from referrer: %s (Error: %v)", entry.Referrer, parseErr)
+							}
+							fieldValue = entry.Referrer
+						}
+					} else {
+						// Referrer is empty, which means it cannot match a path regex.
+						allFieldsMatch = false
+						break
+					}
 				case "StatusCode":
 					fieldValue = strconv.Itoa(entry.StatusCode)
 				default:
