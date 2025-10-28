@@ -12,7 +12,7 @@ To compile the source code, you must first initialize the Go module and fetch th
 
 ```
 
-go mod init bot\_detector
+go mod init bot_detector
 
 ```
 
@@ -96,12 +96,12 @@ The core fields you can match against are: **IP, Path, Method, UserAgent, Referr
 
 ### `chains.yaml`
 
-```
+```yaml
 
 version: "1.0"
 chains:
 
-# \--- CHAIN 1: The Account Takeover Pre-scan ---
+# --- CHAIN 1: The Account Takeover Pre-scan ---
 
 # Goal: Block users who first probe for a sensitive path and then immediately
 
@@ -109,49 +109,49 @@ chains:
 
   - name: "Login-Bruteforce-Attempt"
     action: "block"
-    block\_duration: "2h"
+    block_duration: "2h"
     steps:
 
     # Step 1: Probe a known sensitive file
 
       - order: 1
-        field\_matches:
+        field_matches:
         Path: "/wp-admin/includes/version.php"
-        StatusCode: "404|403" \# Look for failure responses
+        StatusCode: "404|403" # Look for failure responses
 
     # Step 2: Immediate follow-up with multiple login attempts
 
       - order: 2
-        field\_matches:
+        field_matches:
         Path: "/login.html"
         Method: "POST"
-        max\_delay: "15s" \# This step must occur within 15 seconds of Step 1
+        max_delay: "15s" # This step must occur within 15 seconds of Step 1
 
-# \--- CHAIN 2: The Evasion Scanner ---
+# --- CHAIN 2: The Evasion Scanner ---
 
 # Goal: Block IPs that scrape a public page followed by an administrative area,
 
 # but use a known bot User Agent and try to appear like a normal browser.
 
   - name: "Evasion-Scraper"
-    action: "log" \# Using 'log' for testing purposes
-    block\_duration: "10m"
+    action: "log" # Using 'log' for testing purposes
+    block_duration: "10m"
     steps:
 
     # Step 1: Hit a public page
 
       - order: 1
-        field\_matches:
+        field_matches:
         Path: "^/products/[a-z0-9-]+$"
-        UserAgent: "(?i)Mozilla/5.0.\*Chrome" \# Use common browser UA regex to avoid detection
-        # Note: If max\_delay is omitted, it defaults to no maximum delay for the next step.
+        UserAgent: "(?i)Mozilla/5.0.*Chrome" # Use common browser UA regex to avoid detection
+        # Note: If max_delay is omitted, it defaults to no maximum delay for the next step.
 
     # Step 2: Hit a private/admin endpoint
 
       - order: 2
-        field\_matches:
+        field_matches:
         Path: "/admin/stats"
-        StatusCode: "401" \# Check for Unauthorized access
-        max\_delay: "3m" \# Must occur within 3 minutes of Step 1
+        StatusCode: "401" # Check for Unauthorized access
+        max_delay: "3m" # Must occur within 3 minutes of Step 1
 
-<!-- end list -->
+```
