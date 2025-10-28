@@ -128,7 +128,6 @@ func init() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "A behavioral bot detection tool that monitors logs and blocks malicious IPs via the HAProxy Runtime API.\n\n")
-		fmt.Fprintf(os.Stderr, "Configuration Options (--option value):\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nMemory and CPU are optimized by pre-compiling regexes and using the cleanup routine.\n")
 	}
@@ -490,17 +489,19 @@ func parseLogLine(line string) (*LogEntry, error) {
 	// Assumed format: HOSTNAME IP - - [TIME] "METHOD PATH HTTP/1.1" STATUS SIZE "REFERRER" "USERAGENT"
 	parts := strings.Split(line, "\"")
 	if len(parts) < 5 {
-		return nil, fmt.Errorf("malformed log line")
+		return nil, fmt.Errorf("malformed log line: too few quoted sections")
 	}
 
 	ipPart := strings.Fields(parts[0])
 	requestPart := strings.Fields(parts[1])
 	statusSizePart := strings.Fields(parts[2])
 
-	if len(ipPart) < 4 || len(requestPart) < 2 || len(statusSizePart) < 1 {
-		return nil, fmt.Errorf("malformed essential fields")
+	// Check for enough fields: Hostname (0), IP (1), ID1 (2), ID2 (3), [TimePart1 (4), TimePart2 (5)]
+	if len(ipPart) < 6 || len(requestPart) < 2 || len(statusSizePart) < 1 {
+		return nil, fmt.Errorf("malformed essential fields (missing Hostname, Time, Request, or Status)")
 	}
 
+	// Correct Indexing for Hostname-prefixed log:
 	ip := ipPart[1]
 	method := requestPart[0]
 	path := requestPart[1]
@@ -512,12 +513,15 @@ func parseLogLine(line string) (*LogEntry, error) {
 		return nil, fmt.Errorf("failed to parse status code: %w", err)
 	}
 
-	// Parse the actual timestamp from the log line (e.g., Apache combined log format).
-	timeStr := strings.Trim(ipPart[3], "[]")
+	// FIX: Reconstruct the full bracketed timestamp from indices 4 and 5.
+	// Example: ipPart[4] = "[28/Oct/2025:15:41:10" and ipPart[5] = "+0000]"
+	timeStrWithBrackets := ipPart[4] + " " + ipPart[5]
+	timeStr := strings.Trim(timeStrWithBrackets, "[]")
 
 	// Use Go's reference time for layout: "02/Jan/2006:15:04:05 -0700".
 	t, parseErr := time.Parse("02/Jan/2006:15:04:05 -0700", timeStr)
 	if parseErr != nil {
+		// Log warning and use current time if time string is unparseable (e.g., malformed or missing).
 		log.Printf("[PARSE:WARN] Failed to parse log time '%s'. Using current time: %v", timeStr, parseErr)
 		t = time.Now()
 	}
