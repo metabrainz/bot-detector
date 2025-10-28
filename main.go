@@ -21,24 +21,19 @@ import (
 
 // --- CONFIGURATION GLOBAL VARS (Set by CLI flags) ---
 var (
-	// Log & HAProxy paths
 	logFilePath       string
 	haproxySocketPath string
 	blockedMapPath    string
 
-	// Configuration file options
 	yamlFilePath       string
 	pollingIntervalStr string
 
-	// Memory management options
 	cleanupIntervalStr string
-	idleTimeoutStr     string
+	idleTimeoutStr     string // Duration an IP must be inactive before its state is purged.
 
-	// DRY RUN OPTIONS
 	dryRun      bool
 	testLogPath string
 
-	// Parsed durations
 	pollingInterval time.Duration
 	cleanupInterval time.Duration
 	idleTimeout     time.Duration
@@ -46,14 +41,12 @@ var (
 
 // --- YAML DATA STRUCTURES ---
 
-// StepDefYAML defines one action in a behavioral chain from the YAML file
 type StepDefYAML struct {
 	Order           int               `yaml:"order"`
 	FieldMatches    map[string]string `yaml:"field_matches"`
-	MaxDelaySeconds string            `yaml:"max_delay"` // e.g., "5s", "10m"
+	MaxDelaySeconds string            `yaml:"max_delay"`
 }
 
-// BehavioralChainYAML is the structure for a chain in the YAML file
 type BehavioralChainYAML struct {
 	Name          string        `yaml:"name"`
 	Steps         []StepDefYAML `yaml:"steps"`
@@ -61,7 +54,6 @@ type BehavioralChainYAML struct {
 	BlockDuration string        `yaml:"block_duration"`
 }
 
-// ChainConfig is the root structure for the entire YAML file, including versioning
 type ChainConfig struct {
 	Version string                `yaml:"version"`
 	Chains  []BehavioralChainYAML `yaml:"chains"`
@@ -69,9 +61,8 @@ type ChainConfig struct {
 
 // --- RUNTIME DATA STRUCTURES ---
 
-// LogEntry captures essential fields for analysis
 type LogEntry struct {
-	Timestamp  time.Time
+	Timestamp  time.Time // Actual time of the request (parsed from log, not time.Now()).
 	IP         string
 	Path       string
 	Method     string
@@ -80,15 +71,13 @@ type LogEntry struct {
 	StatusCode int
 }
 
-// StepDef (Runtime) includes pre-compiled regex and parsed duration
 type StepDef struct {
 	Order            int
 	FieldMatches     map[string]string
-	MaxDelayDuration time.Duration // Parsed duration
-	compiledRegexes  map[string]*regexp.Regexp
+	MaxDelayDuration time.Duration
+	compiledRegexes  map[string]*regexp.Regexp // Pre-compiled regexes for performance.
 }
 
-// BehavioralChain (Runtime) includes parsed block duration and runtime steps
 type BehavioralChain struct {
 	Name          string
 	Steps         []StepDef
@@ -96,13 +85,12 @@ type BehavioralChain struct {
 	BlockDuration time.Duration
 }
 
-// StepState tracks an IP's progress through a single chain
 type StepState struct {
 	CurrentStep   int
 	LastMatchTime time.Time
 }
 
-// BotActivity tracks state for a single IP address
+// BotActivity tracks state for a single IP address across all chains.
 type BotActivity struct {
 	LastRequestTime time.Time
 	ChainProgress   map[string]StepState
@@ -110,16 +98,13 @@ type BotActivity struct {
 
 // --- GLOBAL STATE ---
 var (
-	// Production state store, protected by ActivityMutex
 	ActivityStore = make(map[string]*BotActivity)
-	ActivityMutex sync.Mutex
+	ActivityMutex sync.Mutex // Mutex protecting concurrent access to ActivityStore.
 
-	// Dynamic runtime chains, protected by a read/write mutex
 	Chains      []BehavioralChain
-	ChainMutex  sync.RWMutex
+	ChainMutex  sync.RWMutex // Mutex protecting concurrent read/write access during chain reload.
 	lastModTime time.Time
 
-	// Dry Run state storage (separate for isolation)
 	dryRunActivityStore = make(map[string]*BotActivity)
 	dryRunActivityMutex sync.Mutex
 )
@@ -127,20 +112,16 @@ var (
 // --- 🧩 CLI FLAG INITIALIZATION AND PARSING ---
 
 func init() {
-	// Log & HAProxy paths
 	flag.StringVar(&logFilePath, "log-path", "/var/log/http/access.log", "Path to the live access log file to tail (ignored in dry-run).")
 	flag.StringVar(&haproxySocketPath, "socket-path", "/var/run/haproxy.sock", "Path to the HAProxy Runtime API Unix socket (ignored in dry-run).")
 	flag.StringVar(&blockedMapPath, "map-path", "/etc/haproxy/maps/blocked_ips.map", "Path to the HAProxy map file used for dynamic IP blocking (ignored in dry-run).")
 
-	// Configuration file options
 	flag.StringVar(&yamlFilePath, "yaml-path", "chains.yaml", "Path to the YAML configuration file defining behavioral chains.")
 	flag.StringVar(&pollingIntervalStr, "poll-interval", "5s", "Interval (e.g., '10s', '1m') to check the YAML file for changes (ignored in dry-run).")
 
-	// Memory management options (Critical for leak prevention)
 	flag.StringVar(&cleanupIntervalStr, "cleanup-interval", "1m", "Interval (e.g., '5m') to run the routine that cleans up idle IP state.")
 	flag.StringVar(&idleTimeoutStr, "idle-timeout", "30m", "Duration (e.g., '45m') an IP must be inactive before its state is purged from memory.")
 
-	// DRY RUN OPTIONS
 	flag.BoolVar(&dryRun, "dry-run", false, "If true, runs in test mode: skips HAProxy/live logging, ignores cleanup/polling, and uses --test-log.")
 	flag.StringVar(&testLogPath, "test-log", "test_access.log", "Path to a static file containing log lines for dry-run testing.")
 
@@ -153,7 +134,6 @@ func init() {
 	}
 }
 
-// parseDurations converts string flags to time.Duration
 func parseDurations() error {
 	var err error
 
@@ -174,7 +154,7 @@ func parseDurations() error {
 	return nil
 }
 
-// --- HAProxy BLOCKING FUNCTION (Improved Error Reporting) ---
+// --- HAProxy BLOCKING FUNCTION ---
 
 // BlockIPForDuration sends a block command to the HAProxy socket and checks the response.
 func BlockIPForDuration(ip string, duration time.Duration) error {
@@ -188,7 +168,7 @@ func BlockIPForDuration(ip string, duration time.Duration) error {
 
 	conn, err := net.Dial("unix", haproxySocketPath)
 	if err != nil {
-		// FAIL-SAFE: If the connection fails (e.g., socket missing), log the error and return nil (downgrade action)
+		// FAIL-SAFE: If connection fails, log error and return nil (downgrade action)
 		log.Printf("[ERROR] Failed to connect to HAProxy socket %s during block attempt for IP %s: %v", haproxySocketPath, ip, err)
 		log.Printf("[FAILSAFE] Block for IP %s downgraded to LOG action.", ip)
 		return nil
@@ -209,7 +189,7 @@ func BlockIPForDuration(ip string, duration time.Duration) error {
 
 	trimmedResponse := strings.TrimSpace(response)
 
-	// Display the specific HAProxy error message
+	// Display the specific HAProxy error message (e.g., 500 or error keyword).
 	if strings.HasPrefix(trimmedResponse, "500") || strings.Contains(trimmedResponse, "error") {
 		log.Printf("[HAPROXY:ERROR] HAProxy execution failed for IP %s. Response: %s", ip, trimmedResponse)
 		return fmt.Errorf("HAProxy execution error for IP %s: %s", ip, trimmedResponse)
@@ -219,8 +199,9 @@ func BlockIPForDuration(ip string, duration time.Duration) error {
 	return nil
 }
 
-// --- MEMORY LEAK PREVENTION ROUTINE (Critical) ---
+// --- MEMORY LEAK PREVENTION ROUTINE ---
 
+// CleanUpIdleActivity periodically purges state for IPs inactive longer than idleTimeout.
 func CleanUpIdleActivity() {
 	if dryRun {
 		return
@@ -230,12 +211,11 @@ func CleanUpIdleActivity() {
 	for {
 		time.Sleep(cleanupInterval)
 
-		ActivityMutex.Lock()
+		ActivityMutex.Lock() // Protect the global ActivityStore map.
 		now := time.Now()
 		deletedCount := 0
 
 		for ip, activity := range ActivityStore {
-			// Check if last request time exceeds the idle timeout
 			if now.Sub(activity.LastRequestTime) > idleTimeout {
 				delete(ActivityStore, ip)
 				deletedCount++
@@ -249,9 +229,9 @@ func CleanUpIdleActivity() {
 	}
 }
 
-// --- YAML LOADING & WATCHER LOGIC (CPU-optimized) ---
+// --- YAML LOADING & WATCHER LOGIC ---
 
-// loadChainsFromYAML reads, parses, and compiles regexes for the chains.
+// loadChainsFromYAML reads, parses, and pre-compiles regexes for the chains.
 func loadChainsFromYAML() ([]BehavioralChain, error) {
 	data, err := os.ReadFile(yamlFilePath)
 	if err != nil {
@@ -271,7 +251,6 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 		if runtimeChain.Action != "block" && runtimeChain.Action != "log" {
 			return nil, fmt.Errorf("chain '%s': invalid action '%s'. Action must be 'block' or 'log'", yamlChain.Name, runtimeChain.Action)
 		}
-		// Parse block duration
 		if yamlChain.BlockDuration != "" {
 			runtimeChain.BlockDuration, err = time.ParseDuration(yamlChain.BlockDuration)
 			if err != nil {
@@ -286,7 +265,6 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 				compiledRegexes: make(map[string]*regexp.Regexp),
 			}
 
-			// Parse max delay
 			if yamlStep.MaxDelaySeconds != "" {
 				runtimeStep.MaxDelayDuration, err = time.ParseDuration(yamlStep.MaxDelaySeconds)
 				if err != nil {
@@ -294,7 +272,7 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 				}
 			}
 
-			// Compile regexes (Case-sensitive by default, which is the desired behavior)
+			// Compile regexes for performance.
 			for field, regexStr := range yamlStep.FieldMatches {
 				re, err := regexp.Compile(regexStr)
 				if err != nil {
@@ -310,6 +288,7 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 	return newChains, nil
 }
 
+// ChainWatcher monitors the YAML config file for modifications and reloads the chains dynamically.
 func ChainWatcher() {
 	if dryRun {
 		return
@@ -343,9 +322,9 @@ func ChainWatcher() {
 	}
 }
 
-// --- CORE BEHAVIORAL ANALYSIS (Concurrency Fix Applied) ---
+// --- CORE BEHAVIORAL ANALYSIS ---
 
-// GetOrCreateActivity uses the appropriate state store based on the run mode.
+// GetOrCreateActivity retrieves or initializes a BotActivity struct for a given IP, ensuring thread safety.
 func GetOrCreateActivity(ip string) *BotActivity {
 	store := ActivityStore
 	mutex := &ActivityMutex
@@ -371,11 +350,10 @@ func GetOrCreateActivity(ip string) *BotActivity {
 	return newActivity
 }
 
-// CheckChains now uses a single, extended lock for state modification.
+// CheckChains iterates through all chains and updates the IP's progress.
 func CheckChains(entry *LogEntry) {
 	activity := GetOrCreateActivity(entry.IP)
 
-	// Helper function to get a field value
 	getMatchValue := func(fieldName string, entry *LogEntry) (string, error) {
 		switch fieldName {
 		case "IP":
@@ -401,14 +379,12 @@ func CheckChains(entry *LogEntry) {
 
 	for _, chain := range currentChains {
 
-		// Use the correct mutex based on run mode
 		mutex := &ActivityMutex
 		if dryRun {
 			mutex = &dryRunActivityMutex
 		}
 
-		// Lock the activity map to prevent race conditions when two goroutines
-		// process the same IP concurrently and update the shared activity.ChainProgress.
+		// Lock for the entire state modification to prevent race conditions (Concurrency Fix).
 		mutex.Lock()
 
 		state, exists := activity.ChainProgress[chain.Name]
@@ -416,16 +392,12 @@ func CheckChains(entry *LogEntry) {
 			state = StepState{}
 		}
 
-		// The 'state' is a struct copy and all modifications happen on this local copy.
-		// The lock protects the map read and the final map write.
-
 		nextStepIndex := state.CurrentStep
 		if nextStepIndex >= len(chain.Steps) {
 			nextStepIndex = 0
 		}
 
-		// 1. Time Check (CPU-efficient comparison)
-		// Check if the delay between the last match and the current entry exceeds the maximum allowed duration.
+		// 1. Time Check: Reset progress if delay exceeds the Max Delay Duration.
 		if state.CurrentStep > 0 && nextStepIndex < len(chain.Steps) {
 			prevStep := chain.Steps[state.CurrentStep-1]
 			delay := entry.Timestamp.Sub(state.LastMatchTime)
@@ -436,7 +408,7 @@ func CheckChains(entry *LogEntry) {
 			}
 		}
 
-		// 2. Generic Field Match Check
+		// 2. Field Match Check
 		if nextStepIndex < len(chain.Steps) {
 			nextStep := chain.Steps[nextStepIndex]
 			allFieldsMatch := true
@@ -448,24 +420,20 @@ func CheckChains(entry *LogEntry) {
 
 				switch fieldName {
 				case "Referrer":
-					// STATIC Referrer Match
 					fieldValue = entry.Referrer
 				case "ReferrerPrevPath":
-					// DYNAMIC Referrer Match (Extract and match against the path component)
+					// Extract *only* the path component from the Referrer URL for path-based matching.
 					if entry.Referrer != "" {
 						u, parseErr := url.Parse(entry.Referrer)
 						if parseErr == nil && u.Path != "" {
-							// Successfully parsed; use only the path for matching
 							fieldValue = u.Path
 						} else {
-							// If parsing fails or path is empty, log warning and use full string
 							if !dryRun {
 								log.Printf("[WARN] Failed to parse URL path from referrer: %s (Error: %v)", entry.Referrer, parseErr)
 							}
 							fieldValue = entry.Referrer
 						}
 					} else {
-						// Referrer is empty, which means it cannot match a path regex.
 						allFieldsMatch = false
 						break
 					}
@@ -496,30 +464,28 @@ func CheckChains(entry *LogEntry) {
 				if state.CurrentStep == len(chain.Steps) {
 					log.Printf("[ALERT] BEHAVIORAL MATCH! Chain: %s completed by IP %s.", chain.Name, entry.IP)
 
-					// Execute action based on the chain's runtime Action field
 					if chain.Action == "block" {
 						if err := BlockIPForDuration(entry.IP, chain.BlockDuration); err != nil {
-							// This error block catches write/response errors, not socket connection errors
-							// The error log is handled in BlockIPForDuration with the full response.
+							// Error is handled/logged in BlockIPForDuration.
 						}
 					} else if chain.Action == "log" {
 						log.Printf("[LOG] ACTION: Chain '%s' completed. IP %s recorded.", chain.Name, entry.IP)
 					}
 
-					state.CurrentStep = 0
+					state.CurrentStep = 0 // Reset chain for potential future attacks.
 				}
 			}
 		}
 
-		// Update the state map (write back the modified local 'state' copy)
+		// Update the state map (write back the modified local 'state' copy).
 		activity.ChainProgress[chain.Name] = state
-		mutex.Unlock() // Unlock after the entire state update is complete.
+		mutex.Unlock() // Release the lock.
 	}
 }
 
-// --- LOG PARSING & TAILING (Timestamp Fix Applied) ---
+// --- LOG PARSING & TAILING ---
 
-// parseLogLine is a mock parser.
+// parseLogLine processes a raw log line into a LogEntry.
 func parseLogLine(line string) (*LogEntry, error) {
 	// Assumed format: HOSTNAME IP - - [TIME] "METHOD PATH HTTP/1.1" STATUS SIZE "REFERRER" "USERAGENT"
 	parts := strings.Split(line, "\"")
@@ -532,7 +498,7 @@ func parseLogLine(line string) (*LogEntry, error) {
 	statusSizePart := strings.Fields(parts[2])
 
 	if len(ipPart) < 4 || len(requestPart) < 2 || len(statusSizePart) < 1 {
-		return nil, fmt.Errorf("malformed essential fields (missing IP, Hostname, Request, or Status)")
+		return nil, fmt.Errorf("malformed essential fields")
 	}
 
 	ip := ipPart[1]
@@ -546,10 +512,10 @@ func parseLogLine(line string) (*LogEntry, error) {
 		return nil, fmt.Errorf("failed to parse status code: %w", err)
 	}
 
-	// Parse the actual timestamp from the log line (e.g., Apache combined log format)
-	timeStr := strings.Trim(ipPart[3], "[]") // Should extract the time string, e.g., 02/Jan/2006:15:04:05 -0700
+	// Parse the actual timestamp from the log line (e.g., Apache combined log format).
+	timeStr := strings.Trim(ipPart[3], "[]")
 
-	// Use a fallback to time.Now() if parsing fails, but log the error
+	// Use Go's reference time for layout: "02/Jan/2006:15:04:05 -0700".
 	t, parseErr := time.Parse("02/Jan/2006:15:04:05 -0700", timeStr)
 	if parseErr != nil {
 		log.Printf("[PARSE:WARN] Failed to parse log time '%s'. Using current time: %v", timeStr, parseErr)
@@ -557,7 +523,7 @@ func parseLogLine(line string) (*LogEntry, error) {
 	}
 
 	return &LogEntry{
-		Timestamp:  t, // Use parsed time
+		Timestamp:  t,
 		IP:         ip,
 		Path:       path,
 		Method:     method,
@@ -567,7 +533,7 @@ func parseLogLine(line string) (*LogEntry, error) {
 	}, nil
 }
 
-// DryRunLogProcessor uses bufio.Scanner (efficient for reading static files)
+// DryRunLogProcessor reads and processes a static log file for testing.
 func DryRunLogProcessor() {
 	log.Printf("[DRYRUN] MODE: Reading test logs from %s...", testLogPath)
 
@@ -604,7 +570,7 @@ func DryRunLogProcessor() {
 	log.Printf("[INFO] Total distinct IPs processed: %d", len(dryRunActivityStore))
 }
 
-// TailLogWithRotation handles file rotation by checking file inode changes.
+// TailLogWithRotation tails a log file indefinitely, supporting rotation via inode checks.
 func TailLogWithRotation() {
 	if dryRun {
 		return
@@ -612,9 +578,8 @@ func TailLogWithRotation() {
 
 	log.Printf("[TAIL] Starting live log tailing on %s with rotation support...", logFilePath)
 
-	// The main loop that manages the file handle
 	for {
-		// 1. Open the file and seek to the end
+		// 1. Open the file and seek to the end.
 		file, err := os.OpenFile(logFilePath, os.O_RDONLY, 0644)
 		if err != nil {
 			log.Printf("[TAIL:ERROR] Failed to open log file %s: %v. Retrying in 5s.", logFilePath, err)
@@ -625,12 +590,12 @@ func TailLogWithRotation() {
 		_, err = file.Seek(0, 2)
 		if err != nil {
 			log.Printf("[TAIL:ERROR] Failed to seek to end of log file: %v. Closing and retrying.", err)
-			file.Close() // Close the failed file handle
+			file.Close()
 			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		// Get the initial stat information to check for rotation
+		// Get initial file metadata (Dev and Inode) to detect rotation.
 		initialStat, err := file.Stat()
 		if err != nil {
 			log.Printf("[TAIL:ERROR] Failed to stat open file: %v. Closing and retrying.", err)
@@ -645,11 +610,10 @@ func TailLogWithRotation() {
 		reader := bufio.NewReader(file)
 		log.Printf("[TAIL] Now tailing (Dev: %d, Inode: %d)", initialDev, initialIno)
 
-		// 2. Inner loop for active tailing
+		// 2. Inner loop for active tailing.
 		for {
 			line, err := reader.ReadString('\n')
 			if err == nil {
-				// Log line read successfully
 				line = strings.TrimSpace(line)
 				if line != "" {
 					if entry, parseErr := parseLogLine(line); parseErr == nil {
@@ -657,14 +621,12 @@ func TailLogWithRotation() {
 					}
 				}
 			} else if err.Error() == "EOF" {
-				// We reached the end of the file. Check for rotation before sleeping.
-
 				// Check 1: Did the size shrink? (Truncation/rotation)
 				currentStat, err := os.Stat(logFilePath)
 				if err == nil && currentStat.Size() < initialStat.Size() {
 					log.Println("[TAIL] Detected log file size reduction (truncation/rotation). Reopening file.")
 					file.Close()
-					break // Break inner loop to trigger outer loop and re-open
+					break
 				}
 
 				// Check 2: Did the inode change? (Standard rotation)
@@ -680,13 +642,13 @@ func TailLogWithRotation() {
 				if currentSysStat.Dev != initialDev || currentSysStat.Ino != initialIno {
 					log.Printf("[TAIL] Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialIno, currentSysStat.Ino)
 					file.Close()
-					break // Break inner loop to trigger outer loop and re-open
+					break
 				}
 
-				// No rotation detected, wait for more data
+				// No rotation detected, wait for more data.
 				time.Sleep(200 * time.Millisecond)
 			} else {
-				// Some other error (e.g., I/O error). Log and break to re-open.
+				// Handle other I/O errors.
 				log.Printf("[TAIL:ERROR] Reading log file: %v. Reopening in 1s.", err)
 				time.Sleep(1 * time.Second)
 				file.Close()
@@ -694,7 +656,6 @@ func TailLogWithRotation() {
 			}
 		}
 
-		// Sleep briefly to avoid a hot loop if the file disappears.
 		time.Sleep(100 * time.Millisecond)
 	}
 }
@@ -702,15 +663,12 @@ func TailLogWithRotation() {
 // --- MAIN FUNCTION ---
 
 func main() {
-	// 1. Parse CLI flags
 	flag.Parse()
 
-	// 2. Parse durations based on run mode
 	if err := parseDurations(); err != nil {
 		log.Fatalf("[FATAL] Configuration Error: %v", err)
 	}
 
-	// 3. Initial configuration load (Always load the YAML as is)
 	var err error
 	Chains, err = loadChainsFromYAML()
 	if err != nil {
@@ -719,14 +677,11 @@ func main() {
 	log.Printf("[LOAD] Initial configuration loaded. Loaded %d behavioral chains.", len(Chains))
 
 	if dryRun {
-		// DRY RUN PATH
 		DryRunLogProcessor()
 	} else {
-		// PRODUCTION PATH
 		log.Println("[INFO] Running in Production Mode with per-attempt HAProxy Fail-Safe.")
 
 		// GRACEFUL SHUTDOWN SETUP
-		// Set up a channel to listen for interrupt/termination signals (Ctrl+C, kill)
 		stop := make(chan os.Signal, 1)
 		signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
@@ -737,11 +692,9 @@ func main() {
 		// Start essential goroutines
 		go ChainWatcher()
 		go CleanUpIdleActivity()
-
-		// Start the log processing goroutine
 		go TailLogWithRotation()
 
-		// Wait here for the interrupt signal to initiate graceful shutdown
+		// Wait here for the interrupt signal.
 		<-stop
 		log.Println("[SHUTDOWN] Interrupt signal received. Shutting down gracefully...")
 		log.Println("[SHUTDOWN] Exiting.")
