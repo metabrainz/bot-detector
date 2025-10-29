@@ -119,22 +119,33 @@ go build -o bot-detector main.go
 
 This will produce a single executable named `bot-detector`.
 
-## 🚀 Command Line Usage
+## **Command-Line Flags (Execution)**
 
-The application supports two primary modes: **Production** (live blocking) and **Dry Run** (testing rules against a static log file).
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| **`--log-path`** | `/var/log/http/access.log` | Path to the live access log file to tail (ignored in dry-run). |
+| **`--socket-path`** | `/var/run/haproxy.sock` | Path to the HAProxy Runtime API Unix socket (ignored in dry-run). |
+| **`--map-path`** | `/etc/haproxy/maps/blocked_ips.map` | Path to the HAProxy map file for dynamic IP blocking. |
+| **`--cleanup-interval`**| `1m` | Interval to run the routine that cleans up idle IP state. |
+| **`--idle-timeout`** | `30m` | Duration an IP must be inactive before its state is purged from memory. |
+| **`--log-level`** | `warning` | Set minimum log level to display. *See Log Levels below.* |
+| **`--dry-run`** | `false` | If true, runs in test mode, ignoring HAProxy and live logging. |
+| **`--test-log`** | `test_access.log` | Path to a static file containing log lines for dry-run testing. |
 
-### 1. Production Mode
+---
 
-Production mode tails a live log file, monitors rule changes, cleans up idle state, and sends block commands to HAProxy. This mode often requires `sudo` or root privileges to access log files and the HAProxy socket.
+### **Log Levels**
 
-| **Flag** | **Description** | **Default** | 
-| ----- | ----- | ----- | 
-| `--log-path` | Path to the live access log file to tail. | `/var/log/http/access.log` | 
-| `--socket-path` | Path to the HAProxy Runtime API Unix socket. | `/var/run/haproxy.sock` | 
-| `--map-path` | Path to the HAProxy map file (`blocked_ips.map`) to update. | `/etc/haproxy/maps/blocked_ips.map` | 
-| `--yaml-path` | Path to the behavioral rules configuration. | `chains.yaml` | 
-| `--cleanup-interval` | How often to run the memory cleanup routine. | `1m` (1 minute) | 
-| `--idle-timeout` | Duration an IP must be inactive before its state is purged (leak prevention). | `30m` (30 minutes) | 
+The application uses a unified logging system with five discrete levels. The `--log-level` flag controls the minimum severity level that will be displayed in the output.
+
+| Level | Severity | Description |
+| :--- | :--- | :--- |
+| **`critical`** | **0** (Highest) | Only displays actions that modify state or terminate the program (e.g., **IP blocks**, graceful **SHUTDOWN**). |
+| **`error`** | **1** | Displays severe, non-fatal issues (e.g., file read errors, **HAProxy connection failures** that trigger fail-safe). |
+| **`warning`** | **2** (Default) | Includes non-critical operational issues that should be reviewed (e.g., failed timestamp parsing, malformed URL referrers). |
+| **`info`** | **3** | Includes major application lifecycle events (e.g., configuration **LOAD**, **DRYRUN** start/completion, tailing start). |
+| **`debug`** | **4** (Lowest) | The most verbose level. Includes high-volume internal logic like individual step **MATCH**,
+
 
 **Example Command (Recommended for Production):**
 
@@ -146,20 +157,12 @@ Production mode tails a live log file, monitors rule changes, cleans up idle sta
 --idle-timeout "30m"
 ```
 
-### 2. Dry Run Mode
-
-Dry Run mode is for testing your behavioral rules without connecting to HAProxy or running live cleanup routines.
-
-| **Flag** | **Description** | **Default** | 
- | ----- | ----- | ----- | 
-| `--dry-run` | Activates test mode (skips HAProxy and live tailing). | `false` | 
-| `--test-log` | Path to a static log file to process lines from. | `test_access.log` | 
-
 **Example Command (Testing Rules):**
 
 ```bash
 ./bot-detector --dry-run \  
 --yaml-path "test_rules.yaml" \
+--log-level debug \
 --test-log "large_test_data.log"
 ```
 
