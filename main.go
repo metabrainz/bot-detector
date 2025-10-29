@@ -579,7 +579,7 @@ func CheckChains(entry *LogEntry) {
 			delay := entry.Timestamp.Sub(state.LastMatchTime)
 
 			if prevStep.MaxDelayDuration > 0 && delay > prevStep.MaxDelayDuration {
-				logOutput(LevelDebug, "RESET", "IP %s: Progress on step %d of chain '%s' reset due to max_delay timeout (%v > %v).", entry.IP, state.CurrentStep+1, chain.Name, delay, prevStep.MaxDelayDuration)
+				logOutput(LevelDebug, "RESET", "IP %s: Progress on step %d of chain '%s' reset due to max_delay timeout (%v > %v).", entry.IP, state.CurrentStep, chain.Name, delay, prevStep.MaxDelayDuration)
 				state.CurrentStep = 0
 				nextStepIndex = 0
 				nextStep = chain.Steps[nextStepIndex]
@@ -633,7 +633,16 @@ func CheckChains(entry *LogEntry) {
 			}
 
 			if allFieldsMatch {
-				logOutput(LevelDebug, "MATCH", "IP %s: Matched step %d of chain '%s'. Progressing to step %d.", entry.IP, state.CurrentStep+1, chain.Name, state.CurrentStep+2)
+
+				// Corrected Logging Logic
+				isCompletion := state.CurrentStep+1 == len(chain.Steps)
+
+				if isCompletion {
+					logOutput(LevelDebug, "MATCH", "IP %s: Matched final step %d of chain '%s'. Chain completion detected.", entry.IP, state.CurrentStep+1, chain.Name)
+				} else {
+					logOutput(LevelDebug, "MATCH", "IP %s: Matched step %d of chain '%s'. Progressing to step %d.", entry.IP, state.CurrentStep+1, chain.Name, state.CurrentStep+2)
+				}
+
 				state.CurrentStep++
 				state.LastMatchTime = entry.Timestamp
 
