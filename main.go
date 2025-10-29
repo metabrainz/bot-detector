@@ -699,8 +699,8 @@ func parseLogLine(line string) (*LogEntry, error) {
 		Path:       path,
 		Method:     method,
 		StatusCode: statusCode,
-		Referrer:   strings.TrimSpace(referrer),
-		UserAgent:  strings.TrimSpace(userAgent),
+		Referrer:   referrer,
+		UserAgent:  userAgent,
 	}, nil
 }
 
@@ -812,7 +812,7 @@ func DryRunLogProcessor(done chan<- struct{}) {
 			if errors.Is(err, io.EOF) {
 				// Process final line fragment if present (this ensures files that don't return a newline
 				// still have their last line processed).
-				if strings.TrimSpace(line) != "" {
+				if line != "" {
 					processLogLine(line, lineNumber)
 				}
 				break
