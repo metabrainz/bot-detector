@@ -4,11 +4,11 @@
 musicbrainz.org 10.0.0.1 - - [28/Oct/2025:17:00:00 +0000] "GET /ping HTTP/1.1" 200 100 "-" "Baseline"
 musicbrainz.org 10.0.0.3 - - [28/Oct/2025:17:00:01 +0000] "GET /ping HTTP/1.1" 200 100 "-" "Baseline"
 
-# 1. Test: MatchKey IPv4 Only (192.0.2.10) - SUCCESS
+# 1. Test: MatchKey IPv4 Only (192.0.2.10) - SUCCESS (BLOCKED)
 musicbrainz.org 192.0.2.10 - - [28/Oct/2025:17:00:02 +0000] "GET /v4/start HTTP/1.1" 200 100 "-" "V4-Bot-A"
 musicbrainz.org 192.0.2.10 - - [28/Oct/2025:17:00:04 +0000] "GET /v4/end HTTP/1.1" 200 100 "-" "V4-Bot-A"
 
-# 2. Test: MatchKey IPv6 + UserAgent (2001:db8::1) - SUCCESS
+# 2. Test: MatchKey IPv6 + UserAgent (2001:db8::1) - SUCCESS (BLOCKED)
 musicbrainz.org 2001:db8::1 - - [28/Oct/2025:17:00:05 +0000] "GET /v6/start HTTP/1.1" 200 100 "-" "Bot-A/1.0"
 musicbrainz.org 2001:db8::1 - - [28/Oct/2025:17:00:06 +0000] "GET /v6/end HTTP/1.1" 200 100 "-" "Bot-A/1.0"
 
@@ -43,25 +43,28 @@ musicbrainz.org 192.0.2.26 - - [28/Oct/2025:17:00:20 +0000] "POST /api/auth HTTP
 musicbrainz.org 192.0.2.27 - - [28/Oct/2025:17:00:04 +0000] "GET /v4/end HTTP/1.1" 200 100 "-" "badguy"
 musicbrainz.org 2001:db8::27 - - [28/Oct/2025:17:00:05 +0000] "GET /v6/start HTTP/1.1" 200 100 "-" "badguy"
 
+# 11. Test: Already Blocked IP Check (192.0.2.10) - Should ideally be ignored/dropped by external filter
+musicbrainz.org 192.0.2.10 - - [28/Oct/2025:17:00:21 +0000] "GET /already_blocked HTTP/1.1" 200 100 "-" "Already-Blocked-Tester"
+
 # --- Buggy/Malformed Lines Section (Testing Parser Robustness) ---
 
 # A. Normal but complex line (user provided from Source 1/2) - Should parse correctly
 musicbrainz.org 165.0.186.154 - - [28/Oct/2025:15:41:10 +0000] "HEAD /set-language/fr?returnto=%2Frecording%2F7bef20d6-b72b-45a5-b159-09a51c1715de%2Faliases HTTP/1.1" 302 0 "-" "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.2405.185 Safari/537.36"
 
 # B. Incomplete log line (missing last quotes) - Should generate "malformed log line: too few quoted sections"
-musicbrainz.org 1.2.3.4 - - [28/Oct/2025:17:00:21 +0000] "GET /incomplete HTTP/1.1" 200 100 "-"
+musicbrainz.org 1.2.3.4 - - [28/Oct/2025:17:00:22 +0000] "GET /incomplete HTTP/1.1" 200 100 "-"
 
 # C. Malformed time string (invalid format) - Should generate "Failed to parse log time" and use time.Now()
-musicbrainz.org 1.2.3.5 - - [28/Oct/2025:17:00:22 Invalid Time Format] "GET /timefail HTTP/1.1" 200 100 "-" "TimeFail"
+musicbrainz.org 1.2.3.5 - - [28/Oct/2025:17:00:23 Invalid Time Format] "GET /timefail HTTP/1.1" 200 100 "-" "TimeFail"
 
 # D. Invalid IP format - Should be skipped by all chains (IP version "invalid")
-musicbrainz.org BAD_IP_ADDRESS - - [28/Oct/2025:17:00:23 +0000] "GET /ipfail HTTP/1.1" 200 100 "-" "IPFail"
+musicbrainz.org BAD_IP_ADDRESS - - [28/Oct/2025:17:00:24 +0000] "GET /ipfail HTTP/1.1" 200 100 "-" "IPFail"
 
 # E. Non-integer Status Code - Should generate "failed to parse status code"
-musicbrainz.org 1.2.3.6 - - [28/Oct/2025:17:00:24 +0000] "GET /statfail HTTP/1.1" OK 100 "-" "StatusFail"
+musicbrainz.org 1.2.3.6 - - [28/Oct/2025:17:00:25 +0000] "GET /statfail HTTP/1.1" OK 100 "-" "StatusFail"
 
 # F. Fields are too short (missing final part of the timestamp array) - Should generate "malformed essential fields"
-musicbrainz.org 1.2.3.7 - - [28/Oct/2025:17:00:25 +0000" "GET /shortfield HTTP/1.1" 200 100 "-" "ShortField"
+musicbrainz.org 1.2.3.7 - - [28/Oct/2025:17:00:26 +0000" "GET /shortfield HTTP/1.1" 200 100 "-" "ShortField"
 
 # G. Lines with whitespaces
    
@@ -69,4 +72,3 @@ musicbrainz.org 1.2.3.7 - - [28/Oct/2025:17:00:25 +0000" "GET /shortfield HTTP/1
 # Actual lines from logs
 musicbrainz.org 2003:c7:e701:2a00:208:9bff:fecc:1c9a - - [29/Oct/2025:13:23:21 +0000] "GET /ws/2/release-group/?query=\x22Knockin\x22+and+artist:\x22Double+Vision\x22&type=album HTTP/1.1" 403 257 "-" "Mozilla/5.0 (Windows; U; Windows NT 5.1; de; rv:1.9.2.3) Gecko/20100401 Firefox/3.6.3"
 musicbrainz.org 43.173.182.62 - - [29/Oct/2025:13:23:21 +0000] "GET /artist/72cdc76d-9d84-41fd-8ceb-57d901c186e5/aliases HTTP/1.1" 200 4817 "-" "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.114 Safari/537.36"
-

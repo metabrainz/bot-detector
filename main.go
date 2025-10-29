@@ -141,6 +141,8 @@ type TrackingKey struct {
 type BotActivity struct {
 	LastRequestTime time.Time // Time of the IP's PREVIOUS overall request.
 	ChainProgress   map[string]StepState
+	IsBlocked       bool      // Flag to skip chain checks if this key is blocked.
+	BlockedUntil    time.Time // ADDED: Time when the block expires.
 }
 
 // --- GLOBAL STATE ---
@@ -633,7 +635,6 @@ func CheckChains(entry *LogEntry) {
 			}
 
 			if allFieldsMatch {
-
 				// Corrected Logging Logic
 				isCompletion := state.CurrentStep+1 == len(chain.Steps)
 
@@ -653,6 +654,12 @@ func CheckChains(entry *LogEntry) {
 						logOutput(LevelCritical, "ALERT", "BLOCK! Chain: %s completed by IP %s. Attempting to block for %v.", chain.Name, ipToBlock, chain.BlockDuration)
 						if err := BlockIPForDuration(ipToBlock, chain.BlockDuration); err != nil {
 						}
+
+						// NEW: Optimization - Mark the IP-ONLY key as blocked for skipping future log lines from this IP.
+						ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
+						ipActivity := getOrCreateActivityUnsafe(store, ipOnlyKey)
+						ipActivity.IsBlocked = true
+						ipActivity.BlockedUntil = entry.Timestamp.Add(chain.BlockDuration) // ADDED: Set the time of block expiry
 					} else if chain.Action == "log" {
 						logOutput(LevelCritical, "ALERT", "LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IP)
 					}
@@ -750,12 +757,50 @@ func processLogLine(line string, lineNumber int) {
 		return
 	}
 
-	CheckChains(entry)
-
-	// Always update the overall LastRequestTime for the IP-only key,
-	// which is used for min_delay baseline checks.
+	// Define the IP-Only key for block status check and last request time update.
 	ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
-	GetOrCreateActivity(ipOnlyKey).LastRequestTime = entry.Timestamp
+
+	store := ActivityStore
+	mutex := &ActivityMutex
+	if dryRun {
+		store = dryRunActivityStore
+		mutex = &dryRunActivityMutex
+	}
+
+	// Lock the mutex for atomic access to the store for status check and time updates.
+	mutex.Lock()
+
+	// 1. Get/Update IP-only key.
+	ipActivity := getOrCreateActivityUnsafe(store, ipOnlyKey)
+
+	if ipActivity.IsBlocked {
+		// Check if the block has expired
+		if entry.Timestamp.Before(ipActivity.BlockedUntil) {
+			// Not expired: log skip and update last request time
+			// FIX: Use explicit format to clean up time output
+			logOutput(LevelDebug, "SKIP", "IP %s is currently marked as blocked until %s. Skipping chain checks.",
+				entry.IP, ipActivity.BlockedUntil.Format("2006-01-02 15:04:05 MST"))
+			ipActivity.LastRequestTime = entry.Timestamp // Update time for cleanup/min_delay baseline in case they become unblocked.
+			mutex.Unlock()
+			return // Skip all chain checks for this request
+		}
+
+		// Block expired: Reset status and log the unblock event.
+		// FIX: Use explicit format to clean up time output
+		logOutput(LevelDebug, "UNBLOCK", "IP %s block expired at %s. Re-enabling chain checks.",
+			entry.IP, ipActivity.BlockedUntil.Format("2006-01-02 15:04:05 MST"))
+		ipActivity.IsBlocked = false
+		ipActivity.BlockedUntil = time.Time{}
+	}
+
+	// Always update LastRequestTime for all non-skipped/unblocked requests.
+	ipActivity.LastRequestTime = entry.Timestamp
+
+	// Unlock before calling CheckChains, which also locks.
+	mutex.Unlock()
+
+	// Only proceed to check chains if the IP is not blocked.
+	CheckChains(entry)
 }
 
 // --- CORE FILE I/O IMPLEMENTATION ---
