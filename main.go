@@ -706,10 +706,9 @@ func parseLogLine(line string) (*LogEntry, error) {
 
 // processLogLine processes a single raw log line, handling skipping of empty/comment lines,
 // parsing, chain checking, and updating the activity store.
-func processLogLine(rawLine string, lineNumber int) {
-	line := strings.TrimSpace(rawLine) // Apply trim to the centralized logic
-
-	if line == "" || strings.HasPrefix(line, "#") {
+func processLogLine(line string, lineNumber int) {
+	// Skip truly empty lines and comments.
+	if line == "" || line == "\n" || line == "\r\n" || strings.HasPrefix(line, "#") {
 		return
 	}
 
