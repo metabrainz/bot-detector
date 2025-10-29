@@ -126,3 +126,11 @@ chains:
     field_matches:
       Path: "^/product/confirm$"
     max_delay: "5s"
+# --- 10. Field: Block User Agent (SUCCESS) ---
+- name: "Test-Field-BlockUserAgent"
+  action: "log"
+  match_key: "ip_ua"
+  steps:
+  - order: 1
+    field_matches:
+      UserAgent: "^badguy$"
