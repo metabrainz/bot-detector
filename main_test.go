@@ -133,6 +133,9 @@ func TestParseLogLine(t *testing.T) {
 	if entry.Path != "/api/v1/user/123" {
 		t.Errorf("Expected Path /api/v1/user/123, got %s", entry.Path)
 	}
+	if entry.Protocol != "HTTP/1.1" {
+		t.Errorf("Expected Protocol HTTP/1.1, got %s", entry.Protocol)
+	}
 	if entry.StatusCode != 200 {
 		t.Errorf("Expected Status Code 200, got %d", entry.StatusCode)
 	}
@@ -144,11 +147,12 @@ func TestParseLogLine(t *testing.T) {
 		t.Errorf("Expected Time %v, got %v", expectedTime, entry.Timestamp)
 	}
 
-	// Test Case: Malformed line (too few quotes)
-	malformedLine := `127.0.0.1 - - [29/Oct/2025:10:00:00 +0100] "GET /path HTTP/1.1" 200`
+	// Test Case: Malformed line (missing protocol version in request part).
+	// Must contain at least 6 quoted sections to pass the initial structural check.
+	malformedLine := `127.0.0.1 - - [29/Oct/2025:10:00:00 +0100] "GET /path" 200 456 "-" "Mozilla/5.0 (Bot)"`
 	_, err = ParseLogLine(malformedLine)
-	if err == nil {
-		t.Error("Expected error for malformed line, got nil")
+	if err == nil || !strings.Contains(err.Error(), "malformed essential fields") {
+		t.Errorf("Expected 'malformed essential fields' (missing Protocol) error for malformed line, got %v", err)
 	}
 }
 
@@ -252,6 +256,7 @@ chains:
       - order: 2
         field_matches:
           StatusCode: "^404$"
+          Protocol: "^HTTP/1\\.[01]$"
         min_delay: "1s"
 `
 	// Use a temporary file path
@@ -291,7 +296,10 @@ chains:
 		t.Errorf("Step 2 properties incorrect: %+v", step2)
 	}
 	if _, ok := step2.CompiledRegexes["StatusCode"]; !ok || step2.CompiledRegexes["StatusCode"].String() != "^404$" {
-		t.Errorf("Step 2 regex missing or incorrect")
+		t.Errorf("Step 2 StatusCode regex missing or incorrect")
+	}
+	if _, ok := step2.CompiledRegexes["Protocol"]; !ok || step2.CompiledRegexes["Protocol"].String() != "^HTTP/1\\.[01]$" {
+		t.Errorf("Step 2 Protocol regex missing or incorrect")
 	}
 
 	// Verify Whitelist Nets
@@ -352,6 +360,7 @@ func TestGetMatchValue(t *testing.T) {
 		IP:         "1.1.1.1",
 		Path:       "/index.html",
 		Method:     "GET",
+		Protocol:   "HTTP/2.0",
 		UserAgent:  "Test",
 		Referrer:   "http://example.com",
 		StatusCode: 200,
@@ -361,6 +370,7 @@ func TestGetMatchValue(t *testing.T) {
 		"IP":         "1.1.1.1",
 		"Path":       "/index.html",
 		"Method":     "GET",
+		"Protocol":   "HTTP/2.0",
 		"UserAgent":  "Test",
 		"Referrer":   "http://example.com",
 		"StatusCode": "200",
@@ -511,19 +521,31 @@ func TestCheckChains(t *testing.T) {
 	DryRun = true // Use dry run mode to prevent real HAProxy calls and use DryRunActivityStore
 
 	// Setup: Define a two-step chain
-	// Step 1: GET /step1, MaxDelay 5s
-	// Step 2: GET /step2, MinDelay 1s
+	// Step 1: GET /step1, Protocol HTTP/1.1, MaxDelay 5s
+	// Step 2: GET /step2, Protocol HTTP/2.0, MinDelay 1s
 	step1 := StepDef{
-		Order:            1,
-		FieldMatches:     map[string]string{"Path": "/step1"},
+		Order: 1,
+		FieldMatches: map[string]string{
+			"Path":     "/step1",
+			"Protocol": "HTTP/1\\.1",
+		},
 		MaxDelayDuration: 5 * time.Second,
-		CompiledRegexes:  map[string]*regexp.Regexp{"Path": regexp.MustCompile("/step1")},
+		CompiledRegexes: map[string]*regexp.Regexp{
+			"Path":     regexp.MustCompile("/step1"),
+			"Protocol": regexp.MustCompile("HTTP/1\\.1"),
+		},
 	}
 	step2 := StepDef{
-		Order:            2,
-		FieldMatches:     map[string]string{"Path": "/step2"},
+		Order: 2,
+		FieldMatches: map[string]string{
+			"Path":     "/step2",
+			"Protocol": "HTTP/2\\.0",
+		},
 		MinDelayDuration: 1 * time.Second,
-		CompiledRegexes:  map[string]*regexp.Regexp{"Path": regexp.MustCompile("/step2")},
+		CompiledRegexes: map[string]*regexp.Regexp{
+			"Path":     regexp.MustCompile("/step2"),
+			"Protocol": regexp.MustCompile("HTTP/2\\.0"),
+		},
 	}
 	testChain := BehavioralChain{
 		Name:          "TestChain",
@@ -543,7 +565,7 @@ func TestCheckChains(t *testing.T) {
 	key := TrackingKey{IP: ip, UA: ""}
 
 	// --- 1. Step 1 Match ---
-	entry1 := &LogEntry{IP: ip, Path: "/step1", Timestamp: t1, Method: "GET"}
+	entry1 := &LogEntry{IP: ip, Path: "/step1", Protocol: "HTTP/1.1", Timestamp: t1, Method: "GET"}
 	CheckChains(entry1)
 
 	DryRunActivityMutex.Lock()
@@ -560,7 +582,7 @@ func TestCheckChains(t *testing.T) {
 
 	// --- 2. Min Delay Check (Too short delay) ---
 	t2 := t1.Add(500 * time.Millisecond) // 0.5s delay
-	entry2Short := &LogEntry{IP: ip, Path: "/step2", Timestamp: t2, Method: "GET"}
+	entry2Short := &LogEntry{IP: ip, Path: "/step2", Protocol: "HTTP/2.0", Timestamp: t2, Method: "GET"}
 	CheckChains(entry2Short)
 
 	DryRunActivityMutex.Lock()
@@ -572,7 +594,7 @@ func TestCheckChains(t *testing.T) {
 
 	// --- 3. Max Delay Check (Timeout, resets progress to 0) ---
 	t3 := t1.Add(6 * time.Second) // > 5s max delay (from step 1)
-	entry3Reset := &LogEntry{IP: ip, Path: "/step1", Timestamp: t3, Method: "GET"}
+	entry3Reset := &LogEntry{IP: ip, Path: "/step1", Protocol: "HTTP/1.1", Timestamp: t3, Method: "GET"}
 	CheckChains(entry3Reset) // Match step 1 again.
 
 	DryRunActivityMutex.Lock()
@@ -584,7 +606,7 @@ func TestCheckChains(t *testing.T) {
 
 	// --- 4. Chain Completion ---
 	t4 := t3.Add(2 * time.Second) // 2s delay (> 1s min delay)
-	entry4Complete := &LogEntry{IP: ip, Path: "/step2", Timestamp: t4, Method: "GET"}
+	entry4Complete := &LogEntry{IP: ip, Path: "/step2", Protocol: "HTTP/2.0", Timestamp: t4, Method: "GET"}
 	CheckChains(entry4Complete)
 
 	DryRunActivityMutex.Lock()

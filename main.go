@@ -106,6 +106,7 @@ type LogEntry struct {
 	IP         string
 	Path       string
 	Method     string
+	Protocol   string
 	UserAgent  string
 	Referrer   string
 	StatusCode int
@@ -531,6 +532,8 @@ func GetMatchValue(fieldName string, entry *LogEntry) (string, error) {
 		return entry.Path, nil
 	case "Method":
 		return entry.Method, nil
+	case "Protocol":
+		return entry.Protocol, nil
 	case "UserAgent":
 		return entry.UserAgent, nil
 	case "Referrer":
@@ -694,7 +697,6 @@ func CheckChains(entry *LogEntry) {
 						baseMessage := fmt.Sprintf("BLOCK! Chain: %s completed by IP %s. Attempting to block for %v.", chain.Name, ipToBlock, chain.BlockDuration)
 
 						if isWhitelisted {
-							// NEW CONSOLIDATED LOGIC for whitelisted BLOCK
 							LogOutput(LevelCritical, "ALERT", "%s (IP is whitelisted: BLOCK ACTION SKIPPED)", baseMessage)
 						} else {
 							// Original logic for non-whitelisted block: two logs (ALERT + HAPROXY_BLOCK)
@@ -755,9 +757,10 @@ func ParseLogLine(line string) (*LogEntry, error) {
 	requestPart := strings.Fields(parts[1])
 	statusSizePart := strings.Fields(parts[2])
 
-	// We expect at least 5 fields: IP, -, -, [Time, TZ]
-	if len(ipPart) < 5 || len(requestPart) < 2 || len(statusSizePart) < 1 {
-		return nil, fmt.Errorf("malformed essential fields (missing Request, Status, or incomplete Host/Time fields)")
+	// We expect at least 5 fields in ipPart (e.g., 127.0.0.1 - - [time tz]),
+	// at least 3 fields in requestPart (e.g., GET /path HTTP/1.1)
+	if len(ipPart) < 5 || len(requestPart) < 3 || len(statusSizePart) < 1 {
+		return nil, fmt.Errorf("malformed essential fields (missing Protocol, Request, Status, or incomplete Host/Time fields)")
 	}
 
 	var ip string
@@ -778,6 +781,7 @@ func ParseLogLine(line string) (*LogEntry, error) {
 
 	method := requestPart[0]
 	path := requestPart[1]
+	protocol := requestPart[2] // EXTRACT PROTOCOL VERSION
 	referrer := parts[3]
 	userAgent := parts[5]
 
@@ -785,8 +789,6 @@ func ParseLogLine(line string) (*LogEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse status code: %w", err)
 	}
-
-	// HTTP version (e.g., HTTP/1.1 or HTTP/2.0) is ignored, as it's not a LogEntry field.
 
 	timeStrWithBrackets := ipPart[timeIndexStart] + " " + ipPart[timeIndexEnd]
 	timeStr := strings.Trim(timeStrWithBrackets, "[]")
@@ -802,6 +804,7 @@ func ParseLogLine(line string) (*LogEntry, error) {
 		IP:         ip,
 		Path:       path,
 		Method:     method,
+		Protocol:   protocol,
 		StatusCode: statusCode,
 		Referrer:   referrer,
 		UserAgent:  userAgent,

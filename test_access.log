@@ -42,6 +42,7 @@ musicbrainz.org 192.0.2.26 - - [28/Oct/2025:17:00:20 +0000] "POST /api/auth HTTP
 # 10. Test: Field: Bad User Agent - SUCCESS
 musicbrainz.org 192.0.2.27 - - [28/Oct/2025:17:00:04 +0000] "GET /v4/end HTTP/1.1" 200 100 "-" "badguy"
 musicbrainz.org 2001:db8::27 - - [28/Oct/2025:17:00:05 +0000] "GET /v6/start HTTP/1.1" 200 100 "-" "badguy"
+musicbrainz.org 192.0.2.28 - - [28/Oct/2025:17:00:04 +0000] "GET /v4/end HTTP/2.0" 200 100 "-" "badguy"
 
 # 11. Test: Already Blocked IP Check (192.0.2.10) - Should ideally be ignored/dropped by external filter
 musicbrainz.org 192.0.2.10 - - [28/Oct/2025:17:00:21 +0000] "GET /already_blocked HTTP/1.1" 200 100 "-" "Already-Blocked-Tester"

@@ -98,7 +98,7 @@ chains:
   - order: 1
     field_matches:
       Path: "^/checkout$"
-      Referrer: "^https://external.payment.gateway/return.html\\?id=.*$"
+      Referrer: "^https://external\\.payment\\..gateway/return.html\\?id=.*$"
   - order: 2
     field_matches:
       Path: "^/complete$"
@@ -139,3 +139,4 @@ chains:
   - order: 1
     field_matches:
       UserAgent: "^badguy$"
+      Protocol: "^HTTP/1\\.1$"
