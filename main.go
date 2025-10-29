@@ -484,27 +484,28 @@ func GetOrCreateActivity(trackingKey TrackingKey) *BotActivity {
 	return getOrCreateActivityUnsafe(store, trackingKey)
 }
 
+// getMatchValue retrieves the field value from a LogEntry based on the field name.
+func getMatchValue(fieldName string, entry *LogEntry) (string, error) {
+	switch fieldName {
+	case "IP":
+		return entry.IP, nil
+	case "Path":
+		return entry.Path, nil
+	case "Method":
+		return entry.Method, nil
+	case "UserAgent":
+		return entry.UserAgent, nil
+	case "Referrer":
+		return entry.Referrer, nil
+	case "StatusCode":
+		return strconv.Itoa(entry.StatusCode), nil
+	default:
+		return "", fmt.Errorf("unknown field: %s", fieldName)
+	}
+}
+
 // CheckChains iterates through all chains and updates the IP's progress.
 func CheckChains(entry *LogEntry) {
-
-	getMatchValue := func(fieldName string, entry *LogEntry) (string, error) {
-		switch fieldName {
-		case "IP":
-			return entry.IP, nil
-		case "Path":
-			return entry.Path, nil
-		case "Method":
-			return entry.Method, nil
-		case "UserAgent":
-			return entry.UserAgent, nil
-		case "Referrer":
-			return entry.Referrer, nil
-		case "StatusCode":
-			return strconv.Itoa(entry.StatusCode), nil
-		default:
-			return "", fmt.Errorf("unknown field: %s", fieldName)
-		}
-	}
 
 	ChainMutex.RLock()
 	currentChains := Chains
