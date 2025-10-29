@@ -603,7 +603,9 @@ func CheckChains(entry *LogEntry) {
 			if !timeSource.IsZero() {
 				timeSinceLastHit := entry.Timestamp.Sub(timeSource)
 
-				if timeSinceLastHit < nextStep.MinDelayDuration {
+				// Only skip if the time difference is > 0 but < min_delay.
+				// This allows hits logged in the same second (0s difference) to proceed.
+				if timeSinceLastHit > 0 && timeSinceLastHit < nextStep.MinDelayDuration {
 					logOutput(LevelDebug, "SKIP", "IP %s: Hit for step %d of chain '%s' skipped (delay too short: %v < %v).", entry.IP, nextStepIndex+1, chain.Name, timeSinceLastHit, nextStep.MinDelayDuration)
 					mutex.Unlock()
 					continue
