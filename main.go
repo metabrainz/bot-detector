@@ -26,27 +26,27 @@ import (
 const MaxLogLineSize = 16 * 1024
 
 // Custom error type for skipped lines
-var errLineSkipped = errors.New("line exceeded critical limit and was skipped")
+var ErrLineSkipped = errors.New("line exceeded critical limit and was skipped")
 
 // --- CONFIGURATION GLOBAL VARS (Set by CLI flags) ---
 var (
-	logFilePath       string
-	haproxySocketPath string
-	blockedMapPath    string
+	LogFilePath       string
+	HAProxySocketPath string
+	BlockedMapPath    string
 
-	yamlFilePath       string
-	pollingIntervalStr string
+	YAMLFilePath       string
+	PollingIntervalStr string
 
-	cleanupIntervalStr string
-	idleTimeoutStr     string // Duration an IP must be inactive before its state is purged.
+	CleanupIntervalStr string
+	IdleTimeoutStr     string // Duration an IP must be inactive before its state is purged.
 
-	logLevelStr string
-	dryRun      bool
-	testLogPath string
+	LogLevelStr string
+	DryRun      bool
+	TestLogPath string
 
-	pollingInterval time.Duration
-	cleanupInterval time.Duration
-	idleTimeout     time.Duration
+	PollingInterval time.Duration
+	CleanupInterval time.Duration
+	IdleTimeout     time.Duration
 )
 
 // --- LOGGING STRUCTURE ---
@@ -60,8 +60,8 @@ const (
 	LevelDebug                    // 4: Verbose: All high-volume messages (skip, match, reset, cleanup, watch polling)
 )
 
-var currentLogLevel = LevelWarning // Default level set to WARNING
-var logLevelMap = map[string]LogLevel{
+var CurrentLogLevel = LevelWarning // Default level set to WARNING
+var LogLevelMap = map[string]LogLevel{
 	"critical": LevelCritical,
 	"error":    LevelError,
 	"warning":  LevelWarning,
@@ -116,7 +116,7 @@ type StepDef struct {
 	FieldMatches     map[string]string
 	MaxDelayDuration time.Duration
 	MinDelayDuration time.Duration
-	compiledRegexes  map[string]*regexp.Regexp // Pre-compiled regexes for performance.
+	CompiledRegexes  map[string]*regexp.Regexp // Pre-compiled regexes for performance.
 }
 
 type BehavioralChain struct {
@@ -153,18 +153,18 @@ var (
 
 	Chains      []BehavioralChain
 	ChainMutex  sync.RWMutex
-	lastModTime time.Time
+	LastModTime time.Time
 
 	WhitelistNets []*net.IPNet // Holds parsed CIDR networks
 
-	dryRunActivityStore = make(map[TrackingKey]*BotActivity)
-	dryRunActivityMutex sync.Mutex
+	DryRunActivityStore = make(map[TrackingKey]*BotActivity)
+	DryRunActivityMutex sync.Mutex
 )
 
 // --- IP/LOGIC HELPERS ---
 
-// getIPVersion returns the version of the IP address string ("ipv4", "ipv6", or "invalid").
-func getIPVersion(ipStr string) string {
+// GetIPVersion returns the version of the IP address string ("ipv4", "ipv6", or "invalid").
+func GetIPVersion(ipStr string) string {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return VersionInvalid
@@ -178,8 +178,8 @@ func getIPVersion(ipStr string) string {
 	return VersionInvalid
 }
 
-// isIPWhitelisted checks if the given IP address falls within any configured CIDR whitelist range.
-func isIPWhitelisted(ipStr string) bool {
+// IsIPWhitelisted checks if the given IP address falls within any configured CIDR whitelist range.
+func IsIPWhitelisted(ipStr string) bool {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return false
@@ -196,9 +196,9 @@ func isIPWhitelisted(ipStr string) bool {
 	return false
 }
 
-// getTrackingKey generates the unique state-tracking key based on the chain's configuration.
-func getTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
-	ipVersion := getIPVersion(entry.IP)
+// GetTrackingKey generates the unique state-tracking key based on the chain's configuration.
+func GetTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
+	ipVersion := GetIPVersion(entry.IP)
 	trackingKey := TrackingKey{IP: entry.IP}
 
 	switch chain.MatchKey {
@@ -228,19 +228,19 @@ func getTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
 // --- CLI FLAG INITIALIZATION AND PARSING ---
 
 func init() {
-	flag.StringVar(&logFilePath, "log-path", "/var/log/http/access.log", "Path to the live access log file to tail (ignored in dry-run).")
-	flag.StringVar(&haproxySocketPath, "socket-path", "/var/run/haproxy.sock", "Path to the HAProxy Runtime API Unix socket (ignored in dry-run).")
-	flag.StringVar(&blockedMapPath, "map-path", "/etc/haproxy/maps/blocked_ips.map", "Path to the HAProxy map file used for dynamic IP blocking (ignored in dry-run).")
+	flag.StringVar(&LogFilePath, "log-path", "/var/log/http/access.log", "Path to the live access log file to tail (ignored in dry-run).")
+	flag.StringVar(&HAProxySocketPath, "socket-path", "/var/run/haproxy.sock", "Path to the HAProxy Runtime API Unix socket (ignored in dry-run).")
+	flag.StringVar(&BlockedMapPath, "map-path", "/etc/haproxy/maps/blocked_ips.map", "Path to the HAProxy map file used for dynamic IP blocking (ignored in dry-run).")
 
-	flag.StringVar(&yamlFilePath, "yaml-path", "chains.yaml", "Path to the YAML configuration file defining behavioral chains.")
-	flag.StringVar(&pollingIntervalStr, "poll-interval", "5s", "Interval (e.g., '10s', '1m') to check the YAML file for changes (ignored in dry-run).")
+	flag.StringVar(&YAMLFilePath, "yaml-path", "chains.yaml", "Path to the YAML configuration file defining behavioral chains.")
+	flag.StringVar(&PollingIntervalStr, "poll-interval", "5s", "Interval (e.g., '10s', '1m') to check the YAML file for changes (ignored in dry-run).")
 
-	flag.StringVar(&cleanupIntervalStr, "cleanup-interval", "1m", "Interval (e.g., '5m') to run the routine that cleans up idle IP state.")
-	flag.StringVar(&idleTimeoutStr, "idle-timeout", "30m", "Duration (e.g., '45m') an IP must be inactive before its state is purged from memory.")
+	flag.StringVar(&CleanupIntervalStr, "cleanup-interval", "1m", "Interval (e.g., '5m') to run the routine that cleans up idle IP state.")
+	flag.StringVar(&IdleTimeoutStr, "idle-timeout", "30m", "Duration (e.g., '45m') an IP must be inactive before its state is purged from memory.")
 
-	flag.StringVar(&logLevelStr, "log-level", "warning", "Set minimum log level to display: critical, error, warning, info, debug.")
-	flag.BoolVar(&dryRun, "dry-run", false, "If true, runs in test mode: skips HAProxy/live logging, ignores cleanup/polling, and uses --test-log.")
-	flag.StringVar(&testLogPath, "test-log", "test_access.log", "Path to a static file containing log lines for dry-run testing.")
+	flag.StringVar(&LogLevelStr, "log-level", "warning", "Set minimum log level to display: critical, error, warning, info, debug.")
+	flag.BoolVar(&DryRun, "dry-run", false, "If true, runs in test mode: skips HAProxy/live logging, ignores cleanup/polling, and uses --test-log.")
+	flag.StringVar(&TestLogPath, "test-log", "test_access.log", "Path to a static file containing log lines for dry-run testing.")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
@@ -250,32 +250,32 @@ func init() {
 	}
 }
 
-// logOutput checks the level against the configured currentLogLevel and prints the message if appropriate.
-func logOutput(level LogLevel, prefix string, format string, v ...interface{}) {
-	if level <= currentLogLevel {
+// LogOutput checks the level against the configured CurrentLogLevel and prints the message if appropriate.
+func LogOutput(level LogLevel, prefix string, format string, v ...interface{}) {
+	if level <= CurrentLogLevel {
 		log.Printf("[%s] "+format, append([]interface{}{prefix}, v...)...)
 	}
 }
 
-func parseDurations() error {
+func ParseDurations() error {
 	var err error
 
-	if level, ok := logLevelMap[strings.ToLower(logLevelStr)]; ok {
-		currentLogLevel = level
+	if level, ok := LogLevelMap[strings.ToLower(LogLevelStr)]; ok {
+		CurrentLogLevel = level
 	} else {
-		return fmt.Errorf("invalid log-level '%s'. Must be one of: critical, error, warning, info, debug", logLevelStr)
+		return fmt.Errorf("invalid log-level '%s'. Must be one of: critical, error, warning, info, debug", LogLevelStr)
 	}
 
-	if !dryRun {
-		pollingInterval, err = time.ParseDuration(pollingIntervalStr)
+	if !DryRun {
+		PollingInterval, err = time.ParseDuration(PollingIntervalStr)
 		if err != nil {
 			return fmt.Errorf("invalid poll-interval format: %w", err)
 		}
-		cleanupInterval, err = time.ParseDuration(cleanupIntervalStr)
+		CleanupInterval, err = time.ParseDuration(CleanupIntervalStr)
 		if err != nil {
 			return fmt.Errorf("invalid cleanup-interval format: %w", err)
 		}
-		idleTimeout, err = time.ParseDuration(idleTimeoutStr)
+		IdleTimeout, err = time.ParseDuration(IdleTimeoutStr)
 		if err != nil {
 			return fmt.Errorf("invalid idle-timeout format: %w", err)
 		}
@@ -287,24 +287,24 @@ func parseDurations() error {
 
 // BlockIPForDuration sends a block command to the HAProxy socket and checks the response.
 func BlockIPForDuration(ip string, duration time.Duration) error {
-	if dryRun {
-		logOutput(LevelInfo, "DRYRUN", "Would block IP %s for %v (Chain complete).", ip, duration)
+	if DryRun {
+		LogOutput(LevelInfo, "DRYRUN", "Would block IP %s for %v (Chain complete).", ip, duration)
 		return nil
 	}
 
 	haproxyDuration := fmt.Sprintf("%.0fs", duration.Seconds())
-	command := fmt.Sprintf("set map %s %s true timeout %s\n", blockedMapPath, ip, haproxyDuration)
+	command := fmt.Sprintf("set map %s %s true timeout %s\n", BlockedMapPath, ip, haproxyDuration)
 
-	conn, err := net.Dial("unix", haproxySocketPath)
+	conn, err := net.Dial("unix", HAProxySocketPath)
 	if err != nil {
-		logOutput(LevelError, "ERROR", "Failed to connect to HAProxy socket %s during block attempt for IP %s: %v", haproxySocketPath, ip, err)
-		logOutput(LevelWarning, "FAILSAFE", "Block for IP %s downgraded to LOG action.", ip)
+		LogOutput(LevelError, "ERROR", "Failed to connect to HAProxy socket %s during block attempt for IP %s: %v", HAProxySocketPath, ip, err)
+		LogOutput(LevelWarning, "FAILSAFE", "Block for IP %s downgraded to LOG action.", ip)
 		return nil
 	}
 	defer conn.Close()
 
 	if _, err = conn.Write([]byte(command)); err != nil {
-		logOutput(LevelError, "ERROR", "Failed to send command to HAProxy for IP %s: %v", ip, err)
+		LogOutput(LevelError, "ERROR", "Failed to send command to HAProxy for IP %s: %v", ip, err)
 		return nil
 	}
 
@@ -312,43 +312,43 @@ func BlockIPForDuration(ip string, duration time.Duration) error {
 	response, err := reader.ReadString('\n')
 
 	if err != nil && !errors.Is(err, io.EOF) {
-		logOutput(LevelError, "ERROR", "HAProxy response read error for IP %s: %v", ip, err)
+		LogOutput(LevelError, "ERROR", "HAProxy response read error for IP %s: %v", ip, err)
 		return nil
 	}
 
 	trimmedResponse := strings.TrimSpace(response)
 
 	if strings.HasPrefix(trimmedResponse, "500") || strings.Contains(trimmedResponse, "error") {
-		logOutput(LevelError, "HAPROXY_ERR", "HAProxy execution failed for IP %s. Response: %s", ip, trimmedResponse)
+		LogOutput(LevelError, "HAPROXY_ERR", "HAProxy execution failed for IP %s. Response: %s", ip, trimmedResponse)
 		return nil
 	}
 
-	logOutput(LevelCritical, "HAPROXY_BLOCK", "IP %s blocked for %v (via map: %s)", ip, duration, blockedMapPath)
+	LogOutput(LevelCritical, "HAPROXY_BLOCK", "IP %s blocked for %v (via map: %s)", ip, duration, BlockedMapPath)
 	return nil
 }
 
 // --- MEMORY LEAK PREVENTION ROUTINE ---
 
-// CleanUpIdleActivity periodically purges state for IPs inactive longer than idleTimeout.
+// CleanUpIdleActivity periodically purges state for IPs inactive longer than IdleTimeout.
 func CleanUpIdleActivity() {
-	if dryRun {
+	if DryRun {
 		return
 	}
 
-	logOutput(LevelDebug, "CLEANUP", "Starting Cleanup routine. Purging state older than %v every %v.", idleTimeout, cleanupInterval)
+	LogOutput(LevelDebug, "CLEANUP", "Starting Cleanup routine. Purging state older than %v every %v.", IdleTimeout, CleanupInterval)
 	for {
-		time.Sleep(cleanupInterval)
+		time.Sleep(CleanupInterval)
 
 		ActivityMutex.Lock()
 		now := time.Now()
 		deletedCount := 0
 
 		for trackingKey, activity := range ActivityStore {
-			if now.Sub(activity.LastRequestTime) > idleTimeout {
+			if now.Sub(activity.LastRequestTime) > IdleTimeout {
 				if trackingKey.UA != "" {
-					logOutput(LevelDebug, "CLEANUP", "Purging idle key: %s (UA: %s)", trackingKey.IP, trackingKey.UA)
+					LogOutput(LevelDebug, "CLEANUP", "Purging idle key: %s (UA: %s)", trackingKey.IP, trackingKey.UA)
 				} else {
-					logOutput(LevelDebug, "CLEANUP", "Purging idle IP: %s", trackingKey.IP)
+					LogOutput(LevelDebug, "CLEANUP", "Purging idle IP: %s", trackingKey.IP)
 				}
 				delete(ActivityStore, trackingKey)
 				deletedCount++
@@ -357,18 +357,18 @@ func CleanUpIdleActivity() {
 		ActivityMutex.Unlock()
 
 		if deletedCount > 0 {
-			logOutput(LevelDebug, "CLEANUP", "Complete: Purged %d idle IP states. Current active keys: %d", deletedCount, len(ActivityStore))
+			LogOutput(LevelDebug, "CLEANUP", "Complete: Purged %d idle IP states. Current active keys: %d", deletedCount, len(ActivityStore))
 		}
 	}
 }
 
 // --- YAML LOADING & WATCHER LOGIC ---
 
-// loadChainsFromYAML reads, parses, and pre-compiles regexes for the chains.
-func loadChainsFromYAML() ([]BehavioralChain, error) {
-	data, err := os.ReadFile(yamlFilePath)
+// LoadChainsFromYAML reads, parses, and pre-compiles regexes for the chains.
+func LoadChainsFromYAML() ([]BehavioralChain, error) {
+	data, err := os.ReadFile(YAMLFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read YAML file %s: %w", yamlFilePath, err)
+		return nil, fmt.Errorf("failed to read YAML file %s: %w", YAMLFilePath, err)
 	}
 
 	var config ChainConfig
@@ -385,7 +385,7 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 			return nil, fmt.Errorf("invalid CIDR in whitelist: %s: %w", cidr, err)
 		}
 		newWhitelistNets = append(newWhitelistNets, ipNet)
-		logOutput(LevelInfo, "WHITELIST", "Added CIDR to Whitelist: %s (Base IP: %s)", cidr, ip)
+		LogOutput(LevelInfo, "WHITELIST", "Added CIDR to Whitelist: %s (Base IP: %s)", cidr, ip)
 	}
 	ChainMutex.Lock()
 	WhitelistNets = newWhitelistNets // Update the global list atomically
@@ -425,7 +425,7 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 			runtimeStep := StepDef{
 				Order:           yamlStep.Order,
 				FieldMatches:    yamlStep.FieldMatches,
-				compiledRegexes: make(map[string]*regexp.Regexp),
+				CompiledRegexes: make(map[string]*regexp.Regexp),
 			}
 
 			if yamlStep.MaxDelaySeconds != "" {
@@ -447,7 +447,7 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 				if err != nil {
 					return nil, fmt.Errorf("chain '%s', step %d, field '%s': failed to compile regex '%s': %w", yamlChain.Name, yamlStep.Order, field, regexStr, err)
 				}
-				runtimeStep.compiledRegexes[field] = re
+				runtimeStep.CompiledRegexes[field] = re
 			}
 			runtimeChain.Steps = append(runtimeChain.Steps, runtimeStep)
 		}
@@ -459,34 +459,34 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 
 // ChainWatcher monitors the YAML config file for modifications and reloads the chains dynamically.
 func ChainWatcher() {
-	if dryRun {
+	if DryRun {
 		return
 	}
-	logOutput(LevelDebug, "WATCH", "Starting ChainWatcher, polling %s every %v", yamlFilePath, pollingInterval)
+	LogOutput(LevelDebug, "WATCH", "Starting ChainWatcher, polling %s every %v", YAMLFilePath, PollingInterval)
 	for {
-		time.Sleep(pollingInterval)
+		time.Sleep(PollingInterval)
 
-		fileInfo, err := os.Stat(yamlFilePath)
+		fileInfo, err := os.Stat(YAMLFilePath)
 		if err != nil {
-			logOutput(LevelError, "WATCH_ERROR", "Failed to stat file %s: %v", yamlFilePath, err)
+			LogOutput(LevelError, "WATCH_ERROR", "Failed to stat file %s: %v", YAMLFilePath, err)
 			continue
 		}
 		modTime := fileInfo.ModTime()
 
-		if modTime.After(lastModTime) {
-			logOutput(LevelInfo, "WATCH", "Detected change in chains.yaml. Attempting reload...")
+		if modTime.After(LastModTime) {
+			LogOutput(LevelInfo, "WATCH", "Detected change in chains.yaml. Attempting reload...")
 
-			newChains, err := loadChainsFromYAML()
+			newChains, err := LoadChainsFromYAML()
 			if err != nil {
-				logOutput(LevelError, "LOAD_ERROR", "Failed to reload chains: %v. Retaining previous configuration.", err)
+				LogOutput(LevelError, "LOAD_ERROR", "Failed to reload chains: %v. Retaining previous configuration.", err)
 				continue
 			}
 
 			ChainMutex.Lock()
 			Chains = newChains
-			lastModTime = modTime
+			LastModTime = modTime
 			ChainMutex.Unlock()
-			logOutput(LevelInfo, "LOAD", "Successfully reloaded and compiled %d behavioral chains.", len(newChains))
+			LogOutput(LevelInfo, "LOAD", "Successfully reloaded and compiled %d behavioral chains.", len(newChains))
 		}
 	}
 }
@@ -494,7 +494,7 @@ func ChainWatcher() {
 // --- CORE BEHAVIORAL ANALYSIS ---
 
 // New helper: non-locking variant used when caller already holds the mutex.
-func getOrCreateActivityUnsafe(store map[TrackingKey]*BotActivity, trackingKey TrackingKey) *BotActivity {
+func GetOrCreateActivityUnsafe(store map[TrackingKey]*BotActivity, trackingKey TrackingKey) *BotActivity {
 	if activity, exists := store[trackingKey]; exists {
 		return activity
 	}
@@ -511,19 +511,19 @@ func GetOrCreateActivity(trackingKey TrackingKey) *BotActivity {
 	store := ActivityStore
 	mutex := &ActivityMutex
 
-	if dryRun {
-		store = dryRunActivityStore
-		mutex = &dryRunActivityMutex
+	if DryRun {
+		store = DryRunActivityStore
+		mutex = &DryRunActivityMutex
 	}
 
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	return getOrCreateActivityUnsafe(store, trackingKey)
+	return GetOrCreateActivityUnsafe(store, trackingKey)
 }
 
-// getMatchValue retrieves the field value from a LogEntry based on the field name.
-func getMatchValue(fieldName string, entry *LogEntry) (string, error) {
+// GetMatchValue retrieves the field value from a LogEntry based on the field name.
+func GetMatchValue(fieldName string, entry *LogEntry) (string, error) {
 	switch fieldName {
 	case "IP":
 		return entry.IP, nil
@@ -551,26 +551,26 @@ func CheckChains(entry *LogEntry) {
 
 	for _, chain := range currentChains {
 
-		trackingKey := getTrackingKey(&chain, entry)
+		trackingKey := GetTrackingKey(&chain, entry)
 
 		if trackingKey == (TrackingKey{}) {
-			logOutput(LevelDebug, "SKIP", "IP %s: Skipped chain '%s'. IP version does not match required key type (%s).", entry.IP, chain.Name, chain.MatchKey)
+			LogOutput(LevelDebug, "SKIP", "IP %s: Skipped chain '%s'. IP version does not match required key type (%s).", entry.IP, chain.Name, chain.MatchKey)
 			continue
 		}
 
 		// Choose appropriate store & mutex based on mode.
 		store := ActivityStore
 		mutex := &ActivityMutex
-		if dryRun {
-			store = dryRunActivityStore
-			mutex = &dryRunActivityMutex
+		if DryRun {
+			store = DryRunActivityStore
+			mutex = &DryRunActivityMutex
 		}
 
 		// Lock once for operations that need atomic access.
 		mutex.Lock()
 
 		// Use unsafe variant since we already hold the mutex.
-		activity := getOrCreateActivityUnsafe(store, trackingKey)
+		activity := GetOrCreateActivityUnsafe(store, trackingKey)
 
 		state, exists := activity.ChainProgress[chain.Name]
 		if !exists {
@@ -594,7 +594,7 @@ func CheckChains(entry *LogEntry) {
 			if state.CurrentStep == 0 {
 				ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
 				// Use unsafe access to avoid re-locking the same mutex.
-				ipActivity := getOrCreateActivityUnsafe(store, ipOnlyKey)
+				ipActivity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
 				timeSource = ipActivity.LastRequestTime
 			} else {
 				timeSource = state.LastMatchTime
@@ -606,7 +606,7 @@ func CheckChains(entry *LogEntry) {
 				// Only skip if the time difference is > 0 but < min_delay.
 				// This allows hits logged in the same second (0s difference) to proceed.
 				if timeSinceLastHit > 0 && timeSinceLastHit < nextStep.MinDelayDuration {
-					logOutput(LevelDebug, "SKIP", "IP %s: Hit for step %d of chain '%s' skipped (delay too short: %v < %v).", entry.IP, nextStepIndex+1, chain.Name, timeSinceLastHit, nextStep.MinDelayDuration)
+					LogOutput(LevelDebug, "SKIP", "IP %s: Hit for step %d of chain '%s' skipped (delay too short: %v < %v).", entry.IP, nextStepIndex+1, chain.Name, timeSinceLastHit, nextStep.MinDelayDuration)
 					mutex.Unlock()
 					continue
 				}
@@ -619,7 +619,7 @@ func CheckChains(entry *LogEntry) {
 			delay := entry.Timestamp.Sub(state.LastMatchTime)
 
 			if prevStep.MaxDelayDuration > 0 && delay > prevStep.MaxDelayDuration {
-				logOutput(LevelDebug, "RESET", "IP %s: Progress on step %d of chain '%s' reset due to max_delay timeout (%v > %v).", entry.IP, state.CurrentStep, chain.Name, delay, prevStep.MaxDelayDuration)
+				LogOutput(LevelDebug, "RESET", "IP %s: Progress on step %d of chain '%s' reset due to max_delay timeout (%v > %v).", entry.IP, state.CurrentStep, chain.Name, delay, prevStep.MaxDelayDuration)
 				state.CurrentStep = 0
 				nextStepIndex = 0
 				nextStep = chain.Steps[nextStepIndex]
@@ -632,7 +632,7 @@ func CheckChains(entry *LogEntry) {
 			allFieldsMatch = true
 
 			for fieldName := range nextStep.FieldMatches {
-				regex := nextStep.compiledRegexes[fieldName]
+				regex := nextStep.CompiledRegexes[fieldName]
 				fieldValue := ""
 				var err error
 
@@ -645,8 +645,8 @@ func CheckChains(entry *LogEntry) {
 						if parseErr == nil && u.Path != "" {
 							fieldValue = u.Path
 						} else {
-							if !dryRun {
-								logOutput(LevelWarning, "WARN", "Failed to parse URL path from referrer: %s (Error: %v)", entry.Referrer, parseErr)
+							if !DryRun {
+								LogOutput(LevelWarning, "WARN", "Failed to parse URL path from referrer: %s (Error: %v)", entry.Referrer, parseErr)
 							}
 							fieldValue = entry.Referrer
 						}
@@ -657,11 +657,11 @@ func CheckChains(entry *LogEntry) {
 				case "StatusCode":
 					fieldValue = strconv.Itoa(entry.StatusCode)
 				default:
-					fieldValue, err = getMatchValue(fieldName, entry)
+					fieldValue, err = GetMatchValue(fieldName, entry)
 				}
 
 				if err != nil {
-					logOutput(LevelError, "ERROR", "Internal error in getMatchValue for field %s: %v", fieldName, err)
+					LogOutput(LevelError, "ERROR", "Internal error in GetMatchValue for field %s: %v", fieldName, err)
 					allFieldsMatch = false
 					break
 				}
@@ -677,9 +677,9 @@ func CheckChains(entry *LogEntry) {
 				isCompletion := state.CurrentStep+1 == len(chain.Steps)
 
 				if isCompletion {
-					logOutput(LevelDebug, "MATCH", "IP %s: Matched final step %d of chain '%s'. Chain completion detected.", entry.IP, state.CurrentStep+1, chain.Name)
+					LogOutput(LevelDebug, "MATCH", "IP %s: Matched final step %d of chain '%s'. Chain completion detected.", entry.IP, state.CurrentStep+1, chain.Name)
 				} else {
-					logOutput(LevelDebug, "MATCH", "IP %s: Matched step %d of chain '%s'. Progressing to step %d.", entry.IP, state.CurrentStep+1, chain.Name, state.CurrentStep+2)
+					LogOutput(LevelDebug, "MATCH", "IP %s: Matched step %d of chain '%s'. Progressing to step %d.", entry.IP, state.CurrentStep+1, chain.Name, state.CurrentStep+2)
 				}
 
 				state.CurrentStep++
@@ -688,24 +688,24 @@ func CheckChains(entry *LogEntry) {
 				// 4. Check for Chain Completion
 				if state.CurrentStep == len(chain.Steps) {
 					ipToBlock := entry.IP
-					isWhitelisted := isIPWhitelisted(ipToBlock) // Check whitelist status here
+					isWhitelisted := IsIPWhitelisted(ipToBlock) // Check whitelist status here
 
 					if chain.Action == "block" {
 						baseMessage := fmt.Sprintf("BLOCK! Chain: %s completed by IP %s. Attempting to block for %v.", chain.Name, ipToBlock, chain.BlockDuration)
 
 						if isWhitelisted {
 							// NEW CONSOLIDATED LOGIC for whitelisted BLOCK
-							logOutput(LevelCritical, "ALERT", "%s (IP is whitelisted: BLOCK ACTION SKIPPED)", baseMessage)
+							LogOutput(LevelCritical, "ALERT", "%s (IP is whitelisted: BLOCK ACTION SKIPPED)", baseMessage)
 						} else {
 							// Original logic for non-whitelisted block: two logs (ALERT + HAPROXY_BLOCK)
-							logOutput(LevelCritical, "ALERT", baseMessage)
+							LogOutput(LevelCritical, "ALERT", baseMessage)
 
 							if err := BlockIPForDuration(ipToBlock, chain.BlockDuration); err != nil {
 							}
 
 							// Optimization: Mark the IP-ONLY key as blocked for skipping future log lines from this IP.
 							ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
-							ipActivity := getOrCreateActivityUnsafe(store, ipOnlyKey)
+							ipActivity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
 							ipActivity.IsBlocked = true
 							ipActivity.BlockedUntil = entry.Timestamp.Add(chain.BlockDuration) // Set block expiration time
 						}
@@ -717,10 +717,10 @@ func CheckChains(entry *LogEntry) {
 
 						if isWhitelisted {
 							// Consolidate into a single log line when whitelisted
-							logOutput(LevelCritical, "ALERT", "%s (IP is whitelisted: NO FURTHER ACTION TAKEN)", baseMessage)
+							LogOutput(LevelCritical, "ALERT", "%s (IP is whitelisted: NO FURTHER ACTION TAKEN)", baseMessage)
 						} else {
 							// Original log output for non-whitelisted IPs
-							logOutput(LevelCritical, "ALERT", baseMessage)
+							LogOutput(LevelCritical, "ALERT", baseMessage)
 						}
 					}
 
@@ -744,8 +744,8 @@ func CheckChains(entry *LogEntry) {
 
 // --- LOG PARSING & TAILING ---
 
-// parseLogLine processes a raw log line into a LogEntry.
-func parseLogLine(line string) (*LogEntry, error) {
+// ParseLogLine processes a raw log line into a LogEntry.
+func ParseLogLine(line string) (*LogEntry, error) {
 	parts := strings.Split(line, "\"")
 	if len(parts) < 6 {
 		return nil, fmt.Errorf("malformed log line: expected at least 6 quoted sections (got %d)", len(parts))
@@ -755,11 +755,27 @@ func parseLogLine(line string) (*LogEntry, error) {
 	requestPart := strings.Fields(parts[1])
 	statusSizePart := strings.Fields(parts[2])
 
-	if len(ipPart) < 6 || len(requestPart) < 2 || len(statusSizePart) < 1 {
-		return nil, fmt.Errorf("malformed essential fields (missing Hostname, Time, Request, or Status)")
+	// We expect at least 5 fields: IP, -, -, [Time, TZ]
+	if len(ipPart) < 5 || len(requestPart) < 2 || len(statusSizePart) < 1 {
+		return nil, fmt.Errorf("malformed essential fields (missing Request, Status, or incomplete Host/Time fields)")
 	}
 
-	ip := ipPart[1]
+	var ip string
+	var timeIndexStart, timeIndexEnd int
+
+	// Determine structure based on field count in the first part:
+	if len(ipPart) >= 6 {
+		// Format: Hostname IP - - [Time TZ] (e.g., musicbrainz.org 197.3.177.209 ...)
+		ip = ipPart[1]
+		timeIndexStart = 4
+		timeIndexEnd = 5
+	} else {
+		// Format: IP - - [Time TZ] (e.g., 127.0.0.1 - - ...)
+		ip = ipPart[0]
+		timeIndexStart = 3
+		timeIndexEnd = 4
+	}
+
 	method := requestPart[0]
 	path := requestPart[1]
 	referrer := parts[3]
@@ -770,12 +786,14 @@ func parseLogLine(line string) (*LogEntry, error) {
 		return nil, fmt.Errorf("failed to parse status code: %w", err)
 	}
 
-	timeStrWithBrackets := ipPart[4] + " " + ipPart[5]
+	// HTTP version (e.g., HTTP/1.1 or HTTP/2.0) is ignored, as it's not a LogEntry field.
+
+	timeStrWithBrackets := ipPart[timeIndexStart] + " " + ipPart[timeIndexEnd]
 	timeStr := strings.Trim(timeStrWithBrackets, "[]")
 
 	t, parseErr := time.Parse("02/Jan/2006:15:04:05 -0700", timeStr)
 	if parseErr != nil {
-		logOutput(LevelWarning, "WARN", "Failed to parse log time '%s'. Using current time: %v", timeStr, parseErr)
+		LogOutput(LevelWarning, "WARN", "Failed to parse log time '%s'. Using current time: %v", timeStr, parseErr)
 		t = time.Now()
 	}
 
@@ -790,19 +808,19 @@ func parseLogLine(line string) (*LogEntry, error) {
 	}, nil
 }
 
-// processLogLine processes a single raw log line, handling skipping of empty/comment lines,
+// ProcessLogLine processes a single raw log line, handling skipping of empty/comment lines,
 // parsing, chain checking, and updating the activity store.
-func processLogLine(line string, lineNumber int) {
+func ProcessLogLine(line string, lineNumber int) {
 	// Skip truly empty lines and comments.
 	if line == "" || line == "\n" || line == "\r\n" || strings.HasPrefix(line, "#") {
 		return
 	}
 
-	entry, parseErr := parseLogLine(line)
+	entry, parseErr := ParseLogLine(line)
 	if parseErr != nil {
 		logLevel := LevelDebug
 		prefix := "PARSE_FAIL"
-		if dryRun {
+		if DryRun {
 			prefix = "DRYRUN_WARN"
 			logLevel = LevelWarning
 		}
@@ -811,7 +829,7 @@ func processLogLine(line string, lineNumber int) {
 		if len(line) > 60 {
 			lineStart = line[:60] + "..."
 		}
-		logOutput(logLevel, prefix, "[Line %d] Failed to parse log line: %v (Line start: %s)", lineNumber, parseErr, lineStart)
+		LogOutput(logLevel, prefix, "[Line %d] Failed to parse log line: %v (Line start: %s)", lineNumber, parseErr, lineStart)
 		return
 	}
 
@@ -820,16 +838,16 @@ func processLogLine(line string, lineNumber int) {
 
 	store := ActivityStore
 	mutex := &ActivityMutex
-	if dryRun {
-		store = dryRunActivityStore
-		mutex = &dryRunActivityMutex
+	if DryRun {
+		store = DryRunActivityStore
+		mutex = &DryRunActivityMutex
 	}
 
 	// Lock the mutex for atomic access to the store for status check and time updates.
 	mutex.Lock()
 
 	// 1. Get/Update IP-only key (for block status check and min_delay Step 1 time).
-	ipActivity := getOrCreateActivityUnsafe(store, ipOnlyKey)
+	ipActivity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
 	ipActivity.LastRequestTime = entry.Timestamp
 
 	isBlocked := ipActivity.IsBlocked
@@ -840,7 +858,7 @@ func processLogLine(line string, lineNumber int) {
 		ipActivity.IsBlocked = false
 		ipActivity.BlockedUntil = time.Time{}
 		isBlocked = false
-		logOutput(LevelDebug, "UNBLOCK_EXPIRY", "IP %s block has expired at %s. Unmarked as blocked.", entry.IP, blockedUntil.Format("2006-01-02 15:04:05 -0700"))
+		LogOutput(LevelDebug, "UNBLOCK_EXPIRY", "IP %s block has expired at %s. Unmarked as blocked.", entry.IP, blockedUntil.Format("2006-01-02 15:04:05 -0700"))
 	}
 
 	// Unlock before calling CheckChains, which also locks.
@@ -848,7 +866,7 @@ func processLogLine(line string, lineNumber int) {
 
 	if isBlocked {
 		// Log the skip and return immediately. This is the IP-only optimization.
-		logOutput(LevelDebug, "SKIP", "IP %s is currently marked as blocked until %s. Skipping chain checks.", entry.IP, blockedUntil.Format("2006-01-02 15:04:05 -0700"))
+		LogOutput(LevelDebug, "SKIP", "IP %s is currently marked as blocked until %s. Skipping chain checks.", entry.IP, blockedUntil.Format("2006-01-02 15:04:05 -0700"))
 		return
 	}
 
@@ -858,9 +876,9 @@ func processLogLine(line string, lineNumber int) {
 
 // --- CORE FILE I/O IMPLEMENTATION ---
 
-// readLineWithLimit reads a line from the bufio.Reader until a newline is found or the limit is hit.
+// ReadLineWithLimit reads a line from the bufio.Reader until a newline is found or the limit is hit.
 // It uses r.Read(b) for robust final EOF detection, preventing the hang when reading a static file.
-func readLineWithLimit(r *bufio.Reader, maxBytes int) (string, error) {
+func ReadLineWithLimit(r *bufio.Reader, maxBytes int) (string, error) {
 	var lineBuilder strings.Builder
 	bytesRead := 0
 
@@ -893,25 +911,25 @@ func readLineWithLimit(r *bufio.Reader, maxBytes int) (string, error) {
 				b_drain, err := r.ReadByte()
 				if err != nil {
 					// We hit EOF or an I/O error while draining.
-					return "", fmt.Errorf("%w (draining failed with error: %v)", errLineSkipped, err)
+					return "", fmt.Errorf("%w (draining failed with error: %v)", ErrLineSkipped, err)
 				}
 				if b_drain == '\n' {
 					break // Successfully drained the rest of the line.
 				}
 			}
 			// Return the skip error. The reader is now correctly positioned at the start of the next line.
-			return "", errLineSkipped
+			return "", ErrLineSkipped
 		}
 	}
 }
 
 // DryRunLogProcessor reads and processes a static log file for testing.
 func DryRunLogProcessor(done chan<- struct{}) {
-	logOutput(LevelInfo, "DRYRUN", "MODE: Reading test logs from %s...", testLogPath)
+	LogOutput(LevelInfo, "DRYRUN", "MODE: Reading test logs from %s...", TestLogPath)
 
-	file, err := os.Open(testLogPath)
+	file, err := os.Open(TestLogPath)
 	if err != nil {
-		log.Fatalf("[FATAL] Dry Run Failed: Could not open test log file %s: %v", testLogPath, err)
+		log.Fatalf("[FATAL] Dry Run Failed: Could not open test log file %s: %v", TestLogPath, err)
 	}
 	defer file.Close()
 
@@ -921,37 +939,37 @@ func DryRunLogProcessor(done chan<- struct{}) {
 	for {
 		lineNumber++
 
-		line, err := readLineWithLimit(reader, MaxLogLineSize)
+		line, err := ReadLineWithLimit(reader, MaxLogLineSize)
 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				// Process final line fragment if present
 				if line != "" {
-					processLogLine(line, lineNumber)
+					ProcessLogLine(line, lineNumber)
 				}
 				break
 			}
-			if errors.Is(err, errLineSkipped) {
-				logOutput(LevelWarning, "SKIPPED", "Line %d exceeded critical limit and was skipped.", lineNumber)
+			if errors.Is(err, ErrLineSkipped) {
+				LogOutput(LevelWarning, "SKIPPED", "Line %d exceeded critical limit and was skipped.", lineNumber)
 				lineNumber--
 				continue
 			}
 
-			logOutput(LevelError, "DRYRUN_ERROR", "Reading log file: %v. Exiting dry-run loop.", err)
+			LogOutput(LevelError, "DRYRUN_ERROR", "Reading log file: %v. Exiting dry-run loop.", err)
 			break
 		}
 
-		processLogLine(line, lineNumber)
+		ProcessLogLine(line, lineNumber)
 	}
 
-	logOutput(LevelInfo, "DRYRUN", "COMPLETED: Processed all lines in test log.")
-	logOutput(LevelDebug, "DRYRUN", "Total lines processed: %d", lineNumber)
+	LogOutput(LevelInfo, "DRYRUN", "COMPLETED: Processed all lines in test log.")
+	LogOutput(LevelDebug, "DRYRUN", "Total lines processed: %d", lineNumber)
 
 	close(done)
 }
 
-// runDryRun orchestrates the dry-run and manages graceful shutdown.
-func runDryRun() {
+// RunDryRun orchestrates the dry-run and manages graceful shutdown.
+func RunDryRun() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
@@ -962,15 +980,15 @@ func runDryRun() {
 		DryRunLogProcessor(done)
 	}()
 
-	logOutput(LevelInfo, "INFO", "Running in Dry-Run Mode. Log level set to %s. Log line critical limit: %dKB.", strings.ToUpper(logLevelStr), MaxLogLineSize/1024)
+	LogOutput(LevelInfo, "INFO", "Running in Dry-Run Mode. Log level set to %s. Log line critical limit: %dKB.", strings.ToUpper(LogLevelStr), MaxLogLineSize/1024)
 
 	select {
 	case <-done:
-		logOutput(LevelInfo, "DRYRUN", "COMPLETE: Dry-run successfully finished processing log file.")
-		logOutput(LevelInfo, "INFO", "Total distinct IP/UA keys processed: %d", len(dryRunActivityStore))
-		logOutput(LevelCritical, "SHUTDOWN", "Dry-run complete. Exiting.")
+		LogOutput(LevelInfo, "DRYRUN", "COMPLETE: Dry-run successfully finished processing log file.")
+		LogOutput(LevelInfo, "INFO", "Total distinct IP/UA keys processed: %d", len(DryRunActivityStore))
+		LogOutput(LevelCritical, "SHUTDOWN", "Dry-run complete. Exiting.")
 	case <-stop:
-		logOutput(LevelCritical, "SHUTDOWN", "Interrupt signal received during dry-run. Shutting down...")
+		LogOutput(LevelCritical, "SHUTDOWN", "Interrupt signal received during dry-run. Shutting down...")
 	}
 
 	os.Exit(0)
@@ -978,16 +996,16 @@ func runDryRun() {
 
 // TailLogWithRotation tails a log file indefinitely, supporting rotation via inode checks.
 func TailLogWithRotation() {
-	if dryRun {
+	if DryRun {
 		return
 	}
 
-	logOutput(LevelInfo, "TAIL", "Starting live log tailing on %s with rotation support...", logFilePath)
+	LogOutput(LevelInfo, "TAIL", "Starting live log tailing on %s with rotation support...", LogFilePath)
 
 	for {
-		file, err := os.OpenFile(logFilePath, os.O_RDONLY, 0644)
+		file, err := os.OpenFile(LogFilePath, os.O_RDONLY, 0644)
 		if err != nil {
-			logOutput(LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in 5s.", logFilePath, err)
+			LogOutput(LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in 5s.", LogFilePath, err)
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -995,7 +1013,7 @@ func TailLogWithRotation() {
 		// Seek to the end of the file
 		_, err = file.Seek(0, 2)
 		if err != nil {
-			logOutput(LevelError, "TAIL_ERROR", "Failed to seek to end of log file: %v. Closing and retrying.", err)
+			LogOutput(LevelError, "TAIL_ERROR", "Failed to seek to end of log file: %v. Closing and retrying.", err)
 			file.Close()
 			time.Sleep(1 * time.Second)
 			continue
@@ -1003,7 +1021,7 @@ func TailLogWithRotation() {
 
 		initialStat, err := file.Stat()
 		if err != nil {
-			logOutput(LevelError, "TAIL_ERROR", "Failed to stat open file: %v. Closing and retrying.", err)
+			LogOutput(LevelError, "TAIL_ERROR", "Failed to stat open file: %v. Closing and retrying.", err)
 			file.Close()
 			time.Sleep(1 * time.Second)
 			continue
@@ -1014,38 +1032,38 @@ func TailLogWithRotation() {
 		initialIno := initialSysStat.Ino
 
 		reader := bufio.NewReader(file)
-		logOutput(LevelInfo, "TAIL", "Now tailing (Dev: %d, Inode: %d)", initialDev, initialIno)
+		LogOutput(LevelInfo, "TAIL", "Now tailing (Dev: %d, Inode: %d)", initialDev, initialIno)
 
 		lineNumber := 0
 
 		for {
 			lineNumber++
 
-			line, err := readLineWithLimit(reader, MaxLogLineSize)
+			line, err := ReadLineWithLimit(reader, MaxLogLineSize)
 			finalErr := err
 
-			if errors.Is(finalErr, errLineSkipped) {
-				logOutput(LevelWarning, "SKIPPED", "Live log line exceeded critical limit of %dKB and was skipped.", MaxLogLineSize/1024)
+			if errors.Is(finalErr, ErrLineSkipped) {
+				LogOutput(LevelWarning, "SKIPPED", "Live log line exceeded critical limit of %dKB and was skipped.", MaxLogLineSize/1024)
 				continue
 			}
 
 			if finalErr != nil {
 				if finalErr == io.EOF { // Standard check for live tail: sleep and check rotation
-					currentStat, statErr := os.Stat(logFilePath)
+					currentStat, statErr := os.Stat(LogFilePath)
 					if statErr == nil {
 						if currentStat.Size() < initialStat.Size() {
-							logOutput(LevelDebug, "TAIL", "Detected log file size reduction (truncation/rotation). Reopening file.")
+							LogOutput(LevelDebug, "TAIL", "Detected log file size reduction (truncation/rotation). Reopening file.")
 							file.Close()
 							break
 						}
 						currentSysStat := currentStat.Sys().(*syscall.Stat_t)
 						if currentSysStat.Dev != initialDev || currentSysStat.Ino != initialIno {
-							logOutput(LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialIno, currentSysStat.Ino)
+							LogOutput(LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialIno, currentSysStat.Ino)
 							file.Close()
 							break
 						}
 					} else {
-						logOutput(LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Reopening in 1s.", statErr)
+						LogOutput(LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Reopening in 1s.", statErr)
 						time.Sleep(1 * time.Second)
 						file.Close()
 						break
@@ -1053,14 +1071,14 @@ func TailLogWithRotation() {
 					time.Sleep(200 * time.Millisecond)
 					continue
 				} else {
-					logOutput(LevelError, "TAIL_ERROR", "Reading log file: %v. Reopening in 1s.", finalErr)
+					LogOutput(LevelError, "TAIL_ERROR", "Reading log file: %v. Reopening in 1s.", finalErr)
 					time.Sleep(1 * time.Second)
 					file.Close()
 					break
 				}
 			}
 
-			processLogLine(line, lineNumber)
+			ProcessLogLine(line, lineNumber)
 		}
 
 		time.Sleep(100 * time.Millisecond)
@@ -1072,28 +1090,28 @@ func TailLogWithRotation() {
 func main() {
 	flag.Parse()
 
-	if err := parseDurations(); err != nil {
+	if err := ParseDurations(); err != nil {
 		log.Fatalf("[FATAL] Configuration Error: %v", err)
 	}
 
 	var err error
-	Chains, err = loadChainsFromYAML()
+	Chains, err = LoadChainsFromYAML()
 	if err != nil {
 		log.Fatalf("[FATAL] Initial chain load failed: %v", err)
 	}
-	logOutput(LevelInfo, "LOAD", "Initial configuration loaded. Loaded %d behavioral chains.", len(Chains))
+	LogOutput(LevelInfo, "LOAD", "Initial configuration loaded. Loaded %d behavioral chains.", len(Chains))
 
-	if dryRun {
-		runDryRun()
+	if DryRun {
+		RunDryRun()
 		return
 	} else {
-		logOutput(LevelInfo, "INFO", "Running in Production Mode with per-attempt HAProxy Fail-Safe. Log level set to %s. Log line critical limit: %dKB.", strings.ToUpper(logLevelStr), MaxLogLineSize/1024)
+		LogOutput(LevelInfo, "INFO", "Running in Production Mode with per-attempt HAProxy Fail-Safe. Log level set to %s. Log line critical limit: %dKB.", strings.ToUpper(LogLevelStr), MaxLogLineSize/1024)
 
 		stop := make(chan os.Signal, 1)
 		signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
-		if fileInfo, err := os.Stat(yamlFilePath); err == nil {
-			lastModTime = fileInfo.ModTime()
+		if fileInfo, err := os.Stat(YAMLFilePath); err == nil {
+			LastModTime = fileInfo.ModTime()
 		}
 
 		go ChainWatcher()
@@ -1101,7 +1119,7 @@ func main() {
 		go TailLogWithRotation()
 
 		<-stop
-		logOutput(LevelCritical, "SHUTDOWN", "Interrupt signal received. Shutting down gracefully...")
-		logOutput(LevelCritical, "SHUTDOWN", "Exiting.")
+		LogOutput(LevelCritical, "SHUTDOWN", "Interrupt signal received. Shutting down gracefully...")
+		LogOutput(LevelCritical, "SHUTDOWN", "Exiting.")
 	}
 }
