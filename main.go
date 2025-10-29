@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/url"
@@ -18,6 +20,13 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// --- CONSTANT FOR CRITICAL LOG LINE BUFFER LIMIT ---
+// If a line exceeds this limit (e.g., 16KB), it is skipped entirely.
+const MaxLogLineSize = 16 * 1024
+
+// Custom error type for skipped lines
+var errLineSkipped = errors.New("line exceeded critical limit and was skipped")
 
 // --- CONFIGURATION GLOBAL VARS (Set by CLI flags) ---
 var (
@@ -123,29 +132,26 @@ type StepState struct {
 }
 
 // TrackingKey is a comparable struct used as the key for the ActivityStore map.
-// It tracks an IP or a combination of IP + UserAgent.
 type TrackingKey struct {
 	IP string
-	UA string // UserAgent, used as-is (case-sensitive). Empty string if tracking is IP-only.
+	UA string // UserAgent. Empty string if tracking is IP-only.
 }
 
 // BotActivity tracks state for a single IP address (or IP+UA combination) across all chains.
 type BotActivity struct {
-	LastRequestTime time.Time // Time of the IP's PREVIOUS overall request (set *after* CheckChains).
+	LastRequestTime time.Time // Time of the IP's PREVIOUS overall request.
 	ChainProgress   map[string]StepState
 }
 
 // --- GLOBAL STATE ---
 var (
-	// ActivityStore now uses the TrackingKey struct as its key
 	ActivityStore = make(map[TrackingKey]*BotActivity)
 	ActivityMutex sync.Mutex // Mutex protecting concurrent access to ActivityStore.
 
 	Chains      []BehavioralChain
-	ChainMutex  sync.RWMutex // Mutex protecting concurrent read/write access during chain reload.
+	ChainMutex  sync.RWMutex
 	lastModTime time.Time
 
-	// dryRunActivityStore now uses the TrackingKey struct as its key
 	dryRunActivityStore = make(map[TrackingKey]*BotActivity)
 	dryRunActivityMutex sync.Mutex
 )
@@ -158,11 +164,9 @@ func getIPVersion(ipStr string) string {
 	if ip == nil {
 		return VersionInvalid
 	}
-	// If To4() is non-nil, it's a valid IPv4 address (or IPv4-mapped IPv6, which we treat as v4 for this context).
 	if ip.To4() != nil {
 		return VersionIPv4
 	}
-	// If To4() is nil, it's a non-mapped IPv6 address.
 	if len(ip) == net.IPv6len {
 		return VersionIPv6
 	}
@@ -170,12 +174,10 @@ func getIPVersion(ipStr string) string {
 }
 
 // getTrackingKey generates the unique state-tracking key based on the chain's configuration.
-// Returns an empty struct (TrackingKey{}) if the IP version does not match the chain's requirement.
 func getTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
 	ipVersion := getIPVersion(entry.IP)
 	trackingKey := TrackingKey{IP: entry.IP}
 
-	// 1. Check if the IP version matches the required key type
 	switch chain.MatchKey {
 	case "ip", "ip_ua":
 		if ipVersion == VersionInvalid {
@@ -190,13 +192,10 @@ func getTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
 			return TrackingKey{}
 		}
 	default:
-		// Should not happen due to validation in loadChainsFromYAML
 		return TrackingKey{}
 	}
 
-	// 2. Determine the final tracking key: include UserAgent if needed.
 	if strings.HasSuffix(chain.MatchKey, "_ua") {
-		// NOTE: entry.UserAgent is used as-is (case-sensitive) for fidelity.
 		trackingKey.UA = entry.UserAgent
 	}
 
@@ -230,7 +229,6 @@ func init() {
 
 // logOutput checks the level against the configured currentLogLevel and prints the message if appropriate.
 func logOutput(level LogLevel, prefix string, format string, v ...interface{}) {
-	// Only print if the message's level is equal to or higher priority (lower iota value) than the configured level.
 	if level <= currentLogLevel {
 		log.Printf("[%s] "+format, append([]interface{}{prefix}, v...)...)
 	}
@@ -276,7 +274,6 @@ func BlockIPForDuration(ip string, duration time.Duration) error {
 
 	conn, err := net.Dial("unix", haproxySocketPath)
 	if err != nil {
-		// FAIL-SAFE: If connection fails, log error and return nil (downgrade action)
 		logOutput(LevelError, "ERROR", "Failed to connect to HAProxy socket %s during block attempt for IP %s: %v", haproxySocketPath, ip, err)
 		logOutput(LevelWarning, "FAILSAFE", "Block for IP %s downgraded to LOG action.", ip)
 		return nil
@@ -284,12 +281,10 @@ func BlockIPForDuration(ip string, duration time.Duration) error {
 	defer conn.Close()
 
 	if _, err = conn.Write([]byte(command)); err != nil {
-		// Log the initial error but return nil to continue the program (fail-safe)
 		logOutput(LevelError, "ERROR", "Failed to send command to HAProxy for IP %s: %v", ip, err)
 		return nil
 	}
 
-	// Read Response Confirmation
 	reader := bufio.NewReader(conn)
 	response, err := reader.ReadString('\n')
 
@@ -300,10 +295,9 @@ func BlockIPForDuration(ip string, duration time.Duration) error {
 
 	trimmedResponse := strings.TrimSpace(response)
 
-	// Display the specific HAProxy error message (e.g., 500 or error keyword).
 	if strings.HasPrefix(trimmedResponse, "500") || strings.Contains(trimmedResponse, "error") {
 		logOutput(LevelError, "HAPROXY_ERR", "HAProxy execution failed for IP %s. Response: %s", ip, trimmedResponse)
-		return nil // Return nil on error for the fail-safe to avoid log noise.
+		return nil
 	}
 
 	logOutput(LevelCritical, "HAPROXY_BLOCK", "IP %s blocked for %v (via map: %s)", ip, duration, blockedMapPath)
@@ -322,11 +316,10 @@ func CleanUpIdleActivity() {
 	for {
 		time.Sleep(cleanupInterval)
 
-		ActivityMutex.Lock() // Protect the global ActivityStore map.
+		ActivityMutex.Lock()
 		now := time.Now()
 		deletedCount := 0
 
-		// ActivityStore now uses TrackingKey as the key
 		for trackingKey, activity := range ActivityStore {
 			if now.Sub(activity.LastRequestTime) > idleTimeout {
 				if trackingKey.UA != "" {
@@ -362,7 +355,6 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 
 	newChains := make([]BehavioralChain, 0, len(config.Chains))
 
-	// Conversion and Pre-Compilation Logic
 	for _, yamlChain := range config.Chains {
 		runtimeChain := BehavioralChain{
 			Name:     yamlChain.Name,
@@ -370,7 +362,6 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 			MatchKey: yamlChain.MatchKey,
 		}
 
-		// Default and Validation for MatchKey
 		if runtimeChain.MatchKey == "" {
 			runtimeChain.MatchKey = "ip"
 		}
@@ -380,7 +371,7 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 		if !validKeys[keyLower] {
 			return nil, fmt.Errorf("chain '%s': invalid match_key '%s'. MatchKey must be one of: ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua", yamlChain.Name, runtimeChain.MatchKey)
 		}
-		runtimeChain.MatchKey = keyLower // Store the lowercased key for easy matching
+		runtimeChain.MatchKey = keyLower
 
 		if runtimeChain.Action != "block" && runtimeChain.Action != "log" {
 			return nil, fmt.Errorf("chain '%s': invalid action '%s'. Action must be 'block' or 'log'", yamlChain.Name, runtimeChain.Action)
@@ -413,7 +404,6 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 				}
 			}
 
-			// Compile regexes for performance.
 			for field, regexStr := range yamlStep.FieldMatches {
 				re, err := regexp.Compile(regexStr)
 				if err != nil {
@@ -465,8 +455,20 @@ func ChainWatcher() {
 
 // --- CORE BEHAVIORAL ANALYSIS ---
 
+// New helper: non-locking variant used when caller already holds the mutex.
+func getOrCreateActivityUnsafe(store map[TrackingKey]*BotActivity, trackingKey TrackingKey) *BotActivity {
+	if activity, exists := store[trackingKey]; exists {
+		return activity
+	}
+	newActivity := &BotActivity{
+		LastRequestTime: time.Time{},
+		ChainProgress:   make(map[string]StepState),
+	}
+	store[trackingKey] = newActivity
+	return newActivity
+}
+
 // GetOrCreateActivity retrieves or initializes a BotActivity struct for a given tracking key, ensuring thread safety.
-// Function signature updated to use TrackingKey struct.
 func GetOrCreateActivity(trackingKey TrackingKey) *BotActivity {
 	store := ActivityStore
 	mutex := &ActivityMutex
@@ -479,18 +481,7 @@ func GetOrCreateActivity(trackingKey TrackingKey) *BotActivity {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	if activity, exists := store[trackingKey]; exists {
-		// LastRequestTime is intentionally NOT updated here. It is updated *after* CheckChains
-		// in the log processor to hold the time of the PREVIOUS request for min_delay checks.
-		return activity
-	}
-
-	newActivity := &BotActivity{
-		LastRequestTime: time.Time{}, // Initialize to zero time to indicate no prior request.
-		ChainProgress:   make(map[string]StepState),
-	}
-	store[trackingKey] = newActivity
-	return newActivity
+	return getOrCreateActivityUnsafe(store, trackingKey)
 }
 
 // CheckChains iterates through all chains and updates the IP's progress.
@@ -523,21 +514,24 @@ func CheckChains(entry *LogEntry) {
 
 		trackingKey := getTrackingKey(&chain, entry)
 
-		// Skip if the IP version does not match the chain's requirement (empty struct check)
 		if trackingKey == (TrackingKey{}) {
 			logOutput(LevelDebug, "SKIP", "IP %s: Skipped chain '%s'. IP version does not match required key type (%s).", entry.IP, chain.Name, chain.MatchKey)
-			continue // Move to the next chain
+			continue
 		}
 
-		activity := GetOrCreateActivity(trackingKey) // Use TrackingKey struct
-
+		// Choose appropriate store & mutex based on mode.
+		store := ActivityStore
 		mutex := &ActivityMutex
 		if dryRun {
+			store = dryRunActivityStore
 			mutex = &dryRunActivityMutex
 		}
 
-		// Lock for the entire state modification to prevent race conditions.
+		// Lock once for operations that need atomic access.
 		mutex.Lock()
+
+		// Use unsafe variant since we already hold the mutex.
+		activity := getOrCreateActivityUnsafe(store, trackingKey)
 
 		state, exists := activity.ChainProgress[chain.Name]
 		if !exists {
@@ -549,35 +543,30 @@ func CheckChains(entry *LogEntry) {
 			nextStepIndex = 0
 		}
 
-		// Identify the step we are attempting to match.
 		var nextStep StepDef
 		if nextStepIndex < len(chain.Steps) {
 			nextStep = chain.Steps[nextStepIndex]
 		}
 
-		// 1. Minimum Delay Check (min_delay): Skip processing this log entry for this chain if the delay is too short.
+		// 1. Minimum Delay Check (min_delay)
 		if nextStep.MinDelayDuration > 0 {
 			var timeSource time.Time
 
 			if state.CurrentStep == 0 {
-				// First Step: Check min_delay against the IP's global LastRequestTime.
-				// This is retrieved using the IP-only key to provide a baseline for the IP's activity.
 				ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
-				ipActivity := GetOrCreateActivity(ipOnlyKey)
+				// Use unsafe access to avoid re-locking the same mutex.
+				ipActivity := getOrCreateActivityUnsafe(store, ipOnlyKey)
 				timeSource = ipActivity.LastRequestTime
 			} else {
-				// Subsequent Steps: Check min_delay against the chain's last successful step time.
 				timeSource = state.LastMatchTime
 			}
 
-			// Only check if we have a recorded previous time (i.e., not the absolute first request ever).
 			if !timeSource.IsZero() {
 				timeSinceLastHit := entry.Timestamp.Sub(timeSource)
 
 				if timeSinceLastHit < nextStep.MinDelayDuration {
-					// Use entry.IP for logging clarity, even if trackingKey includes UA.
 					logOutput(LevelDebug, "SKIP", "IP %s: Hit for step %d of chain '%s' skipped (delay too short: %v < %v).", entry.IP, nextStepIndex+1, chain.Name, timeSinceLastHit, nextStep.MinDelayDuration)
-					mutex.Unlock() // Release the lock before returning
+					mutex.Unlock()
 					continue
 				}
 			}
@@ -589,11 +578,9 @@ func CheckChains(entry *LogEntry) {
 			delay := entry.Timestamp.Sub(state.LastMatchTime)
 
 			if prevStep.MaxDelayDuration > 0 && delay > prevStep.MaxDelayDuration {
-				// Delay was too long, progress is reset.
 				logOutput(LevelDebug, "RESET", "IP %s: Progress on step %d of chain '%s' reset due to max_delay timeout (%v > %v).", entry.IP, state.CurrentStep+1, chain.Name, delay, prevStep.MaxDelayDuration)
-				state.CurrentStep = 0 // Reset chain progress
+				state.CurrentStep = 0
 				nextStepIndex = 0
-				// Re-fetch the first step for the Field Match Check below
 				nextStep = chain.Steps[nextStepIndex]
 			}
 		}
@@ -611,11 +598,10 @@ func CheckChains(entry *LogEntry) {
 				case "Referrer":
 					fieldValue = entry.Referrer
 				case "ReferrerPrevPath":
-					// Extract *only* the path component from the Referrer URL for path-based matching.
 					if entry.Referrer != "" {
 						u, parseErr := url.Parse(entry.Referrer)
 						if parseErr == nil && u.Path != "" {
-							fieldValue = u.Path // Use only the path part of the referrer
+							fieldValue = u.Path
 						} else {
 							if !dryRun {
 								logOutput(LevelWarning, "WARN", "Failed to parse URL path from referrer: %s (Error: %v)", entry.Referrer, parseErr)
@@ -645,31 +631,28 @@ func CheckChains(entry *LogEntry) {
 			}
 
 			if allFieldsMatch {
-				// Match successful. Advance progress.
 				logOutput(LevelDebug, "MATCH", "IP %s: Matched step %d of chain '%s'. Progressing to step %d.", entry.IP, state.CurrentStep+1, chain.Name, state.CurrentStep+2)
 				state.CurrentStep++
 				state.LastMatchTime = entry.Timestamp
 
 				// 4. Check for Chain Completion
 				if state.CurrentStep == len(chain.Steps) {
-					ipToBlock := entry.IP // Always use the log entry's IP for blocking
+					ipToBlock := entry.IP
 					if chain.Action == "block" {
 						logOutput(LevelCritical, "ALERT", "BLOCK! Chain: %s completed by IP %s. Attempting to block for %v.", chain.Name, ipToBlock, chain.BlockDuration)
 						if err := BlockIPForDuration(ipToBlock, chain.BlockDuration); err != nil {
-							// Error is handled/logged in BlockIPForDuration.
 						}
 					} else if chain.Action == "log" {
 						logOutput(LevelCritical, "ALERT", "LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IP)
 					}
 
-					state.CurrentStep = 0 // Reset chain for potential future attacks.
+					state.CurrentStep = 0
 				}
 			}
 		}
 
-		// Update the state map (write back the modified local 'state' copy).
 		activity.ChainProgress[chain.Name] = state
-		mutex.Unlock() // Release the lock.
+		mutex.Unlock()
 	}
 }
 
@@ -677,22 +660,19 @@ func CheckChains(entry *LogEntry) {
 
 // parseLogLine processes a raw log line into a LogEntry.
 func parseLogLine(line string) (*LogEntry, error) {
-	// Assumed format: HOSTNAME IP - - [TIME] "METHOD PATH HTTP/1.1" STATUS SIZE "REFERRER" "USERAGENT"
 	parts := strings.Split(line, "\"")
-	if len(parts) < 5 {
-		return nil, fmt.Errorf("malformed log line: too few quoted sections")
+	if len(parts) < 6 {
+		return nil, fmt.Errorf("malformed log line: expected at least 6 quoted sections (got %d)", len(parts))
 	}
 
 	ipPart := strings.Fields(parts[0])
 	requestPart := strings.Fields(parts[1])
 	statusSizePart := strings.Fields(parts[2])
 
-	// Check for enough fields: Hostname (0), IP (1), ID1 (2), ID2 (3), [TimePart1 (4), TimePart2 (5)]
 	if len(ipPart) < 6 || len(requestPart) < 2 || len(statusSizePart) < 1 {
 		return nil, fmt.Errorf("malformed essential fields (missing Hostname, Time, Request, or Status)")
 	}
 
-	// Correct Indexing for Hostname-prefixed log:
 	ip := ipPart[1]
 	method := requestPart[0]
 	path := requestPart[1]
@@ -704,15 +684,11 @@ func parseLogLine(line string) (*LogEntry, error) {
 		return nil, fmt.Errorf("failed to parse status code: %w", err)
 	}
 
-	// FIX: Reconstruct the full bracketed timestamp from indices 4 and 5.
-	// Example: ipPart[4] = "[28/Oct/2025:15:41:10" and ipPart[5] = "+0000]"
 	timeStrWithBrackets := ipPart[4] + " " + ipPart[5]
 	timeStr := strings.Trim(timeStrWithBrackets, "[]")
 
-	// Use Go's reference time for layout: "02/Jan/2006:15:04:05 -0700".
 	t, parseErr := time.Parse("02/Jan/2006:15:04:05 -0700", timeStr)
 	if parseErr != nil {
-		// Log warning and use current time if time string is unparseable (e.g., malformed or missing).
 		logOutput(LevelWarning, "WARN", "Failed to parse log time '%s'. Using current time: %v", timeStr, parseErr)
 		t = time.Now()
 	}
@@ -728,8 +704,93 @@ func parseLogLine(line string) (*LogEntry, error) {
 	}, nil
 }
 
+// processLogLine processes a single raw log line, handling skipping of empty/comment lines,
+// parsing, chain checking, and updating the activity store.
+func processLogLine(rawLine string, lineNumber int) {
+	line := strings.TrimSpace(rawLine) // Apply trim to the centralized logic
+
+	if line == "" || strings.HasPrefix(line, "#") {
+		return
+	}
+
+	entry, parseErr := parseLogLine(line)
+	if parseErr != nil {
+		logLevel := LevelDebug
+		prefix := "PARSE_FAIL"
+		if dryRun {
+			prefix = "DRYRUN_WARN"
+			logLevel = LevelWarning
+		}
+
+		lineStart := line
+		if len(line) > 60 {
+			lineStart = line[:60] + "..."
+		}
+		logOutput(logLevel, prefix, "[Line %d] Failed to parse log line: %v (Line start: %s)", lineNumber, parseErr, lineStart)
+		return
+	}
+
+	CheckChains(entry)
+
+	ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
+	GetOrCreateActivity(ipOnlyKey).LastRequestTime = entry.Timestamp
+}
+
+// --- CORE FILE I/O IMPLEMENTATION ---
+
+// readLineWithLimit reads a line from the bufio.Reader until a newline is found or the limit is hit.
+// It uses r.Read(b) for robust final EOF detection, preventing the hang when reading a static file.
+func readLineWithLimit(r *bufio.Reader, maxBytes int) (string, error) {
+	var lineBuilder strings.Builder
+	bytesRead := 0
+
+	// Use a 1-byte buffer to read instead of ReadByte().
+	// The Read method handles EOF more reliably in this context for static files, resolving the hang.
+	b := make([]byte, 1)
+
+	for {
+		n, err := r.Read(b)
+
+		if err != nil {
+			// If we hit EOF or another error, we return the line fragment read so far (if any).
+			if n > 0 {
+				lineBuilder.Write(b[:n])
+			}
+			return lineBuilder.String(), err
+		}
+
+		// n will always be 1 here for a successful read
+		char := b[0]
+
+		if char == '\n' {
+			return lineBuilder.String(), nil // Full line found
+		}
+
+		lineBuilder.WriteByte(char)
+		bytesRead++
+
+		if bytesRead > maxBytes {
+			// CRITICAL LIMIT HIT. Drain the rest of the line until the next \n.
+			for {
+				// Use ReadByte() for draining as its performance is fine here (we are not at EOF).
+				b_drain, err := r.ReadByte()
+				if err != nil {
+					// We hit EOF or an I/O error while draining.
+					return "", fmt.Errorf("%w (draining failed with error: %v)", errLineSkipped, err)
+				}
+				if b_drain == '\n' {
+					break // Successfully drained the rest of the line.
+				}
+			}
+			// Return the skip error. The reader is now correctly positioned at the start of the next line.
+			return "", errLineSkipped
+		}
+	}
+}
+
 // DryRunLogProcessor reads and processes a static log file for testing.
-func DryRunLogProcessor() {
+// This function MUST use a finite loop structure and cleanly exit on io.EOF.
+func DryRunLogProcessor(done chan<- struct{}) {
 	logOutput(LevelInfo, "DRYRUN", "MODE: Reading test logs from %s...", testLogPath)
 
 	file, err := os.Open(testLogPath)
@@ -738,35 +799,75 @@ func DryRunLogProcessor() {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	reader := bufio.NewReader(file)
 	lineNumber := 0
 
-	for scanner.Scan() {
+	// This is a FINITE loop that MUST exit when the file is read.
+	for {
 		lineNumber++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
+
+		// Assuming readLineWithLimit is still used for line-limit handling.
+		line, err := readLineWithLimit(reader, MaxLogLineSize)
+
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				// Process final line fragment if present (this ensures files that don't return a newline
+				// still have their last line processed).
+				if strings.TrimSpace(line) != "" {
+					processLogLine(line, lineNumber)
+				}
+				break
+			}
+			if errors.Is(err, errLineSkipped) {
+				logOutput(LevelWarning, "SKIPPED", "Line %d exceeded critical limit and was skipped.", lineNumber)
+				lineNumber-- // Do not count skipped line against final total
+				continue
+			}
+
+			// Handle any other I/O errors by logging and exiting the processing loop.
+			logOutput(LevelError, "DRYRUN_ERROR", "Reading log file: %v. Exiting dry-run loop.", err)
+			break
 		}
 
-		entry, parseErr := parseLogLine(line)
-		if parseErr != nil {
-			logOutput(LevelDebug, "DRYRUN_WARN", "[Line %d]: Failed to parse log line: %v", lineNumber, parseErr)
-			continue
-		}
-
-		CheckChains(entry)
-
-		// Update LastRequestTime for the IP-only key, which is the baseline for global min_delay checks.
-		ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
-		GetOrCreateActivity(ipOnlyKey).LastRequestTime = entry.Timestamp
+		// Process the line once it's successfully read.
+		processLogLine(line, lineNumber)
 	}
 
-	if err := scanner.Err(); err != nil {
-		logOutput(LevelError, "DRYRUN_ERROR", "Reading test log file: %v", err)
+	logOutput(LevelInfo, "DRYRUN", "COMPLETED: Processed all lines in test log.")
+	logOutput(LevelDebug, "DRYRUN", "Total lines processed: %d", lineNumber)
+
+	// Signal the runDryRun function that processing is complete, allowing the program to exit.
+	close(done)
+}
+
+// runDryRun orchestrates the dry-run and manages graceful shutdown.
+func runDryRun() {
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	// Channel to signal completion of log processing.
+	done := make(chan struct{})
+
+	go func() {
+		// Pass the done channel to the processor.
+		DryRunLogProcessor(done)
+	}()
+
+	logOutput(LevelInfo, "INFO", "Running in Dry-Run Mode. Log level set to %s. Log line critical limit: %dKB.", strings.ToUpper(logLevelStr), MaxLogLineSize/1024)
+
+	select {
+	case <-done:
+		// Program exits here after the goroutine finishes.
+		logOutput(LevelInfo, "DRYRUN", "COMPLETE: Dry-run successfully finished processing log file.")
+		logOutput(LevelInfo, "INFO", "Total distinct IP/UA keys processed: %d", len(dryRunActivityStore))
+		logOutput(LevelCritical, "SHUTDOWN", "Dry-run complete. Exiting.")
+	case <-stop:
+		// Program exits here if interrupted.
+		logOutput(LevelCritical, "SHUTDOWN", "Interrupt signal received during dry-run. Shutting down...")
 	}
 
-	logOutput(LevelInfo, "DRYRUN", "COMPLETE: Review output for 'DRY RUN' messages.")
-	logOutput(LevelInfo, "INFO", "Total distinct IP/UA keys processed: %d", len(dryRunActivityStore))
+	// Use os.Exit(0) to forcefully terminate the process and all goroutines cleanly.
+	os.Exit(0)
 }
 
 // TailLogWithRotation tails a log file indefinitely, supporting rotation via inode checks.
@@ -778,7 +879,6 @@ func TailLogWithRotation() {
 	logOutput(LevelInfo, "TAIL", "Starting live log tailing on %s with rotation support...", logFilePath)
 
 	for {
-		// 1. Open the file and seek to the end.
 		file, err := os.OpenFile(logFilePath, os.O_RDONLY, 0644)
 		if err != nil {
 			logOutput(LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in 5s.", logFilePath, err)
@@ -794,7 +894,6 @@ func TailLogWithRotation() {
 			continue
 		}
 
-		// Get initial file metadata (Dev and Inode) to detect rotation.
 		initialStat, err := file.Stat()
 		if err != nil {
 			logOutput(LevelError, "TAIL_ERROR", "Failed to stat open file: %v. Closing and retrying.", err)
@@ -806,57 +905,54 @@ func TailLogWithRotation() {
 		initialDev := initialSysStat.Dev
 		initialIno := initialSysStat.Ino
 
-		reader := bufio.NewReader(file) // Create buffered reader for efficiency
+		reader := bufio.NewReader(file)
 		logOutput(LevelInfo, "TAIL", "Now tailing (Dev: %d, Inode: %d)", initialDev, initialIno)
 
-		// 2. Inner loop for active tailing.
+		lineNumber := 0
+
 		for {
-			line, err := reader.ReadString('\n')
-			if err == nil {
-				line = strings.TrimSpace(line)
-				if line != "" {
-					if entry, parseErr := parseLogLine(line); parseErr == nil {
-						CheckChains(entry) // Process the log entry
+			lineNumber++
 
-						// Update LastRequestTime for the IP-only key, which is the baseline for global min_delay checks.
-						ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
-						GetOrCreateActivity(ipOnlyKey).LastRequestTime = entry.Timestamp
+			line, err := readLineWithLimit(reader, MaxLogLineSize)
+			finalErr := err
+
+			if errors.Is(finalErr, errLineSkipped) {
+				logOutput(LevelWarning, "SKIPPED", "Live log line exceeded critical limit of %dKB and was skipped.", MaxLogLineSize/1024)
+				continue
+			}
+
+			if finalErr != nil {
+				if finalErr == io.EOF { // Standard check for live tail: sleep and check rotation
+					currentStat, statErr := os.Stat(logFilePath)
+					if statErr == nil {
+						if currentStat.Size() < initialStat.Size() {
+							logOutput(LevelDebug, "TAIL", "Detected log file size reduction (truncation/rotation). Reopening file.")
+							file.Close()
+							break
+						}
+						currentSysStat := currentStat.Sys().(*syscall.Stat_t)
+						if currentSysStat.Dev != initialDev || currentSysStat.Ino != initialIno {
+							logOutput(LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialIno, currentSysStat.Ino)
+							file.Close()
+							break
+						}
+					} else {
+						logOutput(LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Reopening in 1s.", statErr)
+						time.Sleep(1 * time.Second)
+						file.Close()
+						break
 					}
-				}
-			} else if err.Error() == "EOF" {
-				// Check 1: Did the size shrink? (Truncation/rotation)
-				currentStat, err := os.Stat(logFilePath)
-				if err == nil && currentStat.Size() < initialStat.Size() {
-					logOutput(LevelDebug, "TAIL", "Detected log file size reduction (truncation/rotation). Reopening file.")
-					file.Close()
-					break
-				}
-
-				// Check 2: Did the inode change? (Standard rotation)
-				currentFileInfo, err := os.Stat(logFilePath)
-				if err != nil {
-					logOutput(LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Reopening in 1s.", err)
+					time.Sleep(200 * time.Millisecond)
+					continue
+				} else {
+					logOutput(LevelError, "TAIL_ERROR", "Reading log file: %v. Reopening in 1s.", finalErr)
 					time.Sleep(1 * time.Second)
 					file.Close()
 					break
 				}
-				currentSysStat := currentFileInfo.Sys().(*syscall.Stat_t)
-
-				if currentSysStat.Dev != initialDev || currentSysStat.Ino != initialIno {
-					logOutput(LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialIno, currentSysStat.Ino)
-					file.Close()
-					break
-				}
-
-				// No rotation detected, wait for more data.
-				time.Sleep(200 * time.Millisecond)
-			} else {
-				// Handle other I/O errors.
-				logOutput(LevelError, "TAIL_ERROR", "Reading log file: %v. Reopening in 1s.", err)
-				time.Sleep(1 * time.Second)
-				file.Close()
-				break
 			}
+
+			processLogLine(line, lineNumber)
 		}
 
 		time.Sleep(100 * time.Millisecond)
@@ -880,11 +976,11 @@ func main() {
 	logOutput(LevelInfo, "LOAD", "Initial configuration loaded. Loaded %d behavioral chains.", len(Chains))
 
 	if dryRun {
-		DryRunLogProcessor()
+		runDryRun()
+		return
 	} else {
-		logOutput(LevelInfo, "INFO", "Running in Production Mode with per-attempt HAProxy Fail-Safe. Log level set to %s.", strings.ToUpper(logLevelStr))
+		logOutput(LevelInfo, "INFO", "Running in Production Mode with per-attempt HAProxy Fail-Safe. Log level set to %s. Log line critical limit: %dKB.", strings.ToUpper(logLevelStr), MaxLogLineSize/1024)
 
-		// GRACEFUL SHUTDOWN SETUP
 		stop := make(chan os.Signal, 1)
 		signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
@@ -892,12 +988,10 @@ func main() {
 			lastModTime = fileInfo.ModTime()
 		}
 
-		// Start essential goroutines
 		go ChainWatcher()
 		go CleanUpIdleActivity()
 		go TailLogWithRotation()
 
-		// Wait here for the interrupt signal.
 		<-stop
 		logOutput(LevelCritical, "SHUTDOWN", "Interrupt signal received. Shutting down gracefully...")
 		logOutput(LevelCritical, "SHUTDOWN", "Exiting.")

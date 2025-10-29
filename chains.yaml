@@ -1,125 +1,128 @@
 version: "1.0"
 chains:
 
-# --- Original Chain (Confirmed Working) ---
-
-- name: "Suspect"
-  action: "block"
-  block_duration: "2h"
-  steps:
-
-  - order: 1
-    field_matches:
-      Path: "^/set-language/"
-      Method: "HEAD"
-      StatusCode: "302"
-
-  - order: 2
-    field_matches:
-      Path: "^/recording/"
-      Method: "GET"
-    max_delay: "10s"
-
-# --- Mimics Python Script's 'setlang' (Language Redirect Abuse) ---
-
-- name: "SetLang-Redirect-Abuse"
+# --- 1. MatchKey: IPv4 Only & Max_Delay (SUCCESS) ---
+- name: "Test-MatchKey-IPv4-Only"
   action: "block"
   block_duration: "1h"
+  match_key: "ipv4"
   steps:
-
-  # Step 1: Initial probe GET /set-language/ (302)
   - order: 1
     field_matches:
-      Path: "^/set-language/"
-      Method: "GET"
-      StatusCode: "302"
-      Referrer: "^-$"
-
-  # Step 2: Immediate follow-up request (the redirect target)
+      Path: "^/v4/start$"
   - order: 2
     field_matches:
-      Path: "^/"
-      Method: "GET"
+      Path: "^/v4/end$"
     max_delay: "5s"
 
-# --- Mimics Python Script's '303' (Track-to-Release-Scan) ---
-
-- name: "Track-to-Release-Scan"
+# --- 2. MatchKey: IPv6 + UserAgent (Success) ---
+- name: "Test-MatchKey-IPv6-UA-Strict"
   action: "block"
   block_duration: "1h"
+  match_key: "ipv6_ua"
   steps:
-
-  # Step 1: Initial probe GET /track/ (303)
   - order: 1
     field_matches:
-      Path: "^/track/"
-      Method: "GET"
-      StatusCode: "303"
-      Referrer: "^-$"
-
-  # Step 2: Immediate successful GET to a /release/ page (200)
+      Path: "^/v6/start$"
+      UserAgent: "^Bot-A/1.0$"
   - order: 2
     field_matches:
-      Path: "^/release/"
-      Method: "GET"
-      StatusCode: "200"
+      Path: "^/v6/end$"
     max_delay: "5s"
 
-# --- NEW CHAIN 4: Excessive API Requests with Low-Quality Agent (2 RPS Limit) ---
-
-# Goal: Detect bots rapidly hitting the /ws/2/ API endpoint using User Agents
-# that indicate automated access. Triggered if 3 requests occur in under 1 second total.
-
-- name: "API-Abuse-Low-Agent"
-  action: "block"
-  block_duration: "30m"
-  steps:
-
-  # Step 1: Hit API endpoint with a low-quality or generic User Agent
-  - order: 1
-    field_matches:
-      Path: "^/ws/2/"
-      UserAgent: "(?i)python|curl|requests|wget|go-http-client" # Case-insensitive regex match
-
-  # Step 2: Hit the same API endpoint again very quickly (below 0.5s limit)
-  - order: 2
-    field_matches:
-      Path: "^/ws/2/"
-    max_delay: "0.4s" # Tightened to catch 2 RPS violation
-
-  # Step 3: A third rapid hit confirms the automated sequence (below 0.5s limit)
-  - order: 3
-    field_matches:
-      Path: "^/ws/2/"
-    max_delay: "0.4s" # Tightened to catch 2 RPS violation
-
-# --- NEW CHAIN 5: User-Agent Spoofing/Scanning ---
-
-# Goal: Detect a single IP attempting to scan different admin paths while rapidly
-# switching User Agents (e.g., Firefox -> Chrome -> Safari) to bypass simple fingerprinting.
-
-- name: "UA-Spoofing-Scan"
+# --- 3. Time: Min_Delay Success (IP-only key) ---
+- name: "Test-MinDelay-Success"
   action: "log"
-  block_duration: "1h30m"
+  match_key: "ip"
   steps:
-
-  # Step 1: Probe a sensitive path using Firefox UA
   - order: 1
     field_matches:
-      Path: "^/admin"
-      UserAgent: "(?i)Firefox"
-
-  # Step 2: Probe a different sensitive path using Chrome UA immediately after
+      Path: "^/delay/start$"
+    min_delay: "2s" # Requires >2s since IP's last request (which was at 17:00:00).
   - order: 2
     field_matches:
-      Path: "^/status"
-      UserAgent: "(?i)Chrome"
-    max_delay: "10s"
+      Path: "^/delay/end$"
 
-  # Step 3: Probe a third sensitive path using Safari UA
-  - order: 3
+# --- 4. Time: Max_Delay Reset (FAILURE) ---
+- name: "Test-MaxDelay-Reset"
+  action: "log"
+  match_key: "ip"
+  steps:
+  - order: 1
     field_matches:
-      Path: "^/config"
-      UserAgent: "(?i)Safari"
+      Path: "^/max/start$"
+  - order: 2
+    field_matches:
+      Path: "^/max/fail$"
+    max_delay: "1s"
+
+# --- 5. MatchKey: IP + UA Spoof (FAILURE: Key Change) ---
+- name: "Test-MatchKey-IP-UA-Spoof"
+  action: "log"
+  match_key: "ip_ua"
+  steps:
+  - order: 1
+    field_matches:
+      Path: "^/spoof/start$"
+      UserAgent: "^UA-Original$"
+  - order: 2
+    field_matches:
+      Path: "^/spoof/end$"
+
+# --- 6. Field: Method and StatusCode Match (SUCCESS) ---
+- name: "Test-Fields-Method-Status"
+  action: "log"
+  match_key: "ip"
+  steps:
+  - order: 1
+    field_matches:
+      Path: "^/api/auth$"
+      Method: "POST"
+      StatusCode: "^403$"
+  - order: 2
+    field_matches:
+      Path: "^/api/auth$"
+      StatusCode: "^403$"
+    max_delay: "1s"
+
+# --- 7. Field: Referrer Match (Full URL) (SUCCESS) ---
+- name: "Test-Field-Referrer-Full"
+  action: "log"
+  match_key: "ip"
+  steps:
+  - order: 1
+    field_matches:
+      Path: "^/checkout$"
+      Referrer: "^https://external.payment.gateway/return.html\\?id=.*$"
+  - order: 2
+    field_matches:
+      Path: "^/complete$"
     max_delay: "10s"
 
+# --- 8. Field: ReferrerPrevPath Match (Path Only) (SUCCESS) ---
+- name: "Test-Field-ReferrerPrevPath-Path"
+  action: "log"
+  match_key: "ip"
+  steps:
+  - order: 1
+    field_matches:
+      Path: "^/product/buy$"
+      ReferrerPrevPath: "^/catalog/item/456$"
+  - order: 2
+    field_matches:
+      Path: "^/product/confirm$"
+    max_delay: "5s"
+
+# --- 9. Field: ReferrerPrevPath (FAILURE: Path does not match) ---
+- name: "Test-Field-ReferrerPrevPath-Failure"
+  action: "log"
+  match_key: "ip"
+  steps:
+  - order: 1
+    field_matches:
+      Path: "^/product/fail$"
+      ReferrerPrevPath: "^/catalog/item/999$" # Intentional failure path
+  - order: 2
+    field_matches:
+      Path: "^/product/confirm$"
+    max_delay: "5s"
