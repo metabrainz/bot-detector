@@ -194,6 +194,7 @@ Each step in the steps array defines a specific log entry characteristic that mu
 | **order** | integer | Yes | The sequence number of the step (starting at 1). Steps are processed numerically. |
 | **field_matches** | map\[string\]string | Yes | A set of key-value pairs where the key is a field from the log line (e.g., **Method**, **StatusCode**, **Path**, **UserAgent**) and the value is a **Go Regular Expression** that must match the corresponding log entry field. |
 | **max_delay** | string | Yes | The maximum allowed time gap between the *previous* successful step and this step. Format: Go duration string (e.g., "10s", "1m"). |
+| **min_delay**	| string | No | The minimum required time gap before this step can match. If the time since the last successful match is less than `min_delay`, the log entry is skipped for this chain. On the first step (order: 1), this acts as a 'first hit since' check, using the IP's overall last request time. Format: Go duration string (e.g., "10s", "1m"). |
 
 ### `field_matches`
 

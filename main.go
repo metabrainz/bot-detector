@@ -45,6 +45,7 @@ type StepDefYAML struct {
 	Order           int               `yaml:"order"`
 	FieldMatches    map[string]string `yaml:"field_matches"`
 	MaxDelaySeconds string            `yaml:"max_delay"`
+	MinDelaySeconds string            `yaml:"min_delay"`
 }
 
 type BehavioralChainYAML struct {
@@ -75,6 +76,7 @@ type StepDef struct {
 	Order            int
 	FieldMatches     map[string]string
 	MaxDelayDuration time.Duration
+	MinDelayDuration time.Duration
 	compiledRegexes  map[string]*regexp.Regexp // Pre-compiled regexes for performance.
 }
 
@@ -92,7 +94,7 @@ type StepState struct {
 
 // BotActivity tracks state for a single IP address across all chains.
 type BotActivity struct {
-	LastRequestTime time.Time
+	LastRequestTime time.Time // Time of the IP's PREVIOUS overall request (set *after* CheckChains).
 	ChainProgress   map[string]StepState
 }
 
@@ -271,6 +273,13 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 				}
 			}
 
+			if yamlStep.MinDelaySeconds != "" {
+				runtimeStep.MinDelayDuration, err = time.ParseDuration(yamlStep.MinDelaySeconds)
+				if err != nil {
+					return nil, fmt.Errorf("chain '%s', step %d: failed to parse min_delay '%s': %w", yamlChain.Name, yamlStep.Order, yamlStep.MinDelaySeconds, err)
+				}
+			}
+
 			// Compile regexes for performance.
 			for field, regexStr := range yamlStep.FieldMatches {
 				re, err := regexp.Compile(regexStr)
@@ -337,12 +346,13 @@ func GetOrCreateActivity(ip string) *BotActivity {
 	defer mutex.Unlock()
 
 	if activity, exists := store[ip]; exists {
-		activity.LastRequestTime = time.Now()
+		// LastRequestTime is intentionally NOT updated here. It is updated *after* CheckChains
+		// in the log processor to hold the time of the PREVIOUS request for min_delay checks.
 		return activity
 	}
 
 	newActivity := &BotActivity{
-		LastRequestTime: time.Now(),
+		LastRequestTime: time.Time{}, // Initialize to zero time to indicate no prior request.
 		ChainProgress:   make(map[string]StepState),
 	}
 	store[ip] = newActivity
@@ -396,20 +406,53 @@ func CheckChains(entry *LogEntry) {
 			nextStepIndex = 0
 		}
 
-		// 1. Time Check: Reset progress if delay exceeds the Max Delay Duration.
+		// Identify the step we are attempting to match.
+		var nextStep StepDef
+		if nextStepIndex < len(chain.Steps) {
+			nextStep = chain.Steps[nextStepIndex]
+		}
+
+		// 1. Minimum Delay Check (min_delay): Skip processing this log entry for this chain if the delay is too short.
+		if nextStep.MinDelayDuration > 0 {
+			var timeSource time.Time
+
+			if state.CurrentStep == 0 {
+				// First Step: Check min_delay against the IP's global LastRequestTime.
+				timeSource = activity.LastRequestTime
+			} else {
+				// Subsequent Steps: Check min_delay against the chain's last successful step time.
+				timeSource = state.LastMatchTime
+			}
+
+			// Only check if we have a recorded previous time (i.e., not the absolute first request ever).
+			if !timeSource.IsZero() {
+				timeSinceLastHit := entry.Timestamp.Sub(timeSource)
+
+				if timeSinceLastHit < nextStep.MinDelayDuration {
+					log.Printf("[SKIP:%s] IP %s: Hit for step %d of chain '%s' skipped (delay too short: %v < %v).", chain.Action, entry.IP, nextStepIndex+1, chain.Name, timeSinceLastHit, nextStep.MinDelayDuration)
+					mutex.Unlock() // Release the lock before returning
+					return
+				}
+			}
+		}
+
+		// 2. Maximum Delay Check: Reset progress if delay exceeds the Max Delay Duration.
 		if state.CurrentStep > 0 && nextStepIndex < len(chain.Steps) {
 			prevStep := chain.Steps[state.CurrentStep-1]
 			delay := entry.Timestamp.Sub(state.LastMatchTime)
 
 			if prevStep.MaxDelayDuration > 0 && delay > prevStep.MaxDelayDuration {
+				// Delay was too long, progress is reset.
+				log.Printf("[RESET:%s] IP %s: Progress on step %d of chain '%s' reset due to max_delay timeout (%v > %v).", chain.Action, entry.IP, state.CurrentStep+1, chain.Name, delay, prevStep.MaxDelayDuration)
 				state.CurrentStep = 0 // Reset chain progress
 				nextStepIndex = 0
+				// Re-fetch the first step for the Field Match Check below
+				nextStep = chain.Steps[nextStepIndex]
 			}
 		}
 
-		// 2. Field Match Check
+		// 3. Field Match Check
 		if nextStepIndex < len(chain.Steps) {
-			nextStep := chain.Steps[nextStepIndex]
 			allFieldsMatch := true
 
 			for fieldName := range nextStep.FieldMatches {
@@ -564,6 +607,9 @@ func DryRunLogProcessor() {
 		}
 
 		CheckChains(entry)
+
+		// Update LastRequestTime after chain checks to preserve the time of the *previous* hit for next log entry.
+		GetOrCreateActivity(entry.IP).LastRequestTime = entry.Timestamp
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -622,6 +668,9 @@ func TailLogWithRotation() {
 				if line != "" {
 					if entry, parseErr := parseLogLine(line); parseErr == nil {
 						CheckChains(entry)
+
+						// Update LastRequestTime after chain checks to preserve the time of the *previous* hit for next log entry.
+						GetOrCreateActivity(entry.IP).LastRequestTime = entry.Timestamp
 					}
 				}
 			} else if err.Error() == "EOF" {
