@@ -40,15 +40,15 @@ var (
 	idleTimeout     time.Duration
 )
 
-// --- NEW LOGGING STRUCTURE ---
+// --- LOGGING STRUCTURE ---
 type LogLevel int
 
 const (
-	LevelCritical LogLevel = iota // Highest priority: Blocks, Fatal errors
-	LevelError                    // Critical failure, but program continues
-	LevelWarning                  // Non-critical issues, time parse warnings
-	LevelInfo                     // Default mode: Startup, shutdown, significant operational events (e.g., config reload)
-	LevelDebug                    // Verbose: All high-volume messages (skip, match, reset, cleanup, watch polling)
+	LevelCritical LogLevel = iota // 0: Highest priority: Blocks, Fatal errors
+	LevelError                    // 1: Critical failure, but program continues
+	LevelWarning                  // 2: Non-critical issues, time parse warnings (Default Level)
+	LevelInfo                     // 3: Default mode: Startup, shutdown, significant operational events (e.g., config reload)
+	LevelDebug                    // 4: Verbose: All high-volume messages (skip, match, reset, cleanup, watch polling)
 )
 
 var currentLogLevel = LevelWarning // Default level set to WARNING
@@ -59,6 +59,13 @@ var logLevelMap = map[string]LogLevel{
 	"info":     LevelInfo,
 	"debug":    LevelDebug,
 }
+
+// --- IP VERSION CONSTANTS ---
+const (
+	VersionInvalid = "invalid"
+	VersionIPv4    = "ipv4"
+	VersionIPv6    = "ipv6"
+)
 
 // --- YAML DATA STRUCTURES ---
 
@@ -74,6 +81,7 @@ type BehavioralChainYAML struct {
 	Steps         []StepDefYAML `yaml:"steps"`
 	Action        string        `yaml:"action"`
 	BlockDuration string        `yaml:"block_duration"`
+	MatchKey      string        `yaml:"match_key"`
 }
 
 type ChainConfig struct {
@@ -106,6 +114,7 @@ type BehavioralChain struct {
 	Steps         []StepDef
 	Action        string
 	BlockDuration time.Duration
+	MatchKey      string // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
 }
 
 type StepState struct {
@@ -113,7 +122,14 @@ type StepState struct {
 	LastMatchTime time.Time
 }
 
-// BotActivity tracks state for a single IP address across all chains.
+// TrackingKey is a comparable struct used as the key for the ActivityStore map.
+// It tracks an IP or a combination of IP + UserAgent.
+type TrackingKey struct {
+	IP string
+	UA string // UserAgent, used as-is (case-sensitive). Empty string if tracking is IP-only.
+}
+
+// BotActivity tracks state for a single IP address (or IP+UA combination) across all chains.
 type BotActivity struct {
 	LastRequestTime time.Time // Time of the IP's PREVIOUS overall request (set *after* CheckChains).
 	ChainProgress   map[string]StepState
@@ -121,18 +137,73 @@ type BotActivity struct {
 
 // --- GLOBAL STATE ---
 var (
-	ActivityStore = make(map[string]*BotActivity)
+	// ActivityStore now uses the TrackingKey struct as its key
+	ActivityStore = make(map[TrackingKey]*BotActivity)
 	ActivityMutex sync.Mutex // Mutex protecting concurrent access to ActivityStore.
 
 	Chains      []BehavioralChain
 	ChainMutex  sync.RWMutex // Mutex protecting concurrent read/write access during chain reload.
 	lastModTime time.Time
 
-	dryRunActivityStore = make(map[string]*BotActivity)
+	// dryRunActivityStore now uses the TrackingKey struct as its key
+	dryRunActivityStore = make(map[TrackingKey]*BotActivity)
 	dryRunActivityMutex sync.Mutex
 )
 
-// --- 🧩 CLI FLAG INITIALIZATION AND PARSING ---
+// --- IP/LOGIC HELPERS ---
+
+// getIPVersion returns the version of the IP address string ("ipv4", "ipv6", or "invalid").
+func getIPVersion(ipStr string) string {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return VersionInvalid
+	}
+	// If To4() is non-nil, it's a valid IPv4 address (or IPv4-mapped IPv6, which we treat as v4 for this context).
+	if ip.To4() != nil {
+		return VersionIPv4
+	}
+	// If To4() is nil, it's a non-mapped IPv6 address.
+	if len(ip) == net.IPv6len {
+		return VersionIPv6
+	}
+	return VersionInvalid
+}
+
+// getTrackingKey generates the unique state-tracking key based on the chain's configuration.
+// Returns an empty struct (TrackingKey{}) if the IP version does not match the chain's requirement.
+func getTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
+	ipVersion := getIPVersion(entry.IP)
+	trackingKey := TrackingKey{IP: entry.IP}
+
+	// 1. Check if the IP version matches the required key type
+	switch chain.MatchKey {
+	case "ip", "ip_ua":
+		if ipVersion == VersionInvalid {
+			return TrackingKey{}
+		}
+	case "ipv4", "ipv4_ua":
+		if ipVersion != VersionIPv4 {
+			return TrackingKey{}
+		}
+	case "ipv6", "ipv6_ua":
+		if ipVersion != VersionIPv6 {
+			return TrackingKey{}
+		}
+	default:
+		// Should not happen due to validation in loadChainsFromYAML
+		return TrackingKey{}
+	}
+
+	// 2. Determine the final tracking key: include UserAgent if needed.
+	if strings.HasSuffix(chain.MatchKey, "_ua") {
+		// NOTE: entry.UserAgent is used as-is (case-sensitive) for fidelity.
+		trackingKey.UA = entry.UserAgent
+	}
+
+	return trackingKey
+}
+
+// --- CLI FLAG INITIALIZATION AND PARSING ---
 
 func init() {
 	flag.StringVar(&logFilePath, "log-path", "/var/log/http/access.log", "Path to the live access log file to tail (ignored in dry-run).")
@@ -159,6 +230,7 @@ func init() {
 
 // logOutput checks the level against the configured currentLogLevel and prints the message if appropriate.
 func logOutput(level LogLevel, prefix string, format string, v ...interface{}) {
+	// Only print if the message's level is equal to or higher priority (lower iota value) than the configured level.
 	if level <= currentLogLevel {
 		log.Printf("[%s] "+format, append([]interface{}{prefix}, v...)...)
 	}
@@ -212,7 +284,9 @@ func BlockIPForDuration(ip string, duration time.Duration) error {
 	defer conn.Close()
 
 	if _, err = conn.Write([]byte(command)); err != nil {
-		return fmt.Errorf("failed to send command to HAProxy: %w", err)
+		// Log the initial error but return nil to continue the program (fail-safe)
+		logOutput(LevelError, "ERROR", "Failed to send command to HAProxy for IP %s: %v", ip, err)
+		return nil
 	}
 
 	// Read Response Confirmation
@@ -252,16 +326,22 @@ func CleanUpIdleActivity() {
 		now := time.Now()
 		deletedCount := 0
 
-		for ip, activity := range ActivityStore {
+		// ActivityStore now uses TrackingKey as the key
+		for trackingKey, activity := range ActivityStore {
 			if now.Sub(activity.LastRequestTime) > idleTimeout {
-				delete(ActivityStore, ip)
+				if trackingKey.UA != "" {
+					logOutput(LevelDebug, "CLEANUP", "Purging idle key: %s (UA: %s)", trackingKey.IP, trackingKey.UA)
+				} else {
+					logOutput(LevelDebug, "CLEANUP", "Purging idle IP: %s", trackingKey.IP)
+				}
+				delete(ActivityStore, trackingKey)
 				deletedCount++
 			}
 		}
 		ActivityMutex.Unlock()
 
 		if deletedCount > 0 {
-			logOutput(LevelDebug, "CLEANUP", "Complete: Purged %d idle IP states. Current active IPs: %d", deletedCount, len(ActivityStore))
+			logOutput(LevelDebug, "CLEANUP", "Complete: Purged %d idle IP states. Current active keys: %d", deletedCount, len(ActivityStore))
 		}
 	}
 }
@@ -284,7 +364,24 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 
 	// Conversion and Pre-Compilation Logic
 	for _, yamlChain := range config.Chains {
-		runtimeChain := BehavioralChain{Name: yamlChain.Name, Action: yamlChain.Action}
+		runtimeChain := BehavioralChain{
+			Name:     yamlChain.Name,
+			Action:   yamlChain.Action,
+			MatchKey: yamlChain.MatchKey,
+		}
+
+		// Default and Validation for MatchKey
+		if runtimeChain.MatchKey == "" {
+			runtimeChain.MatchKey = "ip"
+		}
+		validKeys := map[string]bool{"ip": true, "ipv4": true, "ipv6": true, "ip_ua": true, "ipv4_ua": true, "ipv6_ua": true}
+		keyLower := strings.ToLower(runtimeChain.MatchKey)
+
+		if !validKeys[keyLower] {
+			return nil, fmt.Errorf("chain '%s': invalid match_key '%s'. MatchKey must be one of: ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua", yamlChain.Name, runtimeChain.MatchKey)
+		}
+		runtimeChain.MatchKey = keyLower // Store the lowercased key for easy matching
+
 		if runtimeChain.Action != "block" && runtimeChain.Action != "log" {
 			return nil, fmt.Errorf("chain '%s': invalid action '%s'. Action must be 'block' or 'log'", yamlChain.Name, runtimeChain.Action)
 		}
@@ -368,8 +465,9 @@ func ChainWatcher() {
 
 // --- CORE BEHAVIORAL ANALYSIS ---
 
-// GetOrCreateActivity retrieves or initializes a BotActivity struct for a given IP, ensuring thread safety.
-func GetOrCreateActivity(ip string) *BotActivity {
+// GetOrCreateActivity retrieves or initializes a BotActivity struct for a given tracking key, ensuring thread safety.
+// Function signature updated to use TrackingKey struct.
+func GetOrCreateActivity(trackingKey TrackingKey) *BotActivity {
 	store := ActivityStore
 	mutex := &ActivityMutex
 
@@ -381,7 +479,7 @@ func GetOrCreateActivity(ip string) *BotActivity {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	if activity, exists := store[ip]; exists {
+	if activity, exists := store[trackingKey]; exists {
 		// LastRequestTime is intentionally NOT updated here. It is updated *after* CheckChains
 		// in the log processor to hold the time of the PREVIOUS request for min_delay checks.
 		return activity
@@ -391,13 +489,12 @@ func GetOrCreateActivity(ip string) *BotActivity {
 		LastRequestTime: time.Time{}, // Initialize to zero time to indicate no prior request.
 		ChainProgress:   make(map[string]StepState),
 	}
-	store[ip] = newActivity
+	store[trackingKey] = newActivity
 	return newActivity
 }
 
 // CheckChains iterates through all chains and updates the IP's progress.
 func CheckChains(entry *LogEntry) {
-	activity := GetOrCreateActivity(entry.IP)
 
 	getMatchValue := func(fieldName string, entry *LogEntry) (string, error) {
 		switch fieldName {
@@ -424,12 +521,22 @@ func CheckChains(entry *LogEntry) {
 
 	for _, chain := range currentChains {
 
+		trackingKey := getTrackingKey(&chain, entry)
+
+		// Skip if the IP version does not match the chain's requirement (empty struct check)
+		if trackingKey == (TrackingKey{}) {
+			logOutput(LevelDebug, "SKIP", "IP %s: Skipped chain '%s'. IP version does not match required key type (%s).", entry.IP, chain.Name, chain.MatchKey)
+			continue // Move to the next chain
+		}
+
+		activity := GetOrCreateActivity(trackingKey) // Use TrackingKey struct
+
 		mutex := &ActivityMutex
 		if dryRun {
 			mutex = &dryRunActivityMutex
 		}
 
-		// Lock for the entire state modification to prevent race conditions (Concurrency Fix).
+		// Lock for the entire state modification to prevent race conditions.
 		mutex.Lock()
 
 		state, exists := activity.ChainProgress[chain.Name]
@@ -454,7 +561,10 @@ func CheckChains(entry *LogEntry) {
 
 			if state.CurrentStep == 0 {
 				// First Step: Check min_delay against the IP's global LastRequestTime.
-				timeSource = activity.LastRequestTime
+				// This is retrieved using the IP-only key to provide a baseline for the IP's activity.
+				ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
+				ipActivity := GetOrCreateActivity(ipOnlyKey)
+				timeSource = ipActivity.LastRequestTime
 			} else {
 				// Subsequent Steps: Check min_delay against the chain's last successful step time.
 				timeSource = state.LastMatchTime
@@ -465,9 +575,10 @@ func CheckChains(entry *LogEntry) {
 				timeSinceLastHit := entry.Timestamp.Sub(timeSource)
 
 				if timeSinceLastHit < nextStep.MinDelayDuration {
+					// Use entry.IP for logging clarity, even if trackingKey includes UA.
 					logOutput(LevelDebug, "SKIP", "IP %s: Hit for step %d of chain '%s' skipped (delay too short: %v < %v).", entry.IP, nextStepIndex+1, chain.Name, timeSinceLastHit, nextStep.MinDelayDuration)
 					mutex.Unlock() // Release the lock before returning
-					return
+					continue
 				}
 			}
 		}
@@ -541,9 +652,10 @@ func CheckChains(entry *LogEntry) {
 
 				// 4. Check for Chain Completion
 				if state.CurrentStep == len(chain.Steps) {
+					ipToBlock := entry.IP // Always use the log entry's IP for blocking
 					if chain.Action == "block" {
-						logOutput(LevelCritical, "ALERT", "BLOCK! Chain: %s completed by IP %s. Attempting to block for %v.", chain.Name, entry.IP, chain.BlockDuration)
-						if err := BlockIPForDuration(entry.IP, chain.BlockDuration); err != nil {
+						logOutput(LevelCritical, "ALERT", "BLOCK! Chain: %s completed by IP %s. Attempting to block for %v.", chain.Name, ipToBlock, chain.BlockDuration)
+						if err := BlockIPForDuration(ipToBlock, chain.BlockDuration); err != nil {
 							// Error is handled/logged in BlockIPForDuration.
 						}
 					} else if chain.Action == "log" {
@@ -644,8 +756,9 @@ func DryRunLogProcessor() {
 
 		CheckChains(entry)
 
-		// Update LastRequestTime after chain checks to preserve the time of the *previous* hit for next log entry.
-		GetOrCreateActivity(entry.IP).LastRequestTime = entry.Timestamp
+		// Update LastRequestTime for the IP-only key, which is the baseline for global min_delay checks.
+		ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
+		GetOrCreateActivity(ipOnlyKey).LastRequestTime = entry.Timestamp
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -653,7 +766,7 @@ func DryRunLogProcessor() {
 	}
 
 	logOutput(LevelInfo, "DRYRUN", "COMPLETE: Review output for 'DRY RUN' messages.")
-	logOutput(LevelInfo, "INFO", "Total distinct IPs processed: %d", len(dryRunActivityStore))
+	logOutput(LevelInfo, "INFO", "Total distinct IP/UA keys processed: %d", len(dryRunActivityStore))
 }
 
 // TailLogWithRotation tails a log file indefinitely, supporting rotation via inode checks.
@@ -704,9 +817,10 @@ func TailLogWithRotation() {
 				if line != "" {
 					if entry, parseErr := parseLogLine(line); parseErr == nil {
 						CheckChains(entry) // Process the log entry
-						
-						// Update LastRequestTime after chain checks to preserve the time of the *previous* hit for next log entry.
-						GetOrCreateActivity(entry.IP).LastRequestTime = entry.Timestamp
+
+						// Update LastRequestTime for the IP-only key, which is the baseline for global min_delay checks.
+						ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
+						GetOrCreateActivity(ipOnlyKey).LastRequestTime = entry.Timestamp
 					}
 				}
 			} else if err.Error() == "EOF" {
