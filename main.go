@@ -587,8 +587,9 @@ func CheckChains(entry *LogEntry) {
 		}
 
 		// 3. Field Match Check
+		allFieldsMatch := false
 		if nextStepIndex < len(chain.Steps) {
-			allFieldsMatch := true
+			allFieldsMatch = true
 
 			for fieldName := range nextStep.FieldMatches {
 				regex := nextStep.compiledRegexes[fieldName]
@@ -647,12 +648,22 @@ func CheckChains(entry *LogEntry) {
 						logOutput(LevelCritical, "ALERT", "LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IP)
 					}
 
+					// Reset state *after* action is taken.
 					state.CurrentStep = 0
 				}
 			}
 		}
 
-		activity.ChainProgress[chain.Name] = state
+		// 5. Conditional Update and Cleanup of ChainProgress State (Memory Optimization)
+		// Only store the state if the key is actively progressing (CurrentStep > 0).
+		// If CurrentStep is 0, the key is no longer in progress (either never started,
+		// was reset by max_delay, or just completed and reset), so delete the entry.
+		if state.CurrentStep > 0 {
+			activity.ChainProgress[chain.Name] = state
+		} else {
+			delete(activity.ChainProgress, chain.Name)
+		}
+
 		mutex.Unlock()
 	}
 }
@@ -732,6 +743,8 @@ func processLogLine(line string, lineNumber int) {
 
 	CheckChains(entry)
 
+	// Always update the overall LastRequestTime for the IP-only key,
+	// which is used for min_delay baseline checks.
 	ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
 	GetOrCreateActivity(ipOnlyKey).LastRequestTime = entry.Timestamp
 }
