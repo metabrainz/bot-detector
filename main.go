@@ -288,7 +288,7 @@ func BlockIPForDuration(ip string, duration time.Duration) error {
 	reader := bufio.NewReader(conn)
 	response, err := reader.ReadString('\n')
 
-	if err != nil && err.Error() != "EOF" {
+	if err != nil && !errors.Is(err, io.EOF) {
 		logOutput(LevelError, "ERROR", "HAProxy response read error for IP %s: %v", ip, err)
 		return nil
 	}
