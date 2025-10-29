@@ -94,8 +94,9 @@ type BehavioralChainYAML struct {
 }
 
 type ChainConfig struct {
-	Version string                `yaml:"version"`
-	Chains  []BehavioralChainYAML `yaml:"chains"`
+	Version        string                `yaml:"version"`
+	Chains         []BehavioralChainYAML `yaml:"chains"`
+	WhitelistCIDRs []string              `yaml:"whitelist_cidrs"`
 }
 
 // --- RUNTIME DATA STRUCTURES ---
@@ -142,7 +143,7 @@ type BotActivity struct {
 	LastRequestTime time.Time // Time of the IP's PREVIOUS overall request.
 	ChainProgress   map[string]StepState
 	IsBlocked       bool      // Flag to skip chain checks if this key is blocked.
-	BlockedUntil    time.Time // ADDED: Time when the block expires.
+	BlockedUntil    time.Time // Time when the block expires.
 }
 
 // --- GLOBAL STATE ---
@@ -153,6 +154,8 @@ var (
 	Chains      []BehavioralChain
 	ChainMutex  sync.RWMutex
 	lastModTime time.Time
+
+	WhitelistNets []*net.IPNet // Holds parsed CIDR networks
 
 	dryRunActivityStore = make(map[TrackingKey]*BotActivity)
 	dryRunActivityMutex sync.Mutex
@@ -173,6 +176,24 @@ func getIPVersion(ipStr string) string {
 		return VersionIPv6
 	}
 	return VersionInvalid
+}
+
+// isIPWhitelisted checks if the given IP address falls within any configured CIDR whitelist range.
+func isIPWhitelisted(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	// Note: WhitelistNets is protected by ChainMutex because it's populated during config reload.
+	ChainMutex.RLock()
+	defer ChainMutex.RUnlock()
+
+	for _, ipNet := range WhitelistNets {
+		if ipNet.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // getTrackingKey generates the unique state-tracking key based on the chain's configuration.
@@ -354,6 +375,21 @@ func loadChainsFromYAML() ([]BehavioralChain, error) {
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
 	}
+
+	// Parse Whitelist CIDRs
+	newWhitelistNets := make([]*net.IPNet, 0)
+	for _, cidr := range config.WhitelistCIDRs {
+		// net.ParseCIDR returns the IP and the IPNet. The IPNet is what we store for comparison.
+		ip, ipNet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid CIDR in whitelist: %s: %w", cidr, err)
+		}
+		newWhitelistNets = append(newWhitelistNets, ipNet)
+		logOutput(LevelInfo, "WHITELIST", "Added CIDR to Whitelist: %s (Base IP: %s)", cidr, ip)
+	}
+	ChainMutex.Lock()
+	WhitelistNets = newWhitelistNets // Update the global list atomically
+	ChainMutex.Unlock()
 
 	newChains := make([]BehavioralChain, 0, len(config.Chains))
 
@@ -650,18 +686,40 @@ func CheckChains(entry *LogEntry) {
 				// 4. Check for Chain Completion
 				if state.CurrentStep == len(chain.Steps) {
 					ipToBlock := entry.IP
+					isWhitelisted := isIPWhitelisted(ipToBlock) // Check whitelist status here
+
 					if chain.Action == "block" {
-						logOutput(LevelCritical, "ALERT", "BLOCK! Chain: %s completed by IP %s. Attempting to block for %v.", chain.Name, ipToBlock, chain.BlockDuration)
-						if err := BlockIPForDuration(ipToBlock, chain.BlockDuration); err != nil {
+						baseMessage := fmt.Sprintf("BLOCK! Chain: %s completed by IP %s. Attempting to block for %v.", chain.Name, ipToBlock, chain.BlockDuration)
+
+						if isWhitelisted {
+							// NEW CONSOLIDATED LOGIC for whitelisted BLOCK
+							logOutput(LevelCritical, "ALERT", "%s (IP is whitelisted: BLOCK ACTION SKIPPED)", baseMessage)
+						} else {
+							// Original logic for non-whitelisted block: two logs (ALERT + HAPROXY_BLOCK)
+							logOutput(LevelCritical, "ALERT", baseMessage)
+
+							if err := BlockIPForDuration(ipToBlock, chain.BlockDuration); err != nil {
+							}
+
+							// Optimization: Mark the IP-ONLY key as blocked for skipping future log lines from this IP.
+							ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
+							ipActivity := getOrCreateActivityUnsafe(store, ipOnlyKey)
+							ipActivity.IsBlocked = true
+							ipActivity.BlockedUntil = entry.Timestamp.Add(chain.BlockDuration) // Set block expiration time
 						}
 
-						// NEW: Optimization - Mark the IP-ONLY key as blocked for skipping future log lines from this IP.
-						ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
-						ipActivity := getOrCreateActivityUnsafe(store, ipOnlyKey)
-						ipActivity.IsBlocked = true
-						ipActivity.BlockedUntil = entry.Timestamp.Add(chain.BlockDuration) // ADDED: Set the time of block expiry
 					} else if chain.Action == "log" {
-						logOutput(LevelCritical, "ALERT", "LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IP)
+
+						// CONSOLIDATED LOGGING LOGIC for action: log
+						baseMessage := fmt.Sprintf("LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IP)
+
+						if isWhitelisted {
+							// Consolidate into a single log line when whitelisted
+							logOutput(LevelCritical, "ALERT", "%s (IP is whitelisted: NO FURTHER ACTION TAKEN)", baseMessage)
+						} else {
+							// Original log output for non-whitelisted IPs
+							logOutput(LevelCritical, "ALERT", baseMessage)
+						}
 					}
 
 					// Reset state *after* action is taken.
@@ -672,8 +730,6 @@ func CheckChains(entry *LogEntry) {
 
 		// 5. Conditional Update and Cleanup of ChainProgress State (Memory Optimization)
 		// Only store the state if the key is actively progressing (CurrentStep > 0).
-		// If CurrentStep is 0, the key is no longer in progress (either never started,
-		// was reset by max_delay, or just completed and reset), so delete the entry.
 		if state.CurrentStep > 0 {
 			activity.ChainProgress[chain.Name] = state
 		} else {
@@ -770,34 +826,29 @@ func processLogLine(line string, lineNumber int) {
 	// Lock the mutex for atomic access to the store for status check and time updates.
 	mutex.Lock()
 
-	// 1. Get/Update IP-only key.
+	// 1. Get/Update IP-only key (for block status check and min_delay Step 1 time).
 	ipActivity := getOrCreateActivityUnsafe(store, ipOnlyKey)
+	ipActivity.LastRequestTime = entry.Timestamp
 
-	if ipActivity.IsBlocked {
-		// Check if the block has expired
-		if entry.Timestamp.Before(ipActivity.BlockedUntil) {
-			// Not expired: log skip and update last request time
-			// FIX: Use explicit format to clean up time output
-			logOutput(LevelDebug, "SKIP", "IP %s is currently marked as blocked until %s. Skipping chain checks.",
-				entry.IP, ipActivity.BlockedUntil.Format("2006-01-02 15:04:05 MST"))
-			ipActivity.LastRequestTime = entry.Timestamp // Update time for cleanup/min_delay baseline in case they become unblocked.
-			mutex.Unlock()
-			return // Skip all chain checks for this request
-		}
+	isBlocked := ipActivity.IsBlocked
+	blockedUntil := ipActivity.BlockedUntil
 
-		// Block expired: Reset status and log the unblock event.
-		// FIX: Use explicit format to clean up time output
-		logOutput(LevelDebug, "UNBLOCK", "IP %s block expired at %s. Re-enabling chain checks.",
-			entry.IP, ipActivity.BlockedUntil.Format("2006-01-02 15:04:05 MST"))
+	// Check if block has expired
+	if isBlocked && entry.Timestamp.After(blockedUntil) {
 		ipActivity.IsBlocked = false
 		ipActivity.BlockedUntil = time.Time{}
+		isBlocked = false
+		logOutput(LevelDebug, "UNBLOCK_EXPIRY", "IP %s block has expired at %s. Unmarked as blocked.", entry.IP, blockedUntil.Format("2006-01-02 15:04:05 -0700"))
 	}
-
-	// Always update LastRequestTime for all non-skipped/unblocked requests.
-	ipActivity.LastRequestTime = entry.Timestamp
 
 	// Unlock before calling CheckChains, which also locks.
 	mutex.Unlock()
+
+	if isBlocked {
+		// Log the skip and return immediately. This is the IP-only optimization.
+		logOutput(LevelDebug, "SKIP", "IP %s is currently marked as blocked until %s. Skipping chain checks.", entry.IP, blockedUntil.Format("2006-01-02 15:04:05 -0700"))
+		return
+	}
 
 	// Only proceed to check chains if the IP is not blocked.
 	CheckChains(entry)
@@ -812,14 +863,12 @@ func readLineWithLimit(r *bufio.Reader, maxBytes int) (string, error) {
 	bytesRead := 0
 
 	// Use a 1-byte buffer to read instead of ReadByte().
-	// The Read method handles EOF more reliably in this context for static files, resolving the hang.
 	b := make([]byte, 1)
 
 	for {
 		n, err := r.Read(b)
 
 		if err != nil {
-			// If we hit EOF or another error, we return the line fragment read so far (if any).
 			if n > 0 {
 				lineBuilder.Write(b[:n])
 			}
@@ -839,7 +888,6 @@ func readLineWithLimit(r *bufio.Reader, maxBytes int) (string, error) {
 		if bytesRead > maxBytes {
 			// CRITICAL LIMIT HIT. Drain the rest of the line until the next \n.
 			for {
-				// Use ReadByte() for draining as its performance is fine here (we are not at EOF).
 				b_drain, err := r.ReadByte()
 				if err != nil {
 					// We hit EOF or an I/O error while draining.
@@ -856,7 +904,6 @@ func readLineWithLimit(r *bufio.Reader, maxBytes int) (string, error) {
 }
 
 // DryRunLogProcessor reads and processes a static log file for testing.
-// This function MUST use a finite loop structure and cleanly exit on io.EOF.
 func DryRunLogProcessor(done chan<- struct{}) {
 	logOutput(LevelInfo, "DRYRUN", "MODE: Reading test logs from %s...", testLogPath)
 
@@ -869,17 +916,14 @@ func DryRunLogProcessor(done chan<- struct{}) {
 	reader := bufio.NewReader(file)
 	lineNumber := 0
 
-	// This is a FINITE loop that MUST exit when the file is read.
 	for {
 		lineNumber++
 
-		// Assuming readLineWithLimit is still used for line-limit handling.
 		line, err := readLineWithLimit(reader, MaxLogLineSize)
 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				// Process final line fragment if present (this ensures files that don't return a newline
-				// still have their last line processed).
+				// Process final line fragment if present
 				if line != "" {
 					processLogLine(line, lineNumber)
 				}
@@ -887,23 +931,20 @@ func DryRunLogProcessor(done chan<- struct{}) {
 			}
 			if errors.Is(err, errLineSkipped) {
 				logOutput(LevelWarning, "SKIPPED", "Line %d exceeded critical limit and was skipped.", lineNumber)
-				lineNumber-- // Do not count skipped line against final total
+				lineNumber--
 				continue
 			}
 
-			// Handle any other I/O errors by logging and exiting the processing loop.
 			logOutput(LevelError, "DRYRUN_ERROR", "Reading log file: %v. Exiting dry-run loop.", err)
 			break
 		}
 
-		// Process the line once it's successfully read.
 		processLogLine(line, lineNumber)
 	}
 
 	logOutput(LevelInfo, "DRYRUN", "COMPLETED: Processed all lines in test log.")
 	logOutput(LevelDebug, "DRYRUN", "Total lines processed: %d", lineNumber)
 
-	// Signal the runDryRun function that processing is complete, allowing the program to exit.
 	close(done)
 }
 
@@ -916,7 +957,6 @@ func runDryRun() {
 	done := make(chan struct{})
 
 	go func() {
-		// Pass the done channel to the processor.
 		DryRunLogProcessor(done)
 	}()
 
@@ -924,16 +964,13 @@ func runDryRun() {
 
 	select {
 	case <-done:
-		// Program exits here after the goroutine finishes.
 		logOutput(LevelInfo, "DRYRUN", "COMPLETE: Dry-run successfully finished processing log file.")
 		logOutput(LevelInfo, "INFO", "Total distinct IP/UA keys processed: %d", len(dryRunActivityStore))
 		logOutput(LevelCritical, "SHUTDOWN", "Dry-run complete. Exiting.")
 	case <-stop:
-		// Program exits here if interrupted.
 		logOutput(LevelCritical, "SHUTDOWN", "Interrupt signal received during dry-run. Shutting down...")
 	}
 
-	// Use os.Exit(0) to forcefully terminate the process and all goroutines cleanly.
 	os.Exit(0)
 }
 
@@ -953,6 +990,7 @@ func TailLogWithRotation() {
 			continue
 		}
 
+		// Seek to the end of the file
 		_, err = file.Seek(0, 2)
 		if err != nil {
 			logOutput(LevelError, "TAIL_ERROR", "Failed to seek to end of log file: %v. Closing and retrying.", err)
@@ -968,6 +1006,7 @@ func TailLogWithRotation() {
 			time.Sleep(1 * time.Second)
 			continue
 		}
+		// On Linux/Unix, Stat().Sys() returns *syscall.Stat_t
 		initialSysStat := initialStat.Sys().(*syscall.Stat_t)
 		initialDev := initialSysStat.Dev
 		initialIno := initialSysStat.Ino

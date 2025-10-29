@@ -1,4 +1,9 @@
 version: "1.0"
+whitelist_cidrs:
+  - "10.0.0.0/8"     # Example: Whitelist entire 10.x.x.x network
+  - "192.0.2.10/32"  # Whitelist the specific IP that completes Chain 1 (Test-MatchKey-IPv4-Only)
+  - "2001:db8::/64"  # Example: Whitelist an IPv6 range
+  - "192.0.2.20/31"  # Whitelist 192.0.2.20 and 192.0.2.21
 chains:
 
 # --- 1. MatchKey: IPv4 Only & Max_Delay (SUCCESS) ---
