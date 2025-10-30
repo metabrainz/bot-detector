@@ -18,7 +18,14 @@ func executeHAProxyCommand(addr, ip, command string) error {
 	const dialTimeout = 5 * time.Second
 
 	// 1. Connection attempt
-	conn, err := net.DialTimeout("tcp", addr, dialTimeout)
+	// Determine network type: "unix" for local socket, "tcp" otherwise
+	network := "tcp"
+	if strings.Contains(addr, "/") { // Simple check for a file path
+		network = "unix"
+	}
+
+	// 1. Connection attempt
+	conn, err := net.DialTimeout(network, addr, dialTimeout)
 	if err != nil {
 		return fmt.Errorf("failed to connect to HAProxy instance %s: %w", addr, err)
 	}
