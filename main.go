@@ -3,45 +3,44 @@ package main
 import (
 	"flag"
 	"log"
-	"os"
-	"os/signal"
-	"strings"
-	"syscall"
 )
 
+// main is the application entry point.
 func main() {
+	// Parse CLI flags
 	flag.Parse()
 
+	// Validate and parse duration strings (e.g., "5m", "10s")
 	if err := ParseDurations(); err != nil {
 		log.Fatalf("[FATAL] Configuration Error: %v", err)
 	}
 
-	var err error
-	Chains, err = LoadChainsFromYAML()
-	if err != nil {
-		log.Fatalf("[FATAL] Initial chain load failed: %v", err)
+	// Load initial configuration
+	if _, err := LoadChainsFromYAML(); err != nil {
+		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
 	}
-	LogOutput(LevelInfo, "LOAD", "Initial configuration loaded. Loaded %d behavioral chains.", len(Chains))
 
+	// Execute the core application logic
+	start()
+}
+
+// start is the unexported function that contains the main application logic,
+// which is called by the tests and the main function.
+func start() {
 	if DryRun {
-		RunDryRun()
-		return
+		// DryRun mode: Process a static log file and exit when done.
+		done := make(chan struct{})
+		go DryRunLogProcessor(done)
+
+		// Wait for the processor to finish in dry-run mode
+		<-done
+
 	} else {
-		LogOutput(LevelInfo, "INFO", "Running in Production Mode with per-attempt HAProxy Fail-Safe. Log level set to %s. Log line critical limit: %dKB.", strings.ToUpper(LogLevelStr), MaxLogLineSize/1024)
-
-		stop := make(chan os.Signal, 1)
-		signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-
-		if fileInfo, err := os.Stat(YAMLFilePath); err == nil {
-			LastModTime = fileInfo.ModTime()
-		}
-
+		// Live mode: Start background routines and the main log tailing loop.
 		go ChainWatcher()
 		go CleanUpIdleActivity()
-		go TailLogWithRotation()
 
-		<-stop
-		LogOutput(LevelCritical, "SHUTDOWN", "Interrupt signal received. Shutting down gracefully...")
-		LogOutput(LevelCritical, "SHUTDOWN", "Exiting.")
+		// LiveLogTailer is the blocking main loop
+		LiveLogTailer()
 	}
 }

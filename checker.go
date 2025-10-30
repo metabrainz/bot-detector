@@ -186,7 +186,8 @@ func CheckChains(entry *LogEntry) {
 							// Original logic for non-whitelisted block: two logs (ALERT + HAPROXY_BLOCK)
 							LogOutput(LevelCritical, "ALERT", baseMessage)
 
-							if err := BlockIPForDuration(ipToBlock, chain.BlockDuration); err != nil {
+							if err := BlockIP(ipToBlock, chain.BlockDuration); err != nil {
+								// Error is logged inside BlockIP, no action needed here
 							}
 
 							// Optimization: Mark the IP-ONLY key as blocked for skipping future log lines from this IP.
@@ -194,6 +195,7 @@ func CheckChains(entry *LogEntry) {
 							ipActivity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
 							ipActivity.IsBlocked = true
 							ipActivity.BlockedUntil = entry.Timestamp.Add(chain.BlockDuration) // Set block expiration time
+							ipActivity.LastRequestTime = entry.Timestamp
 						}
 
 					} else if chain.Action == "log" {

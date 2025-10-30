@@ -23,9 +23,12 @@ type BehavioralChainYAML struct {
 }
 
 type ChainConfig struct {
-	Version        string                `yaml:"version"`
-	Chains         []BehavioralChainYAML `yaml:"chains"`
-	WhitelistCIDRs []string              `yaml:"whitelist_cidrs"`
+	Version              string                `yaml:"version"`
+	Chains               []BehavioralChainYAML `yaml:"chains"`
+	WhitelistCIDRs       []string              `yaml:"whitelist_cidrs"`
+	HAProxyAddresses     []string              `yaml:"haproxy_addresses"`
+	DurationTables       map[string]string     `yaml:"duration_tables"`
+	DefaultBlockDuration string                `yaml:"default_block_duration"`
 }
 
 // --- RUNTIME DATA STRUCTURES ---
