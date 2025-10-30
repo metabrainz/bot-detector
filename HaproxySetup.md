@@ -1,10 +1,14 @@
+# HaProxy setup
+
 Setting up your two-node HAProxy/Bot Detector cluster requires synchronizing the configuration across both hosts: **rex (10.2.2.60)** and **rudi (10.2.2.30)**.
+
 The key to this setup is that the bot detector uses a unified list of HAProxy targets defined in chains.yaml, and its internal logic automatically chooses between the faster **Unix Domain Socket (UDS)** for the local HAProxy and **TCP/IP** for the remote one.
+
 ---
 
 ## **1\. HAProxy Configuration (haproxy.cfg)**
 
-The haproxy.cfg file must be functionally **identical** on both hosts (rex and rudi). It must define the required stick tables and expose both the local Unix socket and a specific TCP port for the remote bot detector to connect.
+The `haproxy.cfg` file must be functionally **identical** on both hosts (rex and rudi). It must define the required stick tables and expose both the local Unix socket and a specific TCP port for the remote bot detector to connect.
 
 ### **A. Stick Tables and Runtime Socket**
 
@@ -12,34 +16,36 @@ Add the following to the configuration, typically after the defaults section.
 
 Extrait de code
 
-\# haproxy.cfg (on both rex and rudi)
+```
+# haproxy.cfg (on both rex and rudi)
 
 global
-    \# ... existing settings ...
-    \# This exposes the local Unix Domain Socket (UDS) for local control
+    # ... existing settings ...
+    # This exposes the local Unix Domain Socket (UDS) for local control
     stats socket /run/haproxy/admin.sock mode 660 level admin expose-fd listeners
 
-\# \--- Bot Detector Stick Tables \---
-\# Defined duration tables matching the names in chains.yaml
-stick-table type ip size 2m expire 1h store gpc0 name table\_1h
-stick-table type ip size 500k expire 5m store gpc0 name table\_5m
+# --- Bot Detector Stick Tables ---
+# Defined duration tables matching the names in chains.yaml
+stick-table type ip size 2m expire 1h store gpc0 name table_1h
+stick-table type ip size 500k expire 5m store gpc0 name table_5m
 
-\# \--- TCP Runtime API Listener (for remote Bot Detector) \---
-\# This opens the TCP port for control. Replace 10.2.2.60/10.2.2.30 with the
-\# actual local IP address if the host has multiple IPs.
-listen runtime\_api
-    bind 10.2.2.60:9999   \# On rex (10.2.2.60)
-    \# OR
-    \# bind 10.2.2.30:9999 \# On rudi (10.2.2.30)
+# --- TCP Runtime API Listener (for remote Bot Detector) ---
+# This opens the TCP port for control. Replace 10.2.2.60/10.2.2.30 with the
+# actual local IP address if the host has multiple IPs.
+listen runtime_api
+    bind 10.2.2.60:9999   # On rex (10.2.2.60)
+    # OR
+    # bind 10.2.2.30:9999 # On rudi (10.2.2.30)
 
     mode tcp
-    maxconn 10 \# Limit control connections
+    maxconn 10 # Limit control connections
     timeout client 10s
     timeout server 10s
 
-    \# SECURITY: Restrict access to only the other HAProxy host (and localhost)
-    acl allowed\_control src 10.2.2.60 10.2.2.30 127.0.0.1
-    tcp-request content reject unless allowed\_control
+    # SECURITY: Restrict access to only the other HAProxy host (and localhost)
+    acl allowed_control src 10.2.2.60 10.2.2.30 127.0.0.1
+    tcp-request content reject unless allowed_control
+```
 
 *Note: The bind address should be the local host's IP address (10.2.2.60 on rex, 10.2.2.30 on rudi) or 0.0.0.0 if you prefer to bind all interfaces.*
 
@@ -49,18 +55,20 @@ Add the rejection rule to all relevant frontends (tcpforward\_http and tcpforwar
 
 Extrait de code
 
-\# haproxy.cfg (on both rex and rudi)
+```
+# haproxy.cfg (on both rex and rudi)
 
-frontend tcpforward\_http from base
-    \# ... existing settings ...
-    \# CRITICAL: Place this as the first tcp-request connection rule
-    tcp-request connection reject if { src,table\_5m } or { src,table\_1h }
-    \# ... rest of frontend rules
+frontend tcpforward_http from base
+    # ... existing settings ...
+    # CRITICAL: Place this as the first tcp-request connection rule
+    tcp-request connection reject if { src,table_5m } or { src,table_1h }
+    # ... rest of frontend rules
 
-frontend tcpforward\_https from base
-    \# ... existing settings ...
-    tcp-request connection reject if { src,table\_5m } or { src,table\_1h }
-    \# ... rest of frontend rules
+frontend tcpforward_https from base
+    # ... existing settings ...
+    tcp-request connection reject if { src,table_5m } or { src,table_1h }
+    # ... rest of frontend rules
+```
 
 ---
 
@@ -70,30 +78,33 @@ This file is the **master list** of all targets and must be **identical** on bot
 
 YAML
 
-\# chains.yaml (Identical on both rex and rudi)
+```yaml
+# chains.yaml (Identical on both rex and rudi)
 
 version: "1.0"
-\# ... other config ...
+# ... other config ...
 
-\# \--- Block Duration Mapping \---
-duration\_tables:
-    5m: table\_5m \# Matches the stick-table name in haproxy.cfg
-    1h: table\_1h \# Matches the stick-table name in haproxy.cfg
+# --- Block Duration Mapping ---
+duration_tables:
+    5m: table_5m # Matches the stick-table name in haproxy.cfg
+    1h: table_1h # Matches the stick-table name in haproxy.cfg
+default_block_duration: "5m"
 
-\# \--- HAProxy Target Addresses \---
-\# This list contains ALL HAProxy control endpoints across the cluster.
-\# The bot detector handles the connection type (Unix vs. TCP) automatically.
-haproxy\_addresses:
-    \# 1\. Local HAProxy (Uses Unix Socket \- faster, more secure locally)
-  \- /run/haproxy/admin.sock
+# --- HAProxy Target Addresses ---
+# This list contains ALL HAProxy control endpoints across the cluster.
+# The bot detector handles the connection type (Unix vs. TCP) automatically.
+haproxy_addresses:
+  # 1. Local HAProxy (Uses Unix Socket - faster, more secure locally)
+  - /run/haproxy/admin.sock
 
-    \# 2\. Remote HAProxy on rex (Uses TCP/IP)
-  \- 10.2.2.60:9999
+  # 2. Remote HAProxy on rex (Uses TCP/IP)
+  - 10.2.2.60:9999
 
-    \# 3\. Remote HAProxy on rudi (Uses TCP/IP)
-  \- 10.2.2.30:9999
+  # 3. Remote HAProxy on rudi (Uses TCP/IP)
+  - 10.2.2.30:9999
 
-\# ... chains definitions ...
+# ... chains definitions ...
+```
 
 ---
 
