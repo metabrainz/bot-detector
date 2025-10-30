@@ -25,29 +25,25 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
 
-      - name: Verify go binary and environment
-        run: |
-          echo "PATH=$PATH"
-          go version
-          go env
-
-      - name: Cache Go build and module cache
+      - name: Cache Go modules
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cache/go-build
             ~/go/pkg/mod
+            ~/.cache/go-build
           key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-${{ matrix.go-version }}-
 
-      - name: Display go version
-        run: go version
+      - name: Ensure go tools / modules available
+        run: |
+          go env
+          go version
 
       - name: Download dependencies
         run: go mod download
 
-      - name: Check gofmt (fail if files are not formatted)
+      - name: Check formatting (gofmt)
         run: |
           bad=$(gofmt -l .)
           if [ -n "$bad" ]; then
@@ -57,7 +53,21 @@ jobs:
           fi
 
       - name: Run go vet
+        env:
+          GOFLAGS: -mod=mod
         run: go vet ./...
 
       - name: Run tests
-        run: go test ./... -v
+        env:
+          GOFLAGS: -mod=mod
+        run: |
+          go test ./... -v
+
+      - name: Save Go modules cache
+        if: success()
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('**/go.sum') }}
