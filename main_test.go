@@ -676,7 +676,7 @@ func TestCheckChainsLogic(t *testing.T) {
 	// This function contains the logic to skip chain checks AND update activity.LastRequestTime.
 	// logTimeFormat is retrieved from the uploaded log_parse.go file.
 	const logTimeFormat = "02/Jan/2006:15:04:05 -0700"
-	logLine5 := fmt.Sprintf("%s - - [%s] \"GET /anywhere HTTP/1.1\" 200 123 \"-\" \"%s\"", ip, t5.Format(logTimeFormat), ua)
+	logLine5 := fmt.Sprintf("test.domain.com %s - - [%s] \"GET /anywhere HTTP/1.1\" 200 123 \"-\" \"%s\"", ip, t5.Format(logTimeFormat), ua)
 	ProcessLogLine(logLine5, 5)
 
 	DryRunActivityMutex.Lock()
@@ -695,4 +695,37 @@ func TestCheckChainsLogic(t *testing.T) {
 		}
 	}
 	DryRunActivityMutex.Unlock()
+}
+
+// TestParseLogLine_MalformedGroupCount tests the case where the log line matches the regex,
+// but the number of capturing groups is incorrect, triggering the "malformed essential fields" error.
+func TestParseLogLine_MalformedGroupCount(t *testing.T) {
+	// Save the original logRegex and restore it after the test.
+	originalLogRegex := logRegex
+	defer func() { logRegex = originalLogRegex }()
+
+	// 1. Define a temporary regex that is structurally identical to the full one
+	// (preventing the -1 panic) but intentionally broken to return match == nil.
+	// Here, we remove the required space between VHost and IP to force the match failure.
+	logRegex = regexp.MustCompile(
+		`^(?P<VHost>\S+)(?P<IP>\S+) (?P<Identity>\S+) (?P<User>\S+) \[(?P<Timestamp>[^\]]+)\] \"(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)\" (?P<StatusCode>\d{3}) (?P<Size>\d+) \"(?P<Referrer>[^\\\"]*)\" \"(?P<UserAgent>[^\\\"]*)\"$`,
+	)
+
+	// 2. Define a perfectly valid log line (should fail the regex match).
+	logLine := `musicbrainz.org 192.0.2.10 - - [28/Oct/2025:17:00:02 +0000] "GET /v4/start HTTP/1.1" 200 100 "-" "V4-Bot-A"`
+
+	// 3. Call the parser.
+	entry, err := ParseLogLine(logLine)
+
+	// 4. Check results.
+	if err == nil {
+		t.Fatalf("Expected ParseLogLine to fail due to log line not matching regex, but it returned nil error and entry: %v", entry)
+	}
+
+	// The error should be about the line not matching the format.
+	expectedErrMsg := "line does not match log format regex"
+
+	if !strings.Contains(err.Error(), expectedErrMsg) {
+		t.Errorf("Expected error message to contain '%s', but got: %s", expectedErrMsg, err.Error())
+	}
 }

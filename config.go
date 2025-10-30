@@ -139,10 +139,33 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 	newChains := make([]BehavioralChain, 0)
 
 	for _, yamlChain := range config.Chains {
-		// 1. Validate Block Duration
-		blockDuration, err := time.ParseDuration(yamlChain.BlockDuration)
-		if err != nil {
-			return nil, fmt.Errorf("chain '%s': invalid block_duration format: %w", yamlChain.Name, err)
+		// Determine the final duration string to use.
+		blockDurationStr := yamlChain.BlockDuration
+
+		// 1. Check if the chain has an empty block_duration string
+		if blockDurationStr == "" {
+			// 2. Apply the top-level default if it is set
+			if config.DefaultBlockDuration != "" {
+				blockDurationStr = config.DefaultBlockDuration
+			}
+		}
+
+		// 3. Parse Block Duration (using the potentially defaulted value)
+		var blockDuration time.Duration
+		var err error
+
+		// Only attempt to parse if we have a non-empty string.
+		// If blockDurationStr is still empty, blockDuration remains 0, which is acceptable for 'log' actions.
+		if blockDurationStr != "" {
+			blockDuration, err = time.ParseDuration(blockDurationStr)
+			if err != nil {
+				return nil, fmt.Errorf("chain '%s': invalid block_duration format: %w", yamlChain.Name, err)
+			}
+		}
+
+		// 4. Enforce that 'block' actions must have a non-zero duration.
+		if yamlChain.Action == "block" && blockDuration == 0 {
+			return nil, fmt.Errorf("chain '%s' has action 'block' but block_duration is missing or zero", yamlChain.Name)
 		}
 
 		// 2. Validate Match Key
