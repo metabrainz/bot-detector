@@ -10,9 +10,8 @@ import (
 
 // --- CONFIGURATION GLOBAL VARS (Set by CLI flags) ---
 var (
-	LogFilePath       string
-	HAProxySocketPath string
-	BlockedMapPath    string
+	LogFilePath    string
+	BlockedMapPath string
 
 	YAMLFilePath       string
 	PollingIntervalStr string
@@ -31,7 +30,6 @@ var (
 
 func init() {
 	flag.StringVar(&LogFilePath, "log-path", "/var/log/http/access.log", "Path to the live access log file to tail (ignored in dry-run).")
-	flag.StringVar(&HAProxySocketPath, "socket-path", "/var/run/haproxy.sock", "Path to the HAProxy Runtime API Unix socket (ignored in dry-run).")
 	flag.StringVar(&BlockedMapPath, "map-path", "/etc/haproxy/maps/blocked_ips.map", "Path to the HAProxy map file used for dynamic IP blocking (ignored in dry-run).")
 
 	flag.StringVar(&YAMLFilePath, "yaml-path", "chains.yaml", "Path to the YAML configuration file defining behavioral chains.")
