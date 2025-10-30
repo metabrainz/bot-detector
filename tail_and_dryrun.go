@@ -7,10 +7,46 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 )
+
+// ErrLineSkipped is returned by ReadLineWithLimit when the line length exceeds the limit.
+// REMOVED: var ErrLineSkipped = errors.New("log line exceeded limit and was skipped")
+// The variable is already defined in constants.go.
+
+// ReadLineWithLimit reads a line from the reader up to the given limit (in bytes).
+// If the line exceeds the limit, it returns the partial line and ErrLineSkipped.
+func ReadLineWithLimit(reader *bufio.Reader, limit int) (string, error) {
+	var line []byte
+	var isPrefix bool = true
+	var err error
+
+	for len(line) < limit {
+		var chunk []byte
+		chunk, isPrefix, err = reader.ReadLine()
+		line = append(line, chunk...)
+
+		if err != nil {
+			// io.EOF is the standard end-of-file signal
+			return string(line), err
+		}
+
+		if !isPrefix {
+			// Whole line read (line ends with '\n')
+			return string(line), nil
+		}
+
+		// If isPrefix is true here, the line exceeded the buffer and possibly the limit.
+		if len(line) >= limit {
+			// Discard the remainder of the line from the buffer up to the next newline.
+			_, _ = reader.ReadString('\n')
+			return string(line), ErrLineSkipped
+		}
+	}
+
+	return string(line), io.EOF
+}
 
 // DryRunLogProcessor reads and processes a static log file for testing.
 func DryRunLogProcessor(done chan<- struct{}) {
@@ -51,83 +87,66 @@ func DryRunLogProcessor(done chan<- struct{}) {
 		ProcessLogLine(line, lineNumber)
 	}
 
-	LogOutput(LevelInfo, "DRYRUN", "COMPLETED: Processed all lines in test log.")
-	LogOutput(LevelDebug, "DRYRUN", "Total lines processed: %d", lineNumber)
-
-	close(done)
+	LogOutput(LevelInfo, "DRYRUN", "Log file processing complete. Total lines: %d", lineNumber)
+	done <- struct{}{}
 }
 
-// RunDryRun orchestrates the dry-run and manages graceful shutdown.
-func RunDryRun() {
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+// LiveLogTailer is the main loop for reading a log file that is being actively written to.
+func LiveLogTailer() {
+	LogOutput(LevelInfo, "LIVE", "MODE: Starting live log tailer on %s...", LogFilePath)
 
-	// Channel to signal completion of log processing.
-	done := make(chan struct{})
+	// Setup signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		DryRunLogProcessor(done)
+		sig := <-sigChan
+		LogOutput(LevelCritical, "SHUTDOWN", "Received signal %v. Initiating graceful shutdown.", sig)
+		// Perform any cleanup here if necessary
+		os.Exit(0)
 	}()
 
-	LogOutput(LevelInfo, "INFO", "Running in Dry-Run Mode. Log level set to %s. Log line critical limit: %dKB.", strings.ToUpper(LogLevelStr), MaxLogLineSize/1024)
+	var initialStat os.FileInfo
+	var initialDev, initialIno uint64
+	var file *os.File
+	var reader *bufio.Reader
+	lineNumber := 0
 
-	select {
-	case <-done:
-		LogOutput(LevelInfo, "DRYRUN", "COMPLETE: Dry-run successfully finished processing log file.")
-		LogOutput(LevelInfo, "INFO", "Total distinct IP/UA keys processed: %d", len(DryRunActivityStore))
-		LogOutput(LevelCritical, "SHUTDOWN", "Dry-run complete. Exiting.")
-	case <-stop:
-		LogOutput(LevelCritical, "SHUTDOWN", "Interrupt signal received during dry-run. Shutting down...")
-	}
-
-	os.Exit(0)
-}
-
-// TailLogWithRotation tails a log file indefinitely, supporting rotation via inode checks.
-func TailLogWithRotation() {
-	if DryRun {
-		return
-	}
-
-	LogOutput(LevelInfo, "TAIL", "Starting live log tailing on %s with rotation support...", LogFilePath)
-
+	// Main tailing loop (re-opens file on rotation/truncation)
 	for {
-		file, err := os.OpenFile(LogFilePath, os.O_RDONLY, 0644)
-		if err != nil {
-			LogOutput(LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in 5s.", LogFilePath, err)
-			time.Sleep(5 * time.Second)
-			continue
+		var err error
+
+		// 1. Open the file
+		if file == nil {
+			file, err = os.Open(LogFilePath)
+			if err != nil {
+				LogOutput(LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in 5s.", LogFilePath, err)
+				time.Sleep(5 * time.Second)
+				continue
+			}
+			reader = bufio.NewReader(file)
+
+			// Get initial file stats for rotation detection
+			initialStat, _ = os.Stat(LogFilePath)
+			if initialStat != nil {
+				initialSysStat := initialStat.Sys().(*syscall.Stat_t)
+				initialDev = initialSysStat.Dev
+				initialIno = initialSysStat.Ino
+				// When opening, jump to the end for live tailing
+				_, err = file.Seek(0, io.SeekEnd)
+				if err != nil {
+					LogOutput(LevelWarning, "TAIL_ERROR", "Failed to seek to end of file: %v", err)
+				} else {
+					LogOutput(LevelInfo, "TAIL", "Tailing started from end of file.")
+				}
+			}
 		}
 
-		// Seek to the end of the file
-		_, err = file.Seek(0, 2)
-		if err != nil {
-			LogOutput(LevelError, "TAIL_ERROR", "Failed to seek to end of log file: %v. Closing and retrying.", err)
-			file.Close()
-			time.Sleep(1 * time.Second)
-			continue
-		}
-
-		initialStat, err := file.Stat()
-		if err != nil {
-			LogOutput(LevelError, "TAIL_ERROR", "Failed to stat open file: %v. Closing and retrying.", err)
-			file.Close()
-			time.Sleep(1 * time.Second)
-			continue
-		}
-		// On Linux/Unix, Stat().Sys() returns *syscall.Stat_t
-		initialSysStat := initialStat.Sys().(*syscall.Stat_t)
-		initialDev := initialSysStat.Dev
-		initialIno := initialSysStat.Ino
-
-		reader := bufio.NewReader(file)
-		LogOutput(LevelInfo, "TAIL", "Now tailing (Dev: %d, Inode: %d)", initialDev, initialIno)
-
-		lineNumber := 0
-
+		// 2. Read lines in a sub-loop
 		for {
 			lineNumber++
 
+			// This call will block until a new line is available or an error occurs (like EOF)
 			line, err := ReadLineWithLimit(reader, MaxLogLineSize)
 			finalErr := err
 
@@ -160,16 +179,15 @@ func TailLogWithRotation() {
 					time.Sleep(200 * time.Millisecond)
 					continue
 				} else {
-					LogOutput(LevelError, "TAIL_ERROR", "Reading log file: %v. Reopening in 1s.", finalErr)
+					LogOutput(LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening in 1s.", finalErr)
 					time.Sleep(1 * time.Second)
 					file.Close()
-					break
+					break // Break inner loop to trigger file re-opening
 				}
 			}
 
+			// 3. Process the log line
 			ProcessLogLine(line, lineNumber)
 		}
-
-		time.Sleep(100 * time.Millisecond)
 	}
 }

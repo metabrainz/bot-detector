@@ -1,106 +1,77 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
+	"regexp"
 	"strconv"
-	"strings"
 	"time"
 )
 
-// ParseLogLine processes a raw log line into a LogEntry.
+// Regex for parsing the Combined Log Format (or similar)
+// Example: 1.2.3.4 - - [30/Oct/2025:10:00:00 +0000] "GET /path HTTP/1.1" 200 1234 "referrer" "user agent"
+var logRegex = regexp.MustCompile(
+	`^(\S+) (\S+) (\S+) \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d{3}) (\d+) "([^"]*)" "([^"]*)"`,
+)
+
+// Time format used in standard logs
+const logTimeFormat = "02/Jan/2006:15:04:05 -0700"
+
+// ParseLogLine converts a raw log string into a structured LogEntry.
 func ParseLogLine(line string) (*LogEntry, error) {
-	parts := strings.Split(line, "\"")
-	if len(parts) < 6 {
-		return nil, fmt.Errorf("malformed log line: expected at least 6 quoted sections (got %d)", len(parts))
+	matches := logRegex.FindStringSubmatch(line)
+
+	if len(matches) < 12 {
+		return nil, fmt.Errorf("log line does not match expected format")
 	}
 
-	ipPart := strings.Fields(parts[0])
-	requestPart := strings.Fields(parts[1])
-	statusSizePart := strings.Fields(parts[2])
+	// Parse status code
+	statusCode, _ := strconv.Atoi(matches[8])
+	// Note: We ignore errors here; statusCode defaults to 0 if Atoi fails,
+	// which is acceptable as it likely won't match a chain.
 
-	// We expect at least 5 fields in ipPart (e.g., 127.0.0.1 - - [time tz]),
-	// at least 3 fields in requestPart (e.g., GET /path HTTP/1.1)
-	if len(ipPart) < 5 || len(requestPart) < 3 || len(statusSizePart) < 1 {
-		return nil, fmt.Errorf("malformed essential fields (missing Protocol, Request, Status, or incomplete Host/Time fields)")
-	}
-
-	var ip string
-	var timeIndexStart, timeIndexEnd int
-
-	// Determine structure based on field count in the first part:
-	if len(ipPart) >= 6 {
-		// Format: Hostname IP - - [Time TZ] (e.g., musicbrainz.org 197.3.177.209 ...)
-		ip = ipPart[1]
-		timeIndexStart = 4
-		timeIndexEnd = 5
-	} else {
-		// Format: IP - - [Time TZ] (e.g., 127.0.0.1 - - ...)
-		ip = ipPart[0]
-		timeIndexStart = 3
-		timeIndexEnd = 4
-	}
-
-	method := requestPart[0]
-	path := requestPart[1]
-	protocol := requestPart[2] // EXTRACT PROTOCOL VERSION
-	referrer := parts[3]
-	userAgent := parts[5]
-
-	statusCode, err := strconv.Atoi(statusSizePart[0])
+	// Parse timestamp
+	t, err := time.Parse(logTimeFormat, matches[4])
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse status code: %w", err)
-	}
-
-	timeStrWithBrackets := ipPart[timeIndexStart] + " " + ipPart[timeIndexEnd]
-	timeStr := strings.Trim(timeStrWithBrackets, "[]")
-
-	t, parseErr := time.Parse("02/Jan/2006:15:04:05 -0700", timeStr)
-	if parseErr != nil {
-		LogOutput(LevelWarning, "WARN", "Failed to parse log time '%s'. Using current time: %v", timeStr, parseErr)
+		// Log the error but use current time as a fallback
+		LogOutput(LevelWarning, "PARSE_FAIL", "Failed to parse log time '%s'. Using current time: %v", matches[4], err)
 		t = time.Now()
 	}
 
-	return &LogEntry{
+	entry := &LogEntry{
+		IP:         matches[1],
 		Timestamp:  t,
-		IP:         ip,
-		Path:       path,
-		Method:     method,
-		Protocol:   protocol,
+		Method:     matches[5],
+		Path:       matches[6],
+		Protocol:   matches[7],
 		StatusCode: statusCode,
-		Referrer:   referrer,
-		UserAgent:  userAgent,
-	}, nil
+		Referrer:   matches[10],
+		UserAgent:  matches[11],
+	}
+
+	return entry, nil
 }
 
-// ProcessLogLine processes a single raw log line, handling skipping of empty/comment lines,
-// parsing, chain checking, and updating the activity store.
-func ProcessLogLine(line string, lineNumber int) {
-	// Skip truly empty lines and comments.
-	if line == "" || line == "\n" || line == "\r\n" || strings.HasPrefix(line, "#") {
+// ProcessLogLine is the main entry point for handling a single log line.
+// It parses the line, checks whitelists/blocklists, and triggers chain checks.
+// The '_ int' argument is added to satisfy the caller's signature (too many arguments).
+func ProcessLogLine(line string, _ int) {
+	entry, err := ParseLogLine(line)
+	if err != nil {
+		LogOutput(LevelWarning, "PARSE_FAIL", "Failed to parse log line: %s (Error: %v)", line, err)
 		return
 	}
 
-	entry, parseErr := ParseLogLine(line)
-	if parseErr != nil {
-		logLevel := LevelDebug
-		prefix := "PARSE_FAIL"
-		if DryRun {
-			prefix = "DRYRUN_WARN"
-			logLevel = LevelWarning
-		}
-
-		lineStart := line
-		if len(line) > 60 {
-			lineStart = line[:60] + "..."
-		}
-		LogOutput(logLevel, prefix, "[Line %d] Failed to parse log line: %v (Line start: %s)", lineNumber, parseErr, lineStart)
+	// 1. Check if IP is whitelisted
+	if IsIPWhitelisted(entry.IP) {
+		LogOutput(LevelDebug, "SKIP", "IP %s: Skipped (Whitelisted).", entry.IP)
 		return
 	}
 
-	// Define the IP-Only key for block status check and last request time update.
+	// 2. Check if IP is currently blocked (in-memory state)
+	// We use the IP-only key for global block/skip checks.
 	ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
 
+	// Choose appropriate store & mutex based on mode.
 	store := ActivityStore
 	mutex := &ActivityMutex
 	if DryRun {
@@ -108,80 +79,30 @@ func ProcessLogLine(line string, lineNumber int) {
 		mutex = &DryRunActivityMutex
 	}
 
-	// Lock the mutex for atomic access to the store for status check and time updates.
 	mutex.Lock()
+	// GetOrCreateActivityUnsafe is used because we hold the lock.
+	activity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
 
-	// 1. Get/Update IP-only key (for block status check and min_delay Step 1 time).
-	ipActivity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
-	ipActivity.LastRequestTime = entry.Timestamp
-
-	isBlocked := ipActivity.IsBlocked
-	blockedUntil := ipActivity.BlockedUntil
-
-	// Check if block has expired
-	if isBlocked && entry.Timestamp.After(blockedUntil) {
-		ipActivity.IsBlocked = false
-		ipActivity.BlockedUntil = time.Time{}
-		isBlocked = false
-		LogOutput(LevelDebug, "UNBLOCK_EXPIRY", "IP %s block has expired at %s. Unmarked as blocked.", entry.IP, blockedUntil.Format("2006-01-02 15:04:05 -0700"))
+	// If the IP is blocked, check if the block has expired
+	if activity.IsBlocked && time.Now().After(activity.BlockedUntil) {
+		LogOutput(LevelInfo, "EXPIRE", "In-memory block expired for IP %s.", entry.IP)
+		activity.IsBlocked = false
+		activity.BlockedUntil = time.Time{}
 	}
 
-	// Unlock before calling CheckChains, which also locks.
-	mutex.Unlock()
-
-	if isBlocked {
-		// Log the skip and return immediately. This is the IP-only optimization.
-		LogOutput(LevelDebug, "SKIP", "IP %s is currently marked as blocked until %s. Skipping chain checks.", entry.IP, blockedUntil.Format("2006-01-02 15:04:05 -0700"))
+	// If still blocked, skip further chain checks
+	if activity.IsBlocked {
+		LogOutput(LevelDebug, "SKIP", "IP %s: Skipped (Already blocked in memory).", entry.IP)
+		activity.LastRequestTime = entry.Timestamp // Update time even if skipped
+		mutex.Unlock()
 		return
 	}
 
-	// Only proceed to check chains if the IP is not blocked.
+	// Update LastRequestTime *before* checking chains.
+	// This ensures the MinDelay check in CheckChains uses the correct time.
+	activity.LastRequestTime = entry.Timestamp
+	mutex.Unlock() // Unlock before running chain checks (which lock internally)
+
+	// 3. Check chains
 	CheckChains(entry)
-}
-
-// ReadLineWithLimit reads a line from the bufio.Reader until a newline is found or the limit is hit.
-// It uses r.Read(b) for robust final EOF detection, preventing the hang when reading a static file.
-func ReadLineWithLimit(r *bufio.Reader, maxBytes int) (string, error) {
-	var lineBuilder strings.Builder
-	bytesRead := 0
-
-	// Use a 1-byte buffer to read instead of ReadByte().
-	b := make([]byte, 1)
-
-	for {
-		n, err := r.Read(b)
-
-		if err != nil {
-			if n > 0 {
-				lineBuilder.Write(b[:n])
-			}
-			return lineBuilder.String(), err
-		}
-
-		// n will always be 1 here for a successful read
-		char := b[0]
-
-		if char == '\n' {
-			return lineBuilder.String(), nil // Full line found
-		}
-
-		lineBuilder.WriteByte(char)
-		bytesRead++
-
-		if bytesRead > maxBytes {
-			// CRITICAL LIMIT HIT. Drain the rest of the line until the next \n.
-			for {
-				b_drain, err := r.ReadByte()
-				if err != nil {
-					// We hit EOF or an I/O error while draining.
-					return "", fmt.Errorf("%w (draining failed with error: %v)", ErrLineSkipped, err)
-				}
-				if b_drain == '\n' {
-					break // Successfully drained the rest of the line.
-				}
-			}
-			// Return the skip error. The reader is now correctly positioned at the start of the next line.
-			return "", ErrLineSkipped
-		}
-	}
 }

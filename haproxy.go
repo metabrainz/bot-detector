@@ -11,8 +11,9 @@ import (
 	"time"
 )
 
-// blockIPOnInstance connects to a single HAProxy instance over TCP and executes the command.
-func blockIPOnInstance(addr, ip, command string) error {
+// executeHAProxyCommand connects to a single HAProxy instance over TCP and executes the command.
+// This function remains the low-level communication layer.
+func executeHAProxyCommand(addr, ip, command string) error {
 	// Use a short timeout to prevent connection hangs
 	const dialTimeout = 5 * time.Second
 
@@ -41,83 +42,153 @@ func blockIPOnInstance(addr, ip, command string) error {
 	trimmedResponse := strings.TrimSpace(response)
 
 	if trimmedResponse != "" {
-		// HAProxy returned a non-empty string, indicating a command syntax or runtime error
-		return fmt.Errorf("HAProxy returned an error from %s: %s", addr, trimmedResponse)
+		// HAProxy returned a non-empty string, indicating a command syntax or
+		// execution error (e.g., "No such table").
+		return fmt.Errorf("HAProxy command execution failed for IP %s (Response: %s)", ip, trimmedResponse)
 	}
 
-	return nil // Success
+	return nil
 }
 
-// BlockIPForDuration sends a block command to ALL configured HAProxy instances concurrently.
-// It uses a best-effort approach and will always return nil (success) to the caller,
-// ensuring the main log processing is not interrupted by HAProxy failures.
-func BlockIPForDuration(ip string, duration time.Duration) error {
-	if DryRun {
-		LogOutput(LevelInfo, "DRYRUN", "Would block IP %s for %v (Expiry is HAProxy config-driven).", ip, duration)
-		return nil
-	}
-
-	// 1. Determine the stick table name based on the requested duration
-	DurationTableMutex.RLock()
-	tableName, exists := DurationToTableName[duration]
-	fallbackName := BlockTableNameFallback
-	DurationTableMutex.RUnlock()
-
-	// Check if the exact duration exists
-	if !exists {
-		tableName = fallbackName
-
-		// If the fallback is also empty (no tables configured), skip with warning
-		if tableName == "" {
-			LogOutput(LevelWarning, "SKIP_BLOCK", "No HAProxy duration tables configured. Skipping block attempt for IP %s.", ip)
-			return nil
-		}
-		LogOutput(LevelWarning, "WARN", "Requested block duration %v has no specific table. Falling back to %s table.", duration, tableName)
-	}
-
-	// 2. Construct the command (using stick table)
-	// We use 'set table' as it respects the stick table's configured 'expire' time.
-	command := fmt.Sprintf("set table %s key %s data 1\n", tableName, ip)
-
-	// 3. Get the list of HAProxy addresses from the global state (protected by RLock)
+// executeHAProxyCommandsConcurrently handles the concurrent execution of multiple commands
+// (map[table_name]map[haproxy_addr]command) against HAProxy instances.
+// This abstracts away the concurrency and error reporting logic.
+func executeHAProxyCommandsConcurrently(ip string, targets map[string]map[string]string) {
 	HAProxyMutex.RLock()
 	addresses := HAProxyAddresses
 	HAProxyMutex.RUnlock()
 
 	if len(addresses) == 0 {
-		// Log a warning and return nil (success, no blocking action taken)
-		LogOutput(LevelWarning, "SKIP_BLOCK", "HAProxy addresses list is empty. Skipping block attempt for IP %s.", ip)
-		return nil
+		LogOutput(LevelWarning, "SKIP_COMMAND", "HAProxy addresses list is empty. Skipping command for IP %s.", ip)
+		return
+	}
+
+	// Calculate total number of goroutines required
+	totalGoroutines := 0
+	for tableName := range targets {
+		totalGoroutines += len(targets[tableName])
+	}
+
+	if totalGoroutines == 0 {
+		return // Nothing to execute
 	}
 
 	var wg sync.WaitGroup
-	errs := make(chan error, len(addresses))
+	errs := make(chan error, totalGoroutines)
 
-	// 4. Concurrently execute block on all instances
-	for _, addr := range addresses {
-		wg.Add(1)
-		go func(addr string) {
-			defer wg.Done()
+	for tableName, commandsByAddr := range targets {
+		// Capture current table name for the goroutine
+		tableName := tableName
+		for addr, command := range commandsByAddr {
+			// Capture current address and command for the goroutine
+			addr := addr
+			command := command
 
-			if err := blockIPOnInstance(addr, ip, command); err != nil {
-				// Log the error immediately at LevelError
-				LogOutput(LevelError, "HAPROXY_FAIL", "HAProxy block failed on instance %s for IP %s: %v", addr, ip, err)
-				errs <- err
-			} else {
-				LogOutput(LevelInfo, "HAPROXY_BLOCK", "Successfully blocked IP %s on instance %s in table %s.", ip, addr, tableName)
-			}
-		}(addr)
+			wg.Add(1)
+			go func(addr, command string) {
+				defer wg.Done()
+
+				if err := executeHAProxyCommand(addr, ip, command); err != nil {
+					errs <- err
+					// Log the error immediately at LevelError
+					LogOutput(LevelError, "HAPROXY_FAIL", "HAProxy command failed on instance %s for IP %s (Table %s): %v", addr, ip, tableName, err)
+				} else {
+					LogOutput(LevelInfo, "HAPROXY_SUCCESS", "Successfully sent command for IP %s on instance %s to table %s.", ip, addr, tableName)
+				}
+			}(addr, command)
+		}
 	}
 
 	wg.Wait()
 	close(errs)
 
-	// 5. Final Error Check (Logging only, always return nil for graceful failure)
+	// Final Error Check (Logging only)
 	if len(errs) > 0 {
-		// Log a summary warning that the operation failed on some instances.
-		LogOutput(LevelWarning, "FAILSAFE", "Block for IP %s partially failed on %d/%d instances. Check HAPROXY_FAIL logs for details.", ip, len(errs), len(addresses))
+		LogOutput(LevelWarning, "HAPROXY_WARN", "One or more HAProxy instances failed to process command for IP %s. Total failures: %d", ip, len(errs))
+	}
+}
+
+// BlockIP blocks an IP address across all configured HAProxy instances and tables.
+// This function is required by the tests and the refactored checker.go.
+func BlockIP(ip string, duration time.Duration) error {
+	if DryRun {
+		LogOutput(LevelInfo, "DRYRUN", "Would block IP %s for %v (Chain complete).", ip, duration)
+		return nil
 	}
 
-	// CRITICAL: Always return nil to ensure the main program loop is NOT interrupted.
-	return nil
+	// 1. Determine table name for the given duration (using DurationToTableName)
+	DurationTableMutex.RLock()
+	tableName, found := DurationToTableName[duration]
+	if !found {
+		tableName = BlockTableNameFallback
+	}
+	DurationTableMutex.RUnlock()
+
+	if tableName == "" {
+		LogOutput(LevelWarning, "SKIP_BLOCK", "No HAProxy table found for block duration %v. Skipping block attempt for IP %s.", duration, ip)
+		return nil
+	}
+
+	// Command to add/update a stick table entry: set table <table> key <key> data 1
+	command := fmt.Sprintf("set table %s key %s data 1\n", tableName, ip)
+
+	// 2. Construct the targets map and execute concurrently
+	targets := make(map[string]map[string]string)
+	targets[tableName] = make(map[string]string)
+
+	HAProxyMutex.RLock()
+	addresses := HAProxyAddresses
+	HAProxyMutex.RUnlock()
+
+	for _, addr := range addresses {
+		targets[tableName][addr] = command
+	}
+
+	// 3. Execute concurrently
+	executeHAProxyCommandsConcurrently(ip, targets)
+
+	return nil // Error logging is handled inside the concurrent executor
+}
+
+// UnblockIP removes an IP from all configured HAProxy stick tables/maps.
+// This is primarily used when an IP is added to the whitelist and should no longer be blocked.
+func UnblockIP(ip string) error {
+	if DryRun {
+		LogOutput(LevelInfo, "DRYRUN", "Would unblock IP %s from all tables/maps.", ip)
+		return nil
+	}
+
+	// 1. Determine all tables/maps to delete from
+	DurationTableMutex.RLock()
+	tables := make(map[string]struct{})
+	for _, tableName := range DurationToTableName {
+		tables[tableName] = struct{}{}
+	}
+	if BlockTableNameFallback != "" {
+		tables[BlockTableNameFallback] = struct{}{}
+	}
+	DurationTableMutex.RUnlock()
+
+	// 2. Construct the commands and the targets map
+	targets := make(map[string]map[string]string)
+
+	HAProxyMutex.RLock()
+	addresses := HAProxyAddresses
+	HAProxyMutex.RUnlock()
+
+	for tableName := range tables {
+		targets[tableName] = make(map[string]string)
+
+		// Command to remove an entry from a stick table: set table <table> key <key> remove
+		command := fmt.Sprintf("set table %s key %s remove\n", tableName, ip)
+
+		for _, addr := range addresses {
+			targets[tableName][addr] = command
+		}
+	}
+
+	// 3. Execute concurrently
+	executeHAProxyCommandsConcurrently(ip, targets)
+
+	return nil // Error logging is handled inside the concurrent executor
 }

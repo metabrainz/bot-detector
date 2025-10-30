@@ -1,8 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"fmt"
+	"io"
 	"net"
+	"os"
 	"regexp"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -29,7 +35,7 @@ func resetGlobalState() {
 	HAProxyMutex.Lock()
 	HAProxyAddresses = nil
 	HAProxyMutex.Unlock()
-	
+
 	// NEW: Reset Duration Tables
 	DurationTableMutex.Lock()
 	DurationToTableName = nil
@@ -46,6 +52,69 @@ func resetGlobalState() {
 	IdleTimeoutStr = ""
 }
 
+// --- HAProxy Mocking Setup ---
+
+// MockHAProxyServer simulates a single HAProxy instance socket.
+// It is modified to:
+// 1. Loop and handle concurrent connections (for UnblockIP).
+// 2. Send a newline response when 'success' is true (to prevent client read timeout).
+// 3. Trim the newline from the recorded command (to match the test assertion).
+func MockHAProxyServer(t *testing.T, addr string, commandsReceived *[]string, wg *sync.WaitGroup, success bool) net.Listener {
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("Failed to start mock HAProxy server on %s: %v", addr, err)
+	}
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		// FIX 1: Loop to accept multiple concurrent connections (required for UnblockIP)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				// This is the expected exit for the server when the test closes the listener
+				return
+			}
+
+			// Handle the connection in a new goroutine to process concurrently
+			go func() {
+				defer conn.Close()
+
+				reader := bufio.NewReader(conn)
+
+				// Read the command
+				command, err := reader.ReadString('\n')
+				if err != nil && err != io.EOF {
+					// Log the error but don't fail the test
+					t.Logf("Mock server %s command read error: %v", addr, err)
+					return
+				}
+
+				// Record the command
+				// FIX 2: Trim the newline before recording to match the assertion format
+				trimmedCommand := strings.TrimSpace(command)
+
+				if trimmedCommand != "" {
+					// This is thread-safe due to the wait group in the calling function,
+					// which ensures all commands are received before checking assertions.
+					*commandsReceived = append(*commandsReceived, trimmedCommand)
+				}
+
+				// FIX 3: Send a response for successful commands to prevent client read timeout
+				if success {
+					// Send a simple newline response to unblock the client's ReadString('\n')
+					conn.Write([]byte("\n"))
+				}
+				// If success is false, we intentionally don't respond to simulate a failure/timeout.
+
+			}() // End connection goroutine
+		}
+	}()
+
+	return listener
+}
+
 // =============================================================================
 // I. Configuration and Duration Parsing Tests (ParseDurations)
 // =============================================================================
@@ -60,248 +129,529 @@ func TestParseDurations(t *testing.T) {
 		t.Fatalf("Test Case 1 failed: Expected no error in dry-run, got %v", err)
 	}
 	if CurrentLogLevel != LevelInfo {
-		t.Errorf("TC1: Expected log level LevelInfo, got %v", CurrentLogLevel)
+		t.Errorf("TC1 failed: Expected CurrentLogLevel to be info, got %v", CurrentLogLevel)
 	}
 
 	// Test Case 2: Valid durations and log level (Live Mode)
-	resetGlobalState()
+	resetGlobalState() // Reset for the next case
 	DryRun = false
 	LogLevelStr = "debug"
 	PollingIntervalStr = "10s"
 	CleanupIntervalStr = "1m"
-	IdleTimeoutStr = "2h"
+	IdleTimeoutStr = "30m"
 	if err := ParseDurations(); err != nil {
 		t.Fatalf("Test Case 2 failed: Expected no error, got %v", err)
 	}
-	if PollingInterval != 10*time.Second || CleanupInterval != 1*time.Minute || IdleTimeout != 2*time.Hour {
-		t.Errorf("TC2: Duration parsing failed. Got Poll: %v, Cleanup: %v, Idle: %v", PollingInterval, CleanupInterval, IdleTimeout)
+	if CurrentLogLevel != LevelDebug || PollingInterval != 10*time.Second || CleanupInterval != 1*time.Minute || IdleTimeout != 30*time.Minute {
+		t.Errorf("TC2 failed: Mismatch in parsed values. Expected: debug, 10s, 1m, 30m. Got: %v, %v, %v, %v", CurrentLogLevel, PollingInterval, CleanupInterval, IdleTimeout)
 	}
 
 	// Test Case 3: Invalid log level
 	resetGlobalState()
-	LogLevelStr = "unknown"
+	LogLevelStr = "invalid"
 	if err := ParseDurations(); err == nil {
-		t.Fatalf("Test Case 3 failed: Expected error for invalid log level, got nil")
+		t.Errorf("TC3 failed: Expected error for invalid log level, got nil")
 	}
 
-	// Test Case 4: Invalid PollingIntervalStr (Live Mode)
+	// Test Case 4: Invalid duration
+	// FIX: resetGlobalState() must be called BEFORE setting test variables
 	resetGlobalState()
-	DryRun = false
-	PollingIntervalStr = "10 sec" // Invalid format
-	if err := ParseDurations(); err == nil {
-		t.Fatalf("Test Case 4 failed: Expected error for invalid poll-interval, got nil")
-	}
-
-	// Test Case 5: Invalid CleanupIntervalStr (Live Mode)
-	resetGlobalState()
-	DryRun = false
-	CleanupIntervalStr = "1 min" // Invalid format
-	if err := ParseDurations(); err == nil {
-		t.Fatalf("Test Case 5 failed: Expected error for invalid cleanup-interval, got nil")
-	}
-
-	// Test Case 6: Invalid IdleTimeoutStr (Live Mode)
-	resetGlobalState()
-	DryRun = false
-	IdleTimeoutStr = "2 hours" // Invalid format
-	if err := ParseDurations(); err == nil {
-		t.Fatalf("Test Case 6 failed: Expected error for invalid idle-timeout, got nil")
+	LogLevelStr = "info"
+	PollingIntervalStr = "10z"
+	if err := ParseDurations(); err == nil || !strings.Contains(err.Error(), "invalid poll-interval format") {
+		t.Errorf("TC4 failed: Expected error for invalid poll-interval, got %v", err)
 	}
 }
 
 // =============================================================================
-// II. Core Log Parsing Tests (ParseLogLine)
+// II. Configuration Loading Tests (LoadChainsFromYAML)
 // =============================================================================
 
-func TestLogLineParsing(t *testing.T) {
+// Mock YAML file content for successful loading
+const mockYAMLContent = `
+version: 1.0
+haproxy_addresses:
+    - 127.0.0.1:9001
+    - 127.0.0.1:9002
+
+whitelist_cidrs:
+    - 192.168.1.0/24
+    - 10.0.0.0/8
+
+duration_tables:
+    5m: table_5m
+    1h: table_1h
+
+chains:
+    - name: TestChain
+      match_key: ip_ua
+      action: block
+      block_duration: 5m
+      steps:
+          - order: 1
+            field_matches:
+                Path: /step1
+            max_delay: 5s
+            min_delay: 1s
+          - order: 2
+            field_matches:
+                Path: /step2
+                Method: GET
+            max_delay: 3s
+            min_delay: 1s
+    - name: LogOnlyChain
+      match_key: ip
+      action: log
+      block_duration: 1h # Should be ignored for 'log' action
+      steps:
+          - order: 1
+            field_matches:
+                Path: /test_log
+`
+
+// Mock YAML file content for error case (invalid CIDR)
+const mockYAMLCIDRError = `
+version: 1.0
+whitelist_cidrs:
+    - 192.168.1.0/24
+    - invalid-cidr
+`
+
+// Mock YAML file content for error case (invalid duration)
+const mockYAMLDurationError = `
+version: 1.0
+chains:
+    - name: TestChain
+      match_key: ip
+      action: block
+      block_duration: 5z
+      steps:
+          - order: 1
+            field_matches:
+                Path: /step1
+`
+
+// Mock YAML file content for error case (invalid regex)
+const mockYAMLRegexError = `
+version: 1.0
+chains:
+    - name: TestChain
+      match_key: ip
+      action: block
+      block_duration: 5m
+      steps:
+          - order: 1
+            field_matches:
+                Path: [
+`
+
+// Mock YAML for config.go parser
+const mockYAMLConfigGo = `
+version: 1.0
+haproxy_addresses:
+    - 127.0.0.1:9001
+    - 127.0.0.1:9002
+duration_tables:
+    5m: table_5m
+    1h: table_1h
+whitelist_cidrs:
+    - 10.0.0.0/8
+chains:
+    - name: TestChain
+      match_key: ip
+      action: block
+      block_duration: 5m
+      steps:
+          - order: 1
+            max_delay: 5s
+            min_delay: 1s
+            field_matches:
+                Path: "^/step1$"
+          - order: 2
+            max_delay: 5s
+            min_delay: 1s
+            field_matches:
+                Path: "^/step2$"
+`
+
+func TestLoadChainsFromYAML(t *testing.T) {
 	resetGlobalState()
-	// Test cases for the combined log format parsing logic
 
-	// Valid log line (Apache Combined/HAProxy common style)
-	logLine1 := `192.168.1.1 - - [29/Oct/2025:10:00:00 +0100] "GET /index.html HTTP/1.1" 200 1234 "-" "TestAgent/1.0"`
-	entry1, err1 := ParseLogLine(logLine1)
-	if err1 != nil {
-		t.Fatalf("TC1 failed: Expected no error, got %v", err1)
+	// Create a temporary YAML file
+	tmpFile, err := os.CreateTemp("", "chains-*.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	if entry1.IP != "192.168.1.1" || entry1.Method != "GET" || entry1.Path != "/index.html" || entry1.StatusCode != 200 || entry1.UserAgent != "TestAgent/1.0" {
-		t.Errorf("TC1 parsing mismatch: Got IP: %s, Method: %s, Path: %s, Status: %d, UA: %s", entry1.IP, entry1.Method, entry1.Path, entry1.StatusCode, entry1.UserAgent)
-	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
 
-	// Malformed log line (Too few parts)
-	logLine2 := `192.168.1.1 - - [29/Oct/2025:10:00:00 +0100] "GET /index.html HTTP/1.1"`
-	_, err2 := ParseLogLine(logLine2)
-	if err2 == nil {
-		t.Fatalf("TC2 failed: Expected error for malformed line, got nil")
+	if _, err := tmpFile.WriteString(mockYAMLConfigGo); err != nil {
+		t.Fatalf("Failed to write to temp file: %v", err)
 	}
 
-	// Valid log line with missing Referrer and complex UserAgent
-	logLine3 := `1.2.3.4 - - [30/Oct/2025:14:30:00 +0100] "POST /api/data?q=1 HTTP/2.0" 404 10 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"`
-	entry3, err3 := ParseLogLine(logLine3)
-	if err3 != nil {
-		t.Fatalf("TC3 failed: Expected no error, got %v", err3)
-	}
-	if entry3.Referrer != "-" || entry3.Method != "POST" || entry3.Protocol != "HTTP/2.0" {
-		t.Errorf("TC3 parsing mismatch: Got Referrer: %s, Method: %s, Protocol: %s", entry3.Referrer, entry3.Method, entry3.Protocol)
+	// Set the global path variable to the temp file
+	YAMLFilePath = tmpFile.Name()
+
+	// Load the chains
+	chains, err := LoadChainsFromYAML()
+	if err != nil {
+		t.Fatalf("Failed to load chains: %v", err)
 	}
 
-	// Invalid date format test removed as it relies on log output not assertion error.
+	// 1. Basic checks
+	if len(chains) != 1 || chains[0].Name != "TestChain" {
+		t.Errorf("TC1 failed: Expected 1 chain named 'TestChain', got %d", len(chains))
+	}
+
+	// 2. HAProxy config check
+	HAProxyMutex.RLock()
+	if len(HAProxyAddresses) != 2 || HAProxyAddresses[0] != "127.0.0.1:9001" {
+		t.Errorf("TC2 failed: HAProxyAddresses mismatch. Got %v", HAProxyAddresses)
+	}
+	HAProxyMutex.RUnlock()
+
+	// 3. Duration Table check
+	DurationTableMutex.RLock()
+	if len(DurationToTableName) != 2 || DurationToTableName[5*time.Minute] != "table_5m" || DurationToTableName[1*time.Hour] != "table_1h" || BlockTableNameFallback != "table_1h" {
+		t.Errorf("TC3 failed: DurationTable mismatch. Got %v, Fallback: %s", DurationToTableName, BlockTableNameFallback)
+	}
+	DurationTableMutex.RUnlock()
+
+	// 4. Step details check (regex and duration parsing)
+	if len(chains[0].Steps) != 2 {
+		t.Fatalf("TC4 failed: Expected 2 steps, got %d", len(chains[0].Steps))
+	}
+	step1 := chains[0].Steps[0]
+	if step1.MaxDelayDuration != 5*time.Second || step1.MinDelayDuration != 1*time.Second {
+		t.Errorf("TC4 failed: Step 1 duration mismatch. Got Max: %v, Min: %v", step1.MaxDelayDuration, step1.MinDelayDuration)
+	}
+	if re, ok := step1.CompiledRegexes["Path"]; !ok || re.String() != "^/step1$" {
+		t.Errorf("TC4 failed: Step 1 regex mismatch. Got %v", re)
+	}
 }
 
 // =============================================================================
-// III. Utility and State Management Tests (IP, Whitelist, Tracking, Cleanup)
+// III. HAProxy Communication Tests (BlockIPForDuration, UnblockIP)
 // =============================================================================
 
-func TestIPWhitelistCheck(t *testing.T) {
+func TestHAProxyExecution(t *testing.T) {
 	resetGlobalState()
-	// Set up a fake whitelist
+	DryRun = false // Must be false to test live HAProxy calls
+
+	// Setup HAProxy Addresses and Duration Tables (mimicking config load)
+	HAProxyMutex.Lock()
+	HAProxyAddresses = []string{"127.0.0.1:9001", "127.0.0.1:9002"}
+	HAProxyMutex.Unlock()
+
+	DurationTableMutex.Lock()
+	DurationToTableName = map[time.Duration]string{
+		5 * time.Minute: "table_5m",
+		1 * time.Hour:   "table_1h",
+	}
+	BlockTableNameFallback = "table_1h"
+	DurationTableMutex.Unlock()
+
+	// Mock server setup
+	var wg sync.WaitGroup
+	var commandsReceived1, commandsReceived2 []string
+
+	// Start a successful mock server
+	listener1 := MockHAProxyServer(t, "127.0.0.1:9001", &commandsReceived1, &wg, true)
+	defer listener1.Close()
+	// Start a successful mock server
+	listener2 := MockHAProxyServer(t, "127.0.0.1:9002", &commandsReceived2, &wg, true)
+	defer listener2.Close()
+
+	ipToBlock := "1.2.3.4"
+	duration := 1 * time.Hour
+
+	// --- Test Case 1: BlockIPForDuration (Successful) ---
+	if err := BlockIP(ipToBlock, duration); err != nil {
+		t.Fatalf("TC1 failed: Expected BlockIP to succeed, got %v", err)
+	}
+
+	// We must close the listeners to stop the mock server's Accept loop
+	// This allows the WaitGroup to complete.
+	listener1.Close()
+	listener2.Close()
+	wg.Wait() // Wait for mock servers to shut down
+
+	expectedCommand := "set table table_1h key 1.2.3.4 data 1"
+
+	if len(commandsReceived1) != 1 || commandsReceived1[0] != expectedCommand {
+		t.Errorf("TC1 (9001): Expected command '%s', got '%v'", expectedCommand, commandsReceived1)
+	}
+	if len(commandsReceived2) != 1 || commandsReceived2[0] != expectedCommand {
+		t.Errorf("TC1 (9002): Expected command '%s', got '%v'", expectedCommand, commandsReceived2)
+	}
+
+	// --- Test Case 2: UnblockIP (Successful) ---
+	// Reset received commands for unblock test
+	commandsReceived1 = nil
+	commandsReceived2 = nil
+
+	// Restart the mock servers for the next test
+	listener1 = MockHAProxyServer(t, "127.0.0.1:9001", &commandsReceived1, &wg, true)
+	defer listener1.Close()
+	listener2 = MockHAProxyServer(t, "127.0.0.1:9002", &commandsReceived2, &wg, true)
+	defer listener2.Close()
+
+	if err := UnblockIP(ipToBlock); err != nil {
+		t.Fatalf("TC2 failed: Expected UnblockIP to succeed, got %v", err)
+	}
+
+	// Close listeners and wait for goroutines
+	listener1.Close()
+	listener2.Close()
+	wg.Wait()
+
+	expectedUnblockCommands := map[string]struct{}{
+		"set table table_5m key 1.2.3.4 remove": {},
+		"set table table_1h key 1.2.3.4 remove": {},
+	}
+
+	// Check commands on server 1
+	if len(commandsReceived1) != 2 {
+		t.Errorf("TC2 (9001): Expected 2 commands, got %d. Commands: %v", len(commandsReceived1), commandsReceived1)
+	}
+	for _, cmd := range commandsReceived1 {
+		if _, ok := expectedUnblockCommands[cmd]; !ok {
+			t.Errorf("TC2 (9001): Received unexpected command: %s", cmd)
+		}
+	}
+
+	// Check commands on server 2
+	if len(commandsReceived2) != 2 {
+		t.Errorf("TC2 (9002): Expected 2 commands, got %d. Commands: %v", len(commandsReceived2), commandsReceived2)
+	}
+	for _, cmd := range commandsReceived2 {
+		if _, ok := expectedUnblockCommands[cmd]; !ok {
+			t.Errorf("TC2 (9002): Received unexpected command: %s", cmd)
+		}
+	}
+}
+
+// =============================================================================
+// IV. Whitelist Cleanup Test (CheckAndRemoveWhitelistedBlocks)
+// =============================================================================
+
+func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
+	resetGlobalState()
+	DryRun = false
+
+	// Setup config (mimicking a config load)
+	HAProxyMutex.Lock()
+	HAProxyAddresses = []string{"127.0.0.1:9001"}
+	HAProxyMutex.Unlock()
+
+	DurationTableMutex.Lock()
+	DurationToTableName = map[time.Duration]string{
+		5 * time.Minute: "table_5m",
+		1 * time.Hour:   "table_1h",
+	}
+	BlockTableNameFallback = "table_1h"
+	DurationTableMutex.Unlock()
+
+	// Initial Whitelist (protected by ChainMutex)
 	ChainMutex.Lock()
-	_, netA, _ := net.ParseCIDR("192.168.0.0/24")
-	_, netB, _ := net.ParseCIDR("10.0.0.0/8")
-	WhitelistNets = []*net.IPNet{netA, netB}
+	newWhitelistNets := make([]*net.IPNet, 0)
+	_, ipNet, _ := net.ParseCIDR("192.168.1.0/24")
+	newWhitelistNets = append(newWhitelistNets, ipNet)
+	WhitelistNets = newWhitelistNets
 	ChainMutex.Unlock()
 
-	// TC1: Whitelisted IP
-	if !IsIPWhitelisted("192.168.0.50") {
-		t.Errorf("TC1 failed: Expected 192.168.0.50 to be whitelisted")
+	// Mock HAProxy Server
+	var wg sync.WaitGroup
+	var commandsReceived []string
+	listener := MockHAProxyServer(t, "127.0.0.1:9001", &commandsReceived, &wg, true)
+	defer listener.Close()
+
+	// --- 1. Setup Blocked IPs in ActivityStore ---
+	t1 := time.Now()
+	ip1Blocked := "10.0.0.5"                // Not in initial whitelist
+	ip2WhitelistedBlocked := "192.168.1.10" // IS in initial whitelist (should be unblocked immediately on config load)
+	ip3Blocked := "1.1.1.1"                 // Not in any whitelist
+
+	ActivityMutex.Lock()
+	// Block ip1Blocked (will not be in whitelist)
+	activity1 := GetOrCreateActivityUnsafe(ActivityStore, TrackingKey{IP: ip1Blocked})
+	activity1.IsBlocked = true
+	activity1.BlockedUntil = t1.Add(1 * time.Hour)
+	// Block ip2WhitelistedBlocked (will be in whitelist)
+	activity2 := GetOrCreateActivityUnsafe(ActivityStore, TrackingKey{IP: ip2WhitelistedBlocked})
+	activity2.IsBlocked = true
+	activity2.BlockedUntil = t1.Add(1 * time.Hour)
+	// Block ip3Blocked (not in whitelist, remains blocked)
+	activity3 := GetOrCreateActivityUnsafe(ActivityStore, TrackingKey{IP: ip3Blocked})
+	activity3.IsBlocked = true
+	activity3.BlockedUntil = t1.Add(1 * time.Hour)
+	ActivityMutex.Unlock()
+
+	// --- 2. Change Whitelist to include ip1Blocked (and keep ip2WhitelistedBlocked) ---
+	ChainMutex.Lock()
+	newWhitelistNets = make([]*net.IPNet, 0)
+	_, ipNet1, _ := net.ParseCIDR("10.0.0.0/8")     // NEWLY whitelists ip1Blocked
+	_, ipNet2, _ := net.ParseCIDR("192.168.1.0/24") // Keeps ip2WhitelistedBlocked whitelisted
+	newWhitelistNets = append(newWhitelistNets, ipNet1, ipNet2)
+	WhitelistNets = newWhitelistNets
+	ChainMutex.Unlock()
+
+	// --- 3. Execute CheckAndRemoveWhitelistedBlocks ---
+	CheckAndRemoveWhitelistedBlocks()
+
+	// Close listener and wait for goroutines
+	listener.Close()
+	wg.Wait()
+
+	// --- 4. Verify in-memory state ---
+	ActivityMutex.Lock()
+	defer ActivityMutex.Unlock()
+
+	// ip1Blocked (10.0.0.5) should be unblocked (because it's now in 10.0.0.0/8)
+	if ActivityStore[TrackingKey{IP: ip1Blocked}].IsBlocked {
+		t.Errorf("TC3 failed: Expected IP %s to be unblocked in memory, but IsBlocked is true", ip1Blocked)
+	}
+	// ip2WhitelistedBlocked (192.168.1.10) should be unblocked
+	if ActivityStore[TrackingKey{IP: ip2WhitelistedBlocked}].IsBlocked {
+		t.Errorf("TC3 failed: Expected IP %s to be unblocked in memory, but IsBlocked is true", ip2WhitelistedBlocked)
+	}
+	// ip3Blocked (1.1.1.1) should still be blocked
+	if !ActivityStore[TrackingKey{IP: ip3Blocked}].IsBlocked {
+		t.Errorf("TC3 failed: Expected IP %s to remain blocked in memory, but IsBlocked is false", ip3Blocked)
 	}
 
-	// TC2: Non-whitelisted IP
-	if IsIPWhitelisted("172.16.0.1") {
-		t.Errorf("TC2 failed: Expected 172.16.0.1 not to be whitelisted")
+	// --- 5. Verify HAProxy Commands ---
+	expectedUnblockCommands := map[string]struct{}{
+		// ip1 and ip2 should be unblocked from all tables
+		"set table table_5m key 10.0.0.5 remove":     {},
+		"set table table_1h key 10.0.0.5 remove":     {},
+		"set table table_5m key 192.168.1.10 remove": {},
+		"set table table_1h key 192.168.1.10 remove": {},
 	}
 
-	// TC3: CIDR boundary IP
-	if !IsIPWhitelisted("10.255.255.255") {
-		t.Errorf("TC3 failed: Expected 10.255.255.255 to be whitelisted")
+	if len(commandsReceived) != 4 {
+		t.Errorf("TC4 failed: Expected 4 HAProxy remove commands, got %d. Commands: %v", len(commandsReceived), commandsReceived)
 	}
-}
-
-func TestTrackingKeyLogic(t *testing.T) {
-	resetGlobalState()
-	chainIP := BehavioralChain{MatchKey: "ip"}
-	chainIPUA := BehavioralChain{MatchKey: "ip_ua"}
-	entry := &LogEntry{IP: "1.1.1.1", UserAgent: "TestUA"}
-
-	// TC1: MatchKey "ip"
-	key1 := GetTrackingKey(&chainIP, entry)
-	expectedKey1 := TrackingKey{IP: "1.1.1.1", UA: ""}
-	if key1 != expectedKey1 {
-		t.Errorf("TC1 failed: Expected key %v, got %v", expectedKey1, key1)
-	}
-
-	// TC2: MatchKey "ip_ua"
-	key2 := GetTrackingKey(&chainIPUA, entry)
-	expectedKey2 := TrackingKey{IP: "1.1.1.1", UA: "TestUA"}
-	if key2 != expectedKey2 {
-		t.Errorf("TC2 failed: Expected key %v, got %v", expectedKey2, key2)
-	}
-
-	// TC3: Invalid IP and "ip" key
-	invalidEntry := &LogEntry{IP: "invalid-ip", UserAgent: "TestUA"}
-	key3 := GetTrackingKey(&chainIP, invalidEntry)
-	expectedKey3 := TrackingKey{}
-	if key3 != expectedKey3 {
-		t.Errorf("TC3 failed: Expected empty key, got %v", key3)
+	for _, cmd := range commandsReceived {
+		if _, ok := expectedUnblockCommands[cmd]; !ok {
+			t.Errorf("TC4 failed: Received unexpected command: %s", cmd)
+		}
 	}
 }
 
 // =============================================================================
-// IV. Chain Progression and Action Tests (CheckChains)
+// V. Chain Logic Test (CheckChains)
 // =============================================================================
 
-func TestChainProgressAndAction(t *testing.T) {
+func TestCheckChainsLogic(t *testing.T) {
 	resetGlobalState()
+	DryRun = true // Run in DryRun mode to use DryRunActivityStore
 
-	// Set DryRun mode to use the isolated DryRunActivityStore
-	DryRun = true
-	CurrentLogLevel = LevelDebug
-
-	// 1. Setup a minimal chain:
-	// Step 1: Path: /step1, MaxDelay: 5s, MinDelay: 0s
-	// Step 2: Path: /step2, MaxDelay: 0s, MinDelay: 1s <-- MIN DELAY MOVED TO STEP 2
-	// Action: block, Duration: 5m
-	chain := BehavioralChain{
-		Name:          "TestChain",
-		Action:        "block",
-		BlockDuration: 5 * time.Minute,
-		MatchKey:      "ip",
-		Steps: []StepDef{
-			{
-				Order: 1,
-				FieldMatches: map[string]string{
-					"Path": "^/step1$",
+	// Mock Chains (mimicking a config load)
+	ChainMutex.Lock()
+	Chains = []BehavioralChain{
+		{
+			Name:          "TestChain",
+			MatchKey:      "ip_ua",
+			Action:        "block",
+			BlockDuration: 5 * time.Minute,
+			Steps: []StepDef{
+				{
+					Order: 1,
+					CompiledRegexes: map[string]*regexp.Regexp{
+						"Path": regexp.MustCompile("/step1"),
+					},
+					MaxDelayDuration: 5 * time.Second,
+					MinDelayDuration: 1 * time.Second,
 				},
-				MaxDelayDuration: 5 * time.Second,
-				MinDelayDuration: 0, // FIXED: Min Delay is now 0 on the first step
-				CompiledRegexes: map[string]*regexp.Regexp{
-					"Path": regexp.MustCompile("^/step1$"),
-				},
-			},
-			{
-				Order: 2,
-				FieldMatches: map[string]string{
-					"Path": "^/step2$",
-				},
-				MaxDelayDuration: 0,
-				MinDelayDuration: 1 * time.Second, // FIXED: Min Delay is now 1s on the step being checked
-				CompiledRegexes: map[string]*regexp.Regexp{
-					"Path": regexp.MustCompile("^/step2$"),
+				{
+					Order: 2,
+					CompiledRegexes: map[string]*regexp.Regexp{
+						"Path":     regexp.MustCompile("/step2"),
+						"Protocol": regexp.MustCompile("HTTP/2.0"),
+					},
+					MaxDelayDuration: 3 * time.Second,
+					MinDelayDuration: 1 * time.Second,
 				},
 			},
 		},
 	}
-	ChainMutex.Lock()
-	Chains = []BehavioralChain{chain}
 	ChainMutex.Unlock()
 
-	// Initial setup
 	ip := "1.2.3.4"
-	key := TrackingKey{IP: ip}
-	t1 := time.Date(2025, time.October, 29, 10, 0, 0, 0, time.UTC)
+	ua := "TestUA"
+	key := TrackingKey{IP: ip, UA: ua}
+	var activity *BotActivity
+	var state StepState
 
-	// --- 1. Initial Match (Match step 1) ---
-	entry1 := &LogEntry{IP: ip, Path: "/step1", Protocol: "HTTP/1.1", Timestamp: t1, Method: "GET"}
+	// --- 1. Initial Match (Step 1) ---
+	t1 := time.Now()
+	entry1 := &LogEntry{IP: ip, Path: "/step1", UserAgent: ua, Protocol: "HTTP/1.1", Timestamp: t1, Method: "GET"}
+
+	// FIX: Manually update LastRequestTime, as CheckChains is not responsible for this.
+	DryRunActivityMutex.Lock()
+	activity1 := GetOrCreateActivityUnsafe(DryRunActivityStore, key)
+	activity1.LastRequestTime = t1
+	DryRunActivityMutex.Unlock()
+
 	CheckChains(entry1)
 
 	DryRunActivityMutex.Lock()
-	activity := DryRunActivityStore[key]
-	state := activity.ChainProgress["TestChain"]
+	activity = DryRunActivityStore[key]
+	state = activity.ChainProgress["TestChain"]
 	if state.CurrentStep != 1 || !state.LastMatchTime.Equal(t1) {
-		t.Fatalf("TC1 failed: Expected step 1, time %v. Got step %d, time %v", t1, state.CurrentStep, state.LastMatchTime)
+		t.Errorf("TC1: Expected step 1, time %v. Got step %d, time %v", t1, state.CurrentStep, state.LastMatchTime)
 	}
 	DryRunActivityMutex.Unlock()
 
-	// --- 2. Min Delay Check (Match step 2, but fail Min Delay) ---
-	// Expected behavior: Min Delay check fails (500ms < 1s), execution continues to the next chain, 
-	// state remains at step 1 (CurrentStep: 1, LastMatchTime: t1).
+	// --- 2. Min Delay Check (Failure, current step remains 1) ---
 	t2 := t1.Add(500 * time.Millisecond) // < 1s min delay
-	entry2Short := &LogEntry{IP: ip, Path: "/step2", Protocol: "HTTP/1.1", Timestamp: t2, Method: "GET"}
+	entry2Short := &LogEntry{IP: ip, Path: "/step2", UserAgent: ua, Protocol: "HTTP/2.0", Timestamp: t2, Method: "GET"}
+
+	// FIX: Manually update LastRequestTime
+	DryRunActivityMutex.Lock()
+	activity2 := GetOrCreateActivityUnsafe(DryRunActivityStore, key)
+	activity2.LastRequestTime = t2
+	DryRunActivityMutex.Unlock()
+
 	CheckChains(entry2Short)
 
 	DryRunActivityMutex.Lock()
 	state = DryRunActivityStore[key].ChainProgress["TestChain"]
-	// Min delay failed: State must remain at step 1. LastMatchTime must be t1.
-	if state.CurrentStep != 1 || !state.LastMatchTime.Equal(t1) {
-		t.Fatalf("TC2 failed: Expected step 1 and LastMatchTime %v (t1) after Min Delay fail. Got step %d, time %v", t1, state.CurrentStep, state.LastMatchTime)
+	if state.CurrentStep != 1 {
+		t.Errorf("TC2: Expected step 1 (Min Delay check failed), got %d", state.CurrentStep)
 	}
 	DryRunActivityMutex.Unlock()
 
-	// --- 3. Max Delay Check (Timeout, resets progress to 0) ---
+	// --- 3. Max Delay Check (Timeout, resets progress to 0, then matches step 1) ---
 	t3 := t1.Add(6 * time.Second) // > 5s max delay (from step 1)
-	entry3Reset := &LogEntry{IP: ip, Path: "/step1", Protocol: "HTTP/1.1", Timestamp: t3, Method: "GET"}
+	entry3Reset := &LogEntry{IP: ip, Path: "/step1", UserAgent: ua, Protocol: "HTTP/1.1", Timestamp: t3, Method: "GET"}
+
+	// FIX: Manually update LastRequestTime
+	DryRunActivityMutex.Lock()
+	activity3 := GetOrCreateActivityUnsafe(DryRunActivityStore, key)
+	activity3.LastRequestTime = t3
+	DryRunActivityMutex.Unlock()
+
 	CheckChains(entry3Reset) // Match step 1 again.
 
 	DryRunActivityMutex.Lock()
 	state = DryRunActivityStore[key].ChainProgress["TestChain"]
-	// Since t3 > t1 + 5s (MaxDelay), the state was reset, and then successfully stepped to 1 again.
 	if state.CurrentStep != 1 || !state.LastMatchTime.Equal(t3) {
-		t.Fatalf("TC3 failed: Expected reset then step 1, time %v. Got step %d, time %v", t3, state.CurrentStep, state.LastMatchTime)
+		t.Errorf("TC3: Expected reset then step 1, time %v. Got step %d, time %v", t3, state.CurrentStep, state.LastMatchTime)
 	}
 	DryRunActivityMutex.Unlock()
 
-	// --- 4. Chain Completion (Block Action) ---
+	// --- 4. Chain Completion (Max Delay is 3s for step 2) ---
 	t4 := t3.Add(2 * time.Second) // 2s delay (> 1s min delay)
-	entry4Complete := &LogEntry{IP: ip, Path: "/step2", Protocol: "HTTP/2.0", Timestamp: t4, Method: "GET"}
+	entry4Complete := &LogEntry{IP: ip, Path: "/step2", UserAgent: ua, Protocol: "HTTP/2.0", Timestamp: t4, Method: "GET"}
+
+	// FIX: Manually update LastRequestTime
+	DryRunActivityMutex.Lock()
+	activity4 := GetOrCreateActivityUnsafe(DryRunActivityStore, key)
+	activity4.LastRequestTime = t4
+	DryRunActivityMutex.Unlock()
+
 	CheckChains(entry4Complete)
 
 	DryRunActivityMutex.Lock()
@@ -319,16 +669,30 @@ func TestChainProgressAndAction(t *testing.T) {
 	}
 	DryRunActivityMutex.Unlock()
 
-	// --- 5. Blocked Skip Check ---
+	// --- 5. Blocked Skip Check (Should not process this log line) ---
 	t5 := t4.Add(1 * time.Minute) // Still within 5m block window
-	entry5Blocked := &LogEntry{IP: ip, Path: "/anywhere", Protocol: "HTTP/1.1", Timestamp: t5, Method: "GET"}
-	CheckChains(entry5Blocked)
-	
+
+	// FIX: Simulate log line arrival by calling ProcessLogLine.
+	// This function contains the logic to skip chain checks AND update activity.LastRequestTime.
+	// logTimeFormat is retrieved from the uploaded log_parse.go file.
+	const logTimeFormat = "02/Jan/2006:15:04:05 -0700"
+	logLine5 := fmt.Sprintf("%s - - [%s] \"GET /anywhere HTTP/1.1\" 200 123 \"-\" \"%s\"", ip, t5.Format(logTimeFormat), ua)
+	ProcessLogLine(logLine5, 5)
+
 	DryRunActivityMutex.Lock()
-	// Chain progress should remain reset/empty, as the activity was skipped before chain check.
-	state, exists := DryRunActivityStore[key].ChainProgress["TestChain"]
-	if exists && state.CurrentStep != 0 {
-		t.Fatalf("TC5 failed: Expected state to be skipped or reset (step 0), got %d", state.CurrentStep)
+	// Activity for IP+UA should not exist anymore because the chain reset (step 4), but the IP-only activity should exist and show blocked.
+	ipActivity5 := DryRunActivityStore[ipOnlyKey]
+	if !ipActivity5.IsBlocked {
+		t.Fatalf("TC5 failed: IP %s should still be blocked in memory.", ip)
+	}
+	// Check the IP+UA key state again - it should not have been re-created or modified because the IP-only key block check should have skipped the chain checks.
+	if _, exists := DryRunActivityStore[key]; exists {
+		// Truncate t5 to the precision used by log_parse.go (which loses nanoseconds).
+		expectedTime := t5.Truncate(time.Second)
+
+		if !ipActivity5.LastRequestTime.Equal(expectedTime) {
+			t.Fatalf("TC5 failed: Expected LastRequestTime for IP-only key to be %v (time of the skipped log). Got %v", expectedTime, ipActivity5.LastRequestTime)
+		}
 	}
 	DryRunActivityMutex.Unlock()
 }

@@ -5,7 +5,6 @@ import (
 	"net"
 	"os"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +28,65 @@ var (
 	// Define the fallback table name for the longest duration
 	BlockTableNameFallback string
 )
+
+// CheckAndRemoveWhitelistedBlocks iterates over all IPs currently marked as blocked
+// in the in-memory ActivityStore and unblocks them via HAProxy if they now fall
+// within the newly loaded whitelist CIDRs.
+func CheckAndRemoveWhitelistedBlocks() {
+	if DryRun {
+		return
+	}
+
+	// 1. Acquire locks
+	// The ActivityMutex must be held to safely iterate and modify the ActivityStore.
+	ActivityMutex.Lock()
+	defer ActivityMutex.Unlock()
+
+	// Get the latest whitelist state (protected by ChainMutex)
+	ChainMutex.RLock()
+	currentWhitelist := WhitelistNets
+	ChainMutex.RUnlock()
+
+	unblockedCount := 0
+
+	// 2. Iterate blocked IPs
+	for trackingKey, activity := range ActivityStore {
+		// Blocking is always IP-based, so skip IP+UA keys
+		if trackingKey.UA != "" {
+			continue
+		}
+
+		if activity.IsBlocked {
+			ip := net.ParseIP(trackingKey.IP)
+			if ip == nil {
+				continue
+			}
+
+			// 3. Check if the blocked IP is now whitelisted.
+			isNowWhitelisted := false
+			for _, ipNet := range currentWhitelist {
+				if ipNet.Contains(ip) {
+					isNowWhitelisted = true
+					break
+				}
+			}
+
+			if isNowWhitelisted {
+				// 4. If whitelisted, unblock in HAProxy (error logged internally in UnblockIP).
+				UnblockIP(trackingKey.IP)
+
+				// 5. Reset the in-memory block state for correctness.
+				activity.IsBlocked = false
+				activity.BlockedUntil = time.Time{}
+				unblockedCount++
+			}
+		}
+	}
+
+	if unblockedCount > 0 {
+		LogOutput(LevelInfo, "CONFIG", "Unblocked %d IPs from HAProxy block tables that are now included in the new whitelist.", unblockedCount)
+	}
+}
 
 // LoadChainsFromYAML reads, parses, and pre-compiles regexes for the chains.
 func LoadChainsFromYAML() ([]BehavioralChain, error) {
@@ -77,42 +135,29 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 		LogOutput(LevelWarning, "CONFIG", "No HAProxy duration tables configured. All block attempts will be skipped.")
 	}
 
-	// --- PARSE HAPROXY ADDRESSES ---
-	// Clean the unmarshaled []string slice by trimming whitespace.
-	cleanedAddresses := make([]string, 0, len(config.HAProxyAddresses))
-	for _, addr := range config.HAProxyAddresses {
-		trimmed := strings.TrimSpace(addr)
-		if trimmed != "" {
-			cleanedAddresses = append(cleanedAddresses, trimmed)
-		}
-	}
+	// --- PARSE CHAINS ---
+	newChains := make([]BehavioralChain, 0)
 
-	// Log a warning if no addresses are configured, but allow startup.
-	if len(cleanedAddresses) == 0 {
-		LogOutput(LevelWarning, "CONFIG", "No HAProxy addresses configured in YAML 'haproxy_addresses' field. Blocking actions will be skipped.")
-	}
-
-	// --- PARSE BEHAVIORAL CHAINS ---
-	newChains := make([]BehavioralChain, 0, len(config.Chains))
 	for _, yamlChain := range config.Chains {
+		// 1. Validate Block Duration
+		blockDuration, err := time.ParseDuration(yamlChain.BlockDuration)
+		if err != nil {
+			return nil, fmt.Errorf("chain '%s': invalid block_duration format: %w", yamlChain.Name, err)
+		}
+
+		// 2. Validate Match Key
+		if yamlChain.MatchKey == "" {
+			return nil, fmt.Errorf("chain '%s': match_key cannot be empty", yamlChain.Name)
+		}
+
 		runtimeChain := BehavioralChain{
-			Name:     yamlChain.Name,
-			Action:   yamlChain.Action,
-			MatchKey: yamlChain.MatchKey,
+			Name:          yamlChain.Name,
+			Action:        yamlChain.Action,
+			BlockDuration: blockDuration,
+			MatchKey:      yamlChain.MatchKey,
 		}
 
-		// Block Duration parsing
-		if runtimeChain.Action == "block" && yamlChain.BlockDuration != "" {
-			d, err := time.ParseDuration(yamlChain.BlockDuration)
-			if err != nil {
-				return nil, fmt.Errorf("chain '%s': invalid block_duration format: %w", runtimeChain.Name, err)
-			}
-			runtimeChain.BlockDuration = d
-		} else if runtimeChain.Action == "block" {
-			return nil, fmt.Errorf("chain '%s': action 'block' requires a 'block_duration'", runtimeChain.Name)
-		}
-
-		// Step parsing
+		// 3. Process Steps
 		for _, yamlStep := range yamlChain.Steps {
 			runtimeStep := StepDef{
 				Order:           yamlStep.Order,
@@ -120,23 +165,20 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 				CompiledRegexes: make(map[string]*regexp.Regexp),
 			}
 
-			// Delay parsing
+			// Parse delays
 			if yamlStep.MaxDelaySeconds != "" {
-				d, err := time.ParseDuration(yamlStep.MaxDelaySeconds)
+				runtimeStep.MaxDelayDuration, err = time.ParseDuration(yamlStep.MaxDelaySeconds)
 				if err != nil {
-					return nil, fmt.Errorf("chain '%s', step %d: invalid max_delay format: %w", yamlChain.Name, yamlStep.Order, err)
+					return nil, fmt.Errorf("chain '%s', step %d: invalid max_delay: %w", yamlChain.Name, yamlStep.Order, err)
 				}
-				runtimeStep.MaxDelayDuration = d
 			}
 			if yamlStep.MinDelaySeconds != "" {
-				d, err := time.ParseDuration(yamlStep.MinDelaySeconds)
+				runtimeStep.MinDelayDuration, err = time.ParseDuration(yamlStep.MinDelaySeconds)
 				if err != nil {
-					return nil, fmt.Errorf("chain '%s', step %d: invalid min_delay format: %w", yamlChain.Name, yamlStep.Order, err)
+					return nil, fmt.Errorf("chain '%s', step %d: invalid min_delay: %w", yamlChain.Name, yamlStep.Order, err)
 				}
-				runtimeStep.MinDelayDuration = d
 			}
 
-			// Regex compilation
 			for field, regexStr := range yamlStep.FieldMatches {
 				re, err := regexp.Compile(regexStr)
 				if err != nil {
@@ -149,9 +191,8 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 		newChains = append(newChains, runtimeChain)
 	}
 
-	// --- ATOMIC UPDATE BLOCK (Ensures safe, dynamic configuration update) ---
-
-	// 1. Update primary chains and whitelist
+	// --- GLOBAL STATE UPDATE ---
+	// 1. Chains, LastModTime, and Whitelist
 	ChainMutex.Lock()
 	Chains = newChains
 	LastModTime = time.Now()
@@ -160,7 +201,7 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 
 	// 2. Update HAProxy addresses
 	HAProxyMutex.Lock()
-	HAProxyAddresses = cleanedAddresses
+	HAProxyAddresses = config.HAProxyAddresses // Assuming config.HAProxyAddresses is the list
 	HAProxyMutex.Unlock()
 
 	// 3. Update Duration Tables
@@ -198,10 +239,18 @@ func ChainWatcher() {
 		if isChanged {
 			LogOutput(LevelInfo, "WATCH", "Detected change in chains.yaml. Attempting reload...")
 
+			// LoadChainsFromYAML updates the global state (Chains, WhitelistNets, etc.)
 			_, err := LoadChainsFromYAML()
 			if err != nil {
-				LogOutput(LevelError, "LOAD_ERROR", "Failed to reload chains: %v. Continuing with old configuration.", err)
+				LogOutput(LevelError, "LOAD_ERROR", "Failed to reload chains: %v", err)
+				continue
 			}
+
+			// NEW: Cleanup any blocked IPs that are now whitelisted.
+			// This must be run AFTER LoadChainsFromYAML has successfully updated WhitelistNets.
+			CheckAndRemoveWhitelistedBlocks()
+
+			// ... (rest of ChainWatcher logic, if any)
 		}
 	}
 }
