@@ -114,7 +114,7 @@ go mod tidy
 3. **Build the Executable:**
 
 ```bash
-go build -o bot-detector main.go
+go build -o bot-detector .
 ```
 
 This will produce a single executable named `bot-detector`.
@@ -124,7 +124,6 @@ This will produce a single executable named `bot-detector`.
 | Flag | Default | Description |
 | :--- | :--- | :--- |
 | **`--log-path`** | `/var/log/http/access.log` | Path to the live access log file to tail (ignored in dry-run). |
-| **`--socket-path`** | `/var/run/haproxy.sock` | Path to the HAProxy Runtime API Unix socket (ignored in dry-run). |
 | **`--map-path`** | `/etc/haproxy/maps/blocked_ips.map` | Path to the HAProxy map file for dynamic IP blocking. |
 | **`--cleanup-interval`**| `1m` | Interval to run the routine that cleans up idle IP state. |
 | **`--idle-timeout`** | `30m` | Duration an IP must be inactive before its state is purged from memory. |
