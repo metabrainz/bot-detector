@@ -162,18 +162,21 @@ func LiveLogTailer() {
 						if currentStat.Size() < initialStat.Size() {
 							LogOutput(LevelDebug, "TAIL", "Detected log file size reduction (truncation/rotation). Reopening file.")
 							file.Close()
+							file = nil
 							break
 						}
 						currentSysStat := currentStat.Sys().(*syscall.Stat_t)
 						if currentSysStat.Dev != initialDev || currentSysStat.Ino != initialIno {
 							LogOutput(LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialIno, currentSysStat.Ino)
 							file.Close()
+							file = nil
 							break
 						}
 					} else {
 						LogOutput(LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Reopening in 1s.", statErr)
 						time.Sleep(1 * time.Second)
 						file.Close()
+						file = nil
 						break
 					}
 					time.Sleep(200 * time.Millisecond)
@@ -182,6 +185,7 @@ func LiveLogTailer() {
 					LogOutput(LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening in 1s.", finalErr)
 					time.Sleep(1 * time.Second)
 					file.Close()
+					file = nil
 					break // Break inner loop to trigger file re-opening
 				}
 			}
