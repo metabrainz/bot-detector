@@ -666,11 +666,11 @@ func TestCheckChainsLogic(t *testing.T) {
 	// Verify local block state update after action
 	ipOnlyKey := TrackingKey{IP: entry4Complete.IP, UA: ""}
 	ipActivity := DryRunActivityStore[ipOnlyKey]
-	
-	// Check BlockedUntil using a tolerance (fuzz) around time.Now() + duration, 
+
+	// Check BlockedUntil using a tolerance (fuzz) around time.Now() + duration,
 	// since the application code sets BlockedUntil = time.Now().Add(duration).
 	blockDuration := 5 * time.Minute
-	fuzz := 50 * time.Millisecond 
+	fuzz := 50 * time.Millisecond
 	// Use the time captured just before the block call for a tighter bound.
 	expectedMin := t4BeforeBlock.Add(blockDuration).Add(-fuzz)
 	expectedMax := t4BeforeBlock.Add(blockDuration).Add(fuzz)
