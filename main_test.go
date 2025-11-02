@@ -653,6 +653,8 @@ func TestCheckChainsLogic(t *testing.T) {
 	activity4.LastRequestTime = t4
 	DryRunActivityMutex.Unlock()
 
+	// Capture time before the CheckChains call, which triggers BlockIP(using time.Now())
+	t4BeforeBlock := time.Now()
 	CheckChains(entry4Complete)
 
 	DryRunActivityMutex.Lock()
@@ -664,9 +666,17 @@ func TestCheckChainsLogic(t *testing.T) {
 	// Verify local block state update after action
 	ipOnlyKey := TrackingKey{IP: entry4Complete.IP, UA: ""}
 	ipActivity := DryRunActivityStore[ipOnlyKey]
-	expectedBlockUntil := t4.Add(5 * time.Minute)
-	if !ipActivity.IsBlocked || !ipActivity.BlockedUntil.Equal(expectedBlockUntil) {
-		t.Fatalf("TC4 failed: Expected IsBlocked=true and BlockedUntil=%v. Got IsBlocked=%t, BlockedUntil=%v", expectedBlockUntil, ipActivity.IsBlocked, ipActivity.BlockedUntil)
+	
+	// Check BlockedUntil using a tolerance (fuzz) around time.Now() + duration, 
+	// since the application code sets BlockedUntil = time.Now().Add(duration).
+	blockDuration := 5 * time.Minute
+	fuzz := 50 * time.Millisecond 
+	// Use the time captured just before the block call for a tighter bound.
+	expectedMin := t4BeforeBlock.Add(blockDuration).Add(-fuzz)
+	expectedMax := t4BeforeBlock.Add(blockDuration).Add(fuzz)
+
+	if !ipActivity.IsBlocked || ipActivity.BlockedUntil.Before(expectedMin) || ipActivity.BlockedUntil.After(expectedMax) {
+		t.Fatalf("TC4 failed: Expected IsBlocked=true and BlockedUntil in range [%v, %v]. Got IsBlocked=%t, BlockedUntil=%v", expectedMin, expectedMax, ipActivity.IsBlocked, ipActivity.BlockedUntil)
 	}
 	DryRunActivityMutex.Unlock()
 
