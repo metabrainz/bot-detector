@@ -363,10 +363,11 @@ func TestHAProxyExecution(t *testing.T) {
 	defer listener2.Close()
 
 	ipToBlock := "1.2.3.4"
+	ipVersion := VersionIPv4
 	duration := 1 * time.Hour
 
 	// --- Test Case 1: BlockIPForDuration (Successful) ---
-	if err := BlockIP(ipToBlock, duration); err != nil {
+	if err := BlockIP(ipToBlock, ipVersion, duration); err != nil {
 		t.Fatalf("TC1 failed: Expected BlockIP to succeed, got %v", err)
 	}
 
@@ -376,7 +377,7 @@ func TestHAProxyExecution(t *testing.T) {
 	listener2.Close()
 	wg.Wait() // Wait for mock servers to shut down
 
-	expectedCommand := "set table table_1h key 1.2.3.4 data 1"
+	expectedCommand := "set table table_1h_ipv4 key 1.2.3.4 data.gpc0 1"
 
 	if len(commandsReceived1) != 1 || commandsReceived1[0] != expectedCommand {
 		t.Errorf("TC1 (9001): Expected command '%s', got '%v'", expectedCommand, commandsReceived1)
@@ -406,8 +407,8 @@ func TestHAProxyExecution(t *testing.T) {
 	wg.Wait()
 
 	expectedUnblockCommands := map[string]struct{}{
-		"set table table_5m key 1.2.3.4 remove": {},
-		"set table table_1h key 1.2.3.4 remove": {},
+		"clear table table_5m_ipv4 key 1.2.3.4": {},
+		"clear table table_1h_ipv4 key 1.2.3.4": {},
 	}
 
 	// Check commands on server 1
@@ -523,10 +524,10 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 	// --- 5. Verify HAProxy Commands ---
 	expectedUnblockCommands := map[string]struct{}{
 		// ip1 and ip2 should be unblocked from all tables
-		"set table table_5m key 10.0.0.5 remove":     {},
-		"set table table_1h key 10.0.0.5 remove":     {},
-		"set table table_5m key 192.168.1.10 remove": {},
-		"set table table_1h key 192.168.1.10 remove": {},
+		"clear table table_5m_ipv4 key 10.0.0.5":     {},
+		"clear table table_1h_ipv4 key 10.0.0.5":     {},
+		"clear table table_5m_ipv4 key 192.168.1.10": {},
+		"clear table table_1h_ipv4 key 192.168.1.10": {},
 	}
 
 	if len(commandsReceived) != 4 {

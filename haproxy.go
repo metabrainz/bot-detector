@@ -115,9 +115,8 @@ func executeHAProxyCommandsConcurrently(ip string, targets map[string]map[string
 	}
 }
 
-// BlockIP blocks an IP address across all configured HAProxy instances and tables.
-// This function is required by the tests and the refactored checker.go.
-func BlockIP(ip string, duration time.Duration) error {
+// BlockIP adds an IP to the appropriate HAProxy stick table/map with a key set to '1' (blocked).
+func BlockIP(ip string, version IPVersion, duration time.Duration) error {
 	if DryRun {
 		LogOutput(LevelInfo, "DRYRUN", "Would block IP %s for %v (Chain complete).", ip, duration)
 		return nil
@@ -125,21 +124,34 @@ func BlockIP(ip string, duration time.Duration) error {
 
 	// 1. Determine table name for the given duration (using DurationToTableName)
 	DurationTableMutex.RLock()
-	tableName, found := DurationToTableName[duration]
+	baseTableName, found := DurationToTableName[duration]
 	if !found {
-		tableName = BlockTableNameFallback
+		// If duration not found, use the fallback table
+		baseTableName = BlockTableNameFallback
 	}
 	DurationTableMutex.RUnlock()
 
-	if tableName == "" {
+	if baseTableName == "" {
 		LogOutput(LevelWarning, "SKIP_BLOCK", "No HAProxy table found for block duration %v. Skipping block attempt for IP %s.", duration, ip)
 		return nil
 	}
 
-	// Command to add/update a stick table entry: set table <table> key <key> data 1
-	command := fmt.Sprintf("set table %s key %s data 1\n", tableName, ip)
+	// 2. Determine the IP version suffix and handle invalid version
+	tableName := baseTableName
+	switch version {
+	case VersionIPv4:
+		tableName += "_ipv4" // Simple string concatenation
+	case VersionIPv6:
+		tableName += "_ipv6" // Simple string concatenation
+	default:
+		LogOutput(LevelError, "SKIP_BLOCK", "cannot block IP %s: invalid IP version", ip)
+		return nil
+	}
 
-	// 2. Construct the targets map and execute concurrently
+	// Command to block an IP: set table <table> key <key> data.gpc0 1
+	command := fmt.Sprintf("set table %s key %s data.gpc0 1\n", tableName, ip)
+
+	// 3. Construct the targets map for concurrent execution
 	targets := make(map[string]map[string]string)
 	targets[tableName] = make(map[string]string)
 
@@ -151,7 +163,7 @@ func BlockIP(ip string, duration time.Duration) error {
 		targets[tableName][addr] = command
 	}
 
-	// 3. Execute concurrently
+	// 4. Execute concurrently
 	executeHAProxyCommandsConcurrently(ip, targets)
 
 	return nil // Error logging is handled inside the concurrent executor
@@ -165,14 +177,31 @@ func UnblockIP(ip string) error {
 		return nil
 	}
 
+	// Get IP version using the existing utility function
+	version := GetIPVersion(ip)
+
+	var ipSuffix string
+	switch version {
+	case VersionIPv4:
+		ipSuffix = "_ipv4"
+	case VersionIPv6:
+		ipSuffix = "_ipv6"
+	default:
+		// If the IP is invalid or unrecognized, we cannot determine which table to clear,
+		// so we skip the action.
+		LogOutput(LevelError, "SKIP_UNBLOCK", "Cannot unblock IP %s: unrecognized IP version", ip)
+		return nil
+	}
+
+	// 1. Determine all BASE table names to clear from
 	// 1. Determine all tables/maps to delete from
 	DurationTableMutex.RLock()
-	tables := make(map[string]struct{})
-	for _, tableName := range DurationToTableName {
-		tables[tableName] = struct{}{}
+	baseTables := make(map[string]struct{})
+	for _, baseName := range DurationToTableName {
+		baseTables[baseName] = struct{}{}
 	}
 	if BlockTableNameFallback != "" {
-		tables[BlockTableNameFallback] = struct{}{}
+		baseTables[BlockTableNameFallback] = struct{}{}
 	}
 	DurationTableMutex.RUnlock()
 
@@ -183,11 +212,14 @@ func UnblockIP(ip string) error {
 	addresses := HAProxyAddresses
 	HAProxyMutex.RUnlock()
 
-	for tableName := range tables {
+	// We only clear the tables matching the IP's version
+	for baseName := range baseTables {
+		// Construct the full, version-dependent table name
+		tableName := baseName + ipSuffix
 		targets[tableName] = make(map[string]string)
 
-		// Command to remove an entry from a stick table: set table <table> key <key> remove
-		command := fmt.Sprintf("set table %s key %s remove\n", tableName, ip)
+		// Command to remove an entry from a stick table: clear table <table> key <key>
+		command := fmt.Sprintf("clear table %s key %s\n", tableName, ip)
 
 		for _, addr := range addresses {
 			targets[tableName][addr] = command

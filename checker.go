@@ -174,11 +174,10 @@ func CheckChains(entry *LogEntry) {
 
 				// 4. Check for Chain Completion
 				if state.CurrentStep == len(chain.Steps) {
-					ipToBlock := entry.IP
-					isWhitelisted := IsIPWhitelisted(ipToBlock) // Check whitelist status here
+					isWhitelisted := IsIPWhitelisted(entry.IP) // Check whitelist status here
 
 					if chain.Action == "block" {
-						baseMessage := fmt.Sprintf("BLOCK! Chain: %s completed by IP %s. Attempting to block for %v.", chain.Name, ipToBlock, chain.BlockDuration)
+						baseMessage := fmt.Sprintf("BLOCK! Chain: %s completed by IP %s. Attempting to block for %v.", chain.Name, entry.IP, chain.BlockDuration)
 
 						if isWhitelisted {
 							LogOutput(LevelCritical, "ALERT", "%s (IP is whitelisted: BLOCK ACTION SKIPPED)", baseMessage)
@@ -186,7 +185,7 @@ func CheckChains(entry *LogEntry) {
 							// Original logic for non-whitelisted block: two logs (ALERT + HAPROXY_BLOCK)
 							LogOutput(LevelCritical, "ALERT", baseMessage)
 
-							if err := BlockIP(ipToBlock, chain.BlockDuration); err != nil {
+							if err := BlockIP(entry.IP, entry.IPVersion, chain.BlockDuration); err != nil {
 								// Error is logged inside BlockIP, no action needed here
 							}
 
