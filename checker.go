@@ -196,7 +196,7 @@ func CheckChains(entry *LogEntry) {
 							ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
 							ipActivity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
 							ipActivity.IsBlocked = true
-							ipActivity.BlockedUntil = entry.Timestamp.Add(chain.BlockDuration) // Set block expiration time
+							ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration) // Set block expiration time
 							ipActivity.LastRequestTime = entry.Timestamp
 						}
 
