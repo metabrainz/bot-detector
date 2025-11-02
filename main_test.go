@@ -730,3 +730,130 @@ func TestParseLogLine_MalformedGroupCount(t *testing.T) {
 		t.Errorf("Expected error message to contain '%s', but got: %s", expectedErrMsg, err.Error())
 	}
 }
+
+// TestHAProxyIPv6Commands verifies that BlockIP and UnblockIP generate the correct
+// HAProxy commands and target the version-specific _ipv6 tables.
+func TestHAProxyIPv6Commands(t *testing.T) {
+	// Setup constants
+	ipv6 := "2001:db8::1"
+	ipVersion6 := VersionIPv6
+	duration5m := 5 * time.Minute
+	duration1h := 1 * time.Hour
+	baseTableName5m := "table_5m"
+	baseTableName1h := "table_1h"
+	ipv6TableName5m := baseTableName5m + "_ipv6"
+	ipv6TableName1h := baseTableName1h + "_ipv6"
+	fallbackTableName := "table_default"
+	ipv6FallbackTableName := fallbackTableName + "_ipv6"
+
+	// -------------------------------------------------------------------------
+	// --- TEST 1: Block IPv6 ---
+	// -------------------------------------------------------------------------
+	t.Run("Block_IPv6_CorrectCommand", func(t *testing.T) {
+		resetGlobalState()
+
+		// Initialize Duration Tables after state reset
+		DurationTableMutex.Lock()
+		DurationToTableName = map[time.Duration]string{
+			duration5m: baseTableName5m,
+			duration1h: baseTableName1h,
+		}
+		BlockTableNameFallback = fallbackTableName
+		DurationTableMutex.Unlock()
+
+		commandsReceived := make([]string, 0)
+		var wg sync.WaitGroup
+
+		// Setup local mock server. localAddr is net.Listener.
+		localAddr := MockHAProxyServer(t, "127.0.0.1:0", &commandsReceived, &wg, true)
+
+		// Temporarily set HAProxyAddresses to the mock address
+		originalAddresses := HAProxyAddresses
+		HAProxyAddresses = []string{localAddr.Addr().String()}
+		defer func() { HAProxyAddresses = originalAddresses }()
+
+		// Call the function: ip, version, duration. This call uses its own internal WaitGroup.
+		err := BlockIP(ipv6, ipVersion6, duration5m)
+		if err != nil {
+			t.Fatalf("BlockIP failed for IPv6: %v", err)
+		}
+
+		// Close listener before waiting. This unblocks the mock server's Accept() loop,
+		// allowing its lifecycle goroutine to exit and call wg.Done().
+		localAddr.Close()
+
+		wg.Wait() // Wait for the listener's goroutine to exit
+
+		// Assertions
+		expectedCmd := fmt.Sprintf("set table %s key %s data.gpc0 1", ipv6TableName5m, ipv6)
+		if len(commandsReceived) != 1 {
+			t.Fatalf("Expected 1 command, got %d. Commands: %v", len(commandsReceived), commandsReceived)
+		}
+		if commandsReceived[0] != expectedCmd {
+			t.Errorf("BlockIP command mismatch.\nExpected: '%s'\n     Got: '%s'", expectedCmd, commandsReceived[0])
+		}
+	})
+
+	// -------------------------------------------------------------------------
+	// --- TEST 2: Unblock IPv6 ---
+	// -------------------------------------------------------------------------
+	t.Run("Unblock_IPv6_CorrectCommands", func(t *testing.T) {
+		resetGlobalState() // Reset command list
+
+		// Initialize Duration Tables after state reset
+		DurationTableMutex.Lock()
+		DurationToTableName = map[time.Duration]string{
+			duration5m: baseTableName5m,
+			duration1h: baseTableName1h,
+		}
+		BlockTableNameFallback = fallbackTableName
+		DurationTableMutex.Unlock()
+
+		commandsReceived := make([]string, 0)
+		var wg sync.WaitGroup
+
+		// Setup local mock server. localAddr is net.Listener.
+		localAddr := MockHAProxyServer(t, "127.0.0.1:0", &commandsReceived, &wg, true)
+
+		// Temporarily set HAProxyAddresses to the mock address
+		originalAddresses := HAProxyAddresses
+		HAProxyAddresses = []string{localAddr.Addr().String()}
+		defer func() { HAProxyAddresses = originalAddresses }()
+
+		// Expected commands: UnblockIP targets 3 tables total
+		expectedCmds := map[string]struct{}{
+			fmt.Sprintf("clear table %s key %s", ipv6TableName5m, ipv6):       {},
+			fmt.Sprintf("clear table %s key %s", ipv6TableName1h, ipv6):       {},
+			fmt.Sprintf("clear table %s key %s", ipv6FallbackTableName, ipv6): {},
+		}
+		expectedCmdCount := len(expectedCmds)
+
+		// Call the function
+		err := UnblockIP(ipv6)
+		if err != nil {
+			t.Fatalf("UnblockIP failed for IPv6: %v", err)
+		}
+
+		// Close listener before waiting.
+		localAddr.Close()
+
+		wg.Wait() // Wait for the listener's goroutine to exit
+
+		// Assertions
+		if len(commandsReceived) != expectedCmdCount {
+			t.Fatalf("UnblockIP expected %d commands, got %d. Commands: %v", expectedCmdCount, len(commandsReceived), commandsReceived)
+		}
+
+		// Check command content
+		receivedCmdsMap := make(map[string]struct{})
+		for _, cmd := range commandsReceived {
+			receivedCmdsMap[cmd] = struct{}{}
+		}
+
+		for expectedCmd := range expectedCmds {
+			if _, ok := receivedCmdsMap[expectedCmd]; !ok {
+				t.Errorf("UnblockIP failed to receive expected command: '%s'", expectedCmd)
+			}
+		}
+	})
+}
