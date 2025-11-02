@@ -1,6 +1,6 @@
 # HaProxy setup
 
-Setting up your two-node HAProxy/Bot Detector cluster requires synchronizing the configuration across both hosts: **rex (10.2.2.60)** and **rudi (10.2.2.30)**.
+Setting up HAProxy for Bot Detector
 
 The key to this setup is that the bot detector uses a unified list of HAProxy targets defined in chains.yaml, and its internal logic automatically chooses between the faster **Unix Domain Socket (UDS)** for the local HAProxy and **TCP/IP** for the remote one.
 
@@ -8,7 +8,7 @@ The key to this setup is that the bot detector uses a unified list of HAProxy ta
 
 ## **1\. HAProxy Configuration (haproxy.cfg)**
 
-The `haproxy.cfg` file must be functionally **identical** on both hosts (rex and rudi). It must define the required stick tables and expose both the local Unix socket and a specific TCP port for the remote bot detector to connect.
+It must define the required stick tables and expose both the local Unix socket and a specific TCP port for the remote bot detector to connect.
 
 ### **A. Stick Tables and Runtime Socket**
 
@@ -17,57 +17,98 @@ Add the following to the configuration, typically after the defaults section.
 Extrait de code
 
 ```
-# haproxy.cfg (on both rex and rudi)
+# haproxy.cfg
 
 global
-    # ... existing settings ...
-    # This exposes the local Unix Domain Socket (UDS) for local control
-    stats socket /run/haproxy/admin.sock mode 660 level admin expose-fd listeners
+	log /dev/log	local0
+	log /dev/log	local1 notice
+	chroot /var/lib/haproxy
+	stats socket /run/haproxy/admin.sock mode 660 level admin
+    stats socket ipv4@127.0.0.1:9999  level admin  expose-fd listeners
+	stats timeout 30s
+	user haproxy
+	group haproxy
+	daemon
 
-# --- Bot Detector Stick Tables ---
-# Defined duration tables matching the names in chains.yaml
-stick-table type ip size 2m expire 1h store gpc0 name table_1h
-stick-table type ip size 500k expire 5m store gpc0 name table_5m
+	# Default SSL material locations
+	ca-base /etc/ssl/certs
+	crt-base /etc/ssl/private
 
-# --- TCP Runtime API Listener (for remote Bot Detector) ---
-# This opens the TCP port for control. Replace 10.2.2.60/10.2.2.30 with the
-# actual local IP address if the host has multiple IPs.
-listen runtime_api
-    bind 10.2.2.60:9999   # On rex (10.2.2.60)
-    # OR
-    # bind 10.2.2.30:9999 # On rudi (10.2.2.30)
+	# See: https://ssl-config.mozilla.org/#server=haproxy&server-version=2.0.3&config=intermediate
+    ssl-default-bind-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
+    ssl-default-bind-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
+    ssl-default-bind-options ssl-min-ver TLSv1.2 no-tls-tickets
 
-    mode tcp
-    maxconn 10 # Limit control connections
-    timeout client 10s
-    timeout server 10s
+    localpeer localnode
 
-    # SECURITY: Restrict access to only the other HAProxy host (and localhost)
-    acl allowed_control src 10.2.2.60 10.2.2.30 127.0.0.1
-    tcp-request content reject unless allowed_control
+peers mypeers
+    # to save stick tables between restarts
+    peer localnode 127.0.0.1:10000
+
+defaults
+	log	global
+	mode	http
+	option	httplog
+	option	dontlognull
+    timeout connect 5000
+    timeout client  50000
+    timeout server  50000
+	errorfile 400 /etc/haproxy/errors/400.http
+	errorfile 403 /etc/haproxy/errors/403.http
+	errorfile 408 /etc/haproxy/errors/408.http
+	errorfile 500 /etc/haproxy/errors/500.http
+	errorfile 502 /etc/haproxy/errors/502.http
+	errorfile 503 /etc/haproxy/errors/503.http
+	errorfile 504 /etc/haproxy/errors/504.http
+
+# define pseudo backends, as only one stick table can be defined per backend/frontend
+# and we define one per duration+ip version (because each stick table can only contain ipv4 or ipv6 addresses
+# depending on their type
+# gpc0 will contain 1 if the IP is blocked
+backend table_1h_ipv4
+	stick-table type ip size 2m expire 1h store gpc0 peers mypeers
+
+backend table_5m_ipv4
+	stick-table type ip size 500k expire 5m store gpc0 peers mypeers
+
+backend table_1h_ipv6
+	stick-table type ipv6 size 2m expire 1h store gpc0 peers mypeers
+
+backend table_5m_ipv6
+	stick-table type ipv6 size 500k expire 5m store gpc0 peers mypeers
+
+frontend fe_main
+  # Listen on both ipv4 & ipv6 (this depends on your setup)
+  bind :::80 v4v6
+
+  # declare one acl per stick table matching src and checking gpc0 > 0
+  acl blocked_1h_ipv4 src_get_gpc0(table_1h_ipv4) gt 0
+  acl blocked_1h_ipv6 src_get_gpc0(table_1h_ipv6) gt 0
+  acl blocked_5m_ipv4 src_get_gpc0(table_5m_ipv4) gt 0
+  acl blocked_5m_ipv6 src_get_gpc0(table_5m_ipv6) gt 0
+  
+  #tcp-request connection reject if blocked_1h
+  
+  # here we return a 429 on http request if the client src IP was blocked
+  http-request deny deny_status 429 if blocked_1h_ipv4 or blocked_5m_ipv4 or blocked_1h_ipv6 or blocked_5m_ipv6
+
+  default_backend be_servers
+
+backend be_servers
+    mode http
+    # dummy error file for testing
+    errorfile 503 /tmp/dummy.http
 ```
 
-*Note: The bind address should be the local host's IP address (10.2.2.60 on rex, 10.2.2.30 on rudi) or 0.0.0.0 if you prefer to bind all interfaces.*
-
-### **B. Blocking Rules**
-
-Add the rejection rule to all relevant frontends (tcpforward\_http and tcpforward\_https) to reject traffic if the source IP is found in either stick table.
-
-Extrait de code
+For testing, dummy.http:
 
 ```
-# haproxy.cfg (on both rex and rudi)
+HTTP/1.0 200 Found
+Cache-Control: no-cache
+Connection: close
+Content-Type: text/plain
 
-frontend tcpforward_http from base
-    # ... existing settings ...
-    # CRITICAL: Place this as the first tcp-request connection rule
-    tcp-request connection reject if { src,table_5m } or { src,table_1h }
-    # ... rest of frontend rules
-
-frontend tcpforward_https from base
-    # ... existing settings ...
-    tcp-request connection reject if { src,table_5m } or { src,table_1h }
-    # ... rest of frontend rules
+200 Found
 ```
 
 ---
@@ -86,8 +127,8 @@ version: "1.0"
 
 # --- Block Duration Mapping ---
 duration_tables:
-    5m: table_5m # Matches the stick-table name in haproxy.cfg
-    1h: table_1h # Matches the stick-table name in haproxy.cfg
+    5m: table_5m # Matches the stick-table name in haproxy.cfg without _ipv4/_ipv6 suffix
+    1h: table_1h # Matches the stick-table name in haproxy.cfg without _ipv4/_ipv6 suffix
 default_block_duration: "5m"
 
 # --- HAProxy Target Addresses ---
@@ -105,23 +146,3 @@ haproxy_addresses:
 
 # ... chains definitions ...
 ```
-
----
-
-## **3\. Bot Detector Execution**
-
-The execution command is identical on both hosts, assuming the executable and YAML file paths are the same. Each instance will read the full list of HAProxy addresses from the YAML file, but its local connection will benefit from the Unix socket while its cross-host communication will use TCP.
-
-| Host | IP | Execution Command (Example) |
-| :---- | :---- | :---- |
-| **rex** | 10.2.2.60 | ./bot-detector \--yamlFilePath /etc/bot-detector/chains.yaml \--logFilePath /var/log/haproxy/access.log |
-| **rudi** | 10.2.2.30 | ./bot-detector \--yamlFilePath /etc/bot-detector/chains.yaml \--logFilePath /var/log/haproxy/access.log |
-
-**Post-Setup Verification:**
-When a bot detector on **rex** needs to block an IP:
-
-1. It attempts to block via /run/haproxy/admin.sock (Local HAProxy \- **UDS**).
-2. It attempts to block via 10.2.2.60:9999 (The TCP endpoint for rex \- **TCP**).
-3. It attempts to block via 10.2.2.30:9999 (Remote HAProxy on rudi \- **TCP**).
-
-Due to the nature of concurrent execution, it only needs one success per host. The local UDS attempt will typically succeed first and is included for completeness and speed.
