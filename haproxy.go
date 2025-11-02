@@ -12,49 +12,66 @@ import (
 )
 
 // executeHAProxyCommand connects to a single HAProxy instance over TCP and executes the command.
-// This function remains the low-level communication layer.
 func executeHAProxyCommand(addr, ip, command string) error {
-	// Use a short timeout to prevent connection hangs
+	const maxRetries = 3
+	const retryDelay = 200 * time.Millisecond
 	const dialTimeout = 5 * time.Second
 
-	// 1. Connection attempt
 	// Determine network type: "unix" for local socket, "tcp" otherwise
 	network := "tcp"
 	if strings.Contains(addr, "/") { // Simple check for a file path
 		network = "unix"
 	}
 
-	// 1. Connection attempt
-	conn, err := net.DialTimeout(network, addr, dialTimeout)
-	if err != nil {
-		return fmt.Errorf("failed to connect to HAProxy instance %s: %w", addr, err)
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			// Log the retry attempt (assuming a LogOutput function is available)
+			LogOutput(LevelWarning, "HAPROXY_RETRY", "Retrying HAProxy command for %s (Attempt %d/%d)", addr, attempt+1, maxRetries)
+			time.Sleep(retryDelay)
+		}
+
+		// 1. Connection attempt
+		conn, err := net.DialTimeout(network, addr, dialTimeout)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to connect to HAProxy instance %s: %w", addr, err)
+			continue // Try again
+		}
+
+		// Close the connection in a deferred statement
+		defer conn.Close()
+
+		// 2. Write attempt
+		if _, err = conn.Write([]byte(command)); err != nil {
+			lastErr = fmt.Errorf("failed to send command to HAProxy instance %s: %w", addr, err)
+			continue // Try again
+		}
+
+		// 3. Read attempt (Command Error Check)
+		reader := bufio.NewReader(conn)
+		conn.SetReadDeadline(time.Now().Add(dialTimeout))
+		response, err := reader.ReadString('\n')
+
+		// If the error is EOF or nil, the command might have succeeded.
+		if err == nil || errors.Is(err, io.EOF) {
+			trimmedResponse := strings.TrimSpace(response)
+
+			if trimmedResponse != "" {
+				// HAProxy returned a non-empty string, indicating a definitive
+				// command execution error (e.g., "No such table").
+				return fmt.Errorf("HAProxy command execution failed for IP %s (Response: %s)", ip, trimmedResponse)
+			}
+
+			// Success
+			return nil
+		}
+
+		// Any other read error (timeout, broken pipe, etc.) -> retry
+		lastErr = fmt.Errorf("HAProxy response read error from %s: %w", addr, err)
 	}
-	defer conn.Close()
 
-	// 2. Write attempt
-	if _, err = conn.Write([]byte(command)); err != nil {
-		return fmt.Errorf("failed to send command to HAProxy instance %s: %w", addr, err)
-	}
-
-	// 3. Read attempt (Command Error Check)
-	reader := bufio.NewReader(conn)
-	conn.SetReadDeadline(time.Now().Add(dialTimeout))
-	response, err := reader.ReadString('\n')
-
-	// EOF is often expected after a response, but other read errors are reported
-	if err != nil && !errors.Is(err, io.EOF) {
-		return fmt.Errorf("HAProxy response read error from %s: %w", addr, err)
-	}
-
-	trimmedResponse := strings.TrimSpace(response)
-
-	if trimmedResponse != "" {
-		// HAProxy returned a non-empty string, indicating a command syntax or
-		// execution error (e.g., "No such table").
-		return fmt.Errorf("HAProxy command execution failed for IP %s (Response: %s)", ip, trimmedResponse)
-	}
-
-	return nil
+	// If the loop finishes without success, return the last collected error.
+	return lastErr
 }
 
 // executeHAProxyCommandsConcurrently handles the concurrent execution of multiple commands
