@@ -4,18 +4,18 @@ Bot-Detector is a high-performance Go application designed to monitor live acces
 
 ## **Features**
 
-* **Real-Time Behavioral Analysis:** Uses flexible YAML configurations to detect sequential patterns (e.g., initial probe, specific request, failed login).  
-* **HAProxy Integration:** Executes immediate IP blocking via the HAProxy Runtime Socket.  
-* **High Resilience:** Automatically handles HAProxy socket unavailability by switching the action from block to log for the duration of the outage (**Passive Monitoring Mode**).  
-* **Log Rotation Safe:** Continuously tails live log files, automatically detecting and re-opening the file after log rotation events (e.g., logrotate).  
-* **Graceful Shutdown:** Implements signal handlers (SIGINT, SIGTERM) for safe, controlled process termination.  
+* **Real-Time Behavioral Analysis:** Uses flexible YAML configurations to detect sequential patterns (e.g., initial probe, specific request, failed login).
+* **HAProxy Integration:** Executes immediate IP blocking via the HAProxy Runtime Socket.
+* **High Resilience:** Automatically handles HAProxy socket unavailability by switching the action from block to log for the duration of the outage (**Passive Monitoring Mode**).
+* **Log Rotation Safe:** Continuously tails live log files, automatically detecting and re-opening the file after log rotation events (e.g., logrotate).
+* **Graceful Shutdown:** Implements signal handlers (SIGINT, SIGTERM) for safe, controlled process termination.
 * **Dry Run Mode:** Allows testing behavioral chains against static log files without affecting a live HAProxy instance.
 
 ## **Setup and Usage**
 
 ### **Step 1: HAProxy Configuration (CRITICAL)**
 
-The bot-detector writes IP block information via HAProxy runtime API and use stick tables, but **HAProxy must be configured to read it and act on it**.  
+The bot-detector writes IP block information via HAProxy runtime API and use stick tables, but **HAProxy must be configured to read it and act on it**.
 See details in [HaproxySetup.md](HaproxySetup.md)
 
 
@@ -25,22 +25,22 @@ The application is configured using command-line flags.
 
 #### **Production Mode (Live Tailing)**
 
-Run the application pointing to your live log file, HAProxy socket, and map file.  
+Run the application pointing to your live log file, HAProxy socket, and map file.
 
 ```bash
-./bot-detector \  
+./bot-detector \
     -log-path "/var/log/http/access.log" \
     -yaml-path "chains.yaml" \
-    -cleanup-interval "5m" \  
+    -cleanup-interval "5m" \
     -idle-timeout "1h"
 ```
 
 #### **Dry Run Mode (Testing)**
 
-Use `-dry-run` to test your chains against a static log file. This will process the file once and log all match actions without attempting to connect to HAProxy.  
+Use `-dry-run` to test your chains against a static log file. This will process the file once and log all match actions without attempting to connect to HAProxy.
 
 ```bash
-# test_access.log contains the log lines you want to test  
+# test_access.log contains the log lines you want to test
 ./bot-detector -dry-run -test-log "test_access.log" -yaml-path "chains.yaml"
 ```
 
@@ -48,7 +48,7 @@ Use `-dry-run` to test your chains against a static log file. This will process 
 
 ### **Passive Monitoring Mode (HAProxy Fail-Safe)**
 
-If the HAProxy socket (`-socket-path`) is unavailable during a block attempt (e.g., HAProxy is restarting or down), the program will immediately log the connection error and **downgrade the action to log** for that event. It will continue attempting the block for subsequent events.  
+If the HAProxy socket (`-socket-path`) is unavailable during a block attempt (e.g., HAProxy is restarting or down), the program will immediately log the connection error and **downgrade the action to log** for that event. It will continue attempting the block for subsequent events.
 
 ### **Log Rotation Handling**
 
@@ -116,7 +116,7 @@ The application uses a unified logging system with five discrete levels. The `--
 **Example Command (Testing Rules):**
 
 ```bash
-./bot-detector --dry-run \  
+./bot-detector --dry-run \
 --yaml-path "test_rules.yaml" \
 --log-level debug \
 --test-log "large_test_data.log"
@@ -124,7 +124,7 @@ The application uses a unified logging system with five discrete levels. The `--
 
 # **Behavioral Chains Configuration File (chains.yaml)**
 
-This file defines the sequential behavioral chains used by the bot-detector to identify and act upon suspicious traffic patterns.  
+This file defines the sequential behavioral chains used by the bot-detector to identify and act upon suspicious traffic patterns.
 The file is structured as a top-level map containing a single key, chains, which holds an array of individual chain definitions.
 
 ## **Root Structure**
@@ -150,7 +150,6 @@ Each step in the steps array defines a specific log entry characteristic that mu
 
 | Field | Type | Required | Description |
 | :---- | :---- | :---- | :---- |
-| **order** | integer | Yes | The sequence number of the step (starting at 1). Steps are processed numerically. |
 | **field_matches** | map\[string\]string | Yes | A set of key-value pairs where the key is a field from the log line (e.g., **Method**, **StatusCode**, **Path**, **UserAgent**) and the value is a **Go Regular Expression** that must match the corresponding log entry field. |
 | **max_delay** | string | Yes | The maximum allowed time gap between the *previous* successful step and this step. Format: Go duration string (e.g., "10s", "1m"). |
 | **min_delay**	| string | No | The minimum required time gap before this step can match. If the time since the last successful match is less than `min_delay`, the log entry is skipped for this chain. On the first step (order: 1), this acts as a 'first hit since' check, using the IP's overall last request time. Format: Go duration string (e.g., "10s", "1m"). |
@@ -207,61 +206,55 @@ By using `ReferrerPrevPath`, the chain author signals that the regex is path-foc
 
 ## **Example chains.yaml**
 
-This example defines two chains: one for logging suspicious scanning and one for blocking a brute-force-like sequence.  
+This example defines two chains: one for logging suspicious scanning and one for blocking a brute-force-like sequence.
 chains:
 
-```yaml  
-  # 1. CHAIN: Credential Stuffing / Brute Force  
-  - name: Login-Brute-Force  
-    action: block  
-    block_duration: "1h"  
-    steps:  
-      - order: 1  
-        max_delay: "5m"  
-        field_matches:  
-          Method: "POST"  
-          Path: "^/api/login$"  
-          # Must result in a 401 Unauthorized  
-          StatusCode: "^401$" 
+```yaml
+  # 1. CHAIN: Credential Stuffing / Brute Force
+  - name: Login-Brute-Force
+    action: block
+    block_duration: "1h"
+    steps:
+      - max_delay: "5m"
+        field_matches:
+          Method: "POST"
+          Path: "^/api/login$"
+          # Must result in a 401 Unauthorized
+          StatusCode: "^401$"
 
-      - order: 2  
-        max_delay: "10s"  
-        field_matches:  
-          Method: "POST"  
-          Path: "^/api/login$"  
-          StatusCode: "^401$" 
+      - max_delay: "10s"
+        field_matches:
+          Method: "POST"
+          Path: "^/api/login$"
+          StatusCode: "^401$"
 
-      - order: 3  
-        max_delay: "5s"  
-        field_matches:  
-          Method: "POST"  
-          Path: "^/api/login$"  
-          StatusCode: "^401$" 
+      - max_delay: "5s"
+        field_matches:
+          Method: "POST"
+          Path: "^/api/login$"
+          StatusCode: "^401$"
 
-  # 2. CHAIN: Content Scraper (Log Only)  
-  - name: Content-Scraper-Fast  
-    action: log  
-    steps:  
-      - order: 1  
-        max_delay: "5m"  
-        field_matches:  
-          Method: "GET"  
-          # Request an article page  
-          Path: "^/article/\\d+$"  
-          # User agent might be suspicious  
-          UserAgent: "(?i)(curl|wget|python-requests)" 
+  # 2. CHAIN: Content Scraper (Log Only)
+  - name: Content-Scraper-Fast
+    action: log
+    steps:
+      - max_delay: "5m"
+        field_matches:
+          Method: "GET"
+          # Request an article page
+          Path: "^/article/\\d+$"
+          # User agent might be suspicious
+          UserAgent: "(?i)(curl|wget|python-requests)"
 
-      - order: 2  
-        max_delay: "1s"  
-        field_matches:  
-          Method: "GET"  
-          # Request another article page very quickly  
+      - max_delay: "1s"
+        field_matches:
+          Method: "GET"
+          # Request another article page very quickly
           Path: "^/article/\\d+$"
 
-      - order: 3  
-        max_delay: "1s"  
-        field_matches:  
-          Method: "GET"  
-          # Request a third article page very quickly  
+      - max_delay: "1s"
+        field_matches:
+          Method: "GET"
+          # Request a third article page very quickly
           Path: "^/article/\\d+$"
 ```

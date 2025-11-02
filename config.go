@@ -181,9 +181,9 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 		}
 
 		// 3. Process Steps
-		for _, yamlStep := range yamlChain.Steps {
+		for i, yamlStep := range yamlChain.Steps {
 			runtimeStep := StepDef{
-				Order:           yamlStep.Order,
+				Order:           i + 1,
 				FieldMatches:    yamlStep.FieldMatches,
 				CompiledRegexes: make(map[string]*regexp.Regexp),
 			}
@@ -192,27 +192,27 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 			if yamlStep.MaxDelay != "" {
 				runtimeStep.MaxDelayDuration, err = time.ParseDuration(yamlStep.MaxDelay)
 				if err != nil {
-					return nil, fmt.Errorf("chain '%s', step %d: invalid max_delay: %w", yamlChain.Name, yamlStep.Order, err)
+					return nil, fmt.Errorf("chain '%s', step %d: invalid max_delay: %w", yamlChain.Name, runtimeStep.Order, err)
 				}
 			}
 			if yamlStep.MinDelay != "" {
 				runtimeStep.MinDelayDuration, err = time.ParseDuration(yamlStep.MinDelay)
 				if err != nil {
-					return nil, fmt.Errorf("chain '%s', step %d: invalid min_delay: %w", yamlChain.Name, yamlStep.Order, err)
+					return nil, fmt.Errorf("chain '%s', step %d: invalid min_delay: %w", yamlChain.Name, runtimeStep.Order, err)
 				}
 			}
 
 			// DIAGNOSTIC LOG: Check the loaded durations for all steps.
 			// This is the key to debugging the silent load failure.
 			LogOutput(LevelDebug, "CONFIG", "Chain '%s', Step %d: max_delay (raw: '%s', loaded: %v); min_delay (raw: '%s', loaded: %v)",
-				yamlChain.Name, yamlStep.Order,
+				yamlChain.Name, runtimeStep.Order,
 				yamlStep.MaxDelay, runtimeStep.MaxDelayDuration,
 				yamlStep.MinDelay, runtimeStep.MinDelayDuration)
 
 			for field, regexStr := range yamlStep.FieldMatches {
 				re, err := regexp.Compile(regexStr)
 				if err != nil {
-					return nil, fmt.Errorf("chain '%s', step %d, field '%s': failed to compile regex '%s': %w", yamlChain.Name, yamlStep.Order, field, regexStr, err)
+					return nil, fmt.Errorf("chain '%s', step %d, field '%s': failed to compile regex '%s': %w", yamlChain.Name, runtimeStep.Order, field, regexStr, err)
 				}
 				runtimeStep.CompiledRegexes[field] = re
 			}

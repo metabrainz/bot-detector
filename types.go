@@ -8,7 +8,7 @@ import (
 // --- YAML DATA STRUCTURES ---
 
 type StepDefYAML struct {
-	Order        int               `yaml:"order"`
+	Order        int
 	FieldMatches map[string]string `yaml:"field_matches"`
 	MaxDelay     string            `yaml:"max_delay"`
 	MinDelay     string            `yaml:"min_delay"`
