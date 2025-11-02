@@ -101,12 +101,15 @@ func CheckChains(entry *LogEntry) {
 		}
 
 		// 2. Maximum Delay Check: Reset progress if delay exceeds the Max Delay Duration.
+		// FIX: We now check the MaxDelayDuration on the *current target step* (nextStep)
+		// when progressing from a previously matched step (CurrentStep > 0).
 		if state.CurrentStep > 0 && nextStepIndex < len(chain.Steps) {
-			prevStep := chain.Steps[state.CurrentStep-1]
 			delay := entry.Timestamp.Sub(state.LastMatchTime)
+			LogOutput(LevelDebug, "DEBUG", "IP %s: Checking Max Delay for transition to Step %d. Delay: %v", entry.IP, nextStepIndex+1, delay)
 
-			if prevStep.MaxDelayDuration > 0 && delay > prevStep.MaxDelayDuration {
-				LogOutput(LevelDebug, "RESET", "IP %s: Progress on step %d of chain '%s' reset due to max_delay timeout (%v > %v).", entry.IP, state.CurrentStep, chain.Name, delay, prevStep.MaxDelayDuration)
+			// Check the MaxDelayDuration of the target step (nextStep)
+			if nextStep.MaxDelayDuration > 0 && delay > nextStep.MaxDelayDuration {
+				LogOutput(LevelDebug, "RESET", "IP %s: Progress on step %d of chain '%s' reset due to max_delay timeout (%v > %v) defined on the target step.", entry.IP, state.CurrentStep, chain.Name, delay, nextStep.MaxDelayDuration)
 				state.CurrentStep = 0
 				nextStepIndex = 0
 				nextStep = chain.Steps[nextStepIndex]
@@ -224,6 +227,13 @@ func CheckChains(entry *LogEntry) {
 		} else {
 			delete(activity.ChainProgress, chain.Name)
 		}
+
+		// --- NEW: 6. Update LastRequestTime for IP-only activity (used by min_delay check for step 1) ---
+		// We only update the IP-only key because the min_delay check on step 1
+		// specifically fetches the IP-only activity's LastRequestTime.
+		ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
+		ipActivity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
+		ipActivity.LastRequestTime = entry.Timestamp
 
 		mutex.Unlock()
 	}

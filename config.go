@@ -189,18 +189,25 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 			}
 
 			// Parse delays
-			if yamlStep.MaxDelaySeconds != "" {
-				runtimeStep.MaxDelayDuration, err = time.ParseDuration(yamlStep.MaxDelaySeconds)
+			if yamlStep.MaxDelay != "" {
+				runtimeStep.MaxDelayDuration, err = time.ParseDuration(yamlStep.MaxDelay)
 				if err != nil {
 					return nil, fmt.Errorf("chain '%s', step %d: invalid max_delay: %w", yamlChain.Name, yamlStep.Order, err)
 				}
 			}
-			if yamlStep.MinDelaySeconds != "" {
-				runtimeStep.MinDelayDuration, err = time.ParseDuration(yamlStep.MinDelaySeconds)
+			if yamlStep.MinDelay != "" {
+				runtimeStep.MinDelayDuration, err = time.ParseDuration(yamlStep.MinDelay)
 				if err != nil {
 					return nil, fmt.Errorf("chain '%s', step %d: invalid min_delay: %w", yamlChain.Name, yamlStep.Order, err)
 				}
 			}
+
+			// DIAGNOSTIC LOG: Check the loaded durations for all steps.
+			// This is the key to debugging the silent load failure.
+			LogOutput(LevelDebug, "CONFIG", "Chain '%s', Step %d: max_delay (raw: '%s', loaded: %v); min_delay (raw: '%s', loaded: %v)",
+				yamlChain.Name, yamlStep.Order,
+				yamlStep.MaxDelay, runtimeStep.MaxDelayDuration,
+				yamlStep.MinDelay, runtimeStep.MinDelayDuration)
 
 			for field, regexStr := range yamlStep.FieldMatches {
 				re, err := regexp.Compile(regexStr)

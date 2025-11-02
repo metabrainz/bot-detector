@@ -8,10 +8,10 @@ import (
 // --- YAML DATA STRUCTURES ---
 
 type StepDefYAML struct {
-	Order           int               `yaml:"order"`
-	FieldMatches    map[string]string `yaml:"field_matches"`
-	MaxDelaySeconds string            `yaml:"max_delay"`
-	MinDelaySeconds string            `yaml:"min_delay"`
+	Order        int               `yaml:"order"`
+	FieldMatches map[string]string `yaml:"field_matches"`
+	MaxDelay     string            `yaml:"max_delay"`
+	MinDelay     string            `yaml:"min_delay"`
 }
 
 type BehavioralChainYAML struct {
