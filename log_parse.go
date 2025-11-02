@@ -61,16 +61,24 @@ func ParseLogLine(line string) (*LogEntry, error) {
 		t = time.Now().UTC()
 	}
 
+	// Determine IP Version
+	ipIndex := getMatchIndex("IP")
+	ipAddress := matches[ipIndex]
+
+	// GetIPVersion now returns the byte-based type
+	ipVersion := GetIPVersion(ipAddress)
+
 	// Create LogEntry using named indices
 	entry := &LogEntry{
 		Timestamp:  t,
-		IP:         matches[getMatchIndex("IP")],
+		IP:         ipAddress,
 		Path:       matches[getMatchIndex("Path")],
 		Method:     matches[getMatchIndex("Method")],
 		Protocol:   matches[getMatchIndex("Protocol")],
 		UserAgent:  matches[getMatchIndex("UserAgent")],
 		Referrer:   matches[getMatchIndex("Referrer")],
 		StatusCode: statusCode,
+		IPVersion:  ipVersion,
 	}
 
 	return entry, nil

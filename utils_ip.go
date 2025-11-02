@@ -5,15 +5,18 @@ import (
 	"strings"
 )
 
-// --- IP VERSION CONSTANTS ---
+// IPVersion represents the version of an IP address (0=invalid, 4=IPv4, 6=IPv6).
+type IPVersion byte
+
 const (
-	VersionInvalid = "invalid"
-	VersionIPv4    = "ipv4"
-	VersionIPv6    = "ipv6"
+	// VersionInvalid is 0, the default value for a byte, simplifying initialization checks.
+	VersionInvalid IPVersion = 0
+	VersionIPv4    IPVersion = 4
+	VersionIPv6    IPVersion = 6
 )
 
-// GetIPVersion returns the version of the IP address string ("ipv4", "ipv6", or "invalid").
-func GetIPVersion(ipStr string) string {
+// GetIPVersion returns the version of the IP address string (IPVersion byte).
+func GetIPVersion(ipStr string) IPVersion {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return VersionInvalid
@@ -25,6 +28,37 @@ func GetIPVersion(ipStr string) string {
 		return VersionIPv6
 	}
 	return VersionInvalid
+}
+
+// GetTrackingKey (Update to use the new type in the switch statement)
+func GetTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
+	// The IP version is now available directly on the LogEntry
+	ipVersion := entry.IPVersion
+	trackingKey := TrackingKey{IP: entry.IP}
+
+	// NOTE: We now compare against the byte constants (4 and 6) instead of strings.
+	switch chain.MatchKey {
+	case "ip", "ip_ua":
+		if ipVersion == VersionInvalid {
+			return TrackingKey{}
+		}
+	case "ipv4", "ipv4_ua":
+		if ipVersion != VersionIPv4 { // Changed from string to byte constant
+			return TrackingKey{}
+		}
+	case "ipv6", "ipv6_ua":
+		if ipVersion != VersionIPv6 { // Changed from string to byte constant
+			return TrackingKey{}
+		}
+	default:
+		return TrackingKey{}
+	}
+
+	if strings.HasSuffix(chain.MatchKey, "_ua") {
+		trackingKey.UA = entry.UserAgent
+	}
+
+	return trackingKey
 }
 
 // IsIPWhitelisted checks if the given IP address falls within any configured CIDR whitelist range.
@@ -43,33 +77,4 @@ func IsIPWhitelisted(ipStr string) bool {
 		}
 	}
 	return false
-}
-
-// GetTrackingKey generates the unique state-tracking key based on the chain's configuration.
-func GetTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
-	ipVersion := GetIPVersion(entry.IP)
-	trackingKey := TrackingKey{IP: entry.IP}
-
-	switch chain.MatchKey {
-	case "ip", "ip_ua":
-		if ipVersion == VersionInvalid {
-			return TrackingKey{}
-		}
-	case "ipv4", "ipv4_ua":
-		if ipVersion != VersionIPv4 {
-			return TrackingKey{}
-		}
-	case "ipv6", "ipv6_ua":
-		if ipVersion != VersionIPv6 {
-			return TrackingKey{}
-		}
-	default:
-		return TrackingKey{}
-	}
-
-	if strings.HasSuffix(chain.MatchKey, "_ua") {
-		trackingKey.UA = entry.UserAgent
-	}
-
-	return trackingKey
 }

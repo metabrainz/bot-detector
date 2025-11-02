@@ -586,7 +586,7 @@ func TestCheckChainsLogic(t *testing.T) {
 
 	// --- 1. Initial Match (Step 1) ---
 	t1 := time.Now()
-	entry1 := &LogEntry{IP: ip, Path: "/step1", UserAgent: ua, Protocol: "HTTP/1.1", Timestamp: t1, Method: "GET"}
+	entry1 := &LogEntry{IP: ip, Path: "/step1", UserAgent: ua, Protocol: "HTTP/1.1", Timestamp: t1, Method: "GET", IPVersion: VersionIPv4}
 
 	// FIX: Manually update LastRequestTime, as CheckChains is not responsible for this.
 	DryRunActivityMutex.Lock()
@@ -606,7 +606,7 @@ func TestCheckChainsLogic(t *testing.T) {
 
 	// --- 2. Min Delay Check (Failure, current step remains 1) ---
 	t2 := t1.Add(500 * time.Millisecond) // < 1s min delay
-	entry2Short := &LogEntry{IP: ip, Path: "/step2", UserAgent: ua, Protocol: "HTTP/2.0", Timestamp: t2, Method: "GET"}
+	entry2Short := &LogEntry{IP: ip, Path: "/step2", UserAgent: ua, Protocol: "HTTP/2.0", Timestamp: t2, Method: "GET", IPVersion: VersionIPv4}
 
 	// FIX: Manually update LastRequestTime
 	DryRunActivityMutex.Lock()
@@ -625,7 +625,7 @@ func TestCheckChainsLogic(t *testing.T) {
 
 	// --- 3. Max Delay Check (Timeout, resets progress to 0, then matches step 1) ---
 	t3 := t1.Add(6 * time.Second) // > 5s max delay (from step 1)
-	entry3Reset := &LogEntry{IP: ip, Path: "/step1", UserAgent: ua, Protocol: "HTTP/1.1", Timestamp: t3, Method: "GET"}
+	entry3Reset := &LogEntry{IP: ip, Path: "/step1", UserAgent: ua, Protocol: "HTTP/1.1", Timestamp: t3, Method: "GET", IPVersion: VersionIPv4}
 
 	// FIX: Manually update LastRequestTime
 	DryRunActivityMutex.Lock()
@@ -644,7 +644,7 @@ func TestCheckChainsLogic(t *testing.T) {
 
 	// --- 4. Chain Completion (Max Delay is 3s for step 2) ---
 	t4 := t3.Add(2 * time.Second) // 2s delay (> 1s min delay)
-	entry4Complete := &LogEntry{IP: ip, Path: "/step2", UserAgent: ua, Protocol: "HTTP/2.0", Timestamp: t4, Method: "GET"}
+	entry4Complete := &LogEntry{IP: ip, Path: "/step2", UserAgent: ua, Protocol: "HTTP/2.0", Timestamp: t4, Method: "GET", IPVersion: VersionIPv4}
 
 	// FIX: Manually update LastRequestTime
 	DryRunActivityMutex.Lock()

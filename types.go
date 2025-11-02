@@ -42,6 +42,7 @@ type LogEntry struct {
 	UserAgent  string
 	Referrer   string
 	StatusCode int
+	IPVersion  IPVersion
 }
 
 type StepDef struct {
