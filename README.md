@@ -15,48 +15,9 @@ Bot-Detector is a high-performance Go application designed to monitor live acces
 
 ### **Step 1: HAProxy Configuration (CRITICAL)**
 
-The bot-detector writes IP block information to a map file, but **HAProxy must be configured to read it and act on it**.  
-You must integrate the following rules into your /etc/haproxy/haproxy.cfg file.
+The bot-detector writes IP block information via HAProxy runtime API and use stick tables, but **HAProxy must be configured to read it and act on it**.  
+See details in [HaproxySetup.md](HaproxySetup.md)
 
-#### **A. Define the Dynamic Map (In global section)**
-
-Add the following directive to the global section to declare the map file and enable HAProxy to monitor it for updates every 5 seconds.
-
-```
-global  
-    # ... your existing global settings ...
-
-    # Declare the dynamic map file managed by bot-detector  
-    map-file blocked_ips_list /etc/haproxy/maps/blocked_ips.map check 5s
-```
-
-#### **B. Implement the Blocking Rule (In Frontends)**
-
-Place these three lines in your primary HTTP and HTTPS frontends, **before** any other static tcp-request content reject rules for highest priority.  
-
-```
-frontend tcpforward_http from base  
-    # ... existing bind and expect-proxy rules ...
-
-    # --- DYNAMIC BOT-DETECTOR BLOCK ---  
-    acl is_blocked src -f blocked_ips_list  
-    tcp-request content reject if is_blocked  
-    # ----------------------------------
-
-    # ... remaining whitelist/blocklist rules ...
-```
-
-#### **C. Finalize Setup**
-
-1. **Create Map File:** Ensure the map file exists and is empty:
-
-```bash
-   mkdir -p /etc/haproxy/maps  
-   touch /etc/haproxy/maps/blocked_ips.map
-```
-
-3. **Permissions:** Set file permissions so the user running bot-detector can **write** to the map file, and the user running haproxy can **read** it.  
-4. **Reload HAProxy:** Safely reload your HAProxy configuration.
 
 ### **Step 2: Running the Bot-Detector**
 
@@ -69,8 +30,6 @@ Run the application pointing to your live log file, HAProxy socket, and map file
 ```bash
 ./bot-detector \  
     -log-path "/var/log/http/access.log" \
-    -socket-path "/run/haproxy/admin.sock" \
-    -map-path "/etc/haproxy/maps/blocked_ips.map" \  
     -yaml-path "chains.yaml" \
     -cleanup-interval "5m" \  
     -idle-timeout "1h"
@@ -124,7 +83,6 @@ This will produce a single executable named `bot-detector`.
 | Flag | Default | Description |
 | :--- | :--- | :--- |
 | **`--log-path`** | `/var/log/http/access.log` | Path to the live access log file to tail (ignored in dry-run). |
-| **`--map-path`** | `/etc/haproxy/maps/blocked_ips.map` | Path to the HAProxy map file for dynamic IP blocking. |
 | **`--cleanup-interval`**| `1m` | Interval to run the routine that cleans up idle IP state. |
 | **`--idle-timeout`** | `30m` | Duration an IP must be inactive before its state is purged from memory. |
 | **`--log-level`** | `warning` | Set minimum log level to display. *See Log Levels below.* |
@@ -150,9 +108,8 @@ The application uses a unified logging system with five discrete levels. The `--
 
 ```bash
 ./bot-detector \
---log-path "/var/log/nginx/access.log" \  
---socket-path "/var/run/haproxy/admin.sock" \  
---map-path "/etc/haproxy/maps/blocked_ips.map" \  
+--log-path "/var/log/nginx/access.log" \
+--yaml-path "test_rules.yaml" \
 --idle-timeout "30m"
 ```
 
