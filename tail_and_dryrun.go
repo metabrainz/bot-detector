@@ -107,26 +107,68 @@ func LiveLogTailer() {
 	var reader *bufio.Reader
 	lineNumber := 0
 
+	// Polling state flags to suppress repeated log messages
+	var isPollingForFileOpen bool = false
+	var isPollingForStatCheck bool = false
+
+	// Delays
+	const (
+		FileOpenRetryDelay = 100 * time.Millisecond // For quick polling when the file is missing (e.g., just after rotation)
+		EOFPollingDelay    = 200 * time.Millisecond // For regular polling when hitting EOF on an open file
+		ErrorRetryDelay    = 1 * time.Second        // For persistent errors (read failures, stat failures)
+	)
+
 	// Main tailing loop (re-opens file on rotation/truncation)
 	for {
-		var err error
+		// Helper closure to close the file, reset variables, and optionally sleep before the next attempt.
+		restartTailing := func(delay time.Duration) {
+			if file != nil {
+				file.Close()
+				file = nil
+			}
+			if delay > 0 {
+				time.Sleep(delay)
+			}
+		}
 
 		// 1. Open the file
 		if file == nil {
+			var err error
 			file, err = os.Open(LogFilePath)
 			if err != nil {
-				LogOutput(LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in 5s.", LogFilePath, err)
-				time.Sleep(5 * time.Second)
+				// Suppress repeated "Failed to open" messages during fast polling
+				if !isPollingForFileOpen {
+					LogOutput(LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying every %v.", LogFilePath, err, FileOpenRetryDelay)
+					isPollingForFileOpen = true
+				}
+
+				// Wait for the quick poll interval silently
+				time.Sleep(FileOpenRetryDelay)
 				continue
 			}
+
+			// SUCCESSFUL OPEN: Check if we just recovered from a file-open failure or a stat-check failure
+			if isPollingForFileOpen {
+				LogOutput(LevelInfo, "TAIL_RECOVER", "Successfully reopened log file %s after polling.", LogFilePath)
+				isPollingForFileOpen = false
+			}
+
+			// If we successfully opened the file, we are no longer in the stat polling error state.
+			if isPollingForStatCheck {
+				isPollingForStatCheck = false
+				LogOutput(LevelInfo, "TAIL_RECOVER", "Stat check recovered implicitly by successful file open.")
+			}
+
 			reader = bufio.NewReader(file)
 
 			// Get initial file stats from the opened file handle to prevent a race condition.
-			initialStat, statErr := file.Stat()
+			newInitialStat, statErr := file.Stat()
 			if statErr != nil {
 				LogOutput(LevelWarning, "TAIL_ERROR", "Failed to stat opened file: %v. Proceeding without full rotation check.", statErr)
+				initialStat = nil // Ensure initialStat is explicitly nil on failure
 			} else {
-				// We are guaranteed to be on Linux, so we assert to syscall.Stat_t
+				initialStat = newInitialStat
+				// Guaranteed to be on Linux, assert to syscall.Stat_t
 				initialSysStat := initialStat.Sys().(*syscall.Stat_t)
 				initialDev = initialSysStat.Dev
 				initialIno = initialSysStat.Ino
@@ -154,39 +196,48 @@ func LiveLogTailer() {
 
 			if finalErr != nil {
 				if finalErr == io.EOF { // Standard check for live tail: sleep and check rotation
-					// We must check the file on disk, not the opened file handle, for rotation/truncation.
-					currentStat, statErr := os.Stat(LogFilePath)
-					if statErr == nil {
-						if currentStat.Size() < initialStat.Size() {
-							LogOutput(LevelDebug, "TAIL", "Detected log file size reduction (truncation/rotation). Reopening file.")
-							file.Close()
-							file = nil
-							break
-						}
+					// Only perform rotation checks if initialStat was successfully captured.
+					if initialStat != nil {
+						currentStat, statErr := os.Stat(LogFilePath)
+						if statErr == nil {
+							// SUCCESSFUL STAT CHECK: If we were polling, log recovery and reset flag
+							if isPollingForStatCheck {
+								LogOutput(LevelInfo, "TAIL_RECOVER", "Stat check successful, exiting stat error polling mode.")
+								isPollingForStatCheck = false
+							}
 
-						// Check for Inode/Device change (rotation)
-						currentSysStat := currentStat.Sys().(*syscall.Stat_t)
-						if currentSysStat.Dev != initialDev || currentSysStat.Ino != initialIno {
-							LogOutput(LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialIno, currentSysStat.Ino)
-							file.Close()
-							file = nil
+							// Check for truncation
+							if currentStat.Size() < initialStat.Size() {
+								LogOutput(LevelDebug, "TAIL", "Detected log file size reduction (truncation/rotation). Reopening file.")
+								restartTailing(0) // Restart immediately
+								break
+							}
+
+							// Check for Inode/Device change (rotation)
+							currentSysStat := currentStat.Sys().(*syscall.Stat_t)
+							if currentSysStat.Dev != initialDev || currentSysStat.Ino != initialIno {
+								LogOutput(LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialIno, currentSysStat.Ino)
+								restartTailing(0) // Restart immediately
+								break
+							}
+						} else {
+							// Suppress repeated "Failed to stat" messages
+							if !isPollingForStatCheck {
+								LogOutput(LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Retrying every %v.", statErr, ErrorRetryDelay)
+								isPollingForStatCheck = true
+							}
+							restartTailing(ErrorRetryDelay) // Wait a bit on stat failure
 							break
 						}
-					} else {
-						LogOutput(LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Reopening in 1s.", statErr)
-						time.Sleep(1 * time.Second)
-						file.Close()
-						file = nil
-						break
 					}
-					time.Sleep(200 * time.Millisecond)
+
+					time.Sleep(EOFPollingDelay) // Use EOFPollingDelay for standard polling
 					continue
 				} else {
-					LogOutput(LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening in 1s.", finalErr)
-					time.Sleep(1 * time.Second)
-					file.Close()
-					file = nil
-					break // Break inner loop to trigger file re-opening
+					// Read error (non-EOF) is typically a one-off event, but we retry
+					LogOutput(LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening in %v.", finalErr, ErrorRetryDelay)
+					restartTailing(ErrorRetryDelay) // Wait a bit on read error
+					break                           // Break inner loop to trigger file re-opening
 				}
 			}
 
