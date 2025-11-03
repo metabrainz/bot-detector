@@ -41,15 +41,13 @@ docker run --rm \
 
 # Define host paths based on common HAProxy and log setups
 HOST_LOG_PATH="/var/log/http/access.log"
-HOST_SOCKET_PATH="/run/haproxy/admin.sock"
-HOST_MAP_FILE_PATH="/etc/haproxy/maps/blocked_ips.map"
+HOST_SOCKET_PATH="/run/haproxy/admin.sock"  # if using socket to comuunicate with HAProxy
 HOST_CONFIG_PATH="./chains.yaml" # Assuming chains.yaml is in the directory where you run this command
 
 # Define container paths (these should match the defaults or flags used by bot-detector)
 CONTAINER_APP_DIR="/home/appuser/bot-detector"
 CONTAINER_LOG_PATH="${CONTAINER_APP_DIR}/access.log"
 CONTAINER_SOCKET_PATH="${CONTAINER_APP_DIR}/haproxy.sock"
-CONTAINER_MAP_PATH="${CONTAINER_APP_DIR}/blocked_ips.map"
 CONTAINER_CONFIG_PATH="${CONTAINER_APP_DIR}/chains.yaml"
 
 docker run -d \
@@ -57,15 +55,11 @@ docker run -d \
     --restart unless-stopped \
     -v ${HOST_LOG_PATH}:${CONTAINER_LOG_PATH}:ro \
     -v ${HOST_SOCKET_PATH}:${CONTAINER_SOCKET_PATH} \
-    -v ${HOST_MAP_FILE_PATH}:${CONTAINER_MAP_PATH} \
     -v ${HOST_CONFIG_PATH}:${CONTAINER_CONFIG_PATH} \
     bot-detector:latest \
     -log-path "${CONTAINER_LOG_PATH}" \
     -socket-path "${CONTAINER_SOCKET_PATH}" \
-    -map-path "${CONTAINER_MAP_PATH}" \
     -yaml-path "${CONTAINER_CONFIG_PATH}" \
     -cleanup-interval "5m" \
     -idle-timeout "30m"
 ```
-
-
