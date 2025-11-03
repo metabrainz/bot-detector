@@ -58,21 +58,19 @@ func DryRunLogProcessor(done chan<- struct{}) {
 	lineNumber := 0
 
 	for {
-		lineNumber++
-
 		line, err := ReadLineWithLimit(reader, MaxLogLineSize)
 
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				// Process final line fragment if present
 				if line != "" {
+					lineNumber++
 					ProcessLogLine(line, lineNumber)
 				}
 				break
 			}
 			if errors.Is(err, ErrLineSkipped) {
-				LogOutput(LevelWarning, "SKIPPED", "Line %d exceeded critical limit and was skipped.", lineNumber)
-				lineNumber--
+				LogOutput(LevelWarning, "SKIPPED", "Line exceeded critical limit and was skipped.")
 				continue
 			}
 
@@ -80,6 +78,7 @@ func DryRunLogProcessor(done chan<- struct{}) {
 			break
 		}
 
+		lineNumber++
 		ProcessLogLine(line, lineNumber)
 	}
 
