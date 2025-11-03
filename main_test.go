@@ -59,7 +59,8 @@ func resetGlobalState() {
 // 1. Loop and handle concurrent connections (for UnblockIP).
 // 2. Send a newline response when 'success' is true (to prevent client read timeout).
 // 3. Trim the newline from the recorded command (to match the test assertion).
-func MockHAProxyServer(t *testing.T, addr string, commandsReceived *[]string, wg *sync.WaitGroup, success bool) net.Listener {
+// 4. Accept a Mutex to make command recording thread-safe.
+func MockHAProxyServer(t *testing.T, addr string, commandsReceived *[]string, mu *sync.Mutex, wg *sync.WaitGroup, success bool) net.Listener {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		t.Fatalf("Failed to start mock HAProxy server on %s: %v", addr, err)
@@ -69,7 +70,7 @@ func MockHAProxyServer(t *testing.T, addr string, commandsReceived *[]string, wg
 	go func() {
 		defer wg.Done()
 
-		// FIX 1: Loop to accept multiple concurrent connections (required for UnblockIP)
+		// Loop to accept multiple concurrent connections (required for UnblockIP)
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
@@ -92,16 +93,17 @@ func MockHAProxyServer(t *testing.T, addr string, commandsReceived *[]string, wg
 				}
 
 				// Record the command
-				// FIX 2: Trim the newline before recording to match the assertion format
+				// Trim the newline before recording to match the assertion format
 				trimmedCommand := strings.TrimSpace(command)
 
 				if trimmedCommand != "" {
-					// This is thread-safe due to the wait group in the calling function,
-					// which ensures all commands are received before checking assertions.
+					// Use mutex to make slice append thread-safe
+					mu.Lock()
 					*commandsReceived = append(*commandsReceived, trimmedCommand)
+					mu.Unlock()
 				}
 
-				// FIX 3: Send a response for successful commands to prevent client read timeout
+				// Send a response for successful commands to prevent client read timeout
 				if success {
 					// Send a simple newline response to unblock the client's ReadString('\n')
 					conn.Write([]byte("\n"))
@@ -346,13 +348,14 @@ func TestHAProxyExecution(t *testing.T) {
 
 	// Mock server setup
 	var wg sync.WaitGroup
+	var mu sync.Mutex // Mutex to protect command slices
 	var commandsReceived1, commandsReceived2 []string
 
 	// Start a successful mock server
-	listener1 := MockHAProxyServer(t, "127.0.0.1:9001", &commandsReceived1, &wg, true)
+	listener1 := MockHAProxyServer(t, "127.0.0.1:9001", &commandsReceived1, &mu, &wg, true)
 	defer listener1.Close()
 	// Start a successful mock server
-	listener2 := MockHAProxyServer(t, "127.0.0.1:9002", &commandsReceived2, &wg, true)
+	listener2 := MockHAProxyServer(t, "127.0.0.1:9002", &commandsReceived2, &mu, &wg, true)
 	defer listener2.Close()
 
 	ipToBlock := "1.2.3.4"
@@ -385,13 +388,39 @@ func TestHAProxyExecution(t *testing.T) {
 	commandsReceived2 = nil
 
 	// Restart the mock servers for the next test
-	listener1 = MockHAProxyServer(t, "127.0.0.1:9001", &commandsReceived1, &wg, true)
+	listener1 = MockHAProxyServer(t, "127.0.0.1:9001", &commandsReceived1, &mu, &wg, true)
 	defer listener1.Close()
-	listener2 = MockHAProxyServer(t, "127.0.0.1:9002", &commandsReceived2, &wg, true)
+	listener2 = MockHAProxyServer(t, "127.0.0.1:9002", &commandsReceived2, &mu, &wg, true)
 	defer listener2.Close()
 
 	if err := UnblockIP(ipToBlock); err != nil {
 		t.Fatalf("TC2 failed: Expected UnblockIP to succeed, got %v", err)
+	}
+
+	expectedUnblockCommands := map[string]struct{}{
+		"clear table table_5m_ipv4 key 1.2.3.4": {},
+		"clear table table_1h_ipv4 key 1.2.3.4": {},
+	}
+	expectedCmdCount := len(expectedUnblockCommands) // 2 commands
+
+	// --- Poll until all commands are received ---
+	timeout := time.After(2 * time.Second)
+	for {
+		mu.Lock()
+		count1 := len(commandsReceived1)
+		count2 := len(commandsReceived2)
+		mu.Unlock()
+
+		if count1 >= expectedCmdCount && count2 >= expectedCmdCount {
+			break // Both servers got the commands
+		}
+
+		select {
+		case <-timeout:
+			t.Fatalf("TC2 (UnblockIP) timed out. Server 1 got %d/%d, Server 2 got %d/%d. S1: %v, S2: %v", count1, expectedCmdCount, count2, expectedCmdCount, commandsReceived1, commandsReceived2)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 
 	// Close listeners and wait for goroutines
@@ -399,14 +428,9 @@ func TestHAProxyExecution(t *testing.T) {
 	listener2.Close()
 	wg.Wait()
 
-	expectedUnblockCommands := map[string]struct{}{
-		"clear table table_5m_ipv4 key 1.2.3.4": {},
-		"clear table table_1h_ipv4 key 1.2.3.4": {},
-	}
-
 	// Check commands on server 1
-	if len(commandsReceived1) != 2 {
-		t.Errorf("TC2 (9001): Expected 2 commands, got %d. Commands: %v", len(commandsReceived1), commandsReceived1)
+	if len(commandsReceived1) != expectedCmdCount {
+		t.Errorf("TC2 (9001): Expected %d commands, got %d. Commands: %v", expectedCmdCount, len(commandsReceived1), commandsReceived1)
 	}
 	for _, cmd := range commandsReceived1 {
 		if _, ok := expectedUnblockCommands[cmd]; !ok {
@@ -415,8 +439,8 @@ func TestHAProxyExecution(t *testing.T) {
 	}
 
 	// Check commands on server 2
-	if len(commandsReceived2) != 2 {
-		t.Errorf("TC2 (9002): Expected 2 commands, got %d. Commands: %v", len(commandsReceived2), commandsReceived2)
+	if len(commandsReceived2) != expectedCmdCount {
+		t.Errorf("TC2 (9002): Expected %d commands, got %d. Commands: %v", expectedCmdCount, len(commandsReceived2), commandsReceived2)
 	}
 	for _, cmd := range commandsReceived2 {
 		if _, ok := expectedUnblockCommands[cmd]; !ok {
@@ -456,8 +480,9 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 
 	// Mock HAProxy Server
 	var wg sync.WaitGroup
+	var mu sync.Mutex
 	var commandsReceived []string
-	listener := MockHAProxyServer(t, "127.0.0.1:9001", &commandsReceived, &wg, true)
+	listener := MockHAProxyServer(t, "127.0.0.1:9001", &commandsReceived, &mu, &wg, true)
 	defer listener.Close()
 
 	// --- 1. Setup Blocked IPs in ActivityStore ---
@@ -493,6 +518,35 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 	// --- 3. Execute CheckAndRemoveWhitelistedBlocks ---
 	CheckAndRemoveWhitelistedBlocks()
 
+	expectedUnblockCommands := map[string]struct{}{
+		// ip1 and ip2 should be unblocked from all tables
+		"clear table table_5m_ipv4 key 10.0.0.5":     {},
+		"clear table table_1h_ipv4 key 10.0.0.5":     {},
+		"clear table table_5m_ipv4 key 192.168.1.10": {},
+		"clear table table_1h_ipv4 key 192.168.1.10": {},
+	}
+	expectedCmdCount := len(expectedUnblockCommands) // 4 commands
+
+	// --- Poll until all commands are received ---
+	timeout := time.After(2 * time.Second)
+	var currentCmdCount int
+	for {
+		mu.Lock()
+		currentCmdCount = len(commandsReceived)
+		mu.Unlock()
+
+		if currentCmdCount >= expectedCmdCount {
+			break
+		}
+
+		select {
+		case <-timeout:
+			t.Fatalf("TC CheckAndRemoveWhitelistedBlocks timed out. Expected %d commands, got %d. Commands: %v", expectedCmdCount, currentCmdCount, commandsReceived)
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
 	// Close listener and wait for goroutines
 	listener.Close()
 	wg.Wait()
@@ -515,16 +569,8 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 	}
 
 	// --- 5. Verify HAProxy Commands ---
-	expectedUnblockCommands := map[string]struct{}{
-		// ip1 and ip2 should be unblocked from all tables
-		"clear table table_5m_ipv4 key 10.0.0.5":     {},
-		"clear table table_1h_ipv4 key 10.0.0.5":     {},
-		"clear table table_5m_ipv4 key 192.168.1.10": {},
-		"clear table table_1h_ipv4 key 192.168.1.10": {},
-	}
-
-	if len(commandsReceived) != 4 {
-		t.Errorf("TC4 failed: Expected 4 HAProxy remove commands, got %d. Commands: %v", len(commandsReceived), commandsReceived)
+	if len(commandsReceived) != expectedCmdCount {
+		t.Errorf("TC4 failed: Expected %d HAProxy remove commands, got %d. Commands: %v", expectedCmdCount, len(commandsReceived), commandsReceived)
 	}
 	for _, cmd := range commandsReceived {
 		if _, ok := expectedUnblockCommands[cmd]; !ok {
@@ -766,9 +812,10 @@ func TestHAProxyIPv6Commands(t *testing.T) {
 
 		commandsReceived := make([]string, 0)
 		var wg sync.WaitGroup
+		var mu sync.Mutex
 
 		// Setup local mock server. localAddr is net.Listener.
-		localAddr := MockHAProxyServer(t, "127.0.0.1:0", &commandsReceived, &wg, true)
+		localAddr := MockHAProxyServer(t, "127.0.0.1:0", &commandsReceived, &mu, &wg, true)
 
 		// Temporarily set HAProxyAddresses to the mock address
 		originalAddresses := HAProxyAddresses
@@ -814,9 +861,10 @@ func TestHAProxyIPv6Commands(t *testing.T) {
 
 		commandsReceived := make([]string, 0)
 		var wg sync.WaitGroup
+		var mu sync.Mutex
 
 		// Setup local mock server. localAddr is net.Listener.
-		localAddr := MockHAProxyServer(t, "127.0.0.1:0", &commandsReceived, &wg, true)
+		localAddr := MockHAProxyServer(t, "127.0.0.1:0", &commandsReceived, &mu, &wg, true)
 
 		// Temporarily set HAProxyAddresses to the mock address
 		originalAddresses := HAProxyAddresses
@@ -835,6 +883,33 @@ func TestHAProxyIPv6Commands(t *testing.T) {
 		err := UnblockIP(ipv6)
 		if err != nil {
 			t.Fatalf("UnblockIP failed for IPv6: %v", err)
+		}
+
+		// Poll until we receive the expected number of commands or time out.
+		// This solves the race condition.
+		timeout := time.After(2 * time.Second) // 2s timeout to prevent test hang
+		var currentCmdCount int
+		for currentCmdCount < expectedCmdCount {
+			select {
+			case <-timeout:
+				// Force the server to shut down
+				localAddr.Close()
+				wg.Wait()
+
+				// Get final count for a good error message
+				mu.Lock()
+				finalCount := len(commandsReceived)
+				finalCmds := commandsReceived
+				mu.Unlock()
+				t.Fatalf("Test timed out: Expected %d commands, got %d. Commands: %v", expectedCmdCount, finalCount, finalCmds)
+
+			default:
+				// Check the count safely
+				mu.Lock()
+				currentCmdCount = len(commandsReceived)
+				mu.Unlock()
+				time.Sleep(10 * time.Millisecond) // Poll gently
+			}
 		}
 
 		// Close listener before waiting.
