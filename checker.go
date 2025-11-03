@@ -197,7 +197,6 @@ func CheckChains(entry *LogEntry) {
 							ipActivity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
 							ipActivity.IsBlocked = true
 							ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration) // Set block expiration time
-							ipActivity.LastRequestTime = entry.Timestamp
 						}
 
 					} else if chain.Action == "log" {
@@ -227,13 +226,6 @@ func CheckChains(entry *LogEntry) {
 		} else {
 			delete(activity.ChainProgress, chain.Name)
 		}
-
-		// --- 6. Update LastRequestTime for IP-only activity (used by min_delay check for step 1) ---
-		// We only update the IP-only key because the min_delay check on step 1
-		// specifically fetches the IP-only activity's LastRequestTime.
-		ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
-		ipActivity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
-		ipActivity.LastRequestTime = entry.Timestamp
 
 		mutex.Unlock()
 	}

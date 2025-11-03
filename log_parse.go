@@ -136,10 +136,18 @@ func ProcessLogLine(line string, lineNumber int) {
 		return
 	}
 
-	// Update LastRequestTime for the IP-only key before unlocking, even if no chains match.
-	activity.LastRequestTime = entry.Timestamp
+	// DO NOT update LastRequestTime here. Unlock first so CheckChains can run
+	// using the *previous* LastRequestTime for the min_delay check.
 	mutex.Unlock()
 
 	// 3. Process the log line through all behavioral chains
 	CheckChains(entry)
+
+	// 4. After chains have run, lock again to update the LastRequestTime
+	// for the IP-only key. This is the correct place to record the time.
+	mutex.Lock()
+	// Re-get the activity using the unsafe function since we hold the lock.
+	activity = GetOrCreateActivityUnsafe(store, ipOnlyKey)
+	activity.LastRequestTime = entry.Timestamp
+	mutex.Unlock()
 }

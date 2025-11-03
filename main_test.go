@@ -628,16 +628,11 @@ func TestCheckChainsLogic(t *testing.T) {
 	t1 := time.Now()
 	entry1 := &LogEntry{IP: ip, Path: "/step1", UserAgent: ua, Protocol: "HTTP/1.1", Timestamp: t1, Method: "GET", IPVersion: VersionIPv4}
 
-	// Manually update LastRequestTime, as CheckChains is not responsible for this.
-	DryRunActivityMutex.Lock()
-	activity1 := GetOrCreateActivityUnsafe(DryRunActivityStore, key)
-	activity1.LastRequestTime = t1
-	DryRunActivityMutex.Unlock()
-
 	CheckChains(entry1)
 
 	DryRunActivityMutex.Lock()
-	activity = DryRunActivityStore[key]
+	activity = GetOrCreateActivityUnsafe(DryRunActivityStore, key)
+	activity.LastRequestTime = t1 // This is now the 'previous' time for the next call
 	state = activity.ChainProgress["TestChain"]
 	if state.CurrentStep != 1 || !state.LastMatchTime.Equal(t1) {
 		t.Errorf("TC1: Expected step 1, time %v. Got step %d, time %v", t1, state.CurrentStep, state.LastMatchTime)
@@ -648,15 +643,11 @@ func TestCheckChainsLogic(t *testing.T) {
 	t2 := t1.Add(500 * time.Millisecond) // < 1s min delay
 	entry2Short := &LogEntry{IP: ip, Path: "/step2", UserAgent: ua, Protocol: "HTTP/2.0", Timestamp: t2, Method: "GET", IPVersion: VersionIPv4}
 
-	// Manually update LastRequestTime
-	DryRunActivityMutex.Lock()
-	activity2 := GetOrCreateActivityUnsafe(DryRunActivityStore, key)
-	activity2.LastRequestTime = t2
-	DryRunActivityMutex.Unlock()
-
 	CheckChains(entry2Short)
 
 	DryRunActivityMutex.Lock()
+	activity = GetOrCreateActivityUnsafe(DryRunActivityStore, key)
+	activity.LastRequestTime = t2
 	state = DryRunActivityStore[key].ChainProgress["TestChain"]
 	if state.CurrentStep != 1 {
 		t.Errorf("TC2: Expected step 1 (Min Delay check failed), got %d", state.CurrentStep)
@@ -667,15 +658,11 @@ func TestCheckChainsLogic(t *testing.T) {
 	t3 := t1.Add(6 * time.Second) // > 5s max delay (from step 1)
 	entry3Reset := &LogEntry{IP: ip, Path: "/step1", UserAgent: ua, Protocol: "HTTP/1.1", Timestamp: t3, Method: "GET", IPVersion: VersionIPv4}
 
-	// Manually update LastRequestTime
-	DryRunActivityMutex.Lock()
-	activity3 := GetOrCreateActivityUnsafe(DryRunActivityStore, key)
-	activity3.LastRequestTime = t3
-	DryRunActivityMutex.Unlock()
-
 	CheckChains(entry3Reset) // Match step 1 again.
 
 	DryRunActivityMutex.Lock()
+	activity = GetOrCreateActivityUnsafe(DryRunActivityStore, key)
+	activity.LastRequestTime = t3
 	state = DryRunActivityStore[key].ChainProgress["TestChain"]
 	if state.CurrentStep != 1 || !state.LastMatchTime.Equal(t3) {
 		t.Errorf("TC3: Expected reset then step 1, time %v. Got step %d, time %v", t3, state.CurrentStep, state.LastMatchTime)
@@ -686,18 +673,13 @@ func TestCheckChainsLogic(t *testing.T) {
 	t4 := t3.Add(2 * time.Second) // 2s delay (> 1s min delay)
 	entry4Complete := &LogEntry{IP: ip, Path: "/step2", UserAgent: ua, Protocol: "HTTP/2.0", Timestamp: t4, Method: "GET", IPVersion: VersionIPv4}
 
-	// Manually update LastRequestTime
-	DryRunActivityMutex.Lock()
-	activity4 := GetOrCreateActivityUnsafe(DryRunActivityStore, key)
-	activity4.LastRequestTime = t4
-	DryRunActivityMutex.Unlock()
-
 	// Capture time before the CheckChains call, which triggers BlockIP(using time.Now())
 	t4BeforeBlock := time.Now()
 	CheckChains(entry4Complete)
 
 	DryRunActivityMutex.Lock()
-	activity = DryRunActivityStore[key]
+	activity = GetOrCreateActivityUnsafe(DryRunActivityStore, key)
+	activity.LastRequestTime = t4
 	state = activity.ChainProgress["TestChain"]
 	if state.CurrentStep != 0 {
 		t.Fatalf("TC4 failed: Expected step 0 (Chain complete and reset), got %d", state.CurrentStep)
