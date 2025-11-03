@@ -97,9 +97,20 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 	}
 
 	var config ChainConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
+
+	// 1. Create a new decoder from the YAML data string.
+	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
+
+	// 2. Set the public KnownFields field to true to enforce strict decoding.
+	// This makes Decode fail if an unknown key is encountered in the YAML.
+	decoder.KnownFields(true)
+
+	// 3. Decode the YAML using the strict decoder.
+	if err := decoder.Decode(&config); err != nil {
+		// This error will now explicitly include the unknown field error message.
+		return nil, fmt.Errorf("failed to strictly unmarshal YAML (unknown field found): %w", err)
 	}
+	// ---------------------------------------------------------------------------------
 
 	// Parse Whitelist CIDRs
 	newWhitelistNets := make([]*net.IPNet, 0)
