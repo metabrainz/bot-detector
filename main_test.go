@@ -31,12 +31,12 @@ func resetGlobalState() {
 	LastModTime = time.Time{}
 	ChainMutex.Unlock()
 
-	// NEW: Reset HAProxy addresses
+	// Reset HAProxy addresses
 	HAProxyMutex.Lock()
 	HAProxyAddresses = nil
 	HAProxyMutex.Unlock()
 
-	// NEW: Reset Duration Tables
+	// Reset Duration Tables
 	DurationTableMutex.Lock()
 	DurationToTableName = nil
 	BlockTableNameFallback = ""
@@ -154,7 +154,7 @@ func TestParseDurations(t *testing.T) {
 	}
 
 	// Test Case 4: Invalid duration
-	// FIX: resetGlobalState() must be called BEFORE setting test variables
+	// resetGlobalState() must be called BEFORE setting test variables
 	resetGlobalState()
 	LogLevelStr = "info"
 	PollingIntervalStr = "10z"
@@ -589,7 +589,7 @@ func TestCheckChainsLogic(t *testing.T) {
 	t1 := time.Now()
 	entry1 := &LogEntry{IP: ip, Path: "/step1", UserAgent: ua, Protocol: "HTTP/1.1", Timestamp: t1, Method: "GET", IPVersion: VersionIPv4}
 
-	// FIX: Manually update LastRequestTime, as CheckChains is not responsible for this.
+	// Manually update LastRequestTime, as CheckChains is not responsible for this.
 	DryRunActivityMutex.Lock()
 	activity1 := GetOrCreateActivityUnsafe(DryRunActivityStore, key)
 	activity1.LastRequestTime = t1
@@ -609,7 +609,7 @@ func TestCheckChainsLogic(t *testing.T) {
 	t2 := t1.Add(500 * time.Millisecond) // < 1s min delay
 	entry2Short := &LogEntry{IP: ip, Path: "/step2", UserAgent: ua, Protocol: "HTTP/2.0", Timestamp: t2, Method: "GET", IPVersion: VersionIPv4}
 
-	// FIX: Manually update LastRequestTime
+	// Manually update LastRequestTime
 	DryRunActivityMutex.Lock()
 	activity2 := GetOrCreateActivityUnsafe(DryRunActivityStore, key)
 	activity2.LastRequestTime = t2
@@ -628,7 +628,7 @@ func TestCheckChainsLogic(t *testing.T) {
 	t3 := t1.Add(6 * time.Second) // > 5s max delay (from step 1)
 	entry3Reset := &LogEntry{IP: ip, Path: "/step1", UserAgent: ua, Protocol: "HTTP/1.1", Timestamp: t3, Method: "GET", IPVersion: VersionIPv4}
 
-	// FIX: Manually update LastRequestTime
+	// Manually update LastRequestTime
 	DryRunActivityMutex.Lock()
 	activity3 := GetOrCreateActivityUnsafe(DryRunActivityStore, key)
 	activity3.LastRequestTime = t3
@@ -647,7 +647,7 @@ func TestCheckChainsLogic(t *testing.T) {
 	t4 := t3.Add(2 * time.Second) // 2s delay (> 1s min delay)
 	entry4Complete := &LogEntry{IP: ip, Path: "/step2", UserAgent: ua, Protocol: "HTTP/2.0", Timestamp: t4, Method: "GET", IPVersion: VersionIPv4}
 
-	// FIX: Manually update LastRequestTime
+	// Manually update LastRequestTime
 	DryRunActivityMutex.Lock()
 	activity4 := GetOrCreateActivityUnsafe(DryRunActivityStore, key)
 	activity4.LastRequestTime = t4
@@ -683,7 +683,7 @@ func TestCheckChainsLogic(t *testing.T) {
 	// --- 5. Blocked Skip Check (Should not process this log line) ---
 	t5 := t4.Add(1 * time.Minute) // Still within 5m block window
 
-	// FIX: Simulate log line arrival by calling ProcessLogLine.
+	// Simulate log line arrival by calling ProcessLogLine.
 	// This function contains the logic to skip chain checks AND update activity.LastRequestTime.
 	// logTimeFormat is retrieved from the uploaded log_parse.go file.
 	const logTimeFormat = "02/Jan/2006:15:04:05 -0700"

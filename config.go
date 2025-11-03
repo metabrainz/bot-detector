@@ -307,7 +307,7 @@ func ChainWatcher() {
 				continue
 			}
 
-			// NEW: Cleanup any blocked IPs that are now whitelisted.
+			// Cleanup any blocked IPs that are now whitelisted.
 			// This must be run AFTER LoadChainsFromYAML has successfully updated WhitelistNets.
 			CheckAndRemoveWhitelistedBlocks()
 
