@@ -112,6 +112,31 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 	}
 	// ---------------------------------------------------------------------------------
 
+	// Define the expected version for this application code.
+	if config.Version == "" {
+		// Enforce that the 'version' field must be present.
+		return nil, fmt.Errorf("configuration file is missing the required 'version' field")
+	}
+
+	// 1. Check if the version is supported.
+	isSupported := false
+	for _, v := range SupportedConfigVersions {
+		if config.Version == v {
+			isSupported = true
+			break
+		}
+	}
+
+	if !isSupported {
+		// 2. Report an error showing the unsupported version and the list of supported ones.
+		supportedList := strings.Join(SupportedConfigVersions, ", ")
+		return nil, fmt.Errorf(
+			"configuration version mismatch: got '%s'. This version of the application supports: %s. Please update your YAML config file.",
+			config.Version,
+			supportedList,
+		)
+	}
+
 	// Parse Whitelist CIDRs
 	newWhitelistNets := make([]*net.IPNet, 0)
 	for _, cidr := range config.WhitelistCIDRs {
