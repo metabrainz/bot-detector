@@ -1,146 +1,118 @@
 version: "1.0"
 whitelist_cidrs:
-  - "10.0.0.0/8"     # Example: Whitelist entire 10.x.x.x network
-  - "192.0.2.10/32"  # Whitelist the specific IP that completes Chain 1 (Test-MatchKey-IPv4-Only)
-  - "2001:db8::/64"  # Example: Whitelist an IPv6 range
-  - "192.0.2.20/31"  # Whitelist 192.0.2.20 and 192.0.2.21
+  - "10.0.0.0/8" # Example: Whitelist entire 10.x.x.x network
+  - "192.0.2.10/32" # Whitelist the specific IP that completes Chain 1 (Test-MatchKey-IPv4-Only)
+  - "2001:db8::/64" # Example: Whitelist an IPv6 range
+  - "192.0.2.20/31" # Whitelist 192.0.2.20 and 192.0.2.21
 duration_tables:
-    5m: table_5m
-    1h: table_1h
+  5m: table_5m
+  1h: table_1h
 default_block_duration: "5m"
 chains:
-
-# --- 1. MatchKey: IPv4 Only & Max_Delay (SUCCESS) ---
-- name: "Test-MatchKey-IPv4-Only"
-  action: "block"
-  block_duration: "1h"
-  match_key: "ipv4"
-  steps:
-  - order: 1
-    field_matches:
-      Path: "^/v4/start$"
-  - order: 2
-    field_matches:
-      Path: "^/v4/end$"
-    max_delay: "5s"
-
-# --- 2. MatchKey: IPv6 + UserAgent (Success) ---
-- name: "Test-MatchKey-IPv6-UA-Strict"
-  action: "block"
-  block_duration: "1h"
-  match_key: "ipv6_ua"
-  steps:
-  - order: 1
-    field_matches:
-      Path: "^/v6/start$"
-      UserAgent: "^Bot-A/1.0$"
-  - order: 2
-    field_matches:
-      Path: "^/v6/end$"
-    max_delay: "5s"
-
-# --- 3. Time: Min_Delay Success (IP-only key) ---
-- name: "Test-MinDelay-Success"
-  action: "log"
-  match_key: "ip"
-  steps:
-  - order: 1
-    field_matches:
-      Path: "^/delay/start$"
-    min_delay: "2s" # Requires >2s since IP's last request (which was at 17:00:00).
-  - order: 2
-    field_matches:
-      Path: "^/delay/end$"
-
-# --- 4. Time: Max_Delay Reset (FAILURE) ---
-- name: "Test-MaxDelay-Reset"
-  action: "log"
-  match_key: "ip"
-  steps:
-  - order: 1
-    field_matches:
-      Path: "^/max/start$"
-  - order: 2
-    field_matches:
-      Path: "^/max/fail$"
-    max_delay: "1s"
-
-# --- 5. MatchKey: IP + UA Spoof (FAILURE: Key Change) ---
-- name: "Test-MatchKey-IP-UA-Spoof"
-  action: "log"
-  match_key: "ip_ua"
-  steps:
-  - order: 1
-    field_matches:
-      Path: "^/spoof/start$"
-      UserAgent: "^UA-Original$"
-  - order: 2
-    field_matches:
-      Path: "^/spoof/end$"
-
-# --- 6. Field: Method and StatusCode Match (SUCCESS) ---
-- name: "Test-Fields-Method-Status"
-  action: "log"
-  match_key: "ip"
-  steps:
-  - order: 1
-    field_matches:
-      Path: "^/api/auth$"
-      Method: "POST"
-      StatusCode: "^403$"
-  - order: 2
-    field_matches:
-      Path: "^/api/auth$"
-      StatusCode: "^403$"
-    max_delay: "1s"
-
-# --- 7. Field: Referrer Match (Full URL) (SUCCESS) ---
-- name: "Test-Field-Referrer-Full"
-  action: "log"
-  match_key: "ip"
-  steps:
-  - order: 1
-    field_matches:
-      Path: "^/checkout$"
-      Referrer: "^https://external\\.payment\\..gateway/return.html\\?id=.*$"
-  - order: 2
-    field_matches:
-      Path: "^/complete$"
-    max_delay: "10s"
-
-# --- 8. Field: ReferrerPrevPath Match (Path Only) (SUCCESS) ---
-- name: "Test-Field-ReferrerPrevPath-Path"
-  action: "log"
-  match_key: "ip"
-  steps:
-  - order: 1
-    field_matches:
-      Path: "^/product/buy$"
-      ReferrerPrevPath: "^/catalog/item/456$"
-  - order: 2
-    field_matches:
-      Path: "^/product/confirm$"
-    max_delay: "5s"
-
-# --- 9. Field: ReferrerPrevPath (FAILURE: Path does not match) ---
-- name: "Test-Field-ReferrerPrevPath-Failure"
-  action: "log"
-  match_key: "ip"
-  steps:
-  - order: 1
-    field_matches:
-      Path: "^/product/fail$"
-      ReferrerPrevPath: "^/catalog/item/999$" # Intentional failure path
-  - order: 2
-    field_matches:
-      Path: "^/product/confirm$"
-    max_delay: "5s"
-# --- 10. Field: Block User Agent (SUCCESS) ---
-- name: "Test-Field-BlockUserAgent"
-  action: "log"
-  match_key: "ip_ua"
-  steps:
-  - order: 1
-    field_matches:
-      UserAgent: "^badguy$"
-      Protocol: "^HTTP/1\\.1$"
+  # --- 1. MatchKey: IPv4 Only & Max_Delay (SUCCESS) ---
+  - name: "Test-MatchKey-IPv4-Only"
+    action: "block"
+    block_duration: "1h"
+    match_key: "ipv4"
+    steps:
+      - field_matches:
+          Path: "^/v4/start$"
+      - field_matches:
+          Path: "^/v4/end$"
+        max_delay: "5s"
+  # --- 2. MatchKey: IPv6 + UserAgent (Success) ---
+  - name: "Test-MatchKey-IPv6-UA-Strict"
+    action: "block"
+    block_duration: "1h"
+    match_key: "ipv6_ua"
+    steps:
+      - field_matches:
+          Path: "^/v6/start$"
+          UserAgent: "^Bot-A/1.0$"
+      - field_matches:
+          Path: "^/v6/end$"
+        max_delay: "5s"
+  # --- 3. Time: Min_Delay Success (IP-only key) ---
+  - name: "Test-MinDelay-Success"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          Path: "^/delay/start$"
+        min_delay: "2s" # Requires >2s since IP's last request (which was at 17:00:00).
+      - field_matches:
+          Path: "^/delay/end$"
+  # --- 4. Time: Max_Delay Reset (FAILURE) ---
+  - name: "Test-MaxDelay-Reset"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          Path: "^/max/start$"
+      - field_matches:
+          Path: "^/max/fail$"
+        max_delay: "1s"
+  # --- 5. MatchKey: IP + UA Spoof (FAILURE: Key Change) ---
+  - name: "Test-MatchKey-IP-UA-Spoof"
+    action: "log"
+    match_key: "ip_ua"
+    steps:
+      - field_matches:
+          Path: "^/spoof/start$"
+          UserAgent: "^UA-Original$"
+      - field_matches:
+          Path: "^/spoof/end$"
+  # --- 6. Field: Method and StatusCode Match (SUCCESS) ---
+  - name: "Test-Fields-Method-Status"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          Path: "^/api/auth$"
+          Method: "POST"
+          StatusCode: "^403$"
+      - field_matches:
+          Path: "^/api/auth$"
+          StatusCode: "^403$"
+        max_delay: "1s"
+  # --- 7. Field: Referrer Match (Full URL) (SUCCESS) ---
+  - name: "Test-Field-Referrer-Full"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          Path: "^/checkout$"
+          Referrer: "^https://external\\.payment\\..gateway/return.html\\?id=.*$"
+      - field_matches:
+          Path: "^/complete$"
+        max_delay: "10s"
+  # --- 8. Field: ReferrerPrevPath Match (Path Only) (SUCCESS) ---
+  - name: "Test-Field-ReferrerPrevPath-Path"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          Path: "^/product/buy$"
+          ReferrerPrevPath: "^/catalog/item/456$"
+      - field_matches:
+          Path: "^/product/confirm$"
+        max_delay: "5s"
+  # --- 9. Field: ReferrerPrevPath (FAILURE: Path does not match) ---
+  - name: "Test-Field-ReferrerPrevPath-Failure"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          Path: "^/product/fail$"
+          ReferrerPrevPath: "^/catalog/item/999$" # Intentional failure path
+      - field_matches:
+          Path: "^/product/confirm$"
+        max_delay: "5s"
+  # --- 10. Field: Block User Agent (SUCCESS) ---
+  - name: "Test-Field-BlockUserAgent"
+    action: "log"
+    match_key: "ip_ua"
+    steps:
+      - field_matches:
+          UserAgent: "^badguy$"
+          Protocol: "^HTTP/1\\.1$"
