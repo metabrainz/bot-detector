@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-// ErrLineSkipped is returned by ReadLineWithLimit when the line length exceeds the limit.
-// REMOVED: var ErrLineSkipped = errors.New("log line exceeded limit and was skipped")
-// The variable is already defined in constants.go.
-
 // ReadLineWithLimit reads a line from the reader up to the given limit (in bytes).
 // If the line exceeds the limit, it returns the partial line and ErrLineSkipped.
 func ReadLineWithLimit(reader *bufio.Reader, limit int) (string, error) {
