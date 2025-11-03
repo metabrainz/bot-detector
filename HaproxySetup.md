@@ -24,6 +24,8 @@ global
 	log /dev/log	local1 notice
 	chroot /var/lib/haproxy
 	stats socket /run/haproxy/admin.sock mode 660 level admin
+    # for communication with haproxy you may want to use tcp instead of local socket
+    # especially with multiple instances
     stats socket ipv4@127.0.0.1:9999  level admin  expose-fd listeners
 	stats timeout 30s
 	user haproxy
@@ -39,11 +41,13 @@ global
     ssl-default-bind-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
     ssl-default-bind-options ssl-min-ver TLSv1.2 no-tls-tickets
 
-    localpeer localnode
+    # see peears section below, change depending on which node this config is
+    localpeer node1
 
 peers mypeers
     # to save stick tables between restarts
-    peer localnode 127.0.0.1:10000
+    peer node1 192.168.1.1:10000
+    peer node2 192.168.1.2:10000
 
 defaults
 	log	global
@@ -120,7 +124,7 @@ This file is the **master list** of all targets and must be **identical** on bot
 YAML
 
 ```yaml
-# chains.yaml (Identical on both rex and rudi)
+# chains.yaml
 
 version: "1.0"
 # ... other config ...
