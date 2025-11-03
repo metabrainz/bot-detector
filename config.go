@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -103,8 +104,27 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 	// Parse Whitelist CIDRs
 	newWhitelistNets := make([]*net.IPNet, 0)
 	for _, cidr := range config.WhitelistCIDRs {
+		normalizedCIDR := cidr
+
+		// Check if the input is a bare IP (no '/') and is a valid IP address.
+		// If it's a bare IP, append the appropriate mask (/32 for IPv4, /128 for IPv6)
+		if !strings.Contains(cidr, "/") {
+			if ip := net.ParseIP(cidr); ip != nil {
+				if ip.To4() != nil {
+					// It's a bare IPv4 address
+					normalizedCIDR = cidr + "/32"
+				} else {
+					// It's a bare IPv6 address
+					normalizedCIDR = cidr + "/128"
+				}
+			} else {
+				// Not a valid bare IP, will fail net.ParseCIDR below
+				normalizedCIDR = cidr
+			}
+		}
+
 		// net.ParseCIDR returns the IP and the IPNet. The IPNet is what we store for comparison.
-		_, ipNet, err := net.ParseCIDR(cidr)
+		_, ipNet, err := net.ParseCIDR(normalizedCIDR)
 		if err != nil {
 			return nil, fmt.Errorf("invalid CIDR in whitelist: %s: %w", cidr, err)
 		}
