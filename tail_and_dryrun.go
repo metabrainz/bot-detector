@@ -122,12 +122,16 @@ func LiveLogTailer() {
 			}
 			reader = bufio.NewReader(file)
 
-			// Get initial file stats for rotation detection
-			initialStat, _ = os.Stat(LogFilePath)
-			if initialStat != nil {
+			// Get initial file stats from the opened file handle to prevent a race condition.
+			initialStat, statErr := file.Stat()
+			if statErr != nil {
+				LogOutput(LevelWarning, "TAIL_ERROR", "Failed to stat opened file: %v. Proceeding without full rotation check.", statErr)
+			} else {
+				// We are guaranteed to be on Linux, so we assert to syscall.Stat_t
 				initialSysStat := initialStat.Sys().(*syscall.Stat_t)
 				initialDev = initialSysStat.Dev
 				initialIno = initialSysStat.Ino
+
 				// When opening, jump to the end for live tailing
 				_, err = file.Seek(0, io.SeekEnd)
 				if err != nil {
@@ -140,8 +144,6 @@ func LiveLogTailer() {
 
 		// 2. Read lines in a sub-loop
 		for {
-			lineNumber++
-
 			// This call will block until a new line is available or an error occurs (like EOF)
 			line, err := ReadLineWithLimit(reader, MaxLogLineSize)
 			finalErr := err
@@ -153,6 +155,7 @@ func LiveLogTailer() {
 
 			if finalErr != nil {
 				if finalErr == io.EOF { // Standard check for live tail: sleep and check rotation
+					// We must check the file on disk, not the opened file handle, for rotation/truncation.
 					currentStat, statErr := os.Stat(LogFilePath)
 					if statErr == nil {
 						if currentStat.Size() < initialStat.Size() {
@@ -161,6 +164,8 @@ func LiveLogTailer() {
 							file = nil
 							break
 						}
+
+						// Check for Inode/Device change (rotation)
 						currentSysStat := currentStat.Sys().(*syscall.Stat_t)
 						if currentSysStat.Dev != initialDev || currentSysStat.Ino != initialIno {
 							LogOutput(LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialIno, currentSysStat.Ino)
@@ -187,6 +192,7 @@ func LiveLogTailer() {
 			}
 
 			// 3. Process the log line
+			lineNumber++
 			ProcessLogLine(line, lineNumber)
 		}
 	}
