@@ -188,13 +188,11 @@ chains:
       action: block
       block_duration: 5m
       steps:
-          - order: 1
-            field_matches:
+          - field_matches:
                 Path: /step1
             max_delay: 5s
             min_delay: 1s
-          - order: 2
-            field_matches:
+          - field_matches:
                 Path: /step2
                 Method: GET
             max_delay: 3s
@@ -204,8 +202,7 @@ chains:
       action: log
       block_duration: 1h # Should be ignored for 'log' action
       steps:
-          - order: 1
-            field_matches:
+          - field_matches:
                 Path: /test_log
 `
 
@@ -226,8 +223,7 @@ chains:
       action: block
       block_duration: 5z
       steps:
-          - order: 1
-            field_matches:
+          - field_matches:
                 Path: /step1
 `
 
@@ -240,8 +236,7 @@ chains:
       action: block
       block_duration: 5m
       steps:
-          - order: 1
-            field_matches:
+          - field_matches:
                 Path: [
 `
 
@@ -262,13 +257,11 @@ chains:
       action: block
       block_duration: 5m
       steps:
-          - order: 1
-            max_delay: 5s
+          - max_delay: 5s
             min_delay: 1s
             field_matches:
                 Path: "^/step1$"
-          - order: 2
-            max_delay: 5s
+          - max_delay: 5s
             min_delay: 1s
             field_matches:
                 Path: "^/step2$"
