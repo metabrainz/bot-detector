@@ -60,6 +60,7 @@ func resetGlobalState() {
 // 2. Send a newline response when 'success' is true (to prevent client read timeout).
 // 3. Trim the newline from the recorded command (to match the test assertion).
 // 4. Accept a Mutex to make command recording thread-safe.
+// Improved MockHAProxyServer with better shutdown handling
 func MockHAProxyServer(t *testing.T, addr string, commandsReceived *[]string, mu *sync.Mutex, wg *sync.WaitGroup, success bool) net.Listener {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -70,47 +71,40 @@ func MockHAProxyServer(t *testing.T, addr string, commandsReceived *[]string, mu
 	go func() {
 		defer wg.Done()
 
-		// Loop to accept multiple concurrent connections (required for UnblockIP)
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
-				// This is the expected exit for the server when the test closes the listener
+				// Check if this is a normal shutdown or unexpected error
+				if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
+					// Expected shutdown - exit gracefully
+					return
+				}
+				// Log unexpected errors but still exit
+				t.Logf("Mock server %s accept error: %v", addr, err)
 				return
 			}
 
-			// Handle the connection in a new goroutine to process concurrently
-			go func() {
-				defer conn.Close()
+			go func(c net.Conn) {
+				defer c.Close()
 
-				reader := bufio.NewReader(conn)
-
-				// Read the command
+				reader := bufio.NewReader(c)
 				command, err := reader.ReadString('\n')
 				if err != nil && err != io.EOF {
-					// Log the error but don't fail the test
 					t.Logf("Mock server %s command read error: %v", addr, err)
 					return
 				}
 
-				// Record the command
-				// Trim the newline before recording to match the assertion format
 				trimmedCommand := strings.TrimSpace(command)
-
 				if trimmedCommand != "" {
-					// Use mutex to make slice append thread-safe
 					mu.Lock()
 					*commandsReceived = append(*commandsReceived, trimmedCommand)
 					mu.Unlock()
 				}
 
-				// Send a response for successful commands to prevent client read timeout
 				if success {
-					// Send a simple newline response to unblock the client's ReadString('\n')
-					conn.Write([]byte("\n"))
+					c.Write([]byte("\n"))
 				}
-				// If success is false, we intentionally don't respond to simulate a failure/timeout.
-
-			}() // End connection goroutine
+			}(conn)
 		}
 	}()
 
