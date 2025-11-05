@@ -2,8 +2,35 @@ package main
 
 import (
 	"regexp"
+	"sync"
 	"time"
 )
+
+// --- EXTERNAL INTERFACES ---
+
+// IPVersion is used internally to track whether an IP is v4 or v6.
+type IPVersion byte
+
+// Blocker defines the interface for external IP blocking services (e.g., HAProxy).
+type Blocker interface {
+	Block(ip string, version IPVersion, duration time.Duration) error
+}
+
+// --- DEPENDENCY CONTAINER ---
+
+// Processor holds all necessary dependencies and state for log processing,
+// making it easy to mock/stub external calls and manage state in tests.
+type Processor struct {
+	ActivityStore     map[TrackingKey]*BotActivity
+	ActivityMutex     *sync.RWMutex
+	Chains            []BehavioralChain
+	ChainMutex        *sync.RWMutex // Assuming ChainMutex is still needed for Chain loading
+	DryRun            bool
+	LogFunc           func(level LogLevel, tag string, format string, args ...interface{})
+	IsWhitelistedFunc func(ip string) bool
+	// The Blocker interface allows injecting the real HAProxy implementation or a mock for tests.
+	Blocker Blocker
+}
 
 // --- YAML DATA STRUCTURES ---
 

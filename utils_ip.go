@@ -5,9 +5,6 @@ import (
 	"strings"
 )
 
-// IPVersion represents the version of an IP address (0=invalid, 4=IPv4, 6=IPv6).
-type IPVersion byte
-
 const (
 	// VersionInvalid is 0, the default value for a byte, simplifying initialization checks.
 	VersionInvalid IPVersion = 0
