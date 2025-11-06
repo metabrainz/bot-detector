@@ -128,25 +128,26 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 			state = StepState{CurrentStep: 0, LastMatchTime: time.Time{}}
 		}
 
-		// Look for the next step in the chain
-		nextStepIndex := state.CurrentStep
-		if nextStepIndex < len(chain.Steps) {
+		// Use a loop to handle step progression and potential resets (replaces goto).
+		for {
+			nextStepIndex := state.CurrentStep
+			if nextStepIndex >= len(chain.Steps) {
+				break // Chain already completed or no more steps.
+			}
 			step := chain.Steps[nextStepIndex]
 
 			// --- CHECK TIME WINDOWS ---
-			if exists {
-				// Check MaxDelayDuration
+			if exists && state.CurrentStep > 0 { // Time checks only apply after the first step.
 				if step.MaxDelayDuration > 0 && time.Since(state.LastMatchTime) > step.MaxDelayDuration {
 					p.LogFunc(LevelDebug, "RESET", "Chain %s: MaxDelay %v exceeded for key %s. Resetting state.", chain.Name, step.MaxDelayDuration, trackingKey.IPInfo.Address)
 					state.CurrentStep = 0
-					goto UpdateChainProgress // Restart check on step 0
+					continue // Restart loop from step 0.
 				}
 
-				// FIX 2: MinDelayNotMet failure should reset the state, not just continue
 				if step.MinDelayDuration > 0 && time.Since(state.LastMatchTime) < step.MinDelayDuration {
 					p.LogFunc(LevelDebug, "RESET", "Chain %s: MinDelay %v not met for key %s. Resetting state.", chain.Name, step.MinDelayDuration, trackingKey.IPInfo.Address)
-					state.CurrentStep = 0    // Reset state
-					goto UpdateChainProgress // Proceed to state update/cleanup (which deletes the state)
+					state.CurrentStep = 0
+					continue // Restart loop from step 0.
 				}
 			}
 
@@ -156,11 +157,9 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 				matchValue := ""
 				var err error
 
-				// Special handling for Referrer: extract path first.
 				if fieldName == "Referrer" {
 					matchValue, err = ExtractReferrerPath(entry.Referrer)
 					if err != nil {
-						// Log only if referrer is not empty but fails to parse.
 						if entry.Referrer != "" {
 							p.LogFunc(LevelDebug, "WARN", "Chain %s: Failed to extract path from referrer '%s': %v", chain.Name, entry.Referrer, err)
 						}
@@ -176,74 +175,60 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 					}
 				}
 
-				// The step's CompiledRegexes field is pre-compiled during config loading.
 				if !step.CompiledRegexes[fieldName].MatchString(matchValue) {
 					match = false
 					break
 				}
 			}
 
-			if match {
-				// Step matched! Advance the state.
-				state.CurrentStep++
-				state.LastMatchTime = entry.Timestamp
+			if !match {
+				break // No match on this step, exit the loop for this chain.
+			}
 
-				// --- CHECK FOR CHAIN COMPLETION ---
-				if state.CurrentStep == len(chain.Steps) {
-					isWhitelisted := p.IsWhitelistedFunc(entry.IPInfo)
+			// Step matched! Advance the state.
+			state.CurrentStep++
+			state.LastMatchTime = entry.Timestamp
 
-					// 3. Take action (block/log)
-					if chain.Action == "block" {
-						// CONSOLIDATED BLOCKING LOGIC for action: block
+			// --- CHECK FOR CHAIN COMPLETION ---
+			if state.CurrentStep == len(chain.Steps) {
+				isWhitelisted := p.IsWhitelistedFunc(entry.IPInfo)
 
-						// 4. Send command to external blocker unless in DryRun mode
-						if p.DryRun {
-							p.LogFunc(LevelCritical, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
-						} else if !isWhitelisted {
-							p.LogFunc(LevelCritical, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v.", chain.Name, entry.IPInfo.Address, chain.BlockDuration)
-
-							// Attempt to block the IP via the injected Blocker
-							if err := p.Blocker.Block(entry.IPInfo, chain.BlockDuration); err != nil {
-								// Error is logged inside Block, no action needed here
-							}
+				// 3. Take action (block/log)
+				if chain.Action == "block" {
+					if p.DryRun {
+						p.LogFunc(LevelCritical, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
+					} else if !isWhitelisted {
+						p.LogFunc(LevelCritical, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v.", chain.Name, entry.IPInfo.Address, chain.BlockDuration)
+						if err := p.Blocker.Block(entry.IPInfo, chain.BlockDuration); err != nil {
+							// Error is logged inside Block, no action needed here
 						}
-
-						// 5. Optimization: Mark the IP-ONLY key as blocked for skipping future log lines from this IP.
-						// We can reuse the IPInfo from the LogEntry.
-						ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
-
-						// Select the correct store/mutex for the IP-only block update based on p.DryRun
-						// NOTE: We do not need a second mutex.Lock/Unlock because we already have the
-						// primary mutex for the current activity locked (either p.ActivityMutex or DryRunActivityMutex),
-						// and the IP-only key *must* reside in the same global map.
-
-						// GetOrCreateActivityUnsafe is used because we hold the current activity's lock.
-						ipActivity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
-						ipActivity.IsBlocked = true
-						ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration) // Set block expiration time
-
-					} else if chain.Action == "log" {
-
-						// CONSOLIDATED LOGGING LOGIC for action: log
-						baseMessage := fmt.Sprintf("LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IPInfo.Address)
-
-						if isWhitelisted {
-							// Consolidate into a single log line when whitelisted
-							p.LogFunc(LevelCritical, "ALERT", "%s (IP is whitelisted: NO FURTHER ACTION TAKEN)", baseMessage)
-						} else {
-							// Original log output for non-whitelisted IPs
-							p.LogFunc(LevelCritical, "ALERT", baseMessage)
-						}
-
 					}
 
-					// Reset state *after* action is taken.
-					state.CurrentStep = 0
+					// Mark in-memory state as blocked for both live and dry runs.
+					ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
+					ipActivity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
+					ipActivity.IsBlocked = true
+					ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration)
+
+					currentActivity.IsBlocked = true
+					currentActivity.BlockedUntil = ipActivity.BlockedUntil
+
+				} else if chain.Action == "log" {
+					baseMessage := fmt.Sprintf("LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IPInfo.Address)
+					if isWhitelisted {
+						p.LogFunc(LevelCritical, "ALERT", "%s (IP is whitelisted: NO FURTHER ACTION TAKEN)", baseMessage)
+					} else {
+						p.LogFunc(LevelCritical, "ALERT", baseMessage)
+					}
 				}
+
+				// Reset state *after* action is taken.
+				state.CurrentStep = 0
 			}
+			// If the chain did not complete, break from the for loop to save the new state.
+			break
 		}
 
-	UpdateChainProgress: // Label for the single goto
 		// 5. Conditional Update and Cleanup of ChainProgress State (Memory Optimization)
 		// Only store the state if the key is actively progressing (CurrentStep > 0).
 		if state.CurrentStep > 0 {
