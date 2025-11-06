@@ -44,6 +44,30 @@ func GetOrCreateActivity(trackingKey TrackingKey) *BotActivity {
 	return GetOrCreateActivityUnsafe(store, trackingKey)
 }
 
+// purgeIdleActivities contains the core logic for iterating through the activity store
+// and removing entries that have been idle for longer than the IdleTimeout.
+// This function is separate from the infinite loop to allow for direct testing.
+func purgeIdleActivities(p *Processor) int {
+	p.ActivityMutex.Lock()
+	defer p.ActivityMutex.Unlock()
+
+	now := time.Now()
+	deletedCount := 0
+
+	for trackingKey, activity := range p.ActivityStore {
+		if now.Sub(activity.LastRequestTime) > IdleTimeout {
+			if trackingKey.UA != "" {
+				p.LogFunc(LevelDebug, "CLEANUP", "Purging idle key: %s (UA: %s)", trackingKey.IPInfo.Address, trackingKey.UA)
+			} else {
+				p.LogFunc(LevelDebug, "CLEANUP", "Purging idle IP: %s", trackingKey.IPInfo.Address)
+			}
+			delete(p.ActivityStore, trackingKey)
+			deletedCount++
+		}
+	}
+	return deletedCount
+}
+
 // CleanUpIdleActivity periodically purges state for IPs inactive longer than IdleTimeout.
 func CleanUpIdleActivity(p *Processor) {
 	if p.DryRun {
@@ -53,24 +77,7 @@ func CleanUpIdleActivity(p *Processor) {
 	p.LogFunc(LevelDebug, "CLEANUP", "Starting Cleanup routine. Purging state older than %v every %v.", IdleTimeout, CleanupInterval)
 	for {
 		time.Sleep(CleanupInterval)
-
-		p.ActivityMutex.Lock()
-		now := time.Now()
-		deletedCount := 0
-
-		for trackingKey, activity := range p.ActivityStore {
-			if now.Sub(activity.LastRequestTime) > IdleTimeout {
-				if trackingKey.UA != "" {
-					p.LogFunc(LevelDebug, "CLEANUP", "Purging idle key: %s (UA: %s)", trackingKey.IPInfo.Address, trackingKey.UA)
-				} else {
-					p.LogFunc(LevelDebug, "CLEANUP", "Purging idle IP: %s", trackingKey.IPInfo.Address)
-				}
-				delete(p.ActivityStore, trackingKey)
-				deletedCount++
-			}
-		}
-		p.ActivityMutex.Unlock()
-
+		deletedCount := purgeIdleActivities(p)
 		if deletedCount > 0 {
 			p.LogFunc(LevelDebug, "CLEANUP", "Complete: Purged %d idle IP states. Current active keys: %d", deletedCount, len(p.ActivityStore))
 		}
