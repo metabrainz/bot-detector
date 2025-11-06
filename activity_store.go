@@ -8,13 +8,13 @@ import (
 // --- GLOBAL STATE: Activity Stores ---
 var (
 	ActivityStore = make(map[TrackingKey]*BotActivity)
-	ActivityMutex sync.Mutex // Mutex protecting concurrent access to ActivityStore.
+	ActivityMutex sync.RWMutex
 
 	DryRunActivityStore = make(map[TrackingKey]*BotActivity)
-	DryRunActivityMutex sync.Mutex
+	DryRunActivityMutex sync.RWMutex
 )
 
-// New helper: non-locking variant used when caller already holds the mutex.
+// Non-locking variant used when caller already holds the mutex.
 func GetOrCreateActivityUnsafe(store map[TrackingKey]*BotActivity, trackingKey TrackingKey) *BotActivity {
 	if activity, exists := store[trackingKey]; exists {
 		return activity
@@ -30,6 +30,7 @@ func GetOrCreateActivityUnsafe(store map[TrackingKey]*BotActivity, trackingKey T
 // GetOrCreateActivity retrieves or initializes a BotActivity struct for a given tracking key, ensuring thread safety.
 func GetOrCreateActivity(trackingKey TrackingKey) *BotActivity {
 	store := ActivityStore
+	// Note: Mutex pointer variable type is correctly derived from the global var type (sync.RWMutex)
 	mutex := &ActivityMutex
 
 	if DryRun {

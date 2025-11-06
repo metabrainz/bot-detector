@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -29,34 +30,47 @@ func GetMatchValue(fieldName string, entry *LogEntry) (string, error) {
 	}
 }
 
-// CheckChains iterates through all chains and updates the IP's progress.
-func CheckChains(entry *LogEntry) {
+// ExtractReferrerPath safely parses the path from a full URL string.
+func ExtractReferrerPath(referrer string) (string, error) {
+	if referrer == "" {
+		return "", fmt.Errorf("referrer is empty")
+	}
+	u, parseErr := url.Parse(referrer)
+	if parseErr != nil {
+		return referrer, fmt.Errorf("failed to parse URL from referrer: %w", parseErr)
+	}
+	if u.Path == "" {
+		return referrer, fmt.Errorf("URL parsed but path is empty")
+	}
+	return u.Path, nil
+}
 
-	ChainMutex.RLock()
-	currentChains := Chains
-	ChainMutex.RUnlock()
+// CheckChains is refactored as a method on Processor.
+func (p *Processor) CheckChains(entry *LogEntry) {
+
+	// Access chains and mutex via the processor struct
+	p.ChainMutex.RLock()
+	currentChains := p.Chains
+	p.ChainMutex.RUnlock()
 
 	for _, chain := range currentChains {
 
+		// GetTrackingKey is assumed to be accessible in package scope
 		trackingKey := GetTrackingKey(&chain, entry)
 
 		if trackingKey == (TrackingKey{}) {
-			LogOutput(LevelDebug, "SKIP", "IP %s: Skipped chain '%s'. IP version does not match required key type (%s).", entry.IP, chain.Name, chain.MatchKey)
+			p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped chain '%s'. IP version does not match required key type (%s).", entry.IP, chain.Name, chain.MatchKey)
 			continue
 		}
 
-		// Choose appropriate store & mutex based on mode.
-		store := ActivityStore
-		mutex := &ActivityMutex
-		if DryRun {
-			store = DryRunActivityStore
-			mutex = &DryRunActivityMutex
-		}
+		// Choose appropriate store & mutex based on mode (already done by Processor construction).
+		store := p.ActivityStore
+		mutex := p.ActivityMutex
 
 		// Lock once for operations that need atomic access.
 		mutex.Lock()
 
-		// Use unsafe variant since we already hold the mutex.
+		// GetOrCreateActivityUnsafe is assumed to be accessible in package scope
 		activity := GetOrCreateActivityUnsafe(store, trackingKey)
 
 		state, exists := activity.ChainProgress[chain.Name]
@@ -91,9 +105,8 @@ func CheckChains(entry *LogEntry) {
 				timeSinceLastHit := entry.Timestamp.Sub(timeSource)
 
 				// Only skip if the time difference is > 0 but < min_delay.
-				// This allows hits logged in the same second (0s difference) to proceed.
 				if timeSinceLastHit > 0 && timeSinceLastHit < nextStep.MinDelayDuration {
-					LogOutput(LevelDebug, "SKIP", "IP %s: Hit for step %d of chain '%s' skipped (delay too short: %v < %v).", entry.IP, nextStepIndex+1, chain.Name, timeSinceLastHit, nextStep.MinDelayDuration)
+					p.LogFunc(LevelDebug, "SKIP", "IP %s: Hit for step %d of chain '%s' skipped (delay too short: %v < %v).", entry.IP, nextStepIndex+1, chain.Name, timeSinceLastHit, nextStep.MinDelayDuration)
 					mutex.Unlock()
 					continue
 				}
@@ -101,15 +114,12 @@ func CheckChains(entry *LogEntry) {
 		}
 
 		// 2. Maximum Delay Check: Reset progress if delay exceeds the Max Delay Duration.
-		// We now check the MaxDelayDuration on the *current target step* (nextStep)
-		// when progressing from a previously matched step (CurrentStep > 0).
 		if state.CurrentStep > 0 && nextStepIndex < len(chain.Steps) {
 			delay := entry.Timestamp.Sub(state.LastMatchTime)
-			LogOutput(LevelDebug, "DEBUG", "IP %s: Checking Max Delay for transition to Step %d. Delay: %v", entry.IP, nextStepIndex+1, delay)
+			p.LogFunc(LevelDebug, "DEBUG", "IP %s: Checking Max Delay for transition to Step %d. Delay: %v", entry.IP, nextStepIndex+1, delay)
 
-			// Check the MaxDelayDuration of the target step (nextStep)
 			if nextStep.MaxDelayDuration > 0 && delay > nextStep.MaxDelayDuration {
-				LogOutput(LevelDebug, "RESET", "IP %s: Progress on step %d of chain '%s' reset due to max_delay timeout (%v > %v) defined on the target step.", entry.IP, state.CurrentStep, chain.Name, delay, nextStep.MaxDelayDuration)
+				p.LogFunc(LevelDebug, "RESET", "IP %s: Progress on step %d of chain '%s' reset due to max_delay timeout (%v > %v) defined on the target step.", entry.IP, state.CurrentStep, chain.Name, delay, nextStep.MaxDelayDuration)
 				state.CurrentStep = 0
 				nextStepIndex = 0
 				nextStep = chain.Steps[nextStepIndex]
@@ -130,17 +140,12 @@ func CheckChains(entry *LogEntry) {
 				case "Referrer":
 					fieldValue = entry.Referrer
 				case "ReferrerPrevPath":
-					if entry.Referrer != "" {
-						u, parseErr := url.Parse(entry.Referrer)
-						if parseErr == nil && u.Path != "" {
-							fieldValue = u.Path
-						} else {
-							if !DryRun {
-								LogOutput(LevelWarning, "WARN", "Failed to parse URL path from referrer: %s (Error: %v)", entry.Referrer, parseErr)
-							}
-							fieldValue = entry.Referrer
+					var pathErr error
+					fieldValue, pathErr = ExtractReferrerPath(entry.Referrer)
+					if pathErr != nil {
+						if !p.DryRun {
+							p.LogFunc(LevelWarning, "WARN", "Failed to parse URL path from referrer: %s (Error: %v)", entry.Referrer, pathErr)
 						}
-					} else {
 						allFieldsMatch = false
 						break
 					}
@@ -151,7 +156,7 @@ func CheckChains(entry *LogEntry) {
 				}
 
 				if err != nil {
-					LogOutput(LevelError, "ERROR", "Internal error in GetMatchValue for field %s: %v", fieldName, err)
+					p.LogFunc(LevelError, "ERROR", "Internal error in GetMatchValue for field %s: %v", fieldName, err)
 					allFieldsMatch = false
 					break
 				}
@@ -167,9 +172,9 @@ func CheckChains(entry *LogEntry) {
 				isCompletion := state.CurrentStep+1 == len(chain.Steps)
 
 				if isCompletion {
-					LogOutput(LevelDebug, "MATCH", "IP %s: Matched final step %d of chain '%s'. Chain completion detected.", entry.IP, state.CurrentStep+1, chain.Name)
+					p.LogFunc(LevelDebug, "MATCH", "IP %s: Matched final step %d of chain '%s'. Chain completion detected.", entry.IP, state.CurrentStep+1, chain.Name)
 				} else {
-					LogOutput(LevelDebug, "MATCH", "IP %s: Matched step %d of chain '%s'. Progressing to step %d.", entry.IP, state.CurrentStep+1, chain.Name, state.CurrentStep+2)
+					p.LogFunc(LevelDebug, "MATCH", "IP %s: Matched step %d of chain '%s'. Progressing to step %d.", entry.IP, state.CurrentStep+1, chain.Name, state.CurrentStep+2)
 				}
 
 				state.CurrentStep++
@@ -177,19 +182,19 @@ func CheckChains(entry *LogEntry) {
 
 				// 4. Check for Chain Completion
 				if state.CurrentStep == len(chain.Steps) {
-					isWhitelisted := IsIPWhitelisted(entry.IP) // Check whitelist status here
+					isWhitelisted := p.IsWhitelistedFunc(entry.IP)
 
 					if chain.Action == "block" {
 						baseMessage := fmt.Sprintf("BLOCK! Chain: %s completed by IP %s. Attempting to block for %v.", chain.Name, entry.IP, chain.BlockDuration)
 
 						if isWhitelisted {
-							LogOutput(LevelCritical, "ALERT", "%s (IP is whitelisted: BLOCK ACTION SKIPPED)", baseMessage)
+							p.LogFunc(LevelCritical, "ALERT", "%s (IP is whitelisted: BLOCK ACTION SKIPPED)", baseMessage)
 						} else {
-							// Original logic for non-whitelisted block: two logs (ALERT + HAPROXY_BLOCK)
-							LogOutput(LevelCritical, "ALERT", baseMessage)
+							p.LogFunc(LevelCritical, "ALERT", baseMessage)
 
-							if err := BlockIP(entry.IP, entry.IPVersion, chain.BlockDuration); err != nil {
-								// Error is logged inside BlockIP, no action needed here
+							// Use the injected Blocker interface
+							if err := p.Blocker.Block(entry.IP, entry.IPVersion, chain.BlockDuration); err != nil {
+								// Error is logged inside Blocker implementation (or we log it here if Blocker doesn't)
 							}
 
 							// Optimization: Mark the IP-ONLY key as blocked for skipping future log lines from this IP.
@@ -200,16 +205,12 @@ func CheckChains(entry *LogEntry) {
 						}
 
 					} else if chain.Action == "log" {
-
-						// CONSOLIDATED LOGGING LOGIC for action: log
 						baseMessage := fmt.Sprintf("LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IP)
 
 						if isWhitelisted {
-							// Consolidate into a single log line when whitelisted
-							LogOutput(LevelCritical, "ALERT", "%s (IP is whitelisted: NO FURTHER ACTION TAKEN)", baseMessage)
+							p.LogFunc(LevelCritical, "ALERT", "%s (IP is whitelisted: NO FURTHER ACTION TAKEN)", baseMessage)
 						} else {
-							// Original log output for non-whitelisted IPs
-							LogOutput(LevelCritical, "ALERT", baseMessage)
+							p.LogFunc(LevelCritical, "ALERT", baseMessage)
 						}
 					}
 
@@ -220,7 +221,6 @@ func CheckChains(entry *LogEntry) {
 		}
 
 		// 5. Conditional Update and Cleanup of ChainProgress State (Memory Optimization)
-		// Only store the state if the key is actively progressing (CurrentStep > 0).
 		if state.CurrentStep > 0 {
 			activity.ChainProgress[chain.Name] = state
 		} else {
@@ -229,4 +229,34 @@ func CheckChains(entry *LogEntry) {
 
 		mutex.Unlock()
 	}
+}
+
+// CheckChains remains the global function and now acts as a wrapper.
+func CheckChains(entry *LogEntry) {
+	// 1. Determine which store/mutex to use based on the global DryRun flag (assumed to be defined).
+	var store map[TrackingKey]*BotActivity
+	var mutex *sync.RWMutex
+
+	if DryRun {
+		store = DryRunActivityStore
+		mutex = &DryRunActivityMutex
+	} else {
+		store = ActivityStore
+		mutex = &ActivityMutex
+	}
+
+	// 2. Instantiate the Processor struct, using globals for fields.
+	p := &Processor{
+		ActivityStore:     store,
+		ActivityMutex:     mutex,
+		Chains:            Chains,          // Global Chains
+		ChainMutex:        &ChainMutex,     // Global ChainMutex
+		DryRun:            DryRun,          // Global DryRun flag
+		LogFunc:           LogOutput,       // Global LogOutput function
+		IsWhitelistedFunc: IsIPWhitelisted, // Global IsIPWhitelisted function
+		Blocker:           &GlobalBlocker{},
+	}
+
+	// 3. Call the new, testable method.
+	p.CheckChains(entry)
 }

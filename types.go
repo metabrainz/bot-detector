@@ -16,6 +16,17 @@ type Blocker interface {
 	Block(ip string, version IPVersion, duration time.Duration) error
 }
 
+// GlobalBlocker is a concrete implementation of Blocker that uses the original
+// global BlockIP function, ensuring backward compatibility.
+// NOTE: BlockIP must be declared globally in the package scope for this to compile.
+type GlobalBlocker struct{}
+
+// Block calls the original global BlockIP function.
+func (h *GlobalBlocker) Block(ip string, version IPVersion, duration time.Duration) error {
+	// Assuming BlockIP is globally defined elsewhere
+	return BlockIP(ip, version, duration)
+}
+
 // --- DEPENDENCY CONTAINER ---
 
 // Processor holds all necessary dependencies and state for log processing,
