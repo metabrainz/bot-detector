@@ -44,9 +44,8 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 
 	// Log entry template
 	entry := &LogEntry{
-		IP:        targetIP,
+		IPInfo:    NewIPInfo(targetIP),
 		UserAgent: "TestAgent",
-		IPVersion: VersionIPv4,
 		Timestamp: time.Now().Add(-1 * time.Second), // Start time for the first request
 		Path:      "/step/one",
 	}
@@ -109,7 +108,7 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 	}
 
 	// Get the correct tracking key for the activity store (ip_ua)
-	trackingKey := GetTrackingKeyFromLogEntry(Chains, entry)
+	trackingKey := GetTrackingKey(&chain, entry)
 
 	// --- STEP 1: Process the first request --
 
@@ -185,9 +184,8 @@ func TestCheckChains_DryRun(t *testing.T) {
 
 	// Log entry template
 	entry := &LogEntry{
-		IP:        targetIP,
+		IPInfo:    NewIPInfo(targetIP),
 		UserAgent: "TestAgent",
-		IPVersion: VersionIPv4,
 		Timestamp: time.Now().Add(-1 * time.Second),
 		Path:      "/step/one",
 	}
@@ -232,7 +230,7 @@ func TestCheckChains_DryRun(t *testing.T) {
 	DryRunActivityStore = make(map[TrackingKey]*BotActivity) // Initialize the dry-run store
 
 	// Get the correct tracking key for the activity store (ip-only)
-	trackingKey := GetTrackingKeyFromLogEntry(Chains, entry)
+	trackingKey := GetTrackingKey(&chain, entry)
 
 	// --- STEP 1 & 2: Process both steps (which should trigger a "block" in dry run) --
 	processor.CheckChains(entry) // Step 1
@@ -274,9 +272,8 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 
 	// Log entry template
 	entry := &LogEntry{
-		IP:        targetIP,
+		IPInfo:    NewIPInfo(targetIP),
 		UserAgent: "TestAgent",
-		IPVersion: VersionIPv4,
 		Timestamp: time.Now(),
 		Path:      "/step/one",
 	}
@@ -308,7 +305,7 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 		Blocker:           &MockBlocker{},
 	}
 
-	trackingKey := GetTrackingKeyFromLogEntry(Chains, entry)
+	trackingKey := GetTrackingKey(&chain, entry)
 
 	// --- STEP 1: Process the first request ---
 	processor.CheckChains(entry)
@@ -350,9 +347,8 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 
 	// Log entry template
 	entry := &LogEntry{
-		IP:        targetIP,
+		IPInfo:    NewIPInfo(targetIP),
 		UserAgent: "TestAgent",
-		IPVersion: VersionIPv4,
 		Timestamp: time.Now(),
 		Path:      "/step/one",
 	}
@@ -384,7 +380,7 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 		Blocker:           &MockBlocker{},
 	}
 
-	trackingKey := GetTrackingKeyFromLogEntry(Chains, entry)
+	trackingKey := GetTrackingKey(&chain, entry)
 
 	// --- STEP 1: Process the first request ---
 	processor.CheckChains(entry)
@@ -443,9 +439,8 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 
 	// Log entry template for whitelisted IP
 	whitelistedEntry := &LogEntry{
-		IP:        whitelistedIP,
+		IPInfo:    NewIPInfo(whitelistedIP),
 		UserAgent: "TestAgent",
-		IPVersion: VersionIPv4,
 		Timestamp: time.Now(),
 		Path:      "/step/one",
 	}
@@ -476,7 +471,7 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 		Blocker:           mockBlocker,
 	}
 
-	whitelistedKey := GetTrackingKeyFromLogEntry(Chains, whitelistedEntry)
+	whitelistedKey := GetTrackingKey(&chain, whitelistedEntry)
 
 	// --- ACT: Process the whitelisted request ---
 	processor.CheckChains(whitelistedEntry)
@@ -496,15 +491,14 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 
 	// Bonus check: ensure a non-whitelisted IP works normally
 	nonWhitelistedEntry := &LogEntry{
-		IP:        targetIP,
-		IPVersion: VersionIPv4,
+		IPInfo:    NewIPInfo(targetIP),
 		Timestamp: time.Now().Add(1 * time.Second),
 		Path:      "/step/one",
 	}
 
 	// --- ACT: Process the non-whitelisted request ---
 	processor.CheckChains(nonWhitelistedEntry)
-	nonWhitelistedKey := GetTrackingKeyFromLogEntry(Chains, nonWhitelistedEntry)
+	nonWhitelistedKey := GetTrackingKey(&chain, nonWhitelistedEntry)
 
 	// --- Assertions for Non-Whitelisted IP ---
 	ActivityMutex.RLock()
@@ -533,8 +527,7 @@ func TestCheckChains_LogAction(t *testing.T) {
 
 	// Log entry template
 	entry := &LogEntry{
-		IP:        targetIP,
-		IPVersion: VersionIPv4,
+		IPInfo:    NewIPInfo(targetIP),
 		Timestamp: time.Now(),
 		Path:      "/step/one",
 	}
@@ -577,7 +570,7 @@ func TestCheckChains_LogAction(t *testing.T) {
 		Blocker:           mockBlocker,
 	}
 
-	trackingKey := GetTrackingKeyFromLogEntry(Chains, entry)
+	trackingKey := GetTrackingKey(&chain, entry)
 
 	// --- STEP 1: Process the first request ---
 	processor.CheckChains(entry)
@@ -624,8 +617,7 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 
 	// Log entry template
 	entry := &LogEntry{
-		IP:        targetIP,
-		IPVersion: VersionIPv4,
+		IPInfo:    NewIPInfo(targetIP),
 		Timestamp: time.Now(),
 		Path:      "/step/one",
 	}
@@ -668,7 +660,7 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 		Blocker:           mockBlocker,
 	}
 
-	trackingKey := GetTrackingKeyFromLogEntry(Chains, entry)
+	trackingKey := GetTrackingKey(&chain, entry)
 
 	// --- STEP 1: Process the first request ---
 	processor.CheckChains(entry)

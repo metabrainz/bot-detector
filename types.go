@@ -73,14 +73,13 @@ type ChainConfig struct {
 
 type LogEntry struct {
 	Timestamp  time.Time // Actual time of the request (parsed from log, not time.Now()).
-	IP         string
+	IPInfo     IPInfo
 	Path       string
 	Method     string
 	Protocol   string
 	UserAgent  string
 	Referrer   string
 	StatusCode int
-	IPVersion  IPVersion
 }
 
 type StepDef struct {

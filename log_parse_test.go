@@ -50,14 +50,13 @@ func TestParseLogLine(t *testing.T) {
 			expectError: false,
 			expected: &LogEntry{
 				Timestamp:  testTime,
-				IP:         "192.168.1.1",
+				IPInfo:     NewIPInfo("192.168.1.1"),
 				Path:       "/path/to/resource",
 				Method:     "GET",
 				Protocol:   "HTTP/1.1",
 				UserAgent:  validUserAgent,
 				Referrer:   validReferrer,
 				StatusCode: 200,
-				IPVersion:  VersionIPv4,
 			},
 		},
 		{
@@ -66,14 +65,13 @@ func TestParseLogLine(t *testing.T) {
 			expectError: false,
 			expected: &LogEntry{
 				Timestamp:  testTime,
-				IP:         "2001:db8::1",
+				IPInfo:     NewIPInfo("2001:db8::1"),
 				Path:       "/path/to/resource",
 				Method:     "GET",
 				Protocol:   "HTTP/1.1",
 				UserAgent:  validIPv6UserAgent,
 				Referrer:   validReferrer,
 				StatusCode: 200,
-				IPVersion:  VersionIPv6,
 			},
 		},
 		{
@@ -133,11 +131,8 @@ func TestParseLogLine(t *testing.T) {
 					return
 				}
 
-				if entry.IP != tt.expected.IP {
-					t.Errorf("IP mismatch. Expected %s, got %s", tt.expected.IP, entry.IP)
-				}
-				if entry.IPVersion != tt.expected.IPVersion {
-					t.Errorf("IPVersion mismatch. Expected %v, got %v", tt.expected.IPVersion, entry.IPVersion)
+				if entry.IPInfo != tt.expected.IPInfo {
+					t.Errorf("IPInfo mismatch. Expected %+v, got %+v", tt.expected.IPInfo, entry.IPInfo)
 				}
 				if entry.Path != tt.expected.Path {
 					t.Errorf("Path mismatch. Expected %s, got %s", tt.expected.Path, entry.Path)

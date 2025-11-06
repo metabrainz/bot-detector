@@ -46,24 +46,20 @@ func ParseLogLine(line string) (*LogEntry, error) {
 	}
 
 	ipStr := matches[getMatchIndex("IP")]
-	// FIX: Check if the IP is valid immediately.
-	ipVersion := GetIPVersion(ipStr)
-
-	if ipVersion == VersionInvalid {
+	ipInfo := NewIPInfo(ipStr)
+	if ipInfo.Version == VersionInvalid {
 		return nil, fmt.Errorf("invalid or unrecognized IP address '%s'", ipStr)
 	}
-	// END FIX
 
 	return &LogEntry{
 		Timestamp:  timestamp,
-		IP:         ipStr,
+		IPInfo:     ipInfo,
 		Path:       matches[getMatchIndex("Path")],
 		Method:     matches[getMatchIndex("Method")],
 		Protocol:   matches[getMatchIndex("Protocol")],
 		UserAgent:  matches[getMatchIndex("UserAgent")],
 		Referrer:   matches[getMatchIndex("Referrer")],
 		StatusCode: statusCode,
-		IPVersion:  ipVersion, // Use the checked version
 	}, nil
 }
 
@@ -84,19 +80,14 @@ func (p *Processor) ProcessLogLine(line string, lineNumber int) {
 
 	// Basic checks and skips
 	// Note: entry.IPVersion is checked inside ParseLogLine now, so this check should theoretically only
-	// catch cases where ParseLogLine was modified to allow invalid versions, or if the calling context
-	// doesn't trust the ParseLogLine check. Keeping it here as a safeguard for the processor logic.
-	if entry.IPVersion == VersionInvalid {
-		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (Invalid IP version).", entry.IP)
-		return
-	}
-	if p.IsWhitelistedFunc(entry.IP) {
-		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (Whitelisted).", entry.IP)
+	// catch cases where ParseLogLine was modified to allow invalid versions.
+	if p.IsWhitelistedFunc(entry.IPInfo.Address) {
+		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (Whitelisted).", entry.IPInfo.Address)
 		return
 	}
 
 	// 2. Check for in-memory block state based on IP-only key
-	ipOnlyKey := TrackingKey{IPInfo: NewIPInfo(entry.IP), UA: ""}
+	ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
 
 	// Choose appropriate store & mutex based on the Processor's DryRun state.
 	var store map[TrackingKey]*BotActivity
@@ -116,14 +107,14 @@ func (p *Processor) ProcessLogLine(line string, lineNumber int) {
 
 	// If the IP is blocked, check if the block has expired
 	if activity.IsBlocked && time.Now().After(activity.BlockedUntil) {
-		p.LogFunc(LevelInfo, "EXPIRE", "In-memory block expired for IP %s.", entry.IP)
+		p.LogFunc(LevelInfo, "EXPIRE", "In-memory block expired for IP %s.", entry.IPInfo.Address)
 		activity.IsBlocked = false
 		activity.BlockedUntil = time.Time{}
 	}
 
 	// If still blocked, skip further chain checks
 	if activity.IsBlocked {
-		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (Already blocked in memory).", entry.IP)
+		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (Already blocked in memory).", entry.IPInfo.Address)
 		activity.LastRequestTime = entry.Timestamp
 		mutex.Unlock()
 		return

@@ -41,16 +41,16 @@ func GetIPVersion(ipStr string) IPVersion {
 	return VersionInvalid
 }
 
-// GetTrackingKey (Update to use the new type in the switch statement)
+// GetTrackingKey creates a TrackingKey for a given log entry and chain configuration.
+// It respects the chain's MatchKey to decide whether to include the User Agent and to validate the IP version.
 func GetTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
-	ipInfo := NewIPInfo(entry.IP)
-	trackingKey := TrackingKey{IPInfo: ipInfo}
+	ipInfo := entry.IPInfo
 
 	// NOTE: We now compare against the byte constants (4 and 6) instead of strings.
 	switch chain.MatchKey {
 	case "ip", "ip_ua":
 		if ipInfo.Version == VersionInvalid {
-			return TrackingKey{IPInfo: ipInfo} // Return with the invalid IPInfo
+			return TrackingKey{IPInfo: ipInfo} // Return with IPInfo but no UA
 		}
 	case "ipv4", "ipv4_ua":
 		if ipInfo.Version != VersionIPv4 { // Changed from string to byte constant
@@ -61,9 +61,10 @@ func GetTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
 			return TrackingKey{IPInfo: ipInfo}
 		}
 	default:
-		return TrackingKey{IPInfo: ipInfo}
+		return TrackingKey{IPInfo: ipInfo} // Unknown match key, treat as mismatch
 	}
 
+	trackingKey := TrackingKey{IPInfo: ipInfo}
 	if strings.HasSuffix(chain.MatchKey, "_ua") {
 		trackingKey.UA = entry.UserAgent
 	}

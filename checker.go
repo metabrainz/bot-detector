@@ -12,7 +12,7 @@ import (
 func GetMatchValue(fieldName string, entry *LogEntry) (string, error) {
 	switch fieldName {
 	case "IP":
-		return entry.IP, nil
+		return entry.IPInfo.Address, nil
 	case "Path":
 		return entry.Path, nil
 	case "Method":
@@ -52,23 +52,10 @@ func ExtractReferrerPath(referrer string) (string, error) {
 // CheckChains is refactored as a method on Processor.
 func (p *Processor) CheckChains(entry *LogEntry) {
 
-	// 1. Determine the correct key for this log line's activity and acquire the store/mutex.
-	p.ChainMutex.RLock()
-	// Get the tracking key based on what's needed by the configured chains.
-	trackingKey := GetTrackingKeyFromLogEntry(p.Chains, entry)
-	chains := p.Chains
-	p.ChainMutex.RUnlock()
-
-	// If the tracking key is invalid (e.g., wrong IP version for required chains), skip.
-	if trackingKey.IPInfo.Address == "" {
-		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (IP version mismatch for all configured chains).", entry.IP)
-		return
-	}
-
 	// FIX 1: Check whitelisting immediately after acquiring the IP/key
 	// This prevents creating activity state for whitelisted IPs, fixing TestCheckChains_WhitelistSkip.
-	if p.IsWhitelistedFunc(trackingKey.IPInfo.Address) {
-		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IP)
+	if p.IsWhitelistedFunc(entry.IPInfo.Address) {
+		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IPInfo.Address)
 		return
 	}
 
@@ -82,6 +69,23 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 	} else {
 		store = p.ActivityStore
 		mutex = p.ActivityMutex
+	}
+
+	// Determine if any chain requires a User Agent to create the primary tracking key.
+	uaRequired := false
+	p.ChainMutex.RLock()
+	chains := p.Chains
+	for _, chain := range chains {
+		if strings.HasSuffix(chain.MatchKey, "_ua") {
+			uaRequired = true
+			break
+		}
+	}
+	p.ChainMutex.RUnlock()
+
+	trackingKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
+	if uaRequired {
+		trackingKey.UA = entry.UserAgent
 	}
 
 	mutex.Lock()
@@ -111,8 +115,11 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 		// Check if the current log entry's tracking key is applicable to this chain
 		// (e.g., check IP version compatibility again, as not all chains may be applicable).
 		chainKey := GetTrackingKey(&chain, entry)
-		if chainKey.IPInfo.Address == "" || chainKey != trackingKey {
-			continue // Skip if this chain isn't configured for the current trackingKey type
+		// A mismatch is signaled by GetTrackingKey returning a key without a UserAgent.
+		// If the primary key requires a UA, but the chain-specific key doesn't have one, it's a mismatch.
+		// Also, if the chain requires a UA but the primary key doesn't, we can't track it.
+		if (uaRequired && chainKey.UA == "") || (!uaRequired && chainKey.UA != "") {
+			continue
 		}
 
 		// Get the current state for this chain.
@@ -184,7 +191,7 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 
 				// --- CHECK FOR CHAIN COMPLETION ---
 				if state.CurrentStep == len(chain.Steps) {
-					isWhitelisted := p.IsWhitelistedFunc(entry.IP)
+					isWhitelisted := p.IsWhitelistedFunc(entry.IPInfo.Address)
 
 					// 3. Take action (block/log)
 					if chain.Action == "block" {
@@ -192,20 +199,19 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 
 						// 4. Send command to external blocker unless in DryRun mode
 						if p.DryRun {
-							p.LogFunc(LevelCritical, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IP)
+							p.LogFunc(LevelCritical, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
 						} else if !isWhitelisted {
-							p.LogFunc(LevelCritical, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v.", chain.Name, entry.IP, chain.BlockDuration)
+							p.LogFunc(LevelCritical, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v.", chain.Name, entry.IPInfo.Address, chain.BlockDuration)
 
 							// Attempt to block the IP via the injected Blocker
-							ipInfo := NewIPInfo(entry.IP)
-							if err := p.Blocker.Block(ipInfo, chain.BlockDuration); err != nil {
+							if err := p.Blocker.Block(entry.IPInfo, chain.BlockDuration); err != nil {
 								// Error is logged inside Block, no action needed here
 							}
 						}
 
 						// 5. Optimization: Mark the IP-ONLY key as blocked for skipping future log lines from this IP.
-						// This must use the correct store/mutex to be read by ProcessLogLine.
-						ipOnlyKey := TrackingKey{IPInfo: NewIPInfo(entry.IP), UA: ""}
+						// We can reuse the IPInfo from the LogEntry.
+						ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
 
 						// Select the correct store/mutex for the IP-only block update based on p.DryRun
 						// NOTE: We do not need a second mutex.Lock/Unlock because we already have the
@@ -220,7 +226,7 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 					} else if chain.Action == "log" {
 
 						// CONSOLIDATED LOGGING LOGIC for action: log
-						baseMessage := fmt.Sprintf("LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IP)
+						baseMessage := fmt.Sprintf("LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IPInfo.Address)
 
 						if isWhitelisted {
 							// Consolidate into a single log line when whitelisted
@@ -250,24 +256,6 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 			}
 		}
 	}
-}
-
-// GetTrackingKeyFromLogEntry determines the most specific key for a log entry based on
-// all configured chains.
-func GetTrackingKeyFromLogEntry(chains []BehavioralChain, entry *LogEntry) TrackingKey {
-	// Default to IP-only key.
-	key := TrackingKey{IPInfo: NewIPInfo(entry.IP), UA: ""}
-
-	// Check if any chain uses the IP+UA key.
-	for _, chain := range chains {
-		if chain.MatchKey == "ip_ua" || chain.MatchKey == "ipv4_ua" || chain.MatchKey == "ipv6_ua" {
-			// If we find any chain that requires UA, the global tracking key for this log line
-			// must include the UA to ensure we don't mix sessions.
-			return TrackingKey{IPInfo: NewIPInfo(entry.IP), UA: entry.UserAgent}
-		}
-	}
-
-	return key
 }
 
 // GetTrackingKey now performs a more fine-grained check for an individual chain,
