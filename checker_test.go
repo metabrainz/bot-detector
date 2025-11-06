@@ -215,11 +215,10 @@ func TestCheckChains_DryRun(t *testing.T) {
 			return nil
 		},
 	}
-
 	// Create the processor with DryRun=true
 	processor := &Processor{
-		ActivityStore:     ActivityStore, // Use global store for DryRun
-		ActivityMutex:     &ActivityMutex,
+		ActivityStore:     DryRunActivityStore, // In DryRun, the processor should use the DryRun store.
+		ActivityMutex:     &DryRunActivityMutex,
 		Chains:            Chains,
 		ChainMutex:        &ChainMutex,
 		DryRun:            true,
@@ -227,7 +226,6 @@ func TestCheckChains_DryRun(t *testing.T) {
 		IsWhitelistedFunc: IsIPWhitelisted,
 		Blocker:           mockBlocker, // Inject mock blocker
 	}
-	DryRunActivityStore = make(map[TrackingKey]*BotActivity) // Initialize the dry-run store
 
 	// Get the correct tracking key for the activity store (ip-only)
 	trackingKey := GetTrackingKey(&chain, entry)
@@ -302,7 +300,7 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 		DryRun:            false,
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: IsIPWhitelisted,
-		Blocker:           &MockBlocker{},
+		Blocker:           &GlobalBlocker{},
 	}
 
 	trackingKey := GetTrackingKey(&chain, entry)
@@ -377,7 +375,7 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 		DryRun:            false,
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: IsIPWhitelisted,
-		Blocker:           &MockBlocker{},
+		Blocker:           &GlobalBlocker{},
 	}
 
 	trackingKey := GetTrackingKey(&chain, entry)
@@ -458,7 +456,6 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 			return nil
 		},
 	}
-
 	// Create the processor
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
@@ -557,7 +554,6 @@ func TestCheckChains_LogAction(t *testing.T) {
 			return nil
 		},
 	}
-
 	// Create the processor
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
@@ -615,6 +611,7 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 
 	const targetIP = "192.0.2.1"
 
+	const blockDuration = 1 * time.Minute
 	// Log entry template
 	entry := &LogEntry{
 		IPInfo:    NewIPInfo(targetIP),
@@ -627,7 +624,7 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 		Name:          "UnknownActionTestChain",
 		MatchKey:      "ip",
 		Action:        "unknown", // ACTION: unknown
-		BlockDuration: 1 * time.Minute,
+		BlockDuration: blockDuration,
 		Steps: []StepDef{
 			{Order: 1, FieldMatches: map[string]string{"Path": "^/step/one$"}, MaxDelayDuration: 5 * time.Second},
 			{Order: 2, FieldMatches: map[string]string{"Path": "^/step/two$"}, MaxDelayDuration: 5 * time.Second},
@@ -647,8 +644,11 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 			return nil
 		},
 	}
-
-	// Create the processor
+	setupConfig(t,
+		[]string{"127.0.0.1:9999"},
+		map[time.Duration]string{blockDuration: "table_10m"},
+		"",
+	)
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &ActivityMutex,

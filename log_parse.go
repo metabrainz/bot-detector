@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
-	"sync"
 	"time"
 )
 
@@ -86,24 +85,12 @@ func (p *Processor) ProcessLogLine(line string, lineNumber int) {
 		return
 	}
 
-	// 2. Check for in-memory block state based on IP-only key
+	// 2. Check for in-memory block state (Optimization)
 	ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
-
-	// Choose appropriate store & mutex based on the Processor's DryRun state.
-	var store map[TrackingKey]*BotActivity
-	var mutex *sync.RWMutex
-
-	if p.DryRun { // *** FIX: Check DryRun here ***
-		store = DryRunActivityStore
-		mutex = &DryRunActivityMutex
-	} else {
-		store = p.ActivityStore
-		mutex = p.ActivityMutex
-	}
+	mutex := p.ActivityMutex
 
 	mutex.Lock()
-	// GetOrCreateActivityUnsafe is used because we hold the lock.
-	activity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
+	activity := GetOrCreateActivityUnsafe(p.ActivityStore, ipOnlyKey)
 
 	// If the IP is blocked, check if the block has expired
 	if activity.IsBlocked && time.Now().After(activity.BlockedUntil) {
@@ -115,31 +102,12 @@ func (p *Processor) ProcessLogLine(line string, lineNumber int) {
 	// If still blocked, skip further chain checks
 	if activity.IsBlocked {
 		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (Already blocked in memory).", entry.IPInfo.Address)
-		activity.LastRequestTime = entry.Timestamp
+		activity.LastRequestTime = entry.Timestamp // Update timestamp to prevent premature cleanup
 		mutex.Unlock()
 		return
 	}
 	mutex.Unlock()
 
-	// 3. Process the log line through all behavioral chains
+	// 3. If not blocked, process the log line through all behavioral chains
 	p.CheckChains(entry)
-
-	// 4. After chains have run, lock again to update the LastRequestTime
-	// Note: CheckChains will use the correct store/mutex based on p.DryRun, so this
-	// second lock/unlock must use the correct store/mutex as well.
-
-	// Recalculate store/mutex for the LastRequestTime update
-	if p.DryRun {
-		mutex = &DryRunActivityMutex
-		store = DryRunActivityStore
-	} else {
-		mutex = p.ActivityMutex
-		store = p.ActivityStore
-	}
-
-	mutex.Lock()
-	// Update LastRequestTime for the IP-only key
-	activity = GetOrCreateActivityUnsafe(store, ipOnlyKey) // Re-fetch, just in case a dry-run chain created it.
-	activity.LastRequestTime = entry.Timestamp
-	mutex.Unlock()
 }
