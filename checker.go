@@ -256,16 +256,3 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 		}
 	}
 }
-
-// GetTrackingKey now performs a more fine-grained check for an individual chain,
-// ensuring the IP version matches what the chain requires.
-// NOTE: This function's logic is only for internal loop use inside CheckChains
-// to filter out incompatible log lines for a specific chain.
-// It is NOT used to determine the primary key for the log entry (GetTrackingKeyFromLogEntry is for that).
-// This function should be removed if the logic in GetTrackingKeyFromLogEntry is deemed sufficient.
-// For now, it is kept to mirror the original intent of checking version compatibility per chain.
-/*
-func GetTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
-	// Replaced by logic in utils_ip.go's GetTrackingKey
-}
-*/
