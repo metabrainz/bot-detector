@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"regexp"
 	"sync"
 	"time"
@@ -35,12 +36,21 @@ type Processor struct {
 	ActivityStore     map[TrackingKey]*BotActivity
 	ActivityMutex     *sync.RWMutex
 	Chains            []BehavioralChain
-	ChainMutex        *sync.RWMutex // Assuming ChainMutex is still needed for Chain loading
+	ChainMutex        *sync.RWMutex
 	DryRun            bool
 	LogFunc           func(level LogLevel, tag string, format string, args ...interface{})
 	IsWhitelistedFunc func(ipInfo IPInfo) bool
-	// The Blocker interface allows injecting the real HAProxy implementation or a mock for tests.
-	Blocker Blocker
+	Blocker           Blocker
+	Config            *AppConfig
+}
+
+// AppConfig holds all the configuration state that can be reloaded from YAML.
+type AppConfig struct {
+	WhitelistNets          []*net.IPNet
+	HAProxyAddresses       []string
+	DurationToTableName    map[time.Duration]string
+	BlockTableNameFallback string
+	LastModTime            time.Time
 }
 
 // --- YAML DATA STRUCTURES ---

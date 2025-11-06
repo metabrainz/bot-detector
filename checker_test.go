@@ -105,6 +105,7 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: IsIPWhitelisted,
 		Blocker:           mockBlocker, // Inject mock blocker
+		Config:            &AppConfig{},
 	}
 
 	// Get the correct tracking key for the activity store (ip_ua)
@@ -225,6 +226,7 @@ func TestCheckChains_DryRun(t *testing.T) {
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: IsIPWhitelisted,
 		Blocker:           mockBlocker, // Inject mock blocker
+		Config:            &AppConfig{},
 	}
 
 	// Get the correct tracking key for the activity store (ip-only)
@@ -301,6 +303,7 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: IsIPWhitelisted,
 		Blocker:           &GlobalBlocker{},
+		Config:            &AppConfig{},
 	}
 
 	trackingKey := GetTrackingKey(&chain, entry)
@@ -376,6 +379,7 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: IsIPWhitelisted,
 		Blocker:           &GlobalBlocker{},
+		Config:            &AppConfig{},
 	}
 
 	trackingKey := GetTrackingKey(&chain, entry)
@@ -466,6 +470,7 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: mockIsWhitelisted, // Inject mock whitelisting
 		Blocker:           mockBlocker,
+		Config:            &AppConfig{},
 	}
 
 	whitelistedKey := GetTrackingKey(&chain, whitelistedEntry)
@@ -564,6 +569,7 @@ func TestCheckChains_LogAction(t *testing.T) {
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: IsIPWhitelisted,
 		Blocker:           mockBlocker,
+		Config:            &AppConfig{},
 	}
 
 	trackingKey := GetTrackingKey(&chain, entry)
@@ -658,6 +664,7 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: IsIPWhitelisted,
 		Blocker:           mockBlocker,
+		Config:            &AppConfig{},
 	}
 
 	trackingKey := GetTrackingKey(&chain, entry)

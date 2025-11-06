@@ -21,6 +21,7 @@ func TestPurgeIdleActivities(t *testing.T) {
 		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ActivityMutex: &sync.RWMutex{},
 		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
+		Config:        &AppConfig{},
 	}
 
 	// Define keys for an active and an idle entry

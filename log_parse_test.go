@@ -186,6 +186,7 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool {
 			return ipInfo.Address == whitelistedIP // Only this IP is whitelisted
 		},
+		Config: &AppConfig{},
 		DryRun: false,
 	}
 
@@ -348,6 +349,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 		Blocker:           mockBlocker,
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: IsIPWhitelisted,
+		Config:            &AppConfig{},
 		DryRun:            true, // CRITICAL: DryRun is enabled
 	}
 

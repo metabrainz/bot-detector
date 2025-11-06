@@ -25,6 +25,16 @@ func main() {
 		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
 	}
 
+	// Create the initial config struct from the loaded global state.
+	// This is a transitional step. Eventually, LoadChainsFromYAML will return this directly.
+	appConfig := &AppConfig{
+		WhitelistNets:          WhitelistNets,
+		HAProxyAddresses:       HAProxyAddresses,
+		DurationToTableName:    DurationToTableName,
+		BlockTableNameFallback: BlockTableNameFallback,
+		LastModTime:            LastModTime,
+	}
+
 	// Initialize the global Processor instance after config is loaded.
 	// This centralizes dependency injection for the entire application.
 	// We use the global state variables (ActivityStore, Chains, etc.) to
@@ -37,8 +47,8 @@ func main() {
 		DryRun:            DryRun,
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: IsIPWhitelisted,
-		// Assuming GlobalBlocker is defined in types.go to wrap the global BlockIP function
-		Blocker: &GlobalBlocker{},
+		Blocker:           &GlobalBlocker{},
+		Config:            appConfig,
 	}
 	// Switch to the DryRun store/mutex if running in dry-run mode
 	if DryRun {
@@ -47,17 +57,17 @@ func main() {
 	}
 
 	// Execute the core application logic
-	start()
+	start(P)
 }
 
 // start is the unexported function that contains the main application logic,
 // which is called by the tests and the main function.
-func start() {
-	if P.DryRun {
+func start(p *Processor) {
+	if p.DryRun {
 		// DryRun mode: Process a static log file and exit when done.
 		done := make(chan struct{})
 		// Pass the Processor instance P
-		go DryRunLogProcessor(P, done)
+		go DryRunLogProcessor(p, done)
 
 		// Wait for the processor to finish in dry-run mode
 		<-done
@@ -65,10 +75,10 @@ func start() {
 	} else {
 		// Live mode: Start background routines and the main log tailing loop.
 		// Pass the Processor instance P to all background routines
-		go ChainWatcher(P)
-		go CleanUpIdleActivity(P)
+		go ChainWatcher(p)
+		go CleanUpIdleActivity(p)
 
 		// LiveLogTailer is the blocking main loop
-		LiveLogTailer(P)
+		LiveLogTailer(p)
 	}
 }
