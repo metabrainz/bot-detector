@@ -96,7 +96,7 @@ func (p *Processor) ProcessLogLine(line string, lineNumber int) {
 	}
 
 	// 2. Check for in-memory block state based on IP-only key
-	ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
+	ipOnlyKey := TrackingKey{IPInfo: NewIPInfo(entry.IP), UA: ""}
 
 	// Choose appropriate store & mutex based on the Processor's DryRun state.
 	var store map[TrackingKey]*BotActivity

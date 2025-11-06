@@ -37,10 +37,6 @@ func executeHAProxyCommand(addr, ip, command string) error {
 // executeHAProxyCommandImpl connects to a single HAProxy instance over TCP/Unix and executes the command.
 // This contains the original networking logic.
 func executeHAProxyCommandImpl(addr, ip, command string) error {
-	const maxRetries = 3
-	const retryDelay = 200 * time.Millisecond
-	const dialTimeout = 5 * time.Second
-
 	// Determine network type: "unix" for local socket, "tcp" otherwise
 	network := "tcp"
 	if strings.Contains(addr, "/") { // Simple check for a file path
@@ -159,9 +155,9 @@ func executeHAProxyCommandsConcurrently(ip string, targets map[string]map[string
 }
 
 // BlockIP adds an IP to the appropriate HAProxy stick table/map with a key set to '1' (blocked).
-func BlockIP(ip string, version IPVersion, duration time.Duration) error {
+func BlockIP(ipInfo IPInfo, duration time.Duration) error {
 	if DryRun {
-		LogOutput(LevelInfo, "DRYRUN", "Would block IP %s for %v (Chain complete).", ip, duration)
+		LogOutput(LevelInfo, "DRYRUN", "Would block IP %s for %v (Chain complete).", ipInfo.Address, duration)
 		return nil
 	}
 
@@ -175,24 +171,24 @@ func BlockIP(ip string, version IPVersion, duration time.Duration) error {
 	DurationTableMutex.RUnlock()
 
 	if baseTableName == "" {
-		LogOutput(LevelWarning, "SKIP_BLOCK", "No HAProxy table found for block duration %v. Skipping block attempt for IP %s.", duration, ip)
+		LogOutput(LevelWarning, "SKIP_BLOCK", "No HAProxy table found for block duration %v. Skipping block attempt for IP %s.", duration, ipInfo.Address)
 		return nil
 	}
 
 	// 2. Determine the IP version suffix and handle invalid version
 	tableName := baseTableName
-	switch version {
+	switch ipInfo.Version {
 	case VersionIPv4:
 		tableName += "_ipv4" // Simple string concatenation
 	case VersionIPv6:
 		tableName += "_ipv6" // Simple string concatenation
 	default:
-		LogOutput(LevelError, "SKIP_BLOCK", "cannot block IP %s: invalid IP version", ip)
+		LogOutput(LevelError, "SKIP_BLOCK", "cannot block IP %s: invalid IP version", ipInfo.Address)
 		return nil
 	}
 
 	// Command to block an IP: set table <table> key <key> data.gpc0 1
-	command := fmt.Sprintf("set table %s key %s data.gpc0 1\n", tableName, ip)
+	command := fmt.Sprintf("set table %s key %s data.gpc0 1\n", tableName, ipInfo.Address)
 
 	// 3. Construct the targets map for concurrent execution
 	targets := make(map[string]map[string]string)
@@ -207,21 +203,21 @@ func BlockIP(ip string, version IPVersion, duration time.Duration) error {
 	}
 
 	// 4. Execute concurrently
-	executeHAProxyCommandsConcurrently(ip, targets)
+	executeHAProxyCommandsConcurrently(ipInfo.Address, targets)
 
 	return nil // Error logging is handled inside the concurrent executor
 }
 
 // UnblockIP removes an IP from all configured HAProxy stick tables/maps.
 // This is primarily used when an IP is added to the whitelist and should no longer be blocked.
-func UnblockIP(ip string, version IPVersion) error {
+func UnblockIP(ipInfo IPInfo) error {
 	if DryRun {
-		LogOutput(LevelInfo, "DRYRUN", "Would unblock IP %s from all tables/maps.", ip)
+		LogOutput(LevelInfo, "DRYRUN", "Would unblock IP %s from all tables/maps.", ipInfo.Address)
 		return nil
 	}
 
 	var ipSuffix string
-	switch version {
+	switch ipInfo.Version {
 	case VersionIPv4:
 		ipSuffix = "_ipv4"
 	case VersionIPv6:
@@ -229,7 +225,7 @@ func UnblockIP(ip string, version IPVersion) error {
 	default:
 		// If the IP is invalid or unrecognized, we cannot determine which table to clear,
 		// so we skip the action.
-		LogOutput(LevelError, "SKIP_UNBLOCK", "Cannot unblock IP %s: unrecognized IP version", ip)
+		LogOutput(LevelError, "SKIP_UNBLOCK", "Cannot unblock IP %s: unrecognized IP version", ipInfo.Address)
 		return nil
 	}
 
@@ -259,7 +255,7 @@ func UnblockIP(ip string, version IPVersion) error {
 		targets[tableName] = make(map[string]string)
 
 		// Command to remove an entry from a stick table: clear table <table> key <key>
-		command := fmt.Sprintf("clear table %s key %s\n", tableName, ip)
+		command := fmt.Sprintf("clear table %s key %s\n", tableName, ipInfo.Address)
 
 		for _, addr := range addresses {
 			targets[tableName][addr] = command
@@ -267,7 +263,7 @@ func UnblockIP(ip string, version IPVersion) error {
 	}
 
 	// 3. Execute concurrently
-	executeHAProxyCommandsConcurrently(ip, targets)
+	executeHAProxyCommandsConcurrently(ipInfo.Address, targets)
 
 	return nil // Error logging is handled inside the concurrent executor
 }

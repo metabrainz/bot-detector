@@ -83,16 +83,14 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 	// Setup a mock blocker to intercept the block call
 	var blockCalled bool
 	var blockCallArgs struct {
-		ip       string
-		version  IPVersion
+		ipInfo   IPInfo
 		duration time.Duration
 	}
 
 	mockBlocker := &MockBlocker{
-		BlockFunc: func(ip string, version IPVersion, duration time.Duration) error {
+		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
 			blockCalled = true
-			blockCallArgs.ip = ip
-			blockCallArgs.version = version
+			blockCallArgs.ipInfo = ipInfo
 			blockCallArgs.duration = duration
 			return nil
 		},
@@ -151,8 +149,8 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 		t.Fatal("Expected Blocker to be called after completing the chain, but it was not.")
 	}
 
-	if blockCallArgs.ip != targetIP {
-		t.Errorf("Blocker called with incorrect IP. Got %s, want %s", blockCallArgs.ip, targetIP)
+	if blockCallArgs.ipInfo.Address != targetIP {
+		t.Errorf("Blocker called with incorrect IP. Got %s, want %s", blockCallArgs.ipInfo.Address, targetIP)
 	}
 	if blockCallArgs.duration != blockDuration {
 		t.Errorf("Blocker called with incorrect duration. Got %v, want %v", blockCallArgs.duration, blockDuration)
@@ -160,7 +158,7 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 
 	// Check final ActivityStore state: IsBlocked should be true and ChainProgress should be cleared
 	ActivityMutex.RLock()
-	ipOnlyKey := TrackingKey{IP: targetIP, UA: ""} // Check the IP-only key block optimization
+	ipOnlyKey := TrackingKey{IPInfo: NewIPInfo(targetIP), UA: ""} // Check the IP-only key block optimization
 	activityIPOnly, _ := processor.ActivityStore[ipOnlyKey]
 	ActivityMutex.RUnlock()
 
@@ -214,7 +212,7 @@ func TestCheckChains_DryRun(t *testing.T) {
 	// Setup a mock blocker to intercept the block call
 	var blockCalled bool
 	mockBlocker := &MockBlocker{
-		BlockFunc: func(ip string, version IPVersion, duration time.Duration) error {
+		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
 			blockCalled = true
 			return nil
 		},
@@ -460,7 +458,7 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 	// Setup a mock blocker to ensure it's not called
 	var blockCalled bool
 	mockBlocker := &MockBlocker{
-		BlockFunc: func(ip string, version IPVersion, duration time.Duration) error {
+		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
 			blockCalled = true
 			return nil
 		},
@@ -561,7 +559,7 @@ func TestCheckChains_LogAction(t *testing.T) {
 	// Setup a mock blocker to ensure it's not called
 	var blockCalled bool
 	mockBlocker := &MockBlocker{
-		BlockFunc: func(ip string, version IPVersion, duration time.Duration) error {
+		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
 			blockCalled = true
 			return nil
 		},
@@ -652,7 +650,7 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 	// Setup a mock blocker to ensure it's not called
 	var blockCalled bool
 	mockBlocker := &MockBlocker{
-		BlockFunc: func(ip string, version IPVersion, duration time.Duration) error {
+		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
 			blockCalled = true
 			return nil
 		},

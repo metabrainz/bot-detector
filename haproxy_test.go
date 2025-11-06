@@ -89,11 +89,11 @@ func TestBlockAndUnblockIP_SuccessFlow(t *testing.T) {
 	}
 	setupMockExecutor(t, mockExecutor)
 
-	ip := "192.0.2.1"
+	ipInfo := NewIPInfo("192.0.2.1")
 	duration := 10 * time.Minute
 
 	// Test BlockIP
-	if err := BlockIP(ip, VersionIPv4, duration); err != nil {
+	if err := BlockIP(ipInfo, duration); err != nil {
 		t.Fatalf("BlockIP failed unexpectedly: %v", err)
 	}
 
@@ -106,7 +106,7 @@ func TestBlockAndUnblockIP_SuccessFlow(t *testing.T) {
 	mu.Unlock()
 
 	// Test UnblockIP
-	if err := UnblockIP(ip, VersionIPv4); err != nil {
+	if err := UnblockIP(ipInfo); err != nil {
 		t.Fatalf("UnblockIP failed unexpectedly: %v", err)
 	}
 
@@ -142,7 +142,7 @@ func TestUnblockIP_ErrorTolerance_Mocked(t *testing.T) {
 		"table_fallback",
 	)
 
-	ip := "2001:db8::1"
+	ipInfo := NewIPInfo("2001:db8::1")
 	successfulCmds := 0
 
 	// Mock executor simulates success on 'workingAddr' and a connection failure on 'failedAddr'.
@@ -156,7 +156,7 @@ func TestUnblockIP_ErrorTolerance_Mocked(t *testing.T) {
 	setupMockExecutor(t, mockExecutor)
 
 	// Execute UnblockIP
-	err := UnblockIP(ip, VersionIPv6)
+	err := UnblockIP(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error: %v", err)
 	}
@@ -181,8 +181,8 @@ func TestUnblockIP_NoAddresses(t *testing.T) {
 	}
 	setupMockExecutor(t, mockExecutor)
 
-	ip := "192.0.2.1"
-	err := UnblockIP(ip, VersionIPv4)
+	ipInfo := NewIPInfo("192.0.2.1")
+	err := UnblockIP(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error when no addresses were configured: %v", err)
 	}
@@ -201,8 +201,8 @@ func TestUnblockIP_NoTables(t *testing.T) {
 	}
 	setupMockExecutor(t, mockExecutor)
 
-	ip := "192.0.2.1"
-	err := UnblockIP(ip, VersionIPv4)
+	ipInfo := NewIPInfo("192.0.2.1")
+	err := UnblockIP(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error: %v", err)
 	}
@@ -221,11 +221,11 @@ func TestBlockIP_InvalidVersion(t *testing.T) {
 	}
 	setupMockExecutor(t, mockExecutor)
 
-	ip := "invalid-ip-string"
+	ipInfo := NewIPInfo("invalid-ip-string")
 	duration := 1 * time.Minute
 
 	// BlockIP with an invalid IP version (0)
-	err := BlockIP(ip, VersionInvalid, duration)
+	err := BlockIP(ipInfo, duration)
 	if err != nil {
 		t.Fatalf("BlockIP failed unexpectedly for invalid version: %v", err)
 	}
@@ -244,10 +244,10 @@ func TestUnblockIP_InvalidVersion(t *testing.T) {
 	}
 	setupMockExecutor(t, mockExecutor)
 
-	ip := "invalid-ip-string"
+	ipInfo := NewIPInfo("invalid-ip-string")
 
 	// UnblockIP with an invalid IP version (0)
-	err := UnblockIP(ip, VersionInvalid)
+	err := UnblockIP(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error: %v", err)
 	}

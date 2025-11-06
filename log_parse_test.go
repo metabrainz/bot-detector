@@ -13,13 +13,13 @@ import (
 
 // MockBlocker implements the Blocker interface for testing, allowing Block() calls to be intercepted.
 type MockBlocker struct {
-	BlockFunc func(ip string, version IPVersion, duration time.Duration) error
+	BlockFunc func(ipInfo IPInfo, duration time.Duration) error
 }
 
 // Block calls the stored mock function to simulate the blocking action.
-func (m *MockBlocker) Block(ip string, version IPVersion, duration time.Duration) error {
+func (m *MockBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 	if m.BlockFunc != nil {
-		return m.BlockFunc(ip, version, duration)
+		return m.BlockFunc(ipInfo, duration)
 	}
 	return nil
 }
@@ -168,7 +168,7 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 	var blockMu sync.Mutex
 
 	mockBlocker := &MockBlocker{
-		BlockFunc: func(ip string, version IPVersion, duration time.Duration) error {
+		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
 			blockMu.Lock()
 			blockCount++
 			blockMu.Unlock()
@@ -233,7 +233,7 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 			line: createLine(baseIP),
 			setup: func() {
 				store = make(map[TrackingKey]*BotActivity)
-				key := TrackingKey{IP: baseIP}
+				key := TrackingKey{IPInfo: NewIPInfo(baseIP)}
 				store[key] = &BotActivity{
 					IsBlocked:    true,
 					BlockedUntil: time.Now().Add(time.Hour),
@@ -248,7 +248,7 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 			line: createLine(baseIP),
 			setup: func() {
 				store = make(map[TrackingKey]*BotActivity)
-				key := TrackingKey{IP: baseIP}
+				key := TrackingKey{IPInfo: NewIPInfo(baseIP)}
 				store[key] = &BotActivity{
 					IsBlocked:    true,
 					BlockedUntil: time.Now().Add(-time.Hour),
@@ -288,7 +288,7 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 
 			// Assertion 2: Check final in-memory block state for baseIP
 			p.ActivityMutex.Lock()
-			key := TrackingKey{IP: baseIP}
+			key := TrackingKey{IPInfo: NewIPInfo(baseIP)}
 			activity, exists := p.ActivityStore[key]
 			p.ActivityMutex.Unlock()
 
@@ -321,7 +321,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 
 	// Mock Blocker that will fail the test if called.
 	mockBlocker := &MockBlocker{
-		BlockFunc: func(ip string, version IPVersion, duration time.Duration) error {
+		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
 			t.Fatal("Blocker.Block was called in DryRun mode.")
 			return nil
 		},
@@ -359,7 +359,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 
 	ip := "192.0.2.1"
 	logLine := fmt.Sprintf(`www.example.com %s - userx [06/Nov/2025:09:00:00 +0100] "GET /1 HTTP/1.1" 200 1234 "-" "-"`, ip)
-	key := TrackingKey{IP: ip}
+	key := TrackingKey{IPInfo: NewIPInfo(ip)}
 
 	// 1. Process the line
 	p.ProcessLogLine(logLine, 1)

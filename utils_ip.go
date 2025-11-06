@@ -5,12 +5,26 @@ import (
 	"strings"
 )
 
+// IPInfo holds both the string representation of an IP and its parsed version.
+type IPInfo struct {
+	Address string
+	Version IPVersion
+}
+
 const (
 	// VersionInvalid is 0, the default value for a byte, simplifying initialization checks.
 	VersionInvalid IPVersion = 0
 	VersionIPv4    IPVersion = 4
 	VersionIPv6    IPVersion = 6
 )
+
+// NewIPInfo creates a new IPInfo struct, calculating the IP version automatically.
+func NewIPInfo(ipStr string) IPInfo {
+	return IPInfo{
+		Address: ipStr,
+		Version: GetIPVersion(ipStr),
+	}
+}
 
 // GetIPVersion returns the version of the IP address string (IPVersion byte).
 func GetIPVersion(ipStr string) IPVersion {
@@ -29,26 +43,25 @@ func GetIPVersion(ipStr string) IPVersion {
 
 // GetTrackingKey (Update to use the new type in the switch statement)
 func GetTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
-	// The IP version is now available directly on the LogEntry
-	ipVersion := entry.IPVersion
-	trackingKey := TrackingKey{IP: entry.IP}
+	ipInfo := NewIPInfo(entry.IP)
+	trackingKey := TrackingKey{IPInfo: ipInfo}
 
 	// NOTE: We now compare against the byte constants (4 and 6) instead of strings.
 	switch chain.MatchKey {
 	case "ip", "ip_ua":
-		if ipVersion == VersionInvalid {
-			return TrackingKey{}
+		if ipInfo.Version == VersionInvalid {
+			return TrackingKey{IPInfo: ipInfo} // Return with the invalid IPInfo
 		}
 	case "ipv4", "ipv4_ua":
-		if ipVersion != VersionIPv4 { // Changed from string to byte constant
-			return TrackingKey{}
+		if ipInfo.Version != VersionIPv4 { // Changed from string to byte constant
+			return TrackingKey{IPInfo: ipInfo}
 		}
 	case "ipv6", "ipv6_ua":
-		if ipVersion != VersionIPv6 { // Changed from string to byte constant
-			return TrackingKey{}
+		if ipInfo.Version != VersionIPv6 { // Changed from string to byte constant
+			return TrackingKey{IPInfo: ipInfo}
 		}
 	default:
-		return TrackingKey{}
+		return TrackingKey{IPInfo: ipInfo}
 	}
 
 	if strings.HasSuffix(chain.MatchKey, "_ua") {

@@ -13,7 +13,7 @@ type IPVersion byte
 
 // Blocker defines the interface for external IP blocking services (e.g., HAProxy).
 type Blocker interface {
-	Block(ip string, version IPVersion, duration time.Duration) error
+	Block(ipInfo IPInfo, duration time.Duration) error
 }
 
 // GlobalBlocker is a concrete implementation of Blocker that uses the original
@@ -22,9 +22,9 @@ type Blocker interface {
 type GlobalBlocker struct{}
 
 // Block calls the original global BlockIP function.
-func (h *GlobalBlocker) Block(ip string, version IPVersion, duration time.Duration) error {
+func (h *GlobalBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 	// Assuming BlockIP is globally defined elsewhere
-	return BlockIP(ip, version, duration)
+	return BlockIP(ipInfo, duration)
 }
 
 // --- DEPENDENCY CONTAINER ---
@@ -106,8 +106,8 @@ type StepState struct {
 
 // TrackingKey is a comparable struct used as the key for the ActivityStore map.
 type TrackingKey struct {
-	IP string
-	UA string // UserAgent. Empty string if tracking is IP-only.
+	IPInfo IPInfo
+	UA     string // UserAgent. Empty string if tracking is IP-only.
 }
 
 // BotActivity tracks state for a single IP address (or IP+UA combination) across all chains.
@@ -116,5 +116,4 @@ type BotActivity struct {
 	ChainProgress   map[string]StepState
 	IsBlocked       bool      // Flag to skip chain checks if this key is blocked.
 	BlockedUntil    time.Time // Time when the block expires.
-	IPVersion       IPVersion
 }

@@ -60,14 +60,14 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 	p.ChainMutex.RUnlock()
 
 	// If the tracking key is invalid (e.g., wrong IP version for required chains), skip.
-	if trackingKey.IP == "" {
+	if trackingKey.IPInfo.Address == "" {
 		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (IP version mismatch for all configured chains).", entry.IP)
 		return
 	}
 
 	// FIX 1: Check whitelisting immediately after acquiring the IP/key
 	// This prevents creating activity state for whitelisted IPs, fixing TestCheckChains_WhitelistSkip.
-	if p.IsWhitelistedFunc(entry.IP) {
+	if p.IsWhitelistedFunc(trackingKey.IPInfo.Address) {
 		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IP)
 		return
 	}
@@ -97,11 +97,11 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 	// This check is for the specific key (which might be IP+UA) that caused the original block.
 	if currentActivity.IsBlocked {
 		if time.Now().After(currentActivity.BlockedUntil) {
-			p.LogFunc(LevelInfo, "EXPIRE", "Chain-specific block expired for key %s (UA: %s).", trackingKey.IP, trackingKey.UA)
+			p.LogFunc(LevelInfo, "EXPIRE", "Chain-specific block expired for key %s (UA: %s).", trackingKey.IPInfo.Address, trackingKey.UA)
 			currentActivity.IsBlocked = false
 			currentActivity.BlockedUntil = time.Time{}
 		} else {
-			p.LogFunc(LevelDebug, "SKIP", "Key %s (UA: %s): Skipped (Already blocked in memory by a chain).", trackingKey.IP, trackingKey.UA)
+			p.LogFunc(LevelDebug, "SKIP", "Key %s (UA: %s): Skipped (Already blocked in memory by a chain).", trackingKey.IPInfo.Address, trackingKey.UA)
 			return
 		}
 	}
@@ -111,7 +111,7 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 		// Check if the current log entry's tracking key is applicable to this chain
 		// (e.g., check IP version compatibility again, as not all chains may be applicable).
 		chainKey := GetTrackingKey(&chain, entry)
-		if chainKey.IP == "" || chainKey != trackingKey {
+		if chainKey.IPInfo.Address == "" || chainKey != trackingKey {
 			continue // Skip if this chain isn't configured for the current trackingKey type
 		}
 
@@ -131,14 +131,14 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 			if exists {
 				// Check MaxDelayDuration
 				if step.MaxDelayDuration > 0 && time.Since(state.LastMatchTime) > step.MaxDelayDuration {
-					p.LogFunc(LevelDebug, "RESET", "Chain %s: MaxDelay %v exceeded for key %s. Resetting state.", chain.Name, step.MaxDelayDuration, trackingKey.IP)
+					p.LogFunc(LevelDebug, "RESET", "Chain %s: MaxDelay %v exceeded for key %s. Resetting state.", chain.Name, step.MaxDelayDuration, trackingKey.IPInfo.Address)
 					state.CurrentStep = 0
 					goto UpdateChainProgress // Restart check on step 0
 				}
 
 				// FIX 2: MinDelayNotMet failure should reset the state, not just continue
 				if step.MinDelayDuration > 0 && time.Since(state.LastMatchTime) < step.MinDelayDuration {
-					p.LogFunc(LevelDebug, "RESET", "Chain %s: MinDelay %v not met for key %s. Resetting state.", chain.Name, step.MinDelayDuration, trackingKey.IP)
+					p.LogFunc(LevelDebug, "RESET", "Chain %s: MinDelay %v not met for key %s. Resetting state.", chain.Name, step.MinDelayDuration, trackingKey.IPInfo.Address)
 					state.CurrentStep = 0    // Reset state
 					goto UpdateChainProgress // Proceed to state update/cleanup (which deletes the state)
 				}
@@ -197,14 +197,15 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 							p.LogFunc(LevelCritical, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v.", chain.Name, entry.IP, chain.BlockDuration)
 
 							// Attempt to block the IP via the injected Blocker
-							if err := p.Blocker.Block(entry.IP, entry.IPVersion, chain.BlockDuration); err != nil {
+							ipInfo := NewIPInfo(entry.IP)
+							if err := p.Blocker.Block(ipInfo, chain.BlockDuration); err != nil {
 								// Error is logged inside Block, no action needed here
 							}
 						}
 
 						// 5. Optimization: Mark the IP-ONLY key as blocked for skipping future log lines from this IP.
 						// This must use the correct store/mutex to be read by ProcessLogLine.
-						ipOnlyKey := TrackingKey{IP: entry.IP, UA: ""}
+						ipOnlyKey := TrackingKey{IPInfo: NewIPInfo(entry.IP), UA: ""}
 
 						// Select the correct store/mutex for the IP-only block update based on p.DryRun
 						// NOTE: We do not need a second mutex.Lock/Unlock because we already have the
@@ -255,14 +256,14 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 // all configured chains.
 func GetTrackingKeyFromLogEntry(chains []BehavioralChain, entry *LogEntry) TrackingKey {
 	// Default to IP-only key.
-	key := TrackingKey{IP: entry.IP, UA: ""}
+	key := TrackingKey{IPInfo: NewIPInfo(entry.IP), UA: ""}
 
 	// Check if any chain uses the IP+UA key.
 	for _, chain := range chains {
 		if chain.MatchKey == "ip_ua" || chain.MatchKey == "ipv4_ua" || chain.MatchKey == "ipv6_ua" {
 			// If we find any chain that requires UA, the global tracking key for this log line
 			// must include the UA to ensure we don't mix sessions.
-			return TrackingKey{IP: entry.IP, UA: entry.UserAgent}
+			return TrackingKey{IPInfo: NewIPInfo(entry.IP), UA: entry.UserAgent}
 		}
 	}
 

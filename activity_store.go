@@ -61,9 +61,9 @@ func CleanUpIdleActivity(p *Processor) {
 		for trackingKey, activity := range p.ActivityStore {
 			if now.Sub(activity.LastRequestTime) > IdleTimeout {
 				if trackingKey.UA != "" {
-					p.LogFunc(LevelDebug, "CLEANUP", "Purging idle key: %s (UA: %s)", trackingKey.IP, trackingKey.UA)
+					p.LogFunc(LevelDebug, "CLEANUP", "Purging idle key: %s (UA: %s)", trackingKey.IPInfo.Address, trackingKey.UA)
 				} else {
-					p.LogFunc(LevelDebug, "CLEANUP", "Purging idle IP: %s", trackingKey.IP)
+					p.LogFunc(LevelDebug, "CLEANUP", "Purging idle IP: %s", trackingKey.IPInfo.Address)
 				}
 				delete(p.ActivityStore, trackingKey)
 				deletedCount++
