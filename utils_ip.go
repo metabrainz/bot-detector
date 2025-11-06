@@ -75,3 +75,17 @@ func IsIPWhitelisted(ipStr string) bool {
 	}
 	return false
 }
+
+// IsIPWhitelistedInList checks if an IP is in the provided list of CIDR networks.
+func IsIPWhitelistedInList(ipStr string, whitelist []*net.IPNet) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	for _, net := range whitelist {
+		if net.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}

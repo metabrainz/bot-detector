@@ -28,9 +28,9 @@ func GetOrCreateActivityUnsafe(store map[TrackingKey]*BotActivity, trackingKey T
 }
 
 // GetOrCreateActivity retrieves or initializes a BotActivity struct for a given tracking key, ensuring thread safety.
+// NOTE: This function still uses global state variables. It should be refactored to use a *Processor as well.
 func GetOrCreateActivity(trackingKey TrackingKey) *BotActivity {
 	store := ActivityStore
-	// Note: Mutex pointer variable type is correctly derived from the global var type (sync.RWMutex)
 	mutex := &ActivityMutex
 
 	if DryRun {
@@ -45,34 +45,34 @@ func GetOrCreateActivity(trackingKey TrackingKey) *BotActivity {
 }
 
 // CleanUpIdleActivity periodically purges state for IPs inactive longer than IdleTimeout.
-func CleanUpIdleActivity() {
-	if DryRun {
+func CleanUpIdleActivity(p *Processor) {
+	if p.DryRun {
 		return
 	}
 
-	LogOutput(LevelDebug, "CLEANUP", "Starting Cleanup routine. Purging state older than %v every %v.", IdleTimeout, CleanupInterval)
+	p.LogFunc(LevelDebug, "CLEANUP", "Starting Cleanup routine. Purging state older than %v every %v.", IdleTimeout, CleanupInterval)
 	for {
 		time.Sleep(CleanupInterval)
 
-		ActivityMutex.Lock()
+		p.ActivityMutex.Lock()
 		now := time.Now()
 		deletedCount := 0
 
-		for trackingKey, activity := range ActivityStore {
+		for trackingKey, activity := range p.ActivityStore {
 			if now.Sub(activity.LastRequestTime) > IdleTimeout {
 				if trackingKey.UA != "" {
-					LogOutput(LevelDebug, "CLEANUP", "Purging idle key: %s (UA: %s)", trackingKey.IP, trackingKey.UA)
+					p.LogFunc(LevelDebug, "CLEANUP", "Purging idle key: %s (UA: %s)", trackingKey.IP, trackingKey.UA)
 				} else {
-					LogOutput(LevelDebug, "CLEANUP", "Purging idle IP: %s", trackingKey.IP)
+					p.LogFunc(LevelDebug, "CLEANUP", "Purging idle IP: %s", trackingKey.IP)
 				}
-				delete(ActivityStore, trackingKey)
+				delete(p.ActivityStore, trackingKey)
 				deletedCount++
 			}
 		}
-		ActivityMutex.Unlock()
+		p.ActivityMutex.Unlock()
 
 		if deletedCount > 0 {
-			LogOutput(LevelDebug, "CLEANUP", "Complete: Purged %d idle IP states. Current active keys: %d", deletedCount, len(ActivityStore))
+			p.LogFunc(LevelDebug, "CLEANUP", "Complete: Purged %d idle IP states. Current active keys: %d", deletedCount, len(p.ActivityStore))
 		}
 	}
 }

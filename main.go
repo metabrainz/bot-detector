@@ -5,6 +5,10 @@ import (
 	"log"
 )
 
+// P is the global application Processor instance holding all state and dependencies.
+// All core logic will be called via this instance.
+var P *Processor
+
 // main is the application entry point.
 func main() {
 	// Parse CLI flags
@@ -16,8 +20,30 @@ func main() {
 	}
 
 	// Load initial configuration
+	// Note: LoadChainsFromYAML updates the global state variables (Chains, WhitelistNets, etc.)
 	if _, err := LoadChainsFromYAML(); err != nil {
 		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
+	}
+
+	// Initialize the global Processor instance after config is loaded.
+	// This centralizes dependency injection for the entire application.
+	// We use the global state variables (ActivityStore, Chains, etc.) to
+	// populate the single Processor instance.
+	P = &Processor{
+		ActivityStore:     ActivityStore,
+		ActivityMutex:     &ActivityMutex,
+		Chains:            Chains,
+		ChainMutex:        &ChainMutex,
+		DryRun:            DryRun,
+		LogFunc:           LogOutput,
+		IsWhitelistedFunc: IsIPWhitelisted,
+		// Assuming GlobalBlocker is defined in types.go to wrap the global BlockIP function
+		Blocker: &GlobalBlocker{},
+	}
+	// Switch to the DryRun store/mutex if running in dry-run mode
+	if DryRun {
+		P.ActivityStore = DryRunActivityStore
+		P.ActivityMutex = &DryRunActivityMutex
 	}
 
 	// Execute the core application logic
@@ -27,20 +53,22 @@ func main() {
 // start is the unexported function that contains the main application logic,
 // which is called by the tests and the main function.
 func start() {
-	if DryRun {
+	if P.DryRun {
 		// DryRun mode: Process a static log file and exit when done.
 		done := make(chan struct{})
-		go DryRunLogProcessor(done)
+		// Pass the Processor instance P
+		go DryRunLogProcessor(P, done)
 
 		// Wait for the processor to finish in dry-run mode
 		<-done
 
 	} else {
 		// Live mode: Start background routines and the main log tailing loop.
-		go ChainWatcher()
-		go CleanUpIdleActivity()
+		// Pass the Processor instance P to all background routines
+		go ChainWatcher(P)
+		go CleanUpIdleActivity(P)
 
 		// LiveLogTailer is the blocking main loop
-		LiveLogTailer()
+		LiveLogTailer(P)
 	}
 }

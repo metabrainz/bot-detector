@@ -52,40 +52,23 @@ func CheckAndRemoveWhitelistedBlocks() {
 
 	// 2. Iterate blocked IPs
 	for trackingKey, activity := range ActivityStore {
-		// Blocking is always IP-based, so skip IP+UA keys
-		if trackingKey.UA != "" {
-			continue
-		}
-
-		if activity.IsBlocked {
-			ip := net.ParseIP(trackingKey.IP)
-			if ip == nil {
-				continue
-			}
-
-			// 3. Check if the blocked IP is now whitelisted.
-			isNowWhitelisted := false
-			for _, ipNet := range currentWhitelist {
-				if ipNet.Contains(ip) {
-					isNowWhitelisted = true
-					break
-				}
-			}
-
-			if isNowWhitelisted {
-				// 4. If whitelisted, unblock in HAProxy (error logged internally in UnblockIP).
-				UnblockIP(trackingKey.IP)
-
-				// 5. Reset the in-memory block state for correctness.
+		if activity.IsBlocked && IsIPWhitelistedInList(trackingKey.IP, currentWhitelist) {
+			// IP is blocked AND now whitelisted -> unblock
+			// Note: We use the global BlockIP/UnblockIP functions as these are not yet injected.
+			if err := UnblockIP(trackingKey.IP, GetIPVersion(trackingKey.IP)); err != nil {
+				// Log is handled inside UnblockIP
+			} else {
+				// Successful unblock
 				activity.IsBlocked = false
 				activity.BlockedUntil = time.Time{}
+				LogOutput(LevelInfo, "WHITELIST_UNBLOCK", "Unblocked whitelisted IP %s (was blocked until %v).", trackingKey.IP, activity.BlockedUntil)
 				unblockedCount++
 			}
 		}
 	}
 
 	if unblockedCount > 0 {
-		LogOutput(LevelInfo, "CONFIG", "Unblocked %d IPs from HAProxy block tables that are now included in the new whitelist.", unblockedCount)
+		LogOutput(LevelInfo, "WHITELIST_CLEANUP", "Finished Whitelist cleanup. Unblocked %d IPs.", unblockedCount)
 	}
 }
 
@@ -298,45 +281,48 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 
 	LogOutput(LevelInfo, "CONFIG", "Loaded %d chains, %d whitelist CIDRs, %d HAProxy addresses, and %d duration tables.", len(Chains), len(WhitelistNets), len(HAProxyAddresses), len(newDurationTables))
 
-	return newChains, nil
+	return Chains, nil
 }
 
 // ChainWatcher monitors the YAML config file for modifications and reloads the chains dynamically.
-func ChainWatcher() {
-	if DryRun {
+func ChainWatcher(p *Processor) {
+	if p.DryRun {
 		return
 	}
-	LogOutput(LevelDebug, "WATCH", "Starting ChainWatcher, polling %s every %v", YAMLFilePath, PollingInterval)
+	p.LogFunc(LevelDebug, "WATCH", "Starting ChainWatcher, polling %s every %v", YAMLFilePath, PollingInterval)
 	for {
 		time.Sleep(PollingInterval)
 
 		fileInfo, err := os.Stat(YAMLFilePath)
 		if err != nil {
-			LogOutput(LevelError, "WATCH_ERROR", "Failed to stat file %s: %v", YAMLFilePath, err)
+			p.LogFunc(LevelError, "WATCH_ERROR", "Failed to stat file %s: %v", YAMLFilePath, err)
 			continue
 		}
 		modTime := fileInfo.ModTime()
 
 		// Read lock access for LastModTime check.
-		ChainMutex.RLock()
+		p.ChainMutex.RLock()
 		isChanged := modTime.After(LastModTime)
-		ChainMutex.RUnlock()
+		p.ChainMutex.RUnlock()
 
 		if isChanged {
-			LogOutput(LevelInfo, "WATCH", "Detected change in chains.yaml. Attempting reload...")
+			p.LogFunc(LevelInfo, "WATCH", "Detected change in chains.yaml. Attempting reload...")
 
 			// LoadChainsFromYAML updates the global state (Chains, WhitelistNets, etc.)
-			_, err := LoadChainsFromYAML()
+			// It returns the newly loaded global Chains array.
+			newChains, err := LoadChainsFromYAML()
 			if err != nil {
-				LogOutput(LevelError, "LOAD_ERROR", "Failed to reload chains: %v", err)
+				p.LogFunc(LevelError, "LOAD_ERROR", "Failed to reload chains: %v", err)
 				continue
 			}
 
-			// Cleanup any blocked IPs that are now whitelisted.
-			// This must be run AFTER LoadChainsFromYAML has successfully updated WhitelistNets.
-			CheckAndRemoveWhitelistedBlocks()
+			// *** CRITICAL: Update the Processor's state with the newly loaded chains ***
+			p.ChainMutex.Lock()
+			p.Chains = newChains
+			p.ChainMutex.Unlock()
 
-			// ... (rest of ChainWatcher logic, if any)
+			// Cleanup any blocked IPs (This function still uses global state)
+			CheckAndRemoveWhitelistedBlocks()
 		}
 	}
 }

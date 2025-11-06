@@ -116,4 +116,5 @@ type BotActivity struct {
 	ChainProgress   map[string]StepState
 	IsBlocked       bool      // Flag to skip chain checks if this key is blocked.
 	BlockedUntil    time.Time // Time when the block expires.
+	IPVersion       IPVersion
 }

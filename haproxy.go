@@ -188,14 +188,11 @@ func BlockIP(ip string, version IPVersion, duration time.Duration) error {
 
 // UnblockIP removes an IP from all configured HAProxy stick tables/maps.
 // This is primarily used when an IP is added to the whitelist and should no longer be blocked.
-func UnblockIP(ip string) error {
+func UnblockIP(ip string, version IPVersion) error {
 	if DryRun {
 		LogOutput(LevelInfo, "DRYRUN", "Would unblock IP %s from all tables/maps.", ip)
 		return nil
 	}
-
-	// Get IP version using the existing utility function
-	version := GetIPVersion(ip)
 
 	var ipSuffix string
 	switch version {

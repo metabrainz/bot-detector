@@ -10,8 +10,7 @@ import (
 
 // --- CONFIGURATION GLOBAL VARS (Set by CLI flags) ---
 var (
-	LogFilePath    string
-	BlockedMapPath string
+	LogFilePath string
 
 	YAMLFilePath       string
 	PollingIntervalStr string
