@@ -193,26 +193,13 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 			if state.CurrentStep == len(chain.Steps) {
 				isWhitelisted := p.IsWhitelistedFunc(entry.IPInfo)
 
-				// 3. Take action (block/log)
-				if chain.Action == "block" {
-					if p.DryRun {
-						p.LogFunc(LevelCritical, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
-					} else if !isWhitelisted {
-						p.LogFunc(LevelCritical, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v.", chain.Name, entry.IPInfo.Address, chain.BlockDuration)
-						if err := p.Blocker.Block(entry.IPInfo, chain.BlockDuration); err != nil {
-							// Error is logged inside Block, no action needed here
-						}
-					}
+				// --- 3. Take Action (Log, Block, etc.) ---
 
-					// Mark in-memory state as blocked for both live and dry runs.
-					ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
-					ipActivity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
-					ipActivity.IsBlocked = true
-					ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration)
-
-					currentActivity.IsBlocked = true
-					currentActivity.BlockedUntil = ipActivity.BlockedUntil
-
+				// First, handle the logging for all actions.
+				if p.DryRun {
+					p.LogFunc(LevelCritical, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
+				} else if chain.Action == "block" {
+					p.LogFunc(LevelCritical, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v.", chain.Name, entry.IPInfo.Address, chain.BlockDuration)
 				} else if chain.Action == "log" {
 					baseMessage := fmt.Sprintf("LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IPInfo.Address)
 					if isWhitelisted {
@@ -220,6 +207,25 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 					} else {
 						p.LogFunc(LevelCritical, "ALERT", baseMessage)
 					}
+				}
+
+				// Second, if the action is 'block', perform the blocking steps.
+				if chain.Action == "block" {
+					// Call the external blocker (e.g., HAProxy), unless in DryRun or whitelisted.
+					if !p.DryRun && !isWhitelisted {
+						if err := p.Blocker.Block(entry.IPInfo, chain.BlockDuration); err != nil {
+							// Error is logged inside Block, no action needed here
+						}
+					}
+
+					// Update the in-memory state to reflect the block for both live and dry runs.
+					ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
+					ipActivity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
+					ipActivity.IsBlocked = true
+					ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration) // Set block expiration time
+
+					currentActivity.IsBlocked = true
+					currentActivity.BlockedUntil = ipActivity.BlockedUntil
 				}
 
 				// Reset state *after* action is taken.
