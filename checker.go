@@ -54,7 +54,7 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 
 	// FIX 1: Check whitelisting immediately after acquiring the IP/key
 	// This prevents creating activity state for whitelisted IPs, fixing TestCheckChains_WhitelistSkip.
-	if p.IsWhitelistedFunc(entry.IPInfo.Address) {
+	if p.IsWhitelistedFunc(entry.IPInfo) {
 		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IPInfo.Address)
 		return
 	}
@@ -191,7 +191,7 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 
 				// --- CHECK FOR CHAIN COMPLETION ---
 				if state.CurrentStep == len(chain.Steps) {
-					isWhitelisted := p.IsWhitelistedFunc(entry.IPInfo.Address)
+					isWhitelisted := p.IsWhitelistedFunc(entry.IPInfo)
 
 					// 3. Take action (block/log)
 					if chain.Action == "block" {

@@ -38,7 +38,7 @@ func TestIsIPWhitelisted(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsIPWhitelisted(tt.ip)
+			result := IsIPWhitelisted(NewIPInfo(tt.ip))
 			if result != tt.expected {
 				t.Errorf("IsIPWhitelisted(%s) = %v, want %v", tt.ip, result, tt.expected)
 			}
@@ -118,7 +118,7 @@ func TestIsIPWhitelistedInList(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsIPWhitelistedInList(tt.ip, tt.list)
+			result := IsIPWhitelistedInList(NewIPInfo(tt.ip), tt.list)
 
 			if result != tt.expected {
 				t.Errorf("IsIPWhitelistedInList(%s) got %t, want %t", tt.ip, result, tt.expected)

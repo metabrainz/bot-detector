@@ -73,8 +73,8 @@ func GetTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
 }
 
 // IsIPWhitelisted checks if the given IP address falls within any configured CIDR whitelist range.
-func IsIPWhitelisted(ipStr string) bool {
-	ip := net.ParseIP(ipStr)
+func IsIPWhitelisted(ipInfo IPInfo) bool {
+	ip := net.ParseIP(ipInfo.Address)
 	if ip == nil {
 		return false
 	}
@@ -91,8 +91,8 @@ func IsIPWhitelisted(ipStr string) bool {
 }
 
 // IsIPWhitelistedInList checks if an IP is in the provided list of CIDR networks.
-func IsIPWhitelistedInList(ipStr string, whitelist []*net.IPNet) bool {
-	ip := net.ParseIP(ipStr)
+func IsIPWhitelistedInList(ipInfo IPInfo, whitelist []*net.IPNet) bool {
+	ip := net.ParseIP(ipInfo.Address)
 	if ip == nil {
 		return false
 	}

@@ -184,8 +184,8 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 		ChainMutex:    &ChainMutex, // FIX: Initialize ChainMutex to prevent nil pointer dereference in CheckChains
 		Blocker:       mockBlocker,
 		LogFunc:       LogOutput,
-		IsWhitelistedFunc: func(ip string) bool {
-			return ip == whitelistedIP // Only this IP is whitelisted
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool {
+			return ipInfo.Address == whitelistedIP // Only this IP is whitelisted
 		},
 		DryRun: false,
 	}

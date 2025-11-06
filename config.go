@@ -52,7 +52,7 @@ func CheckAndRemoveWhitelistedBlocks() {
 
 	// 2. Iterate blocked IPs
 	for trackingKey, activity := range ActivityStore {
-		if activity.IsBlocked && IsIPWhitelistedInList(trackingKey.IPInfo.Address, currentWhitelist) {
+		if activity.IsBlocked && IsIPWhitelistedInList(trackingKey.IPInfo, currentWhitelist) {
 			// IP is blocked AND now whitelisted -> unblock
 			// Note: We use the global BlockIP/UnblockIP functions as these are not yet injected.
 			if err := UnblockIP(trackingKey.IPInfo); err != nil {

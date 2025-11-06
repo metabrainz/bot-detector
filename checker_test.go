@@ -446,8 +446,8 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 	}
 
 	// Setup whitelisting using a mock function for IsIPWhitelisted
-	mockIsWhitelisted := func(ip string) bool {
-		return ip == whitelistedIP
+	mockIsWhitelisted := func(ipInfo IPInfo) bool {
+		return ipInfo.Address == whitelistedIP
 	}
 
 	// Setup a mock blocker to ensure it's not called

@@ -81,7 +81,7 @@ func (p *Processor) ProcessLogLine(line string, lineNumber int) {
 	// Basic checks and skips
 	// Note: entry.IPVersion is checked inside ParseLogLine now, so this check should theoretically only
 	// catch cases where ParseLogLine was modified to allow invalid versions.
-	if p.IsWhitelistedFunc(entry.IPInfo.Address) {
+	if p.IsWhitelistedFunc(entry.IPInfo) {
 		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (Whitelisted).", entry.IPInfo.Address)
 		return
 	}

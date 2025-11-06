@@ -38,7 +38,7 @@ type Processor struct {
 	ChainMutex        *sync.RWMutex // Assuming ChainMutex is still needed for Chain loading
 	DryRun            bool
 	LogFunc           func(level LogLevel, tag string, format string, args ...interface{})
-	IsWhitelistedFunc func(ip string) bool
+	IsWhitelistedFunc func(ipInfo IPInfo) bool
 	// The Blocker interface allows injecting the real HAProxy implementation or a mock for tests.
 	Blocker Blocker
 }
