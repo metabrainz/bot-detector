@@ -349,3 +349,46 @@ func TestExecuteHAProxyCommandImpl_WriteError(t *testing.T) {
 		t.Errorf("Error mismatch.\nExpected error containing: %s\nGot: %v", expectedErrMsg, err)
 	}
 }
+
+// TestExecuteHAProxyCommandImpl_MalformedResponse tests the case where HAProxy
+// returns something unexpected that is neither a standard error nor a clean success.
+func TestExecuteHAProxyCommandImpl_MalformedResponse(t *testing.T) {
+	resetGlobalState()
+
+	// Mock server that returns a non-standard response (e.g., garbage string)
+	_, addr, closeFn := startMockServer(t, func(conn net.Conn) {
+		// Handler logic (wait for command, then respond with garbage)
+		conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		reader := bufio.NewReader(conn)
+		// Read the command
+		_, err := reader.ReadString('\n')
+		if err != nil {
+			// Connection closed or error before command read
+			return
+		}
+
+		// Respond with a non-HAProxy-standard string
+		conn.Write([]byte("UNEXPECTED_GARBAGE_RESPONSE\n"))
+	})
+	defer closeFn()
+
+	// Use the real implementation for this test
+	originalExecutor := haproxyCommandExecutor
+	haproxyCommandExecutor = executeHAProxyCommandImpl
+	defer func() { haproxyCommandExecutor = originalExecutor }()
+
+	// Act: Execute a command (retries are internal to the function)
+	err := executeHAProxyCommand(addr, "192.0.2.1", "set table foo key bar\n")
+
+	// Assert: It should detect the non-success/non-error response and report a failure
+	// that includes the malformed response string.
+	if err == nil {
+		t.Fatal("Expected an error for malformed HAProxy response, got nil")
+	}
+
+	// Check for the error message that indicates command execution failed due to a bad response.
+	expectedErrMsg := "HAProxy command execution failed for IP"
+	if !strings.Contains(err.Error(), expectedErrMsg) {
+		t.Errorf("Error mismatch.\nExpected error containing: %s\nGot: %v", expectedErrMsg, err)
+	}
+}

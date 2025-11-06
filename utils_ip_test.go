@@ -45,3 +45,85 @@ func TestIsIPWhitelisted(t *testing.T) {
 		})
 	}
 }
+
+func TestGetTrackingKey(t *testing.T) {
+	// Dummy LogEntry for testing
+	baseEntry := &LogEntry{
+		IP:        "192.0.2.1",
+		UserAgent: "TestAgent",
+		IPVersion: VersionIPv4,
+	}
+
+	// Test cases for different MatchKeys and IP versions
+	tests := []struct {
+		name        string
+		matchKey    string
+		entry       *LogEntry
+		expectedKey TrackingKey
+	}{
+		// --- Success Cases (Key returned) ---
+		// 1. IP-only keys
+		{"Match: ip (IPv4)", "ip", baseEntry, TrackingKey{IP: "192.0.2.1", UA: ""}},
+		{"Match: ip (IPv6)", "ip", &LogEntry{IP: "2001:db8::1", IPVersion: VersionIPv6}, TrackingKey{IP: "2001:db8::1", UA: ""}},
+		{"Match: ipv4 (IPv4)", "ipv4", baseEntry, TrackingKey{IP: "192.0.2.1", UA: ""}},
+		{"Match: ipv6 (IPv6)", "ipv6", &LogEntry{IP: "2001:db8::1", IPVersion: VersionIPv6}, TrackingKey{IP: "2001:db8::1", UA: ""}},
+
+		// 2. IP+UA keys
+		{"Match: ip_ua (IPv4)", "ip_ua", baseEntry, TrackingKey{IP: "192.0.2.1", UA: "TestAgent"}},
+		{"Match: ipv4_ua (IPv4)", "ipv4_ua", baseEntry, TrackingKey{IP: "192.0.2.1", UA: "TestAgent"}},
+		{"Match: ipv6_ua (IPv6)", "ipv6_ua", &LogEntry{IP: "2001:db8::1", UserAgent: "TestAgent", IPVersion: VersionIPv6}, TrackingKey{IP: "2001:db8::1", UA: "TestAgent"}},
+
+		// --- Failure Cases (Empty Key returned) ---
+		{"Mismatch: ip (Invalid Version)", "ip", &LogEntry{IP: "bad-ip", IPVersion: VersionInvalid}, TrackingKey{}},
+		{"Mismatch: ipv4 (is IPv6)", "ipv4", &LogEntry{IP: "2001:db8::1", IPVersion: VersionIPv6}, TrackingKey{}},
+		{"Mismatch: ipv6 (is IPv4)", "ipv6", baseEntry, TrackingKey{}},
+		{"Mismatch: Unknown MatchKey", "bad_key", baseEntry, TrackingKey{}},
+		{"Mismatch: ipv4_ua (is IPv6)", "ipv4_ua", &LogEntry{IP: "2001:db8::1", IPVersion: VersionIPv6}, TrackingKey{}},
+		{"Mismatch: ipv6_ua (is IPv4)", "ipv6_ua", baseEntry, TrackingKey{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chain := &BehavioralChain{MatchKey: tt.matchKey}
+			result := GetTrackingKey(chain, tt.entry)
+
+			if result != tt.expectedKey {
+				t.Errorf("GetTrackingKey() got key %+v, want %+v", result, tt.expectedKey)
+			}
+		})
+	}
+}
+
+func TestIsIPWhitelistedInList(t *testing.T) {
+	// Setup a sample whitelist (IPv4 and IPv6)
+	_, netV4, _ := net.ParseCIDR("192.168.0.0/24")
+	_, netV6, _ := net.ParseCIDR("2001:db8::/32")
+	whitelist := []*net.IPNet{netV4, netV6}
+
+	tests := []struct {
+		name     string
+		ip       string
+		list     []*net.IPNet
+		expected bool
+	}{
+		// --- Success Cases ---
+		{"IPv4: In Range", "192.168.0.10", whitelist, true},
+		{"IPv6: In Range", "2001:db8::1", whitelist, true},
+		// --- Failure Cases (Not in range) ---
+		{"IPv4: Out of Range", "192.168.1.1", whitelist, false},
+		{"IPv6: Out of Range", "2001:db9::1", whitelist, false},
+		// --- Edge Cases ---
+		{"Invalid IP", "invalid-ip", whitelist, false},
+		{"Empty List", "192.168.0.10", []*net.IPNet{}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := IsIPWhitelistedInList(tt.ip, tt.list)
+
+			if result != tt.expected {
+				t.Errorf("IsIPWhitelistedInList(%s) got %t, want %t", tt.ip, result, tt.expected)
+			}
+		})
+	}
+}
