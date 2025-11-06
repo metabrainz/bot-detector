@@ -148,16 +148,8 @@ func TestParseLogLine(t *testing.T) {
 
 func TestProcessLogLine_FlowControl(t *testing.T) {
 	// Cleanup: Ensure the global store is reset after the test.
-	t.Cleanup(func() {
-		ActivityMutex.Lock()
-		ActivityStore = make(map[TrackingKey]*BotActivity)
-		ActivityMutex.Unlock()
-		DryRunActivityMutex.Lock()
-		DryRunActivityStore = make(map[TrackingKey]*BotActivity)
-		DryRunActivityMutex.Unlock()
-	})
+	t.Cleanup(resetGlobalState)
 
-	var store map[TrackingKey]*BotActivity
 	var blockCount int32
 	var blockMu sync.Mutex
 
@@ -177,10 +169,10 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 
 	// Base Processor
 	p := Processor{
-		ActivityStore: nil, // Will be set per test
-		ActivityMutex: &ActivityMutex,
+		ActivityStore: make(map[TrackingKey]*BotActivity),
+		ActivityMutex: &sync.RWMutex{},
 		Chains:        nil,
-		ChainMutex:    &ChainMutex, // FIX: Initialize ChainMutex to prevent nil pointer dereference in CheckChains
+		ChainMutex:    &sync.RWMutex{},
 		Blocker:       mockBlocker,
 		LogFunc:       LogOutput,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool {
@@ -198,42 +190,40 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 	tests := []struct {
 		name             string
 		line             string
-		setup            func() // Setup function to configure store state before processing
+		setup            func(p *Processor) // Setup function to configure store state before processing
 		assertBlockCount int32
 		assertIsBlocked  bool
 	}{
 		{
 			name:             "Skip - Comment Line",
 			line:             "# This is a comment",
-			setup:            func() {},
+			setup:            func(p *Processor) {},
 			assertBlockCount: 0,
 			assertIsBlocked:  false,
 		},
 		{
 			name:             "Skip - Invalid IP Line (Parse Fail)",
 			line:             createLine(invalidIP), // FIXED: Now using the invalidIP variable
-			setup:            func() {},
+			setup:            func(p *Processor) {},
 			assertBlockCount: 0,
 			assertIsBlocked:  false,
 		},
 		{
 			name:             "Skip - Whitelisted IP",
 			line:             createLine(whitelistedIP),
-			setup:            func() {},
+			setup:            func(p *Processor) {},
 			assertBlockCount: 0,
 			assertIsBlocked:  false,
 		},
 		{
 			name: "Skip - Already Blocked (Not Expired)",
 			line: createLine(baseIP),
-			setup: func() {
-				store = make(map[TrackingKey]*BotActivity)
+			setup: func(p *Processor) {
 				key := TrackingKey{IPInfo: NewIPInfo(baseIP)}
-				store[key] = &BotActivity{
+				p.ActivityStore[key] = &BotActivity{
 					IsBlocked:    true,
 					BlockedUntil: time.Now().Add(time.Hour),
 				}
-				p.ActivityStore = store
 			},
 			assertBlockCount: 0,
 			assertIsBlocked:  true,
@@ -241,25 +231,20 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 		{
 			name: "Process - Blocked but Expired (Should clear block state)",
 			line: createLine(baseIP),
-			setup: func() {
-				store = make(map[TrackingKey]*BotActivity)
+			setup: func(p *Processor) {
 				key := TrackingKey{IPInfo: NewIPInfo(baseIP)}
-				store[key] = &BotActivity{
+				p.ActivityStore[key] = &BotActivity{
 					IsBlocked:    true,
 					BlockedUntil: time.Now().Add(-time.Hour),
 				}
-				p.ActivityStore = store
 			},
 			assertBlockCount: 0,
 			assertIsBlocked:  false,
 		},
 		{
-			name: "Process - New IP (Should proceed to chain checks)",
-			line: createLine(baseIP),
-			setup: func() {
-				store = make(map[TrackingKey]*BotActivity)
-				p.ActivityStore = store
-			},
+			name:             "Process - New IP (Should proceed to chain checks)",
+			line:             createLine(baseIP),
+			setup:            func(p *Processor) {},
 			assertBlockCount: 0,
 			assertIsBlocked:  false,
 		},
@@ -269,7 +254,8 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Reset block count and setup store
 			blockCount = 0
-			tt.setup()
+			p.ActivityStore = make(map[TrackingKey]*BotActivity) // Reset store for each test
+			tt.setup(&p)
 
 			p.ProcessLogLine(tt.line, 1)
 
@@ -282,10 +268,10 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 			}
 
 			// Assertion 2: Check final in-memory block state for baseIP
-			p.ActivityMutex.Lock()
+			p.ActivityMutex.RLock()
 			key := TrackingKey{IPInfo: NewIPInfo(baseIP)}
 			activity, exists := p.ActivityStore[key]
-			p.ActivityMutex.Unlock()
+			p.ActivityMutex.RUnlock()
 
 			if tt.assertIsBlocked {
 				if !exists || !activity.IsBlocked {
@@ -305,14 +291,7 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 // but the processing (including chain progression) still occurs in the dry-run activity store.
 func TestProcessLogLine_DryRun(t *testing.T) {
 	// Cleanup: Reset stores to ensure test isolation
-	t.Cleanup(func() {
-		ActivityMutex.Lock()
-		ActivityStore = make(map[TrackingKey]*BotActivity)
-		ActivityMutex.Unlock()
-		DryRunActivityMutex.Lock()
-		DryRunActivityStore = make(map[TrackingKey]*BotActivity)
-		DryRunActivityMutex.Unlock()
-	})
+	t.Cleanup(resetGlobalState)
 
 	// Mock Blocker that will fail the test if called.
 	mockBlocker := &MockBlocker{
@@ -342,10 +321,10 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 	}
 
 	p := Processor{
-		ActivityStore:     ActivityStore,
-		ActivityMutex:     &ActivityMutex,
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
+		ActivityMutex:     &sync.RWMutex{},
 		Chains:            []BehavioralChain{chain},
-		ChainMutex:        &ChainMutex,
+		ChainMutex:        &sync.RWMutex{},
 		Blocker:           mockBlocker,
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
@@ -361,9 +340,9 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 	p.ProcessLogLine(logLine, 1)
 
 	// Assertion 1: Check the DryRun store. The activity should exist and be blocked.
-	DryRunActivityMutex.Lock()
-	dryRunActivity, exists := DryRunActivityStore[key]
-	DryRunActivityMutex.Unlock()
+	p.ActivityMutex.RLock()
+	dryRunActivity, exists := p.ActivityStore[key]
+	p.ActivityMutex.RUnlock()
 
 	if !exists {
 		t.Fatal("Expected activity in DryRun store, but none was found.")
@@ -375,15 +354,6 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 
 	if dryRunActivity.BlockedUntil.IsZero() {
 		t.Error("Expected BlockedUntil time to be set in DryRun store, but it was zero.")
-	}
-
-	// Assertion 2: Check the real store. The activity should NOT exist or NOT be blocked.
-	ActivityMutex.Lock()
-	realActivity, exists := ActivityStore[key]
-	ActivityMutex.Unlock()
-
-	if exists && realActivity.IsBlocked {
-		t.Error("IP was unexpectedly blocked in the REAL ActivityStore while in DryRun mode.")
 	}
 }
 

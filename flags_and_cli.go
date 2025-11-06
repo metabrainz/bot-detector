@@ -21,10 +21,6 @@ var (
 	LogLevelStr string
 	DryRun      bool
 	TestLogPath string
-
-	PollingInterval time.Duration
-	CleanupInterval time.Duration
-	IdleTimeout     time.Duration
 )
 
 func init() {
@@ -59,15 +55,15 @@ func ParseDurations() error {
 	}
 
 	if !DryRun {
-		PollingInterval, err = time.ParseDuration(PollingIntervalStr)
+		_, err = time.ParseDuration(PollingIntervalStr)
 		if err != nil {
 			return fmt.Errorf("invalid poll-interval format: %w", err)
 		}
-		CleanupInterval, err = time.ParseDuration(CleanupIntervalStr)
+		_, err = time.ParseDuration(CleanupIntervalStr)
 		if err != nil {
 			return fmt.Errorf("invalid cleanup-interval format: %w", err)
 		}
-		IdleTimeout, err = time.ParseDuration(IdleTimeoutStr)
+		_, err = time.ParseDuration(IdleTimeoutStr)
 		if err != nil {
 			return fmt.Errorf("invalid idle-timeout format: %w", err)
 		}

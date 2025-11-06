@@ -6,77 +6,55 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
-// --- GLOBAL STATE ---
-var (
-	Chains      []BehavioralChain
-	ChainMutex  sync.RWMutex
-	LastModTime time.Time
-
-	WhitelistNets []*net.IPNet // Holds parsed CIDR networks
-
-	HAProxyAddresses []string     // Parsed list of HAProxy "host:port" addresses
-	HAProxyMutex     sync.RWMutex // Mutex for HAProxyAddresses
-
-	DurationToTableName map[time.Duration]string // Map parsed durations to table names
-	DurationTableMutex  sync.RWMutex             // Mutex for DurationToTableName
-
-	// Define the fallback table name for the longest duration
-	BlockTableNameFallback string
-)
-
 // CheckAndRemoveWhitelistedBlocks iterates over all IPs currently marked as blocked
 // in the in-memory ActivityStore and unblocks them via HAProxy if they now fall
 // within the newly loaded whitelist CIDRs.
-func CheckAndRemoveWhitelistedBlocks() {
-	if DryRun {
+func (p *Processor) CheckAndRemoveWhitelistedBlocks() {
+	if p.DryRun {
 		return
 	}
 
 	// 1. Acquire locks
 	// The ActivityMutex must be held to safely iterate and modify the ActivityStore.
-	ActivityMutex.Lock()
-	defer ActivityMutex.Unlock()
+	p.ActivityMutex.Lock()
+	defer p.ActivityMutex.Unlock()
 
 	// Get the latest whitelist state (protected by ChainMutex)
-	ChainMutex.RLock()
-	currentWhitelist := WhitelistNets
-	ChainMutex.RUnlock()
+	currentWhitelist := p.Config.WhitelistNets
 
 	unblockedCount := 0
 
 	// 2. Iterate blocked IPs
-	for trackingKey, activity := range ActivityStore {
+	for trackingKey, activity := range p.ActivityStore {
 		if activity.IsBlocked && IsIPWhitelistedInList(trackingKey.IPInfo, currentWhitelist) {
 			// IP is blocked AND now whitelisted -> unblock
-			// Note: We use the global BlockIP/UnblockIP functions as these are not yet injected.
-			if err := UnblockIP(trackingKey.IPInfo); err != nil {
+			if err := p.UnblockIP(trackingKey.IPInfo); err != nil {
 				// Log is handled inside UnblockIP
 			} else {
 				// Successful unblock
 				activity.IsBlocked = false
 				activity.BlockedUntil = time.Time{}
-				LogOutput(LevelInfo, "WHITELIST_UNBLOCK", "Unblocked whitelisted IP %s (was blocked until %v).", trackingKey.IPInfo.Address, activity.BlockedUntil)
+				p.LogFunc(LevelInfo, "WHITELIST_UNBLOCK", "Unblocked whitelisted IP %s (was blocked until %v).", trackingKey.IPInfo.Address, activity.BlockedUntil)
 				unblockedCount++
 			}
 		}
 	}
 
 	if unblockedCount > 0 {
-		LogOutput(LevelInfo, "WHITELIST_CLEANUP", "Finished Whitelist cleanup. Unblocked %d IPs.", unblockedCount)
+		p.LogFunc(LevelInfo, "WHITELIST_CLEANUP", "Finished Whitelist cleanup. Unblocked %d IPs.", unblockedCount)
 	}
 }
 
 // LoadChainsFromYAML reads, parses, and pre-compiles regexes for the chains.
-func LoadChainsFromYAML() ([]BehavioralChain, error) {
+func LoadChainsFromYAML() ([]BehavioralChain, []*net.IPNet, []string, map[time.Duration]string, string, error) {
 	data, err := os.ReadFile(YAMLFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read YAML file %s: %w", YAMLFilePath, err)
+		return nil, nil, nil, nil, "", fmt.Errorf("failed to read YAML file %s: %w", YAMLFilePath, err)
 	}
 
 	var config ChainConfig
@@ -91,14 +69,14 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 	// 3. Decode the YAML using the strict decoder.
 	if err := decoder.Decode(&config); err != nil {
 		// This error will now explicitly include the unknown field error message.
-		return nil, fmt.Errorf("failed to strictly unmarshal YAML (unknown field found): %w", err)
+		return nil, nil, nil, nil, "", fmt.Errorf("failed to strictly unmarshal YAML (unknown field found): %w", err)
 	}
 	// ---------------------------------------------------------------------------------
 
 	// Define the expected version for this application code.
 	if config.Version == "" {
 		// Enforce that the 'version' field must be present.
-		return nil, fmt.Errorf("configuration file is missing the required 'version' field")
+		return nil, nil, nil, nil, "", fmt.Errorf("configuration file is missing the required 'version' field")
 	}
 
 	// 1. Check if the version is supported.
@@ -113,7 +91,7 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 	if !isSupported {
 		// 2. Report an error showing the unsupported version and the list of supported ones.
 		supportedList := strings.Join(SupportedConfigVersions, ", ")
-		return nil, fmt.Errorf(
+		return nil, nil, nil, nil, "", fmt.Errorf(
 			"configuration version mismatch: got '%s'. This version of the application supports: %s. Please update your YAML config file.",
 			config.Version,
 			supportedList,
@@ -145,7 +123,7 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 		// net.ParseCIDR returns the IP and the IPNet. The IPNet is what we store for comparison.
 		_, ipNet, err := net.ParseCIDR(normalizedCIDR)
 		if err != nil {
-			return nil, fmt.Errorf("invalid CIDR in whitelist: %s: %w", cidr, err)
+			return nil, nil, nil, nil, "", fmt.Errorf("invalid CIDR in whitelist: %s: %w", cidr, err)
 		}
 		newWhitelistNets = append(newWhitelistNets, ipNet)
 	}
@@ -158,7 +136,7 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 	for durationStr, tableName := range config.DurationTables {
 		duration, err := time.ParseDuration(durationStr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid duration '%s' in 'duration_tables': %w", durationStr, err)
+			return nil, nil, nil, nil, "", fmt.Errorf("invalid duration '%s' in 'duration_tables': %w", durationStr, err)
 		}
 		newDurationTables[duration] = tableName
 
@@ -198,18 +176,18 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 		if blockDurationStr != "" {
 			blockDuration, err = time.ParseDuration(blockDurationStr)
 			if err != nil {
-				return nil, fmt.Errorf("chain '%s': invalid block_duration format: %w", yamlChain.Name, err)
+				return nil, nil, nil, nil, "", fmt.Errorf("chain '%s': invalid block_duration format: %w", yamlChain.Name, err)
 			}
 		}
 
 		// 4. Enforce that 'block' actions must have a non-zero duration.
 		if yamlChain.Action == "block" && blockDuration == 0 {
-			return nil, fmt.Errorf("chain '%s' has action 'block' but block_duration is missing or zero", yamlChain.Name)
+			return nil, nil, nil, nil, "", fmt.Errorf("chain '%s' has action 'block' but block_duration is missing or zero", yamlChain.Name)
 		}
 
 		// 2. Validate Match Key
 		if yamlChain.MatchKey == "" {
-			return nil, fmt.Errorf("chain '%s': match_key cannot be empty", yamlChain.Name)
+			return nil, nil, nil, nil, "", fmt.Errorf("chain '%s': match_key cannot be empty", yamlChain.Name)
 		}
 
 		runtimeChain := BehavioralChain{
@@ -231,13 +209,13 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 			if yamlStep.MaxDelay != "" {
 				runtimeStep.MaxDelayDuration, err = time.ParseDuration(yamlStep.MaxDelay)
 				if err != nil {
-					return nil, fmt.Errorf("chain '%s', step %d: invalid max_delay: %w", yamlChain.Name, runtimeStep.Order, err)
+					return nil, nil, nil, nil, "", fmt.Errorf("chain '%s', step %d: invalid max_delay: %w", yamlChain.Name, runtimeStep.Order, err)
 				}
 			}
 			if yamlStep.MinDelay != "" {
 				runtimeStep.MinDelayDuration, err = time.ParseDuration(yamlStep.MinDelay)
 				if err != nil {
-					return nil, fmt.Errorf("chain '%s', step %d: invalid min_delay: %w", yamlChain.Name, runtimeStep.Order, err)
+					return nil, nil, nil, nil, "", fmt.Errorf("chain '%s', step %d: invalid min_delay: %w", yamlChain.Name, runtimeStep.Order, err)
 				}
 			}
 
@@ -251,7 +229,7 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 			for field, regexStr := range yamlStep.FieldMatches {
 				re, err := regexp.Compile(regexStr)
 				if err != nil {
-					return nil, fmt.Errorf("chain '%s', step %d, field '%s': failed to compile regex '%s': %w", yamlChain.Name, runtimeStep.Order, field, regexStr, err)
+					return nil, nil, nil, nil, "", fmt.Errorf("chain '%s', step %d, field '%s': failed to compile regex '%s': %w", yamlChain.Name, runtimeStep.Order, field, regexStr, err)
 				}
 				runtimeStep.CompiledRegexes[field] = re
 			}
@@ -260,38 +238,24 @@ func LoadChainsFromYAML() ([]BehavioralChain, error) {
 		newChains = append(newChains, runtimeChain)
 	}
 
-	// --- GLOBAL STATE UPDATE ---
-	// 1. Chains, LastModTime, and Whitelist
-	ChainMutex.Lock()
-	Chains = newChains
-	LastModTime = time.Now()
-	WhitelistNets = newWhitelistNets
-	ChainMutex.Unlock()
-
-	// 2. Update HAProxy addresses
-	HAProxyMutex.Lock()
-	HAProxyAddresses = config.HAProxyAddresses // Assuming config.HAProxyAddresses is the list
-	HAProxyMutex.Unlock()
-
-	// 3. Update Duration Tables
-	DurationTableMutex.Lock()
-	DurationToTableName = newDurationTables
-	BlockTableNameFallback = newFallbackName
-	DurationTableMutex.Unlock()
-
-	LogOutput(LevelInfo, "CONFIG", "Loaded %d chains, %d whitelist CIDRs, %d HAProxy addresses, and %d duration tables.", len(Chains), len(WhitelistNets), len(HAProxyAddresses), len(newDurationTables))
-
-	return Chains, nil
+	return newChains, newWhitelistNets, config.HAProxyAddresses, newDurationTables, newFallbackName, nil
 }
 
 // ChainWatcher monitors the YAML config file for modifications and reloads the chains dynamically.
-func ChainWatcher(p *Processor) {
+func (p *Processor) ChainWatcher() {
 	if p.DryRun {
 		return
 	}
-	p.LogFunc(LevelDebug, "WATCH", "Starting ChainWatcher, polling %s every %v", YAMLFilePath, PollingInterval)
+
+	// Enforce a minimum polling interval to prevent a tight loop on a zero-value duration.
+	pollingInterval := p.Config.PollingInterval
+	if pollingInterval < 1*time.Second {
+		pollingInterval = 5 * time.Second // Default to a safe interval.
+	}
+
+	p.LogFunc(LevelDebug, "WATCH", "Starting ChainWatcher, polling %s every %v", YAMLFilePath, pollingInterval)
 	for {
-		time.Sleep(PollingInterval)
+		time.Sleep(pollingInterval)
 
 		fileInfo, err := os.Stat(YAMLFilePath)
 		if err != nil {
@@ -302,27 +266,31 @@ func ChainWatcher(p *Processor) {
 
 		// Read lock access for LastModTime check.
 		p.ChainMutex.RLock()
-		isChanged := modTime.After(LastModTime)
+		isChanged := modTime.After(p.Config.LastModTime)
 		p.ChainMutex.RUnlock()
 
 		if isChanged {
 			p.LogFunc(LevelInfo, "WATCH", "Detected change in chains.yaml. Attempting reload...")
 
-			// LoadChainsFromYAML updates the global state (Chains, WhitelistNets, etc.)
-			// It returns the newly loaded global Chains array.
-			newChains, err := LoadChainsFromYAML()
+			// LoadChainsFromYAML now returns parsed data, not modifying global state.
+			newChains, newWhitelistNets, newHAProxyAddrs, newDurationTables, newFallbackTable, err := LoadChainsFromYAML()
 			if err != nil {
 				p.LogFunc(LevelError, "LOAD_ERROR", "Failed to reload chains: %v", err)
 				continue
 			}
 
-			// *** CRITICAL: Update the Processor's state with the newly loaded chains ***
+			// Update the processor's state with the new config.
 			p.ChainMutex.Lock()
 			p.Chains = newChains
+			p.Config.WhitelistNets = newWhitelistNets
+			p.Config.HAProxyAddresses = newHAProxyAddrs
+			p.Config.DurationToTableName = newDurationTables
+			p.Config.BlockTableNameFallback = newFallbackTable
+			p.Config.LastModTime = fileInfo.ModTime()
 			p.ChainMutex.Unlock()
 
 			// Cleanup any blocked IPs (This function still uses global state)
-			CheckAndRemoveWhitelistedBlocks()
+			p.CheckAndRemoveWhitelistedBlocks()
 		}
 	}
 }

@@ -1,18 +1,6 @@
 package main
 
-import (
-	"sync"
-	"time"
-)
-
-// --- GLOBAL STATE: Activity Stores ---
-var (
-	ActivityStore = make(map[TrackingKey]*BotActivity)
-	ActivityMutex sync.RWMutex
-
-	DryRunActivityStore = make(map[TrackingKey]*BotActivity)
-	DryRunActivityMutex sync.RWMutex
-)
+import "time"
 
 // Non-locking variant used when caller already holds the mutex.
 func GetOrCreateActivityUnsafe(store map[TrackingKey]*BotActivity, trackingKey TrackingKey) *BotActivity {
@@ -27,23 +15,6 @@ func GetOrCreateActivityUnsafe(store map[TrackingKey]*BotActivity, trackingKey T
 	return newActivity
 }
 
-// GetOrCreateActivity retrieves or initializes a BotActivity struct for a given tracking key, ensuring thread safety.
-// NOTE: This function still uses global state variables. It should be refactored to use a *Processor as well.
-func GetOrCreateActivity(trackingKey TrackingKey) *BotActivity {
-	store := ActivityStore
-	mutex := &ActivityMutex
-
-	if DryRun {
-		store = DryRunActivityStore
-		mutex = &DryRunActivityMutex
-	}
-
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	return GetOrCreateActivityUnsafe(store, trackingKey)
-}
-
 // purgeIdleActivities contains the core logic for iterating through the activity store
 // and removing entries that have been idle for longer than the IdleTimeout.
 // This function is separate from the infinite loop to allow for direct testing.
@@ -55,7 +26,7 @@ func purgeIdleActivities(p *Processor) int {
 	deletedCount := 0
 
 	for trackingKey, activity := range p.ActivityStore {
-		if now.Sub(activity.LastRequestTime) > IdleTimeout {
+		if now.Sub(activity.LastRequestTime) > p.Config.IdleTimeout {
 			if trackingKey.UA != "" {
 				p.LogFunc(LevelDebug, "CLEANUP", "Purging idle key: %s (UA: %s)", trackingKey.IPInfo.Address, trackingKey.UA)
 			} else {
@@ -69,14 +40,20 @@ func purgeIdleActivities(p *Processor) int {
 }
 
 // CleanUpIdleActivity periodically purges state for IPs inactive longer than IdleTimeout.
-func CleanUpIdleActivity(p *Processor) {
+func (p *Processor) CleanUpIdleActivity() {
 	if p.DryRun {
 		return
 	}
 
-	p.LogFunc(LevelDebug, "CLEANUP", "Starting Cleanup routine. Purging state older than %v every %v.", IdleTimeout, CleanupInterval)
+	// Enforce a minimum cleanup interval to prevent a tight loop on a zero-value duration.
+	cleanupInterval := p.Config.CleanupInterval
+	if cleanupInterval < 1*time.Second {
+		cleanupInterval = 1 * time.Minute // Default to a safe interval.
+	}
+
+	p.LogFunc(LevelDebug, "CLEANUP", "Starting Cleanup routine. Purging state older than %v every %v.", p.Config.IdleTimeout, cleanupInterval)
 	for {
-		time.Sleep(CleanupInterval)
+		time.Sleep(cleanupInterval)
 		deletedCount := purgeIdleActivities(p)
 		if deletedCount > 0 {
 			p.LogFunc(LevelDebug, "CLEANUP", "Complete: Purged %d idle IP states. Current active keys: %d", deletedCount, len(p.ActivityStore))

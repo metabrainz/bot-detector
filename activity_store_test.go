@@ -11,17 +11,16 @@ func TestPurgeIdleActivities(t *testing.T) {
 	resetGlobalState()
 	t.Cleanup(resetGlobalState)
 
-	// Set a short, testable IdleTimeout
-	originalIdleTimeout := IdleTimeout
-	IdleTimeout = 100 * time.Millisecond
-	t.Cleanup(func() { IdleTimeout = originalIdleTimeout })
+	// Set a short, testable IdleTimeout for the test.
+	testIdleTimeout := 100 * time.Millisecond
 
 	// Create a processor with a fresh activity store
 	processor := &Processor{
 		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ActivityMutex: &sync.RWMutex{},
 		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
-		Config:        &AppConfig{},
+		// Set the IdleTimeout on the processor's config.
+		Config: &AppConfig{IdleTimeout: testIdleTimeout},
 	}
 
 	// Define keys for an active and an idle entry

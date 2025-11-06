@@ -3,7 +3,6 @@ package main
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestParseDurations(t *testing.T) {
@@ -89,10 +88,6 @@ func TestParseDurations(t *testing.T) {
 			} else {
 				if err != nil {
 					t.Fatalf("Did not expect an error, but got: %v", err)
-				}
-				// Optional: Check if the parsed values are correct in the success case
-				if !tt.dryRun && PollingInterval != 10*time.Second {
-					t.Errorf("Expected PollingInterval to be 10s, got %v", PollingInterval)
 				}
 			}
 		})

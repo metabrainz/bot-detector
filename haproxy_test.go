@@ -23,21 +23,6 @@ func setupMockExecutor(t *testing.T, mock HAProxyExecutor) {
 	})
 }
 
-// setupConfig sets up the necessary global config variables for HAProxy functions
-// (addresses, duration tables, and fallback table) for testing.
-func setupConfig(t *testing.T, addresses []string, durations map[time.Duration]string, fallback string) {
-	HAProxyMutex.Lock()
-	HAProxyAddresses = addresses
-	HAProxyMutex.Unlock()
-
-	DurationTableMutex.Lock()
-	DurationToTableName = durations
-	BlockTableNameFallback = fallback
-	DurationTableMutex.Unlock()
-
-	DryRun = false
-}
-
 // setTestTimeouts sets aggressive timeout/retry settings for tests
 // that rely on the real network implementation and restores the original values using t.Cleanup.
 func setTestTimeouts(t *testing.T) {
@@ -63,14 +48,17 @@ func setTestTimeouts(t *testing.T) {
 // This ensures that BlockIP and UnblockIP generate the correct commands for the specified tables and IP version.
 func TestBlockAndUnblockIP_SuccessFlow(t *testing.T) {
 	resetGlobalState()
-	// Configuration includes one duration table and one fallback table.
-	setupConfig(t,
-		[]string{"127.0.0.1:9999"},
-		map[time.Duration]string{
-			10 * time.Minute: "table_10m",
+	processor := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
+		Config: &AppConfig{
+			HAProxyAddresses: []string{"127.0.0.1:9999"},
+			DurationToTableName: map[time.Duration]string{
+				10 * time.Minute: "table_10m",
+			},
+			BlockTableNameFallback: "table_long",
 		},
-		"table_long",
-	)
+		ChainMutex: &sync.RWMutex{},
+	}
 
 	var mu sync.Mutex
 	var commandsReceived []string
@@ -93,7 +81,7 @@ func TestBlockAndUnblockIP_SuccessFlow(t *testing.T) {
 	duration := 10 * time.Minute
 
 	// Test BlockIP
-	if err := BlockIP(ipInfo, duration); err != nil {
+	if err := processor.BlockIP(ipInfo, duration); err != nil {
 		t.Fatalf("BlockIP failed unexpectedly: %v", err)
 	}
 
@@ -106,7 +94,7 @@ func TestBlockAndUnblockIP_SuccessFlow(t *testing.T) {
 	mu.Unlock()
 
 	// Test UnblockIP
-	if err := UnblockIP(ipInfo); err != nil {
+	if err := processor.UnblockIP(ipInfo); err != nil {
 		t.Fatalf("UnblockIP failed unexpectedly: %v", err)
 	}
 
@@ -134,13 +122,17 @@ func TestUnblockIP_ErrorTolerance_Mocked(t *testing.T) {
 	const workingAddr = "127.0.0.1:9999"
 	const failedAddr = "127.0.0.1:65535"
 
-	setupConfig(t,
-		[]string{workingAddr, failedAddr},
-		map[time.Duration]string{
-			1 * time.Minute: "table_1m",
+	processor := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
+		Config: &AppConfig{
+			HAProxyAddresses: []string{workingAddr, failedAddr},
+			DurationToTableName: map[time.Duration]string{
+				1 * time.Minute: "table_1m",
+			},
+			BlockTableNameFallback: "table_fallback",
 		},
-		"table_fallback",
-	)
+		ChainMutex: &sync.RWMutex{},
+	}
 
 	ipInfo := NewIPInfo("2001:db8::1")
 	successfulCmds := 0
@@ -156,7 +148,7 @@ func TestUnblockIP_ErrorTolerance_Mocked(t *testing.T) {
 	setupMockExecutor(t, mockExecutor)
 
 	// Execute UnblockIP
-	err := UnblockIP(ipInfo)
+	err := processor.UnblockIP(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error: %v", err)
 	}
@@ -171,8 +163,15 @@ func TestUnblockIP_ErrorTolerance_Mocked(t *testing.T) {
 // TestUnblockIP_NoAddresses tests that the function exits gracefully when no HAProxy addresses are configured.
 func TestUnblockIP_NoAddresses(t *testing.T) {
 	resetGlobalState()
-	// Configuration has no HAProxy addresses.
-	setupConfig(t, nil, map[time.Duration]string{time.Minute: "t1"}, "t_fall")
+	processor := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
+		Config: &AppConfig{
+			HAProxyAddresses:       nil,
+			DurationToTableName:    map[time.Duration]string{time.Minute: "t1"},
+			BlockTableNameFallback: "t_fall",
+		},
+		ChainMutex: &sync.RWMutex{},
+	}
 
 	// The mock executor should fail the test if called.
 	mockExecutor := func(addr, ip, command string) error {
@@ -182,7 +181,7 @@ func TestUnblockIP_NoAddresses(t *testing.T) {
 	setupMockExecutor(t, mockExecutor)
 
 	ipInfo := NewIPInfo("192.0.2.1")
-	err := UnblockIP(ipInfo)
+	err := processor.UnblockIP(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error when no addresses were configured: %v", err)
 	}
@@ -191,8 +190,13 @@ func TestUnblockIP_NoAddresses(t *testing.T) {
 // TestUnblockIP_NoTables tests that the function exits gracefully when no HAProxy tables are configured.
 func TestUnblockIP_NoTables(t *testing.T) {
 	resetGlobalState()
-	// Configuration has HAProxy addresses but no duration tables or fallback table.
-	setupConfig(t, []string{"127.0.0.1:9999"}, nil, "")
+	processor := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
+		Config: &AppConfig{
+			HAProxyAddresses: []string{"127.0.0.1:9999"},
+		},
+		ChainMutex: &sync.RWMutex{},
+	}
 
 	// The mock executor should fail the test if called.
 	mockExecutor := func(addr, ip, command string) error {
@@ -202,7 +206,7 @@ func TestUnblockIP_NoTables(t *testing.T) {
 	setupMockExecutor(t, mockExecutor)
 
 	ipInfo := NewIPInfo("192.0.2.1")
-	err := UnblockIP(ipInfo)
+	err := processor.UnblockIP(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error: %v", err)
 	}
@@ -212,7 +216,14 @@ func TestUnblockIP_NoTables(t *testing.T) {
 // and no HAProxy command is attempted.
 func TestBlockIP_InvalidVersion(t *testing.T) {
 	resetGlobalState()
-	setupConfig(t, []string{"127.0.0.1:9999"}, map[time.Duration]string{time.Minute: "table_1m"}, "")
+	processor := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
+		Config: &AppConfig{
+			HAProxyAddresses:    []string{"127.0.0.1:9999"},
+			DurationToTableName: map[time.Duration]string{time.Minute: "table_1m"},
+		},
+		ChainMutex: &sync.RWMutex{},
+	}
 
 	// The mock executor should fail the test if called.
 	mockExecutor := func(addr, ip, command string) error {
@@ -225,7 +236,7 @@ func TestBlockIP_InvalidVersion(t *testing.T) {
 	duration := 1 * time.Minute
 
 	// BlockIP with an invalid IP version (0)
-	err := BlockIP(ipInfo, duration)
+	err := processor.BlockIP(ipInfo, duration)
 	if err != nil {
 		t.Fatalf("BlockIP failed unexpectedly for invalid version: %v", err)
 	}
@@ -235,7 +246,14 @@ func TestBlockIP_InvalidVersion(t *testing.T) {
 // and no HAProxy command is attempted.
 func TestUnblockIP_InvalidVersion(t *testing.T) {
 	resetGlobalState()
-	setupConfig(t, []string{"127.0.0.1:9999"}, map[time.Duration]string{time.Minute: "table_1m"}, "")
+	processor := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
+		Config: &AppConfig{
+			HAProxyAddresses:    []string{"127.0.0.1:9999"},
+			DurationToTableName: map[time.Duration]string{time.Minute: "table_1m"},
+		},
+		ChainMutex: &sync.RWMutex{},
+	}
 
 	// The mock executor should fail the test if called.
 	mockExecutor := func(addr, ip, command string) error {
@@ -247,7 +265,7 @@ func TestUnblockIP_InvalidVersion(t *testing.T) {
 	ipInfo := NewIPInfo("invalid-ip-string")
 
 	// UnblockIP with an invalid IP version (0)
-	err := UnblockIP(ipInfo)
+	err := processor.UnblockIP(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error: %v", err)
 	}

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -40,18 +39,6 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 		return
 	}
 
-	// Choose appropriate store & mutex based on the Processor's DryRun state.
-	var store map[TrackingKey]*BotActivity
-	var mutex *sync.RWMutex
-
-	if p.DryRun {
-		store = DryRunActivityStore
-		mutex = &DryRunActivityMutex
-	} else {
-		store = p.ActivityStore
-		mutex = p.ActivityMutex
-	}
-
 	// Determine if any chain requires a User Agent to create the primary tracking key.
 	uaRequired := false
 	p.ChainMutex.RLock()
@@ -69,12 +56,12 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 		trackingKey.UA = entry.UserAgent
 	}
 
-	mutex.Lock()
+	p.ActivityMutex.Lock()
 	// Ensure the lock is released when the function exits.
-	defer mutex.Unlock()
+	defer p.ActivityMutex.Unlock()
 
 	// Get or create the activity struct for the current log line's tracking key.
-	currentActivity := GetOrCreateActivityUnsafe(store, trackingKey)
+	currentActivity := GetOrCreateActivityUnsafe(p.ActivityStore, trackingKey)
 	currentActivity.LastRequestTime = entry.Timestamp // Always update last request time
 
 	// Optimization: If the current key (IP or IP+UA) is already blocked, stop processing chains.
@@ -189,7 +176,7 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 
 					// Update the in-memory state to reflect the block for both live and dry runs.
 					ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
-					ipActivity := GetOrCreateActivityUnsafe(store, ipOnlyKey)
+					ipActivity := GetOrCreateActivityUnsafe(p.ActivityStore, ipOnlyKey)
 					ipActivity.IsBlocked = true
 					ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration) // Set block expiration time
 

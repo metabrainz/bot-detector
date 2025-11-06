@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -54,7 +55,7 @@ chains:
 	})
 
 	// --- Act ---
-	chains, err := LoadChainsFromYAML()
+	chains, whitelistNets, haProxyAddrs, durationTables, fallbackTable, err := LoadChainsFromYAML()
 
 	// --- Assert ---
 	if err != nil {
@@ -91,27 +92,21 @@ chains:
 		t.Errorf("Expected step 2 to have min_delay of 1s, got %v", step2.MinDelayDuration)
 	}
 
-	// Check global state was updated
-	ChainMutex.RLock()
-	if len(WhitelistNets) != 4 {
-		t.Errorf("Expected 4 whitelist CIDRs, got %d", len(WhitelistNets))
+	// Check other returned config values
+	if len(whitelistNets) != 4 {
+		t.Errorf("Expected 4 whitelist CIDRs, got %d", len(whitelistNets))
 	}
-	ChainMutex.RUnlock()
 
-	HAProxyMutex.RLock()
-	if len(HAProxyAddresses) != 1 {
-		t.Errorf("Expected 1 HAProxy address, got %d", len(HAProxyAddresses))
+	if len(haProxyAddrs) != 1 {
+		t.Errorf("Expected 1 HAProxy address, got %d", len(haProxyAddrs))
 	}
-	HAProxyMutex.RUnlock()
 
-	DurationTableMutex.RLock()
-	if len(DurationToTableName) != 2 {
-		t.Errorf("Expected 2 duration tables, got %d", len(DurationToTableName))
+	if len(durationTables) != 2 {
+		t.Errorf("Expected 2 duration tables, got %d", len(durationTables))
 	}
-	if BlockTableNameFallback != "table_1h" {
-		t.Errorf("Expected fallback table 'table_1h', got '%s'", BlockTableNameFallback)
+	if fallbackTable != "table_1h" {
+		t.Errorf("Expected fallback table 'table_1h', got '%s'", fallbackTable)
 	}
-	DurationTableMutex.RUnlock()
 }
 
 func TestLoadChainsFromYAML_Errors(t *testing.T) {
@@ -169,7 +164,7 @@ chains:
 			YAMLFilePath = tempFile
 			t.Cleanup(func() { YAMLFilePath = originalPath })
 
-			_, err := LoadChainsFromYAML()
+			_, _, _, _, _, err := LoadChainsFromYAML()
 
 			if err == nil || !strings.Contains(err.Error(), tt.expectedError) {
 				t.Errorf("Expected error containing '%s', but got: %v", tt.expectedError, err)
@@ -184,16 +179,8 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 		blockedIP       string
 		expectedCommand string
 	}{
-		{
-			name:            "IPv4",
-			blockedIP:       "192.0.2.100",
-			expectedCommand: "clear table table_5m_ipv4 key 192.0.2.100",
-		},
-		{
-			name:            "IPv6",
-			blockedIP:       "2001:db8::dead:beef",
-			expectedCommand: "clear table table_5m_ipv6 key 2001:db8::dead:beef",
-		},
+		{"IPv4", "192.0.2.100", "clear table table_5m_ipv4 key 192.0.2.100"},
+		{"IPv6", "2001:db8::dead:beef", "clear table table_5m_ipv6 key 2001:db8::dead:beef"},
 	}
 
 	for _, tt := range tests {
@@ -202,12 +189,18 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			resetGlobalState()
 			t.Cleanup(resetGlobalState)
 
-			// 1. Configure HAProxy tables and a mock executor to capture commands.
-			setupConfig(t,
-				[]string{"127.0.0.1:9999"},
-				map[time.Duration]string{5 * time.Minute: "table_5m"},
-				"",
-			)
+			// Create a processor instance for the test.
+			processor := &Processor{
+				ActivityStore: make(map[TrackingKey]*BotActivity),
+				ActivityMutex: &sync.RWMutex{},
+				ChainMutex:    &sync.RWMutex{},
+				Config: &AppConfig{
+					// This config is needed for the p.UnblockIP call to work.
+					HAProxyAddresses:    []string{"127.0.0.1:9999"},
+					DurationToTableName: map[time.Duration]string{5 * time.Minute: "table_5m"},
+				},
+				LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
+			}
 
 			var commandsReceived []string
 			mockExecutor := func(addr, ip, command string) error {
@@ -220,26 +213,24 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			trackingKey := TrackingKey{IPInfo: NewIPInfo(tt.blockedIP)}
 
 			// 3. Manually set the state in ActivityStore to simulate a blocked IP.
-			ActivityStore[trackingKey] = &BotActivity{
+			processor.ActivityStore[trackingKey] = &BotActivity{
 				IsBlocked:    true,
 				BlockedUntil: time.Now().Add(time.Hour),
 			}
 
-			// 4. Set the global WhitelistNets to include the blocked IP.
+			// 4. Set the WhitelistNets on the processor's config to include the blocked IP.
 			_, ipNet, _ := net.ParseCIDR(tt.blockedIP + "/32")
-			ChainMutex.Lock()
-			WhitelistNets = []*net.IPNet{ipNet}
-			ChainMutex.Unlock()
+			processor.Config.WhitelistNets = []*net.IPNet{ipNet}
 
 			// --- Act ---
-			CheckAndRemoveWhitelistedBlocks()
+			processor.CheckAndRemoveWhitelistedBlocks()
 
 			// --- Assert ---
 			if len(commandsReceived) != 1 || commandsReceived[0] != tt.expectedCommand {
 				t.Errorf("Expected unblock command '%s', but got %v", tt.expectedCommand, commandsReceived)
 			}
 
-			activity, exists := ActivityStore[trackingKey]
+			activity, exists := processor.ActivityStore[trackingKey]
 			if !exists {
 				t.Fatal("Activity for the IP was unexpectedly deleted.")
 			}

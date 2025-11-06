@@ -24,8 +24,7 @@ type GlobalBlocker struct{}
 
 // Block calls the original global BlockIP function.
 func (h *GlobalBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
-	// Assuming BlockIP is globally defined elsewhere
-	return BlockIP(ipInfo, duration)
+	return P.BlockIP(ipInfo, duration)
 }
 
 // --- DEPENDENCY CONTAINER ---
@@ -51,6 +50,9 @@ type AppConfig struct {
 	DurationToTableName    map[time.Duration]string
 	BlockTableNameFallback string
 	LastModTime            time.Time
+	PollingInterval        time.Duration
+	IdleTimeout            time.Duration
+	CleanupInterval        time.Duration
 }
 
 // --- YAML DATA STRUCTURES ---

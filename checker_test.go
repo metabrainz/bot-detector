@@ -2,6 +2,7 @@ package main
 
 import (
 	"regexp"
+	"sync"
 	"testing"
 	"time"
 )
@@ -73,10 +74,10 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 			},
 		},
 	}
-	Chains = []BehavioralChain{chain}
+	chains := []BehavioralChain{chain}
 
 	// *** FIX: Compile regexes after chain definition ***
-	compileChainRegexes(t, Chains)
+	compileChainRegexes(t, chains)
 	// *************************************************
 
 	// Setup a mock blocker to intercept the block call
@@ -98,9 +99,9 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 	// Create the processor
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
-		ActivityMutex:     &ActivityMutex,
-		Chains:            Chains,
-		ChainMutex:        &ChainMutex,
+		ActivityMutex:     &sync.RWMutex{},
+		Chains:            chains,
+		ChainMutex:        &sync.RWMutex{},
 		DryRun:            false,
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
@@ -121,9 +122,8 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 		t.Fatal("Blocker was called after step 1, but it should only be called after step 2.")
 	}
 
-	ActivityMutex.RLock()
+	processor.ActivityMutex.RLock()
 	activity, exists := processor.ActivityStore[trackingKey]
-	ActivityMutex.RUnlock()
 
 	if !exists {
 		t.Fatal("Expected activity state to exist after step 1, but it did not.")
@@ -134,6 +134,7 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 	if !stateExists || stepState.CurrentStep != 1 {
 		t.Errorf("Expected chain state to be at step 1, got step %d (exists: %t)", stepState.CurrentStep, stateExists)
 	}
+	processor.ActivityMutex.RUnlock()
 
 	// --- STEP 2: Process the second request (the attack completion) --
 
@@ -157,18 +158,16 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 	}
 
 	// Check final ActivityStore state: IsBlocked should be true and ChainProgress should be cleared
-	ActivityMutex.RLock()
+	processor.ActivityMutex.RLock()
 	ipOnlyKey := TrackingKey{IPInfo: NewIPInfo(targetIP), UA: ""} // Check the IP-only key block optimization
 	activityIPOnly, _ := processor.ActivityStore[ipOnlyKey]
-	ActivityMutex.RUnlock()
 
 	if !activityIPOnly.IsBlocked {
 		t.Error("Expected IP-only activity state to be IsBlocked=true, but was false.")
 	}
 
-	ActivityMutex.RLock()
 	activityFinal, _ := processor.ActivityStore[trackingKey]
-	ActivityMutex.RUnlock()
+	processor.ActivityMutex.RUnlock()
 
 	if len(activityFinal.ChainProgress) != 0 {
 		t.Errorf("Expected ChainProgress to be cleared, but it has %d entries: %v", len(activityFinal.ChainProgress), activityFinal.ChainProgress)
@@ -202,10 +201,10 @@ func TestCheckChains_DryRun(t *testing.T) {
 			{Order: 2, FieldMatches: map[string]string{"Path": "^/step/two$"}, MaxDelayDuration: 5 * time.Second},
 		},
 	}
-	Chains = []BehavioralChain{chain}
+	chains := []BehavioralChain{chain}
 
 	// *** FIX: Compile regexes after chain definition ***
-	compileChainRegexes(t, Chains)
+	compileChainRegexes(t, chains)
 	// *************************************************
 
 	// Setup a mock blocker to intercept the block call
@@ -216,12 +215,13 @@ func TestCheckChains_DryRun(t *testing.T) {
 			return nil
 		},
 	}
+
 	// Create the processor with DryRun=true
 	processor := &Processor{
-		ActivityStore:     DryRunActivityStore, // In DryRun, the processor should use the DryRun store.
-		ActivityMutex:     &DryRunActivityMutex,
-		Chains:            Chains,
-		ChainMutex:        &ChainMutex,
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
+		ActivityMutex:     &sync.RWMutex{},
+		Chains:            chains,
+		ChainMutex:        &sync.RWMutex{},
 		DryRun:            true,
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
@@ -243,16 +243,9 @@ func TestCheckChains_DryRun(t *testing.T) {
 		t.Fatal("Blocker was called, but should be skipped in DryRun mode.")
 	}
 
-	// The DryRunActivityStore should be updated, but the main ActivityStore should be empty
-	ActivityMutex.RLock()
-	if _, exists := ActivityStore[trackingKey]; exists {
-		t.Error("Main ActivityStore should be empty in DryRun mode.")
-	}
-	ActivityMutex.RUnlock()
-
-	DryRunActivityMutex.RLock()
-	activityFinal, exists := DryRunActivityStore[trackingKey]
-	DryRunActivityMutex.RUnlock()
+	processor.ActivityMutex.RLock()
+	activityFinal, exists := processor.ActivityStore[trackingKey]
+	processor.ActivityMutex.RUnlock()
 
 	if !exists {
 		t.Fatal("Expected DryRunActivityStore to have activity, but it did not.")
@@ -288,17 +281,17 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 			{Order: 2, FieldMatches: map[string]string{"Path": "^/step/two$"}, MaxDelayDuration: 5 * time.Second},
 		},
 	}
-	Chains = []BehavioralChain{chain}
+	chains := []BehavioralChain{chain}
 
 	// *** FIX: Compile regexes after chain definition ***
-	compileChainRegexes(t, Chains)
+	compileChainRegexes(t, chains)
 	// *************************************************
 
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
-		ActivityMutex:     &ActivityMutex,
-		Chains:            Chains,
-		ChainMutex:        &ChainMutex,
+		ActivityMutex:     &sync.RWMutex{},
+		Chains:            chains,
+		ChainMutex:        &sync.RWMutex{},
 		DryRun:            false,
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
@@ -312,14 +305,14 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 	processor.CheckChains(entry)
 
 	// Assert 1: State is at step 1
-	ActivityMutex.RLock()
+	processor.ActivityMutex.RLock()
 	activity, _ := processor.ActivityStore[trackingKey]
 	stepState1, _ := activity.ChainProgress[chain.Name]
-	ActivityMutex.RUnlock()
 
 	if stepState1.CurrentStep != 1 {
 		t.Fatalf("Expected state to be at step 1, got %d", stepState1.CurrentStep)
 	}
+	processor.ActivityMutex.RUnlock() // <-- Release the read lock
 
 	// --- STEP 2: Process the second request, after MaxDelay (e.g., 6 seconds later) ---
 
@@ -330,9 +323,9 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 
 	// Assert 2: Chain should have been reset, and the second step should be treated as the *first* step
 	// of a new sequence, but it doesn't match step 1, so the chain progress should be cleared.
-	ActivityMutex.RLock()
+	processor.ActivityMutex.RLock()
 	activityFinal, _ := processor.ActivityStore[trackingKey]
-	ActivityMutex.RUnlock()
+	processor.ActivityMutex.RUnlock()
 
 	if len(activityFinal.ChainProgress) != 0 {
 		t.Errorf("Expected ChainProgress to be reset/cleared (length 0) after MaxDelay, but has %d entries: %v", len(activityFinal.ChainProgress), activityFinal.ChainProgress)
@@ -364,17 +357,17 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 			{Order: 2, FieldMatches: map[string]string{"Path": "^/step/two$"}, MinDelayDuration: 500 * time.Millisecond},
 		},
 	}
-	Chains = []BehavioralChain{chain}
+	chains := []BehavioralChain{chain}
 
 	// *** FIX: Compile regexes after chain definition ***
-	compileChainRegexes(t, Chains)
+	compileChainRegexes(t, chains)
 	// *************************************************
 
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
-		ActivityMutex:     &ActivityMutex,
-		Chains:            Chains,
-		ChainMutex:        &ChainMutex,
+		ActivityMutex:     &sync.RWMutex{},
+		Chains:            chains,
+		ChainMutex:        &sync.RWMutex{},
 		DryRun:            false,
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
@@ -388,14 +381,14 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 	processor.CheckChains(entry)
 
 	// Assert 1: State is at step 1
-	ActivityMutex.RLock()
+	processor.ActivityMutex.RLock()
 	activity, _ := processor.ActivityStore[trackingKey]
 	stepState1, _ := activity.ChainProgress[chain.Name]
-	ActivityMutex.RUnlock()
 
 	if stepState1.CurrentStep != 1 {
 		t.Fatalf("Expected state to be at step 1, got %d", stepState1.CurrentStep)
 	}
+	processor.ActivityMutex.RUnlock() // <-- Release the read lock
 
 	// --- STEP 2: Process the second request, before MinDelay (e.g., 100ms later) ---
 
@@ -405,9 +398,9 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 	processor.CheckChains(entry)
 
 	// Assert 2: Chain should be reset because min delay was not met.
-	ActivityMutex.RLock()
+	processor.ActivityMutex.RLock()
 	activityFinal, _ := processor.ActivityStore[trackingKey]
-	ActivityMutex.RUnlock()
+	processor.ActivityMutex.RUnlock()
 
 	if len(activityFinal.ChainProgress) != 0 {
 		t.Errorf("Expected ChainProgress to be reset/cleared (length 0) after MinDelay failure, but has %d entries: %v", len(activityFinal.ChainProgress), activityFinal.ChainProgress)
@@ -433,10 +426,10 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 			{Order: 1, FieldMatches: map[string]string{"Path": "^/step/one$"}},
 		},
 	}
-	Chains = []BehavioralChain{chain}
+	chains := []BehavioralChain{chain}
 
 	// *** FIX: Compile regexes after chain definition ***
-	compileChainRegexes(t, Chains)
+	compileChainRegexes(t, chains)
 	// *************************************************
 
 	// Log entry template for whitelisted IP
@@ -460,12 +453,13 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 			return nil
 		},
 	}
+
 	// Create the processor
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
-		ActivityMutex:     &ActivityMutex,
-		Chains:            Chains,
-		ChainMutex:        &ChainMutex,
+		ActivityMutex:     &sync.RWMutex{},
+		Chains:            chains,
+		ChainMutex:        &sync.RWMutex{},
 		DryRun:            false,
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: mockIsWhitelisted, // Inject mock whitelisting
@@ -480,9 +474,9 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 
 	// --- Assertions for Whitelisted IP ---
 	// NOTE: This assertion correctly identifies the bug in checker.go
-	ActivityMutex.RLock()
+	processor.ActivityMutex.RLock()
 	_, exists := processor.ActivityStore[whitelistedKey]
-	ActivityMutex.RUnlock()
+	processor.ActivityMutex.RUnlock()
 
 	if exists {
 		t.Errorf("Activity state exists for whitelisted IP %s, but should not. (BUG IN CHECKER.GO)", whitelistedIP)
@@ -502,10 +496,9 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 	processor.CheckChains(nonWhitelistedEntry)
 	nonWhitelistedKey := GetTrackingKey(&chain, nonWhitelistedEntry)
 
-	// --- Assertions for Non-Whitelisted IP ---
-	ActivityMutex.RLock()
+	processor.ActivityMutex.RLock()
+	defer processor.ActivityMutex.RUnlock()
 	activity, exists := processor.ActivityStore[nonWhitelistedKey]
-	ActivityMutex.RUnlock()
 
 	if !exists {
 		t.Error("Activity state for non-whitelisted IP should exist, but did not.")
@@ -545,10 +538,10 @@ func TestCheckChains_LogAction(t *testing.T) {
 			{Order: 2, FieldMatches: map[string]string{"Path": "^/step/two$"}, MaxDelayDuration: 5 * time.Second},
 		},
 	}
-	Chains = []BehavioralChain{chain}
+	chains := []BehavioralChain{chain}
 
 	// *** FIX: Compile regexes after chain definition ***
-	compileChainRegexes(t, Chains)
+	compileChainRegexes(t, chains)
 	// *************************************************
 
 	// Setup a mock blocker to ensure it's not called
@@ -559,12 +552,13 @@ func TestCheckChains_LogAction(t *testing.T) {
 			return nil
 		},
 	}
+
 	// Create the processor
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
-		ActivityMutex:     &ActivityMutex,
-		Chains:            Chains,
-		ChainMutex:        &ChainMutex,
+		ActivityMutex:     &sync.RWMutex{},
+		Chains:            chains,
+		ChainMutex:        &sync.RWMutex{},
 		DryRun:            false,
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
@@ -578,13 +572,13 @@ func TestCheckChains_LogAction(t *testing.T) {
 	processor.CheckChains(entry)
 
 	// Assert 1: State is at step 1
-	ActivityMutex.RLock()
+	processor.ActivityMutex.RLock()
 	activity, _ := processor.ActivityStore[trackingKey]
-	ActivityMutex.RUnlock()
 
 	if len(activity.ChainProgress) == 0 {
 		t.Fatal("Expected state to exist after step 1, but it was empty.")
 	}
+	processor.ActivityMutex.RUnlock()
 
 	// --- STEP 2: Process the second request (completion) ---
 	entry.Timestamp = entry.Timestamp.Add(2 * time.Second)
@@ -597,9 +591,9 @@ func TestCheckChains_LogAction(t *testing.T) {
 		t.Fatal("Blocker was called, but should have been skipped for Action='log'.")
 	}
 
-	ActivityMutex.RLock()
+	processor.ActivityMutex.RLock()
 	activityFinal, _ := processor.ActivityStore[trackingKey]
-	ActivityMutex.RUnlock()
+	defer processor.ActivityMutex.RUnlock()
 
 	// For a 'log' action, IsBlocked should be false and ChainProgress should be cleared
 	if activityFinal.IsBlocked {
@@ -636,10 +630,10 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 			{Order: 2, FieldMatches: map[string]string{"Path": "^/step/two$"}, MaxDelayDuration: 5 * time.Second},
 		},
 	}
-	Chains = []BehavioralChain{chain}
+	chains := []BehavioralChain{chain}
 
 	// *** FIX: Compile regexes after chain definition ***
-	compileChainRegexes(t, Chains)
+	compileChainRegexes(t, chains)
 	// *************************************************
 
 	// Setup a mock blocker to ensure it's not called
@@ -650,16 +644,13 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 			return nil
 		},
 	}
-	setupConfig(t,
-		[]string{"127.0.0.1:9999"},
-		map[time.Duration]string{blockDuration: "table_10m"},
-		"",
-	)
+
+	// Create the processor
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
-		ActivityMutex:     &ActivityMutex,
-		Chains:            Chains,
-		ChainMutex:        &ChainMutex,
+		ActivityMutex:     &sync.RWMutex{},
+		Chains:            chains,
+		ChainMutex:        &sync.RWMutex{},
 		DryRun:            false,
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
@@ -683,9 +674,9 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 		t.Fatal("Blocker was called, but should have been skipped for Action='unknown'.")
 	}
 
-	ActivityMutex.RLock()
+	processor.ActivityMutex.RLock()
 	activityFinal, _ := processor.ActivityStore[trackingKey]
-	ActivityMutex.RUnlock()
+	processor.ActivityMutex.RUnlock()
 
 	// For an 'unknown' action, IsBlocked should be false and ChainProgress should be cleared
 	if activityFinal.IsBlocked {
