@@ -103,7 +103,7 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 		ChainMutex:        &ChainMutex,
 		DryRun:            false,
 		LogFunc:           LogOutput,
-		IsWhitelistedFunc: IsIPWhitelisted,
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
 		Blocker:           mockBlocker, // Inject mock blocker
 		Config:            &AppConfig{},
 	}
@@ -224,7 +224,7 @@ func TestCheckChains_DryRun(t *testing.T) {
 		ChainMutex:        &ChainMutex,
 		DryRun:            true,
 		LogFunc:           LogOutput,
-		IsWhitelistedFunc: IsIPWhitelisted,
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
 		Blocker:           mockBlocker, // Inject mock blocker
 		Config:            &AppConfig{},
 	}
@@ -301,7 +301,7 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 		ChainMutex:        &ChainMutex,
 		DryRun:            false,
 		LogFunc:           LogOutput,
-		IsWhitelistedFunc: IsIPWhitelisted,
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
 		Blocker:           &GlobalBlocker{},
 		Config:            &AppConfig{},
 	}
@@ -377,7 +377,7 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 		ChainMutex:        &ChainMutex,
 		DryRun:            false,
 		LogFunc:           LogOutput,
-		IsWhitelistedFunc: IsIPWhitelisted,
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
 		Blocker:           &GlobalBlocker{},
 		Config:            &AppConfig{},
 	}
@@ -567,7 +567,7 @@ func TestCheckChains_LogAction(t *testing.T) {
 		ChainMutex:        &ChainMutex,
 		DryRun:            false,
 		LogFunc:           LogOutput,
-		IsWhitelistedFunc: IsIPWhitelisted,
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
 		Blocker:           mockBlocker,
 		Config:            &AppConfig{},
 	}
@@ -662,7 +662,7 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 		ChainMutex:        &ChainMutex,
 		DryRun:            false,
 		LogFunc:           LogOutput,
-		IsWhitelistedFunc: IsIPWhitelisted,
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
 		Blocker:           mockBlocker,
 		Config:            &AppConfig{},
 	}

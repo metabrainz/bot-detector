@@ -40,16 +40,16 @@ func main() {
 	// We use the global state variables (ActivityStore, Chains, etc.) to
 	// populate the single Processor instance.
 	P = &Processor{
-		ActivityStore:     ActivityStore,
-		ActivityMutex:     &ActivityMutex,
-		Chains:            Chains,
-		ChainMutex:        &ChainMutex,
-		DryRun:            DryRun,
-		LogFunc:           LogOutput,
-		IsWhitelistedFunc: IsIPWhitelisted,
-		Blocker:           &GlobalBlocker{},
-		Config:            appConfig,
+		ActivityStore: ActivityStore,
+		ActivityMutex: &ActivityMutex,
+		Chains:        Chains,
+		ChainMutex:    &ChainMutex,
+		DryRun:        DryRun,
+		LogFunc:       LogOutput,
+		Blocker:       &GlobalBlocker{},
+		Config:        appConfig,
 	}
+	P.IsWhitelistedFunc = P.IsIPWhitelisted // Set the method correctly.
 	// Switch to the DryRun store/mutex if running in dry-run mode
 	if DryRun {
 		P.ActivityStore = DryRunActivityStore

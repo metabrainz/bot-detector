@@ -73,16 +73,16 @@ func GetTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
 }
 
 // IsIPWhitelisted checks if the given IP address falls within any configured CIDR whitelist range.
-func IsIPWhitelisted(ipInfo IPInfo) bool {
+func (p *Processor) IsIPWhitelisted(ipInfo IPInfo) bool {
 	ip := net.ParseIP(ipInfo.Address)
 	if ip == nil {
 		return false
 	}
 	// Note: WhitelistNets is protected by ChainMutex because it's populated during config reload.
-	ChainMutex.RLock()
-	defer ChainMutex.RUnlock()
+	p.ChainMutex.RLock()
+	defer p.ChainMutex.RUnlock()
 
-	for _, ipNet := range WhitelistNets {
+	for _, ipNet := range p.Config.WhitelistNets {
 		if ipNet.Contains(ip) {
 			return true
 		}

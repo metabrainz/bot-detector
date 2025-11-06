@@ -348,7 +348,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 		ChainMutex:        &ChainMutex,
 		Blocker:           mockBlocker,
 		LogFunc:           LogOutput,
-		IsWhitelistedFunc: IsIPWhitelisted,
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
 		Config:            &AppConfig{},
 		DryRun:            true, // CRITICAL: DryRun is enabled
 	}

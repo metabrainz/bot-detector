@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"sync"
 	"testing"
 )
 
@@ -14,9 +15,14 @@ func TestIsIPWhitelisted(t *testing.T) {
 	_, netV6, _ := net.ParseCIDR("2001:db8::/32")
 
 	// Set the global WhitelistNets
-	ChainMutex.Lock()
-	WhitelistNets = []*net.IPNet{netV4, netV6}
-	ChainMutex.Unlock()
+	processor := &Processor{
+		ChainMutex: &sync.RWMutex{},
+		Config: &AppConfig{
+			WhitelistNets: []*net.IPNet{netV4, netV6},
+		},
+	}
+	// Assign the method to the func field for this test instance.
+	processor.IsWhitelistedFunc = processor.IsIPWhitelisted
 
 	tests := []struct {
 		name     string
@@ -38,7 +44,7 @@ func TestIsIPWhitelisted(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := IsIPWhitelisted(NewIPInfo(tt.ip))
+			result := processor.IsWhitelistedFunc(NewIPInfo(tt.ip))
 			if result != tt.expected {
 				t.Errorf("IsIPWhitelisted(%s) = %v, want %v", tt.ip, result, tt.expected)
 			}
