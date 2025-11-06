@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"regexp"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -383,48 +382,6 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 
 	if exists && realActivity.IsBlocked {
 		t.Error("IP was unexpectedly blocked in the REAL ActivityStore while in DryRun mode.")
-	}
-}
-
-// --- Test Cases for LogEntry Field Getters ---
-
-// TestExtractReferrerPath_ErrorCases tests various malformed or empty referrer inputs
-// that should result in an error or empty path.
-func TestExtractReferrerPath_ErrorCases(t *testing.T) {
-	tests := []struct {
-		name          string
-		referrer      string
-		expectedError string
-	}{
-		{
-			name:          "Empty Referrer",
-			referrer:      "",
-			expectedError: "referrer is empty",
-		},
-		{
-			name:          "Malformed URL (Invalid Escape)",
-			referrer:      "http://example.com/%g",
-			expectedError: "invalid URL escape",
-		},
-		{
-			name:          "URL with no path",
-			referrer:      "http://example.com",
-			expectedError: "URL parsed but path is empty",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			path, err := ExtractReferrerPath(tt.referrer)
-
-			if err == nil {
-				t.Fatalf("Expected an error containing '%s', but got path: %s and no error.", tt.expectedError, path)
-			}
-
-			if !strings.Contains(err.Error(), tt.expectedError) {
-				t.Errorf("Error mismatch. Expected error containing '%s', got: %v", tt.expectedError, err)
-			}
-		})
 	}
 }
 

@@ -86,29 +86,7 @@ chains:
       - field_matches:
           Path: "^/complete$"
         max_delay: "10s"
-  # --- 8. Field: ReferrerPrevPath Match (Path Only) (SUCCESS) ---
-  - name: "Test-Field-ReferrerPrevPath-Path"
-    action: "log"
-    match_key: "ip"
-    steps:
-      - field_matches:
-          Path: "^/product/buy$"
-          ReferrerPrevPath: "^/catalog/item/456$"
-      - field_matches:
-          Path: "^/product/confirm$"
-        max_delay: "5s"
-  # --- 9. Field: ReferrerPrevPath (FAILURE: Path does not match) ---
-  - name: "Test-Field-ReferrerPrevPath-Failure"
-    action: "log"
-    match_key: "ip"
-    steps:
-      - field_matches:
-          Path: "^/product/fail$"
-          ReferrerPrevPath: "^/catalog/item/999$" # Intentional failure path
-      - field_matches:
-          Path: "^/product/confirm$"
-        max_delay: "5s"
-  # --- 10. Field: Block User Agent (SUCCESS) ---
+  # --- 8. Field: Block User Agent (SUCCESS) ---
   - name: "Test-Field-BlockUserAgent"
     action: "log"
     match_key: "ip_ua"

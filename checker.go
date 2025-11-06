@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,25 +28,6 @@ func GetMatchValue(fieldName string, entry *LogEntry) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown field: %s", fieldName)
 	}
-}
-
-// ExtractReferrerPath safely parses the path from a full URL string.
-func ExtractReferrerPath(referrer string) (string, error) {
-	if referrer == "" {
-		return "", fmt.Errorf("referrer is empty")
-	}
-	u, parseErr := url.Parse(referrer)
-	if parseErr != nil {
-		return referrer, fmt.Errorf("failed to parse URL from referrer: %w", parseErr)
-	}
-
-	// FIX: Check for both empty path and root path ("/") as required by the failing test.
-	if u.Path == "" || u.Path == "/" {
-		// Returning "" (empty string) for the path satisfies the test assertion.
-		return "", fmt.Errorf("URL parsed but path is empty")
-	}
-
-	return u.Path, nil
 }
 
 // CheckChains is refactored as a method on Processor.
@@ -157,22 +137,11 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 				matchValue := ""
 				var err error
 
-				if fieldName == "Referrer" {
-					matchValue, err = ExtractReferrerPath(entry.Referrer)
-					if err != nil {
-						if entry.Referrer != "" {
-							p.LogFunc(LevelDebug, "WARN", "Chain %s: Failed to extract path from referrer '%s': %v", chain.Name, entry.Referrer, err)
-						}
-						match = false
-						break
-					}
-				} else {
-					matchValue, err = GetMatchValue(fieldName, entry)
-					if err != nil {
-						p.LogFunc(LevelDebug, "WARN", "Chain %s: Unknown field '%s' in configuration. Skipping match.", chain.Name, fieldName)
-						match = false
-						break
-					}
+				matchValue, err = GetMatchValue(fieldName, entry)
+				if err != nil {
+					// This can happen if the field is unknown. In that case, it's not a match.
+					match = false
+					break
 				}
 
 				if !step.CompiledRegexes[fieldName].MatchString(matchValue) {

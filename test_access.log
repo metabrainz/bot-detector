@@ -28,23 +28,16 @@ musicbrainz.org 192.0.2.21 - - [28/Oct/2025:17:00:13 +0000] "GET /spoof/end HTTP
 musicbrainz.org 192.0.2.23 - - [28/Oct/2025:17:00:14 +0000] "GET /checkout HTTP/1.1" 200 100 "https://external.payment.gateway/return.html?id=12345" "Ref-Bot"
 musicbrainz.org 192.0.2.23 - - [28/Oct/2025:17:00:15 +0000] "GET /complete HTTP/1.1" 200 100 "https://external.payment.gateway/return.html?id=12345" "Ref-Bot"
 
-# 7. Test: Field: ReferrerPrevPath Match (Path Only) (192.0.2.24) - SUCCESS
-musicbrainz.org 192.0.2.24 - - [28/Oct/2025:17:00:16 +0000] "GET /product/buy HTTP/1.1" 200 100 "http://store.com/catalog/item/456?p=a" "Path-Bot"
-musicbrainz.org 192.0.2.24 - - [28/Oct/2025:17:00:17 +0000] "GET /product/confirm HTTP/1.1" 200 100 "http://store.com/product/buy" "Path-Bot"
-
-# 8. Test: Field: ReferrerPrevPath (FAILURE: Path does not match) (192.0.2.25) - FAILURE
-musicbrainz.org 192.0.2.25 - - [28/Oct/2025:17:00:18 +0000] "GET /product/fail HTTP/1.1" 200 100 "http://store.com/catalog/item/456" "Path-Bot-Fail"
-
-# 9. Test: Field: Method and StatusCode (192.0.2.26) - SUCCESS
+# 7. Test: Field: Method and StatusCode (192.0.2.26) - SUCCESS
 musicbrainz.org 192.0.2.26 - - [28/Oct/2025:17:00:19 +0000] "POST /api/auth HTTP/1.1" 403 100 "-" "API-Bot"
 musicbrainz.org 192.0.2.26 - - [28/Oct/2025:17:00:20 +0000] "POST /api/auth HTTP/1.1" 403 100 "-" "API-Bot"
 
-# 10. Test: Field: Bad User Agent - SUCCESS
+# 8. Test: Field: Bad User Agent - SUCCESS
 musicbrainz.org 192.0.2.27 - - [28/Oct/2025:17:00:04 +0000] "GET /v4/end HTTP/1.1" 200 100 "-" "badguy"
 musicbrainz.org 2001:db8::27 - - [28/Oct/2025:17:00:05 +0000] "GET /v6/start HTTP/1.1" 200 100 "-" "badguy"
 musicbrainz.org 192.0.2.28 - - [28/Oct/2025:17:00:04 +0000] "GET /v4/end HTTP/2.0" 200 100 "-" "badguy"
 
-# 11. Test: Already Blocked IP Check (192.0.2.10) - Should ideally be ignored/dropped by external filter
+# 9. Test: Already Blocked IP Check (192.0.2.10) - Should ideally be ignored/dropped by external filter
 musicbrainz.org 192.0.2.10 - - [28/Oct/2025:17:00:21 +0000] "GET /already_blocked HTTP/1.1" 200 100 "-" "Already-Blocked-Tester"
 
 # --- Buggy/Malformed Lines Section (Testing Parser Robustness) ---
