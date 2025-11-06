@@ -20,6 +20,14 @@ type HAProxyExecutor func(addr, ip, command string) error
 // to the real implementation.
 var haproxyCommandExecutor HAProxyExecutor = executeHAProxyCommandImpl
 
+// These variables define the retry and timeout behavior for HAProxy commands.
+// They are package-level so they can be overridden in tests.
+var (
+	maxRetries  = 3
+	retryDelay  = 200 * time.Millisecond
+	dialTimeout = 5 * time.Second
+)
+
 // executeHAProxyCommand is the public-facing wrapper that calls the current executor implementation.
 // In tests, this calls the mock function.
 func executeHAProxyCommand(addr, ip, command string) error {

@@ -38,6 +38,25 @@ func setupConfig(t *testing.T, addresses []string, durations map[time.Duration]s
 	DryRun = false
 }
 
+// setTestTimeouts sets aggressive timeout/retry settings for tests
+// that rely on the real network implementation and restores the original values using t.Cleanup.
+func setTestTimeouts(t *testing.T) {
+	originalMaxRetries := maxRetries
+	originalRetryDelay := retryDelay
+	originalDialTimeout := dialTimeout
+
+	// Set very short, aggressive settings for testing
+	maxRetries = 1 // Only 1 attempt to fail fast
+	retryDelay = 1 * time.Millisecond
+	dialTimeout = 100 * time.Millisecond
+
+	t.Cleanup(func() {
+		maxRetries = originalMaxRetries
+		retryDelay = originalRetryDelay
+		dialTimeout = originalDialTimeout
+	})
+}
+
 // --- Test Cases for BlockIP/UnblockIP (Mocked Flow Control) ---
 
 // TestBlockAndUnblockIP_SuccessFlow tests the complete, successful path of HAProxy command execution.
@@ -271,6 +290,7 @@ func startMockServer(t *testing.T, handler func(net.Conn)) (net.Listener, string
 // TestExecuteHAProxyCommandImpl_Success tests the happy path of a single command execution:
 // successful connection, write, and a response indicating success (empty or newline).
 func TestExecuteHAProxyCommandImpl_Success(t *testing.T) {
+	setTestTimeouts(t)
 	// Start a minimal TCP server that returns an empty response (success).
 	_, addr, closeFn := startMockServer(t, func(conn net.Conn) {
 		reader := bufio.NewReader(conn)
@@ -289,6 +309,7 @@ func TestExecuteHAProxyCommandImpl_Success(t *testing.T) {
 // TestExecuteHAProxyCommandImpl_HAProxyError tests command execution where the HAProxy instance
 // successfully responds with a non-empty string, indicating a command-level error.
 func TestExecuteHAProxyCommandImpl_HAProxyError(t *testing.T) {
+	setTestTimeouts(t)
 	// Start a minimal TCP server that returns a mock HAProxy error response.
 	_, addr, closeFn := startMockServer(t, func(conn net.Conn) {
 		reader := bufio.NewReader(conn)
@@ -311,10 +332,11 @@ func TestExecuteHAProxyCommandImpl_HAProxyError(t *testing.T) {
 // TestExecuteHAProxyCommandImpl_ConnectError tests a failure during the connection attempt (e.g., connection refused).
 // The test verifies the retry mechanism is used and the final error reflects the connection failure.
 func TestExecuteHAProxyCommandImpl_ConnectError(t *testing.T) {
+	setTestTimeouts(t)
 	// Use an address that is guaranteed to fail connection (e.g., high port).
 	addr := "127.0.0.1:65535"
 
-	// The function will retry maxRetries (3) times, returning the last connection error.
+	// The function will retry maxRetries times, returning the last connection error.
 	err := executeHAProxyCommand(addr, "192.0.2.1", "set table foo key bar\n")
 	if err == nil {
 		t.Fatal("Expected a connection error after retries, got nil")
@@ -328,6 +350,7 @@ func TestExecuteHAProxyCommandImpl_ConnectError(t *testing.T) {
 // TestExecuteHAProxyCommandImpl_WriteError tests a failure when the HAProxy server closes the connection
 // immediately after the dial. This verifies the client handles the subsequent read error/timeout correctly after retries.
 func TestExecuteHAProxyCommandImpl_WriteError(t *testing.T) {
+	setTestTimeouts(t)
 	// Start a server that closes the connection immediately after accept.
 	_, addr, closeFn := startMockServer(t, func(conn net.Conn) {
 		// Close the connection before the client can write.
@@ -335,7 +358,7 @@ func TestExecuteHAProxyCommandImpl_WriteError(t *testing.T) {
 	})
 	defer closeFn()
 
-	// The function will retry maxRetries (3) times.
+	// The function will retry maxRetries times.
 	err := executeHAProxyCommand(addr, "192.0.2.1", "set table foo key bar\n")
 	if err == nil {
 		t.Fatal("Expected an error after retries, got nil")
@@ -354,6 +377,7 @@ func TestExecuteHAProxyCommandImpl_WriteError(t *testing.T) {
 // returns something unexpected that is neither a standard error nor a clean success.
 func TestExecuteHAProxyCommandImpl_MalformedResponse(t *testing.T) {
 	resetGlobalState()
+	setTestTimeouts(t)
 
 	// Mock server that returns a non-standard response (e.g., garbage string)
 	_, addr, closeFn := startMockServer(t, func(conn net.Conn) {
