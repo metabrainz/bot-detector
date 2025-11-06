@@ -50,18 +50,18 @@ func GetTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
 	switch chain.MatchKey {
 	case "ip", "ip_ua":
 		if ipInfo.Version == VersionInvalid {
-			return TrackingKey{IPInfo: ipInfo} // Return with IPInfo but no UA
+			return TrackingKey{} // Mismatch: return empty key
 		}
 	case "ipv4", "ipv4_ua":
 		if ipInfo.Version != VersionIPv4 { // Changed from string to byte constant
-			return TrackingKey{IPInfo: ipInfo}
+			return TrackingKey{}
 		}
 	case "ipv6", "ipv6_ua":
 		if ipInfo.Version != VersionIPv6 { // Changed from string to byte constant
-			return TrackingKey{IPInfo: ipInfo}
+			return TrackingKey{}
 		}
 	default:
-		return TrackingKey{IPInfo: ipInfo} // Unknown match key, treat as mismatch
+		return TrackingKey{} // Unknown match key, treat as mismatch
 	}
 
 	trackingKey := TrackingKey{IPInfo: ipInfo}

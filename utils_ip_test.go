@@ -72,13 +72,13 @@ func TestGetTrackingKey(t *testing.T) {
 		{"Match: ipv4_ua (IPv4)", "ipv4_ua", baseEntry, TrackingKey{IPInfo: NewIPInfo("192.0.2.1"), UA: "TestAgent"}},
 		{"Match: ipv6_ua (IPv6)", "ipv6_ua", &LogEntry{IPInfo: NewIPInfo("2001:db8::1"), UserAgent: "TestAgent"}, TrackingKey{IPInfo: NewIPInfo("2001:db8::1"), UA: "TestAgent"}},
 
-		// --- Failure Cases (Empty Key returned) ---
-		{"Mismatch: ip (Invalid Version)", "ip", &LogEntry{IPInfo: NewIPInfo("bad-ip")}, TrackingKey{IPInfo: IPInfo{Address: "bad-ip", Version: 0}}},
-		{"Mismatch: ipv4 (is IPv6)", "ipv4", &LogEntry{IPInfo: NewIPInfo("2001:db8::1")}, TrackingKey{IPInfo: IPInfo{Address: "2001:db8::1", Version: 6}}},
-		{"Mismatch: ipv6 (is IPv4)", "ipv6", baseEntry, TrackingKey{IPInfo: IPInfo{Address: "192.0.2.1", Version: 4}}},
-		{"Mismatch: Unknown MatchKey", "bad_key", baseEntry, TrackingKey{IPInfo: IPInfo{Address: "192.0.2.1", Version: 4}}},
-		{"Mismatch: ipv4_ua (is IPv6)", "ipv4_ua", &LogEntry{IPInfo: NewIPInfo("2001:db8::1")}, TrackingKey{IPInfo: IPInfo{Address: "2001:db8::1", Version: 6}}},
-		{"Mismatch: ipv6_ua (is IPv4)", "ipv6_ua", baseEntry, TrackingKey{IPInfo: IPInfo{Address: "192.0.2.1", Version: 4}}},
+		// --- Failure Cases (Empty Key is now expected) ---
+		{"Mismatch: ip (Invalid Version)", "ip", &LogEntry{IPInfo: NewIPInfo("bad-ip")}, TrackingKey{}},
+		{"Mismatch: ipv4 (is IPv6)", "ipv4", &LogEntry{IPInfo: NewIPInfo("2001:db8::1")}, TrackingKey{}},
+		{"Mismatch: ipv6 (is IPv4)", "ipv6", baseEntry, TrackingKey{}},
+		{"Mismatch: Unknown MatchKey", "bad_key", baseEntry, TrackingKey{}},
+		{"Mismatch: ipv4_ua (is IPv6)", "ipv4_ua", &LogEntry{IPInfo: NewIPInfo("2001:db8::1")}, TrackingKey{}},
+		{"Mismatch: ipv6_ua (is IPv4)", "ipv6_ua", baseEntry, TrackingKey{}},
 	}
 
 	for _, tt := range tests {

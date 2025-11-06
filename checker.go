@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -115,10 +116,8 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 		// Check if the current log entry's tracking key is applicable to this chain
 		// (e.g., check IP version compatibility again, as not all chains may be applicable).
 		chainKey := GetTrackingKey(&chain, entry)
-		// A mismatch is signaled by GetTrackingKey returning a key without a UserAgent.
-		// If the primary key requires a UA, but the chain-specific key doesn't have one, it's a mismatch.
-		// Also, if the chain requires a UA but the primary key doesn't, we can't track it.
-		if (uaRequired && chainKey.UA == "") || (!uaRequired && chainKey.UA != "") {
+		// If GetTrackingKey returns an empty key, it's a mismatch for this chain.
+		if chainKey.IPInfo.Address == "" {
 			continue
 		}
 
