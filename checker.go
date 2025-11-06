@@ -65,6 +65,13 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 		return
 	}
 
+	// FIX 1: Check whitelisting immediately after acquiring the IP/key
+	// This prevents creating activity state for whitelisted IPs, fixing TestCheckChains_WhitelistSkip.
+	if p.IsWhitelistedFunc(entry.IP) {
+		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IP)
+		return
+	}
+
 	// Choose appropriate store & mutex based on the Processor's DryRun state.
 	var store map[TrackingKey]*BotActivity
 	var mutex *sync.RWMutex
@@ -128,10 +135,12 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 					state.CurrentStep = 0
 					goto UpdateChainProgress // Restart check on step 0
 				}
-				// Check MinDelayDuration (prevents rapid-fire completion of the next step)
+
+				// FIX 2: MinDelayNotMet failure should reset the state, not just continue
 				if step.MinDelayDuration > 0 && time.Since(state.LastMatchTime) < step.MinDelayDuration {
-					p.LogFunc(LevelDebug, "SKIP", "Chain %s: MinDelay %v not met for key %s. Skipping this log line for this chain.", chain.Name, step.MinDelayDuration, trackingKey.IP)
-					continue // Skip this chain for this log line
+					p.LogFunc(LevelDebug, "RESET", "Chain %s: MinDelay %v not met for key %s. Resetting state.", chain.Name, step.MinDelayDuration, trackingKey.IP)
+					state.CurrentStep = 0    // Reset state
+					goto UpdateChainProgress // Proceed to state update/cleanup (which deletes the state)
 				}
 			}
 
