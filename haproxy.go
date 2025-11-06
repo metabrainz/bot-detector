@@ -11,8 +11,24 @@ import (
 	"time"
 )
 
-// executeHAProxyCommand connects to a single HAProxy instance over TCP and executes the command.
+// HAProxyExecutor defines the function signature for executing a single HAProxy command.
+// This allows the real network logic to be easily mocked for unit testing.
+type HAProxyExecutor func(addr, ip, command string) error
+
+// haproxyCommandExecutor is a package-level variable that holds the current
+// implementation of the HAProxy command execution function. It is initialized
+// to the real implementation.
+var haproxyCommandExecutor HAProxyExecutor = executeHAProxyCommandImpl
+
+// executeHAProxyCommand is the public-facing wrapper that calls the current executor implementation.
+// In tests, this calls the mock function.
 func executeHAProxyCommand(addr, ip, command string) error {
+	return haproxyCommandExecutor(addr, ip, command)
+}
+
+// executeHAProxyCommandImpl connects to a single HAProxy instance over TCP/Unix and executes the command.
+// This contains the original networking logic.
+func executeHAProxyCommandImpl(addr, ip, command string) error {
 	const maxRetries = 3
 	const retryDelay = 200 * time.Millisecond
 	const dialTimeout = 5 * time.Second
@@ -53,7 +69,9 @@ func executeHAProxyCommand(addr, ip, command string) error {
 		response, err := reader.ReadString('\n')
 
 		// If the error is EOF or nil, the command might have succeeded.
-		if err == nil || errors.Is(err, io.EOF) {
+		// FIX: Only treat io.EOF as success if we actually read some data (`response != ""`).
+		// An io.EOF on an empty response means the connection closed abruptly, which is a failure.
+		if err == nil || (errors.Is(err, io.EOF) && response != "") {
 			trimmedResponse := strings.TrimSpace(response)
 
 			if trimmedResponse != "" {

@@ -1,0 +1,451 @@
+package main
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+// --- Mocking Setup for Blocker Interface ---
+
+// MockBlocker implements the Blocker interface for testing, allowing Block() calls to be intercepted.
+type MockBlocker struct {
+	BlockFunc func(ip string, version IPVersion, duration time.Duration) error
+}
+
+// Block calls the stored mock function to simulate the blocking action.
+func (m *MockBlocker) Block(ip string, version IPVersion, duration time.Duration) error {
+	if m.BlockFunc != nil {
+		return m.BlockFunc(ip, version, duration)
+	}
+	return nil
+}
+
+// --- Test Cases for ParseLogLine ---
+// (No changes to this section, as it passed in the previous step)
+
+func TestParseLogLine(t *testing.T) {
+	testTime, _ := time.Parse(logTimeFormat, "06/Nov/2025:09:00:00 +0100")
+
+	validReferrer := "http://referrer.com/test?q=1"
+	validUserAgent := "test-agent"
+	validIPv6UserAgent := "test-agent-ipv6"
+
+	// Correct format: VHost IP - userx [time] "request" status size "referrer" "user-agent"
+	validLogLine := fmt.Sprintf(`www.example.com 192.168.1.1 - userx [06/Nov/2025:09:00:00 +0100] "GET /path/to/resource HTTP/1.1" 200 1234 "%s" "%s"`, validReferrer, validUserAgent)
+	validIPv6LogLine := fmt.Sprintf(`www.example.com 2001:db8::1 - userx [06/Nov/2025:09:00:00 +0100] "GET /path/to/resource HTTP/1.1" 200 1234 "%s" "%s"`, validReferrer, validIPv6UserAgent)
+
+	tests := []struct {
+		name        string
+		line        string
+		expectError bool
+		expected    *LogEntry
+	}{
+		{
+			name:        "Valid IPv4 Line",
+			line:        validLogLine,
+			expectError: false,
+			expected: &LogEntry{
+				Timestamp:  testTime,
+				IP:         "192.168.1.1",
+				Path:       "/path/to/resource",
+				Method:     "GET",
+				Protocol:   "HTTP/1.1",
+				UserAgent:  validUserAgent,
+				Referrer:   validReferrer,
+				StatusCode: 200,
+				IPVersion:  VersionIPv4,
+			},
+		},
+		{
+			name:        "Valid IPv6 Line",
+			line:        validIPv6LogLine,
+			expectError: false,
+			expected: &LogEntry{
+				Timestamp:  testTime,
+				IP:         "2001:db8::1",
+				Path:       "/path/to/resource",
+				Method:     "GET",
+				Protocol:   "HTTP/1.1",
+				UserAgent:  validIPv6UserAgent,
+				Referrer:   validReferrer,
+				StatusCode: 200,
+				IPVersion:  VersionIPv6,
+			},
+		},
+		{
+			name:        "Empty Line",
+			line:        "",
+			expectError: false,
+			expected:    nil,
+		},
+		{
+			name:        "Comment Line",
+			line:        "# This is a comment",
+			expectError: false,
+			expected:    nil,
+		},
+		{
+			name:        "Malformed Timestamp",
+			line:        fmt.Sprintf(`www.example.com 192.168.1.1 - userx [06/Mal/2025:09:00:00 +0100] "GET /path HTTP/1.1" 200 1234 "-" "-"`),
+			expectError: true,
+			expected:    nil,
+		},
+		{
+			name:        "Malformed Status Code",
+			line:        `www.example.com 192.168.1.1 - userx [06/Nov/2025:09:00:00 +0100] "GET /path HTTP/1.1" XXX 1234 "-" "-"`,
+			expectError: true,
+			expected:    nil,
+		},
+		{
+			name:        "Incorrect Field Count",
+			line:        `www.example.com 192.168.1.1 - userx [06/Nov/2025:09:00:00 +0100] "GET /path HTTP/1.1" 200 1234 "-"`, // Missing UserAgent quote field
+			expectError: true,
+			expected:    nil,
+		},
+		{
+			name:        "Invalid IP Address (Invalid Version)",
+			line:        `www.example.com invalid-ip - userx [06/Nov/2025:09:00:00 +0100] "GET /path/to/resource HTTP/1.1" 200 1234 "-" "-"`,
+			expectError: true,
+			expected:    nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry, err := ParseLogLine(tt.line)
+
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("Expected an error for line:\n%s\nGot nil.", tt.line)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("Unexpected error for line:\n%s\nError: %v", tt.line, err)
+				}
+				if entry == nil {
+					if tt.expected != nil {
+						t.Fatalf("Expected entry %v, got nil.", tt.expected)
+					}
+					return
+				}
+
+				if entry.IP != tt.expected.IP {
+					t.Errorf("IP mismatch. Expected %s, got %s", tt.expected.IP, entry.IP)
+				}
+				if entry.IPVersion != tt.expected.IPVersion {
+					t.Errorf("IPVersion mismatch. Expected %v, got %v", tt.expected.IPVersion, entry.IPVersion)
+				}
+				if entry.Path != tt.expected.Path {
+					t.Errorf("Path mismatch. Expected %s, got %s", tt.expected.Path, entry.Path)
+				}
+				if entry.UserAgent != tt.expected.UserAgent {
+					t.Errorf("UserAgent mismatch. Expected %s, got %s", tt.expected.UserAgent, entry.UserAgent)
+				}
+			}
+		})
+	}
+}
+
+// --- Test Cases for ProcessLogLine Flow Control ---
+
+func TestProcessLogLine_FlowControl(t *testing.T) {
+	// Cleanup: Ensure the global store is reset after the test.
+	t.Cleanup(func() {
+		ActivityMutex.Lock()
+		ActivityStore = make(map[TrackingKey]*BotActivity)
+		ActivityMutex.Unlock()
+		DryRunActivityMutex.Lock()
+		DryRunActivityStore = make(map[TrackingKey]*BotActivity)
+		DryRunActivityMutex.Unlock()
+	})
+
+	var store map[TrackingKey]*BotActivity
+	var blockCount int32
+	var blockMu sync.Mutex
+
+	mockBlocker := &MockBlocker{
+		BlockFunc: func(ip string, version IPVersion, duration time.Duration) error {
+			blockMu.Lock()
+			blockCount++
+			blockMu.Unlock()
+			return nil
+		},
+	}
+
+	// Base LogEntry info to construct log lines
+	baseIP := "192.0.2.1"
+	whitelistedIP := "192.0.2.2"
+	invalidIP := "invalid-ip" // DECLARED AND NOW USED
+
+	// Base Processor
+	p := Processor{
+		ActivityStore: nil, // Will be set per test
+		ActivityMutex: &ActivityMutex,
+		Chains:        nil,
+		ChainMutex:    &ChainMutex, // FIX: Initialize ChainMutex to prevent nil pointer dereference in CheckChains
+		Blocker:       mockBlocker,
+		LogFunc:       LogOutput,
+		IsWhitelistedFunc: func(ip string) bool {
+			return ip == whitelistedIP // Only this IP is whitelisted
+		},
+		DryRun: false,
+	}
+
+	// Helper function to create a valid log line
+	createLine := func(ip string) string {
+		return fmt.Sprintf(`www.example.com %s - userx [06/Nov/2025:09:00:00 +0100] "GET /path/to/resource HTTP/1.1" 200 1234 "-" "-"`, ip)
+	}
+
+	tests := []struct {
+		name             string
+		line             string
+		setup            func() // Setup function to configure store state before processing
+		assertBlockCount int32
+		assertIsBlocked  bool
+	}{
+		{
+			name:             "Skip - Comment Line",
+			line:             "# This is a comment",
+			setup:            func() {},
+			assertBlockCount: 0,
+			assertIsBlocked:  false,
+		},
+		{
+			name:             "Skip - Invalid IP Line (Parse Fail)",
+			line:             createLine(invalidIP), // FIXED: Now using the invalidIP variable
+			setup:            func() {},
+			assertBlockCount: 0,
+			assertIsBlocked:  false,
+		},
+		{
+			name:             "Skip - Whitelisted IP",
+			line:             createLine(whitelistedIP),
+			setup:            func() {},
+			assertBlockCount: 0,
+			assertIsBlocked:  false,
+		},
+		{
+			name: "Skip - Already Blocked (Not Expired)",
+			line: createLine(baseIP),
+			setup: func() {
+				store = make(map[TrackingKey]*BotActivity)
+				key := TrackingKey{IP: baseIP}
+				store[key] = &BotActivity{
+					IsBlocked:    true,
+					BlockedUntil: time.Now().Add(time.Hour),
+				}
+				p.ActivityStore = store
+			},
+			assertBlockCount: 0,
+			assertIsBlocked:  true,
+		},
+		{
+			name: "Process - Blocked but Expired (Should clear block state)",
+			line: createLine(baseIP),
+			setup: func() {
+				store = make(map[TrackingKey]*BotActivity)
+				key := TrackingKey{IP: baseIP}
+				store[key] = &BotActivity{
+					IsBlocked:    true,
+					BlockedUntil: time.Now().Add(-time.Hour),
+				}
+				p.ActivityStore = store
+			},
+			assertBlockCount: 0,
+			assertIsBlocked:  false,
+		},
+		{
+			name: "Process - New IP (Should proceed to chain checks)",
+			line: createLine(baseIP),
+			setup: func() {
+				store = make(map[TrackingKey]*BotActivity)
+				p.ActivityStore = store
+			},
+			assertBlockCount: 0,
+			assertIsBlocked:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset block count and setup store
+			blockCount = 0
+			tt.setup()
+
+			p.ProcessLogLine(tt.line, 1)
+
+			// Assertion 1: Check block call count
+			blockMu.Lock()
+			count := blockCount
+			blockMu.Unlock()
+			if count != tt.assertBlockCount {
+				t.Errorf("Block count mismatch. Expected %d, got %d.", tt.assertBlockCount, count)
+			}
+
+			// Assertion 2: Check final in-memory block state for baseIP
+			p.ActivityMutex.Lock()
+			key := TrackingKey{IP: baseIP}
+			activity, exists := p.ActivityStore[key]
+			p.ActivityMutex.Unlock()
+
+			if tt.assertIsBlocked {
+				if !exists || !activity.IsBlocked {
+					t.Errorf("Expected IP %s to be blocked, but it was not.", baseIP)
+				}
+			} else {
+				// Must ensure it's not blocked, even if it existed (e.g., in the Expired case)
+				if exists && activity.IsBlocked {
+					t.Errorf("Expected IP %s NOT to be blocked, but it was.", baseIP)
+				}
+			}
+		})
+	}
+}
+
+// TestProcessLogLine_DryRun checks that the Block() function is never called in DryRun mode,
+// but the processing (including chain progression) still occurs in the dry-run activity store.
+func TestProcessLogLine_DryRun(t *testing.T) {
+	// Cleanup: Reset stores to ensure test isolation
+	t.Cleanup(func() {
+		ActivityMutex.Lock()
+		ActivityStore = make(map[TrackingKey]*BotActivity)
+		ActivityMutex.Unlock()
+		DryRunActivityMutex.Lock()
+		DryRunActivityStore = make(map[TrackingKey]*BotActivity)
+		DryRunActivityMutex.Unlock()
+	})
+
+	// Mock Blocker that will fail the test if called.
+	mockBlocker := &MockBlocker{
+		BlockFunc: func(ip string, version IPVersion, duration time.Duration) error {
+			t.Fatal("Blocker.Block was called in DryRun mode.")
+			return nil
+		},
+	}
+
+	// Setup a simple chain that will match and call 'block'
+	chain := BehavioralChain{
+		Name: "dryrun_chain",
+		Steps: []StepDef{
+			{Order: 1, FieldMatches: map[string]string{"Path": "/1"}},
+		},
+		Action:        "block",
+		BlockDuration: time.Minute,
+		MatchKey:      "ip",
+	}
+
+	// Pre-compile the regexes for the step (needed by CheckChains)
+	for i := range chain.Steps {
+		chain.Steps[i].CompiledRegexes = make(map[string]*regexp.Regexp)
+		for field, pattern := range chain.Steps[i].FieldMatches {
+			chain.Steps[i].CompiledRegexes[field] = regexp.MustCompile(pattern)
+		}
+	}
+
+	p := Processor{
+		ActivityStore:     ActivityStore,
+		ActivityMutex:     &ActivityMutex,
+		Chains:            []BehavioralChain{chain},
+		ChainMutex:        &ChainMutex,
+		Blocker:           mockBlocker,
+		LogFunc:           LogOutput,
+		IsWhitelistedFunc: IsIPWhitelisted,
+		DryRun:            true, // CRITICAL: DryRun is enabled
+	}
+
+	ip := "192.0.2.1"
+	logLine := fmt.Sprintf(`www.example.com %s - userx [06/Nov/2025:09:00:00 +0100] "GET /1 HTTP/1.1" 200 1234 "-" "-"`, ip)
+	key := TrackingKey{IP: ip}
+
+	// 1. Process the line
+	p.ProcessLogLine(logLine, 1)
+
+	// Assertion 1: Check the DryRun store. The activity should exist and be blocked.
+	DryRunActivityMutex.Lock()
+	dryRunActivity, exists := DryRunActivityStore[key]
+	DryRunActivityMutex.Unlock()
+
+	if !exists {
+		t.Fatal("Expected activity in DryRun store, but none was found.")
+	}
+
+	if !dryRunActivity.IsBlocked {
+		t.Error("Expected IP to be marked as blocked in DryRun store, but it was not.")
+	}
+
+	if dryRunActivity.BlockedUntil.IsZero() {
+		t.Error("Expected BlockedUntil time to be set in DryRun store, but it was zero.")
+	}
+
+	// Assertion 2: Check the real store. The activity should NOT exist or NOT be blocked.
+	ActivityMutex.Lock()
+	realActivity, exists := ActivityStore[key]
+	ActivityMutex.Unlock()
+
+	if exists && realActivity.IsBlocked {
+		t.Error("IP was unexpectedly blocked in the REAL ActivityStore while in DryRun mode.")
+	}
+}
+
+// --- Test Cases for LogEntry Field Getters ---
+
+// TestExtractReferrerPath_ErrorCases tests various malformed or empty referrer inputs
+// that should result in an error or empty path.
+func TestExtractReferrerPath_ErrorCases(t *testing.T) {
+	tests := []struct {
+		name          string
+		referrer      string
+		expectedError string
+	}{
+		{
+			name:          "Empty Referrer",
+			referrer:      "",
+			expectedError: "referrer is empty",
+		},
+		{
+			name:          "Malformed URL (Invalid Escape)",
+			referrer:      "http://example.com/%g",
+			expectedError: "invalid URL escape",
+		},
+		{
+			name:          "URL with no path",
+			referrer:      "http://example.com",
+			expectedError: "URL parsed but path is empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, err := ExtractReferrerPath(tt.referrer)
+
+			if err == nil {
+				t.Fatalf("Expected an error containing '%s', but got path: %s and no error.", tt.expectedError, path)
+			}
+
+			if !strings.Contains(err.Error(), tt.expectedError) {
+				t.Errorf("Error mismatch. Expected error containing '%s', got: %v", tt.expectedError, err)
+			}
+		})
+	}
+}
+
+// TestGetMatchValue_UnknownField tests that trying to extract a value for a field not in LogEntry
+// returns an error, ensuring validation on match fields.
+func TestGetMatchValue_UnknownField(t *testing.T) {
+	entry := &LogEntry{}
+
+	_, err := GetMatchValue("UnknownField", entry)
+
+	if err == nil {
+		t.Fatal("Expected an error for unknown field, but got nil")
+	}
+
+	expectedErrMsg := "unknown field: UnknownField"
+	if err.Error() != expectedErrMsg {
+		t.Errorf("Error mismatch. Expected error '%s', got: %v", expectedErrMsg, err)
+	}
+}
