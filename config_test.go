@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,6 +173,78 @@ chains:
 
 			if err == nil || !strings.Contains(err.Error(), tt.expectedError) {
 				t.Errorf("Expected error containing '%s', but got: %v", tt.expectedError, err)
+			}
+		})
+	}
+}
+
+func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
+	tests := []struct {
+		name            string
+		blockedIP       string
+		expectedCommand string
+	}{
+		{
+			name:            "IPv4",
+			blockedIP:       "192.0.2.100",
+			expectedCommand: "clear table table_5m_ipv4 key 192.0.2.100",
+		},
+		{
+			name:            "IPv6",
+			blockedIP:       "2001:db8::dead:beef",
+			expectedCommand: "clear table table_5m_ipv6 key 2001:db8::dead:beef",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// --- Setup for each sub-test ---
+			resetGlobalState()
+			t.Cleanup(resetGlobalState)
+
+			// 1. Configure HAProxy tables and a mock executor to capture commands.
+			setupConfig(t,
+				[]string{"127.0.0.1:9999"},
+				map[time.Duration]string{5 * time.Minute: "table_5m"},
+				"",
+			)
+
+			var commandsReceived []string
+			mockExecutor := func(addr, ip, command string) error {
+				commandsReceived = append(commandsReceived, strings.TrimSpace(command))
+				return nil
+			}
+			setupMockExecutor(t, mockExecutor)
+
+			// 2. Define the IP that is currently blocked but will be whitelisted.
+			trackingKey := TrackingKey{IPInfo: NewIPInfo(tt.blockedIP)}
+
+			// 3. Manually set the state in ActivityStore to simulate a blocked IP.
+			ActivityStore[trackingKey] = &BotActivity{
+				IsBlocked:    true,
+				BlockedUntil: time.Now().Add(time.Hour),
+			}
+
+			// 4. Set the global WhitelistNets to include the blocked IP.
+			_, ipNet, _ := net.ParseCIDR(tt.blockedIP + "/32")
+			ChainMutex.Lock()
+			WhitelistNets = []*net.IPNet{ipNet}
+			ChainMutex.Unlock()
+
+			// --- Act ---
+			CheckAndRemoveWhitelistedBlocks()
+
+			// --- Assert ---
+			if len(commandsReceived) != 1 || commandsReceived[0] != tt.expectedCommand {
+				t.Errorf("Expected unblock command '%s', but got %v", tt.expectedCommand, commandsReceived)
+			}
+
+			activity, exists := ActivityStore[trackingKey]
+			if !exists {
+				t.Fatal("Activity for the IP was unexpectedly deleted.")
+			}
+			if activity.IsBlocked {
+				t.Error("Expected IsBlocked to be false after whitelist cleanup, but it was true.")
 			}
 		})
 	}
