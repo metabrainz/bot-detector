@@ -311,20 +311,29 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 }
 
 // ChainWatcher monitors the YAML config file for modifications and reloads the chains dynamically.
-func (p *Processor) ChainWatcher() {
+func (p *Processor) ChainWatcher(stop <-chan struct{}) {
 	if p.DryRun {
 		return
 	}
 
 	// Enforce a minimum polling interval to prevent a tight loop on a zero-value duration.
-	pollingInterval := p.Config.PollingInterval
-	if pollingInterval < 1*time.Second {
+	var pollingInterval time.Duration
+	if p.Config.testOverridePollingInterval > 0 {
+		pollingInterval = p.Config.testOverridePollingInterval // Use test override if set
+	} else if p.Config.PollingInterval < 1*time.Second {
+		// In production, enforce a minimum safe interval.
 		pollingInterval = 5 * time.Second // Default to a safe interval.
 	}
 
 	p.LogFunc(LevelDebug, "WATCH", "Starting ChainWatcher, polling %s every %v", YAMLFilePath, pollingInterval)
 	for {
-		time.Sleep(pollingInterval)
+		select {
+		case <-stop:
+			p.LogFunc(LevelInfo, "WATCH", "ChainWatcher received stop signal. Shutting down.")
+			return
+		case <-time.After(pollingInterval):
+			// Continue with polling
+		}
 
 		fileInfo, err := os.Stat(YAMLFilePath)
 		if err != nil {

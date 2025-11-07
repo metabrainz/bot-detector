@@ -344,3 +344,96 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 		})
 	}
 }
+
+func TestChainWatcher_Reload(t *testing.T) {
+	// --- Setup ---
+	// 1. Create a temporary YAML file with initial content.
+	initialYAMLContent := `
+version: "1.0"
+log_level: "info"
+whitelist_cidrs: ["1.1.1.1/32"]
+chains:
+  - name: "InitialChain"
+    match_key: "ip"
+    action: "log"
+    steps: [{field_matches: {Path: "/initial"}}]
+`
+	tempDir := t.TempDir()
+	tempFile := filepath.Join(tempDir, "chains.yaml")
+	if err := os.WriteFile(tempFile, []byte(initialYAMLContent), 0644); err != nil {
+		t.Fatalf("Failed to write initial temp yaml file: %v", err)
+	}
+
+	// Point the global YAMLFilePath to our temp file for the duration of the test.
+	originalPath := YAMLFilePath
+	YAMLFilePath = tempFile
+	t.Cleanup(func() { YAMLFilePath = originalPath })
+
+	// 2. Load the initial configuration.
+	initialLoadedCfg, err := LoadChainsFromYAML()
+	if err != nil {
+		t.Fatalf("Initial LoadChainsFromYAML() failed: %v", err)
+	}
+
+	// 3. Create the processor with the initial config.
+	processor := &Processor{
+		ActivityStore: make(map[TrackingKey]*BotActivity),
+		ActivityMutex: &sync.RWMutex{},
+		Chains:        initialLoadedCfg.Chains,
+		ChainMutex:    &sync.RWMutex{},
+		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+		Config: &AppConfig{
+			testOverridePollingInterval: 10 * time.Millisecond, // Use a very short poll interval for the test.
+		},
+	}
+	// Set LastModTime to the actual modification time of the initial file.
+	initialFileInfo, err := os.Stat(tempFile)
+	if err != nil {
+		t.Fatalf("Failed to stat initial temp yaml file: %v", err)
+	}
+	processor.Config.LastModTime = initialFileInfo.ModTime()
+
+	// 4. Start the ChainWatcher in a goroutine.
+	stopWatcher := make(chan struct{})
+	t.Cleanup(func() { close(stopWatcher) }) // Ensure watcher stops when test finishes.
+
+	go processor.ChainWatcher(stopWatcher)
+
+	// Give the watcher a moment to start and potentially read the initial file.
+	time.Sleep(processor.Config.testOverridePollingInterval * 2)
+
+	// --- Act ---
+	// 5. Modify the YAML file on disk.
+	time.Sleep(100 * time.Millisecond) // Wait a moment to ensure the modification time is different.
+	modifiedYAMLContent := `
+version: "1.0"
+log_level: "debug" # Changed log level
+whitelist_cidrs: ["1.1.1.1/32", "2.2.2.2/32"] # Added a new CIDR (1.1.1.1/32 was already there)
+chains:
+  - name: "ReloadedChain" # Changed chain name
+    match_key: "ip"
+    action: "log"
+    steps: [{field_matches: {Path: "/reloaded"}}]
+`
+	if err := os.WriteFile(tempFile, []byte(modifiedYAMLContent), 0644); err != nil {
+		t.Fatalf("Failed to write modified temp yaml file: %v", err)
+	}
+
+	// 6. Wait for the watcher to detect and apply the changes.
+	time.Sleep(processor.Config.testOverridePollingInterval * 2) // Wait for at least two polling intervals
+
+	// --- Assert ---
+	// 7. Check if the processor's state has been updated.
+	processor.ChainMutex.RLock()
+	defer processor.ChainMutex.RUnlock()
+
+	if len(processor.Chains) != 1 || processor.Chains[0].Name != "ReloadedChain" {
+		t.Errorf("Expected chain to be 'ReloadedChain', but got: %+v", processor.Chains)
+	}
+	if len(processor.Config.WhitelistNets) != 2 {
+		t.Errorf("Expected 2 whitelist networks, but got %d", len(processor.Config.WhitelistNets))
+	}
+	if CurrentLogLevel != LevelDebug {
+		t.Errorf("Expected log level to be updated to 'debug', but it was not.")
+	}
+}

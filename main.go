@@ -88,8 +88,10 @@ func start(p *Processor) {
 
 	} else {
 		// Live mode: Start background routines and the main log tailing loop.
-		// Pass the Processor instance P to all background routines
-		go p.ChainWatcher()
+		stopWatcher := make(chan struct{})
+		defer close(stopWatcher) // Ensure watcher is stopped on main exit
+
+		go p.ChainWatcher(stopWatcher)
 		go p.CleanUpIdleActivity()
 
 		// LiveLogTailer is the blocking main loop
