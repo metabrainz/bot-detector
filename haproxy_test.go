@@ -115,6 +115,44 @@ func TestBlockAndUnblockIP_SuccessFlow(t *testing.T) {
 	}
 }
 
+// TestBlockIP_FallbackTable verifies that if a duration is not found in the duration_tables map,
+// the command falls back to using the table with the longest configured duration.
+func TestBlockIP_FallbackTable(t *testing.T) {
+	resetGlobalState()
+	processor := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
+		Config: &AppConfig{
+			HAProxyAddresses: []string{"127.0.0.1:9999"},
+			DurationToTableName: map[time.Duration]string{
+				5 * time.Minute: "table_5m",
+				1 * time.Hour:   "table_1h", // This will be the fallback
+			},
+			BlockTableNameFallback: "table_1h", // Set explicitly as LoadChainsFromYAML would
+		},
+		ChainMutex: &sync.RWMutex{},
+	}
+
+	var commandReceived string
+	mockExecutor := func(addr, ip, command string) error {
+		commandReceived = strings.TrimSpace(command)
+		return nil
+	}
+	setupMockExecutor(t, mockExecutor)
+
+	ipInfo := NewIPInfo("192.0.2.5")
+	// Use a duration that is NOT in the map.
+	unconfiguredDuration := 30 * time.Minute
+
+	// --- Act ---
+	processor.BlockIP(ipInfo, unconfiguredDuration)
+
+	// --- Assert ---
+	expectedCommand := "set table table_1h_ipv4 key 192.0.2.5 data.gpc0 1"
+	if commandReceived != expectedCommand {
+		t.Errorf("Expected command to use fallback table '%s', but got: '%s'", expectedCommand, commandReceived)
+	}
+}
+
 // TestUnblockIP_ErrorTolerance_Mocked ensures that an execution error on one HAProxy instance
 // does not prevent the unblock attempt on other configured instances/tables.
 func TestUnblockIP_ErrorTolerance_Mocked(t *testing.T) {

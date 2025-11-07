@@ -155,29 +155,27 @@ func LoadChainsFromYAML() ([]BehavioralChain, []*net.IPNet, []string, map[time.D
 	// --- PARSE CHAINS ---
 	newChains := make([]BehavioralChain, 0)
 
-	for _, yamlChain := range config.Chains {
-		// Determine the final duration string to use.
-		blockDurationStr := yamlChain.BlockDuration
-
-		// 1. Check if the chain has an empty block_duration string
-		if blockDurationStr == "" {
-			// 2. Apply the top-level default if it is set
-			if config.DefaultBlockDuration != "" {
-				blockDurationStr = config.DefaultBlockDuration
-			}
-		}
-
-		// 3. Parse Block Duration (using the potentially defaulted value)
-		var blockDuration time.Duration
+	// Pre-parse the default block duration once.
+	var defaultBlockDuration time.Duration
+	if config.DefaultBlockDuration != "" {
 		var err error
+		defaultBlockDuration, err = time.ParseDuration(config.DefaultBlockDuration)
+		if err != nil {
+			return nil, nil, nil, nil, "", fmt.Errorf("invalid block_duration format for default_block_duration: %w", err)
+		}
+	}
 
-		// Only attempt to parse if we have a non-empty string.
-		// If blockDurationStr is still empty, blockDuration remains 0, which is acceptable for 'log' actions.
-		if blockDurationStr != "" {
-			blockDuration, err = time.ParseDuration(blockDurationStr)
+	for _, yamlChain := range config.Chains {
+		var blockDuration time.Duration
+		if yamlChain.BlockDuration != "" {
+			var err error
+			blockDuration, err = time.ParseDuration(yamlChain.BlockDuration)
 			if err != nil {
 				return nil, nil, nil, nil, "", fmt.Errorf("chain '%s': invalid block_duration format: %w", yamlChain.Name, err)
 			}
+		} else {
+			// If the chain's duration is not set, apply the pre-parsed default.
+			blockDuration = defaultBlockDuration
 		}
 
 		// 4. Enforce that 'block' actions must have a non-zero duration.
@@ -216,6 +214,12 @@ func LoadChainsFromYAML() ([]BehavioralChain, []*net.IPNet, []string, map[time.D
 				runtimeStep.MinDelayDuration, err = time.ParseDuration(yamlStep.MinDelay)
 				if err != nil {
 					return nil, nil, nil, nil, "", fmt.Errorf("chain '%s', step %d: invalid min_delay: %w", yamlChain.Name, runtimeStep.Order, err)
+				}
+			}
+			if i == 0 && yamlStep.FirstHitSince != "" { // Only parse for the first step
+				runtimeStep.FirstHitSinceDuration, err = time.ParseDuration(yamlStep.FirstHitSince)
+				if err != nil {
+					return nil, nil, nil, nil, "", fmt.Errorf("chain '%s', step %d: invalid first_hit_since: %w", yamlChain.Name, runtimeStep.Order, err)
 				}
 			}
 

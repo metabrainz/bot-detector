@@ -58,10 +58,11 @@ type AppConfig struct {
 // --- YAML DATA STRUCTURES ---
 
 type StepDefYAML struct {
-	Order        int
-	FieldMatches map[string]string `yaml:"field_matches"`
-	MaxDelay     string            `yaml:"max_delay"`
-	MinDelay     string            `yaml:"min_delay"`
+	Order         int
+	FieldMatches  map[string]string `yaml:"field_matches"`
+	MaxDelay      string            `yaml:"max_delay"`
+	MinDelay      string            `yaml:"min_delay"`
+	FirstHitSince string            `yaml:"first_hit_since"` // New field
 }
 
 type BehavioralChainYAML struct {
@@ -95,11 +96,12 @@ type LogEntry struct {
 }
 
 type StepDef struct {
-	Order            int
-	FieldMatches     map[string]string
-	MaxDelayDuration time.Duration
-	MinDelayDuration time.Duration
-	CompiledRegexes  map[string]*regexp.Regexp // Pre-compiled regexes for performance.
+	Order                 int
+	FieldMatches          map[string]string
+	MaxDelayDuration      time.Duration
+	MinDelayDuration      time.Duration
+	FirstHitSinceDuration time.Duration             // New field
+	CompiledRegexes       map[string]*regexp.Regexp // Pre-compiled regexes for performance.
 }
 
 type BehavioralChain struct {

@@ -39,20 +39,25 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 		return
 	}
 
-	// Determine if any chain requires a User Agent to create the primary tracking key.
-	uaRequired := false
+	// Determine the most specific tracking key required by any matching chain.
+	// This ensures we use the correct BotActivity store for the request.
+	primaryKeySpecificity := 0 // 0=none, 1=ip, 2=ip_ua
 	p.ChainMutex.RLock()
 	chains := p.Chains
 	for _, chain := range chains {
-		if strings.HasSuffix(chain.MatchKey, "_ua") {
-			uaRequired = true
-			break
+		if GetTrackingKey(&chain, entry).IPInfo.Address != "" { // Does this chain apply to this entry?
+			if strings.HasSuffix(chain.MatchKey, "_ua") {
+				primaryKeySpecificity = 2 // ip_ua is most specific
+				break
+			} else if primaryKeySpecificity < 1 {
+				primaryKeySpecificity = 1 // ip is less specific
+			}
 		}
 	}
 	p.ChainMutex.RUnlock()
 
 	trackingKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
-	if uaRequired {
+	if primaryKeySpecificity == 2 {
 		trackingKey.UA = entry.UserAgent
 	}
 
@@ -62,22 +67,24 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 
 	// Get or create the activity struct for the current log line's tracking key.
 	currentActivity := GetOrCreateActivityUnsafe(p.ActivityStore, trackingKey)
-	currentActivity.LastRequestTime = entry.Timestamp // Always update last request time
+	// This is the baseline for first-step time checks. It's the time of the IP's last hit.
 
-	// Optimization: If the current key (IP or IP+UA) is already blocked, stop processing chains.
-	// NOTE: The primary block check (ProcessLogLine) uses the IP-only key for optimization.
-	// This check is for the specific key (which might be IP+UA) that caused the original block.
 	if currentActivity.IsBlocked {
 		if time.Now().After(currentActivity.BlockedUntil) {
 			p.LogFunc(LevelInfo, "EXPIRE", "Chain-specific block expired for key %s (UA: %s).", trackingKey.IPInfo.Address, trackingKey.UA)
 			currentActivity.IsBlocked = false
 			currentActivity.BlockedUntil = time.Time{}
 		} else {
+			// Even if blocked, update the timestamp to prevent premature cleanup by the idle routine.
+			currentActivity.LastRequestTime = entry.Timestamp
 			p.LogFunc(LevelDebug, "SKIP", "Key %s (UA: %s): Skipped (Already blocked in memory by a chain).", trackingKey.IPInfo.Address, trackingKey.UA)
 			return
 		}
 	}
 
+	previousRequestTime := currentActivity.LastRequestTime
+	// Always update the last request time for this key at the end of processing.
+	defer func() { currentActivity.LastRequestTime = entry.Timestamp }()
 	// 2. Iterate over all configured chains.
 	for _, chain := range chains {
 		// Check if the current log entry's tracking key is applicable to this chain
@@ -103,22 +110,32 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 			}
 			step := chain.Steps[nextStepIndex]
 
-			// --- CHECK TIME WINDOWS ---
-			if exists && state.CurrentStep > 0 { // Time checks only apply after the first step.
-				if step.MaxDelayDuration > 0 && time.Since(state.LastMatchTime) > step.MaxDelayDuration {
-					p.LogFunc(LevelDebug, "RESET", "Chain %s: MaxDelay %v exceeded for key %s. Resetting state.", chain.Name, step.MaxDelayDuration, trackingKey.IPInfo.Address)
-					state.CurrentStep = 0
-					continue // Restart loop from step 0.
-				}
+			// --- TIME WINDOW CHECKS ---
+			isFirstStep := state.CurrentStep == 0
+			timeSinceLastHit := entry.Timestamp.Sub(previousRequestTime)
+			timeSinceLastStepHit := entry.Timestamp.Sub(state.LastMatchTime)
 
-				if step.MinDelayDuration > 0 && time.Since(state.LastMatchTime) < step.MinDelayDuration {
-					p.LogFunc(LevelDebug, "RESET", "Chain %s: MinDelay %v not met for key %s. Resetting state.", chain.Name, step.MinDelayDuration, trackingKey.IPInfo.Address)
+			if isFirstStep {
+				// First-step specific checks
+				if step.FirstHitSinceDuration > 0 {
+					if previousRequestTime.IsZero() || timeSinceLastHit >= step.FirstHitSinceDuration {
+						break // Not a rapid first hit, skip.
+					}
+				}
+			} else {
+				// Inter-step (2nd step onwards) checks
+				if step.MaxDelayDuration > 0 && timeSinceLastStepHit > step.MaxDelayDuration {
+					p.LogFunc(LevelDebug, "RESET", "Chain %s: MaxDelay %v exceeded. Resetting.", chain.Name, step.MaxDelayDuration)
 					state.CurrentStep = 0
-					continue // Restart loop from step 0.
+					continue // Restart check from step 0.
+				}
+				if step.MinDelayDuration > 0 && timeSinceLastStepHit < step.MinDelayDuration {
+					p.LogFunc(LevelDebug, "RESET", "Chain %s: MinDelay %v not met. Resetting.", chain.Name, step.MinDelayDuration)
+					state.CurrentStep = 0
+					continue // Restart check from step 0.
 				}
 			}
 
-			// --- CHECK FIELD MATCHES ---
 			match := true
 			for fieldName, _ := range step.FieldMatches {
 				matchValue := ""
@@ -138,7 +155,7 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 			}
 
 			if !match {
-				break // No match on this step, exit the loop for this chain.
+				break // No match on this step, exit the `for {}` loop for this chain.
 			}
 
 			// Step matched! Advance the state.
@@ -202,4 +219,5 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 			}
 		}
 	}
+
 }

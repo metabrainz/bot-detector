@@ -686,3 +686,270 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 		t.Errorf("Expected ChainProgress to be cleared for 'unknown' action, but has %d entries: %v", len(activityFinal.ChainProgress), activityFinal.ChainProgress)
 	}
 }
+
+// TestCheckChains_BlockExpiration verifies that if an activity is marked as blocked but the
+// BlockedUntil time has passed, the block is cleared and the chain can be processed again.
+func TestCheckChains_BlockExpiration(t *testing.T) {
+	// 1. Setup
+	resetGlobalState()
+
+	const targetIP = "192.0.2.1"
+	chain := BehavioralChain{
+		Name:          "SingleStepChain",
+		MatchKey:      "ip",
+		Action:        "block",
+		BlockDuration: 1 * time.Minute,
+		Steps: []StepDef{
+			{Order: 1, FieldMatches: map[string]string{"Path": "^/test$"}},
+		},
+	}
+	compileChainRegexes(t, []BehavioralChain{chain})
+
+	processor := &Processor{
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
+		ActivityMutex:     &sync.RWMutex{},
+		Chains:            []BehavioralChain{chain},
+		ChainMutex:        &sync.RWMutex{},
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		Blocker:           &MockBlocker{}, // No-op blocker
+		Config:            &AppConfig{},
+	}
+
+	// 2. Manually create a pre-existing, EXPIRED block state.
+	trackingKey := GetTrackingKey(&chain, &LogEntry{IPInfo: NewIPInfo(targetIP)})
+	processor.ActivityStore[trackingKey] = &BotActivity{
+		IsBlocked:    true,
+		BlockedUntil: time.Now().Add(-1 * time.Hour), // Expired an hour ago
+	}
+
+	// 3. Create the log entry that will be processed.
+	entry := &LogEntry{
+		IPInfo:    NewIPInfo(targetIP),
+		Timestamp: time.Now(),
+		Path:      "/test",
+	}
+
+	// --- Act ---
+	processor.CheckChains(entry)
+
+	// --- Assert ---
+	processor.ActivityMutex.RLock()
+	finalActivity, exists := processor.ActivityStore[trackingKey]
+	processor.ActivityMutex.RUnlock()
+
+	if !exists {
+		t.Fatal("Expected activity state to exist, but it was deleted.")
+	}
+
+	// The chain should have run, completed, and re-blocked the IP with a new expiration.
+	if !finalActivity.IsBlocked {
+		t.Error("Expected IsBlocked to be true after re-processing, but it was false.")
+	}
+
+	if finalActivity.BlockedUntil.Before(time.Now()) {
+		t.Error("Expected BlockedUntil time to be in the future, but it was not.")
+	}
+}
+
+// TestCheckChains_IPVersionMismatch verifies that chains are correctly skipped
+// if the log entry's IP version does not match the chain's `match_key`.
+func TestCheckChains_IPVersionMismatch(t *testing.T) {
+	resetGlobalState()
+
+	// 1. Define one chain for IPv4 and one for IPv6.
+	chains := []BehavioralChain{
+		{
+			Name:     "IPv4-Only-Chain",
+			MatchKey: "ipv4",
+			Action:   "log",
+			Steps:    []StepDef{{Order: 1, FieldMatches: map[string]string{"Path": "/test"}}},
+		},
+		{
+			Name:     "IPv6-Only-Chain",
+			MatchKey: "ipv6",
+			Action:   "log",
+			Steps:    []StepDef{{Order: 1, FieldMatches: map[string]string{"Path": "/test"}}},
+		},
+	}
+	compileChainRegexes(t, chains)
+
+	processor := &Processor{
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
+		ActivityMutex:     &sync.RWMutex{},
+		Chains:            chains,
+		ChainMutex:        &sync.RWMutex{},
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		Blocker:           &MockBlocker{},
+		Config:            &AppConfig{},
+	}
+
+	// 2. Process an IPv4 log entry.
+	entry := &LogEntry{
+		IPInfo:    NewIPInfo("192.0.2.1"),
+		Timestamp: time.Now(),
+		Path:      "/test",
+	}
+	processor.CheckChains(entry)
+
+	// 3. Assert the state.
+	processor.ActivityMutex.RLock()
+	defer processor.ActivityMutex.RUnlock()
+
+	activity := processor.ActivityStore[TrackingKey{IPInfo: entry.IPInfo}]
+
+	// The IPv6 chain should have been skipped, so no progress should be recorded for it.
+	if _, exists := activity.ChainProgress["IPv6-Only-Chain"]; exists {
+		t.Error("Expected IPv6-Only-Chain to be skipped for an IPv4 log entry, but its state was created.")
+	}
+}
+
+// TestCheckChains_IPAndUABlockOptimization verifies that when a chain with `match_key: "ip_ua"`
+// completes a block action, it blocks BOTH the specific ip_ua key and the general ip-only key.
+func TestCheckChains_IPAndUABlockOptimization(t *testing.T) {
+	// 1. Setup
+	resetGlobalState()
+
+	const targetIP = "192.0.2.100"
+	const targetUA = "BadBot/1.0"
+
+	chain := BehavioralChain{
+		Name:          "IP_UA_Blocker",
+		MatchKey:      "ip_ua",
+		Action:        "block",
+		BlockDuration: 5 * time.Minute,
+		Steps:         []StepDef{{Order: 1, FieldMatches: map[string]string{"Path": "/trigger"}}},
+	}
+	compileChainRegexes(t, []BehavioralChain{chain})
+
+	processor := &Processor{
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
+		ActivityMutex:     &sync.RWMutex{},
+		Chains:            []BehavioralChain{chain},
+		ChainMutex:        &sync.RWMutex{},
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		Blocker:           &MockBlocker{},
+		Config:            &AppConfig{},
+	}
+
+	entry := &LogEntry{
+		IPInfo:    NewIPInfo(targetIP),
+		UserAgent: targetUA,
+		Timestamp: time.Now(),
+		Path:      "/trigger",
+	}
+
+	// --- Act ---
+	processor.CheckChains(entry)
+
+	// --- Assert ---
+	processor.ActivityMutex.RLock()
+	defer processor.ActivityMutex.RUnlock()
+
+	ipUaKey := TrackingKey{IPInfo: NewIPInfo(targetIP), UA: targetUA}
+	ipOnlyKey := TrackingKey{IPInfo: NewIPInfo(targetIP), UA: ""}
+
+	if activity, exists := processor.ActivityStore[ipUaKey]; !exists || !activity.IsBlocked {
+		t.Error("Expected the specific IP+UA key to be blocked, but it was not.")
+	}
+	if activity, exists := processor.ActivityStore[ipOnlyKey]; !exists || !activity.IsBlocked {
+		t.Error("Expected the general IP-only key to be blocked for optimization, but it was not.")
+	}
+}
+
+// TestCheckChains_TimeRules provides focused tests for the new time-based rules,
+// especially the first-step-only `first_hit_since` logic.
+func TestCheckChains_TimeRules(t *testing.T) {
+	// 1. Setup
+	chain := BehavioralChain{
+		Name:     "TimeRuleTestChain",
+		MatchKey: "ip",
+		Action:   "log",
+		Steps: []StepDef{
+			{
+				Order:                 1,
+				FirstHitSinceDuration: 2 * time.Second, // Must have seen this IP within the last 2s
+				FieldMatches:          map[string]string{"Path": "/step1"},
+			}, {
+				Order:        2,
+				FieldMatches: map[string]string{"Path": "/step2"}, // Add a second step to prevent immediate completion
+			},
+		},
+	}
+	compileChainRegexes(t, []BehavioralChain{chain})
+
+	baseProcessor := func() *Processor {
+		return &Processor{
+			ActivityStore:     make(map[TrackingKey]*BotActivity),
+			ActivityMutex:     &sync.RWMutex{},
+			Chains:            []BehavioralChain{chain},
+			ChainMutex:        &sync.RWMutex{},
+			LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
+			IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+			Blocker:           &MockBlocker{},
+			Config:            &AppConfig{},
+		}
+	}
+
+	tests := []struct {
+		name                string
+		primingTimeOffset   time.Duration // How long ago the IP was last seen. Zero if never seen.
+		shouldChainProgress bool
+	}{
+		{
+			name: "first_hit_since SUCCESS - IP seen recently",
+			// Last seen 1 second ago, which is within the 2s window.
+			primingTimeOffset:   -1 * time.Second,
+			shouldChainProgress: true,
+		},
+		{
+			name: "first_hit_since FAILURE - IP seen too long ago",
+			// Last seen 3 seconds ago, which is outside the 2s window.
+			primingTimeOffset:   -3 * time.Second,
+			shouldChainProgress: false,
+		},
+		{
+			name: "first_hit_since FAILURE - IP never seen before",
+			// Zero time indicates the IP has never been seen.
+			primingTimeOffset:   0,
+			shouldChainProgress: false,
+		},
+	}
+
+	// Use a fixed "now" for deterministic test runs.
+	now := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			processor := baseProcessor()
+
+			// Prime the activity store with the specified last request time.
+			if tt.primingTimeOffset != 0 {
+				key := TrackingKey{IPInfo: NewIPInfo("192.0.2.1")}
+				// Use GetOrCreateActivityUnsafe to ensure ChainProgress map is initialized.
+				processor.ActivityMutex.Lock()
+				activity := GetOrCreateActivityUnsafe(processor.ActivityStore, key)
+				activity.LastRequestTime = now.Add(tt.primingTimeOffset)
+				processor.ActivityMutex.Unlock()
+			}
+
+			entry := &LogEntry{
+				IPInfo:    NewIPInfo("192.0.2.1"),
+				Timestamp: now,      // The current request always happens at our fixed "now".
+				Path:      "/step1", // This will match the first step
+			}
+			processor.CheckChains(entry)
+
+			processor.ActivityMutex.RLock()
+			activity, _ := processor.ActivityStore[TrackingKey{IPInfo: entry.IPInfo}]
+			_, progressExists := activity.ChainProgress[chain.Name]
+			processor.ActivityMutex.RUnlock()
+
+			if progressExists != tt.shouldChainProgress {
+				t.Errorf("Chain progress existence was %t, but expected %t", progressExists, tt.shouldChainProgress)
+			}
+		})
+	}
+}

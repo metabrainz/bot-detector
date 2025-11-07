@@ -38,6 +38,11 @@ chains:
       - min_delay: "1s" # Step 2
         field_matches:
           Path: "/login/confirm"
+  - name: "TestDefaultDurationChain"
+    match_key: "ip"
+    action: "block" # No block_duration, should use default
+    steps:
+      - field_matches: { Path: "/default" }
 `
 	// Use t.TempDir() to create a temporary directory that is automatically cleaned up.
 	tempDir := t.TempDir()
@@ -62,8 +67,8 @@ chains:
 		t.Fatalf("LoadChainsFromYAML() returned an unexpected error: %v", err)
 	}
 
-	if len(chains) != 1 {
-		t.Fatalf("Expected 1 chain to be loaded, got %d", len(chains))
+	if len(chains) != 2 {
+		t.Fatalf("Expected 2 chains to be loaded, got %d", len(chains))
 	}
 
 	if chains[0].Name != "TestChain" {
@@ -72,6 +77,11 @@ chains:
 
 	if chains[0].BlockDuration != 5*time.Minute {
 		t.Errorf("Expected block duration 5m, got %v", chains[0].BlockDuration)
+	}
+
+	// Assert that the second chain received the default block duration
+	if chains[1].BlockDuration != 1*time.Hour {
+		t.Errorf("Expected default block duration of 1h for second chain, got %v", chains[1].BlockDuration)
 	}
 
 	// Assertions for the new two-step chain structure
@@ -106,6 +116,10 @@ chains:
 	}
 	if fallbackTable != "table_1h" {
 		t.Errorf("Expected fallback table 'table_1h', got '%s'", fallbackTable)
+	}
+
+	if !IsIPWhitelistedInList(NewIPInfo("10.0.0.1"), whitelistNets) {
+		t.Error("Expected bare IPv4 '10.0.0.1' to be whitelisted, but it was not.")
 	}
 }
 
@@ -142,6 +156,15 @@ chains: []
 			expectedError: "invalid CIDR",
 		},
 		{
+			name: "Invalid Non-CIDR in Whitelist",
+			yamlContent: `
+version: "1.0"
+whitelist_cidrs: ["not-an-ip"]
+chains: []
+`,
+			expectedError: "invalid CIDR",
+		},
+		{
 			name: "Invalid Duration",
 			yamlContent: `
 version: "1.0"
@@ -151,6 +174,88 @@ chains:
     block_duration: "5p"
 `,
 			expectedError: "invalid block_duration",
+		},
+		{
+			name: "Invalid Duration in DurationTables",
+			yamlContent: `
+version: "1.0"
+duration_tables:
+  "1x": "table_1x"
+`,
+			expectedError: "invalid duration",
+		},
+		{
+			name: "Missing Match Key",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    action: "log"
+`,
+			expectedError: "match_key cannot be empty",
+		},
+		{
+			name: "Invalid Max Delay",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    steps: [ { max_delay: "10x" } ]
+`,
+			expectedError: "invalid max_delay",
+		},
+		{
+			name: "Invalid Min Delay",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    steps: [ { min_delay: "10x" } ]
+`,
+			expectedError: "invalid min_delay",
+		},
+		{
+			name: "Invalid First Hit Since",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    steps: [ { first_hit_since: "10x" } ]
+`,
+			expectedError: "invalid first_hit_since",
+		},
+		{
+			name: "Invalid Regex",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    steps: [ { field_matches: { "Path": "/(" } } ]
+`,
+			expectedError: "failed to compile regex",
+		},
+		{
+			name: "Invalid Default Block Duration",
+			yamlContent: `
+version: "1.0"
+default_block_duration: "1x"
+chains: []
+`,
+			expectedError: "invalid block_duration format",
+		},
+		{
+			name: "Block Action Missing Duration",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    action: "block" # No block_duration and no default
+`,
+			expectedError: "block_duration is missing or zero",
 		},
 	}
 
