@@ -51,10 +51,10 @@ func (p *Processor) CheckAndRemoveWhitelistedBlocks() {
 }
 
 // LoadChainsFromYAML reads, parses, and pre-compiles regexes for the chains.
-func LoadChainsFromYAML() ([]BehavioralChain, []*net.IPNet, []string, map[time.Duration]string, string, time.Duration, error) {
+func LoadChainsFromYAML() (*LoadedConfig, error) {
 	data, err := os.ReadFile(YAMLFilePath)
 	if err != nil {
-		return nil, nil, nil, nil, "", 0, fmt.Errorf("failed to read YAML file %s: %w", YAMLFilePath, err)
+		return nil, fmt.Errorf("failed to read YAML file %s: %w", YAMLFilePath, err)
 	}
 
 	var config ChainConfig
@@ -69,14 +69,14 @@ func LoadChainsFromYAML() ([]BehavioralChain, []*net.IPNet, []string, map[time.D
 	// 3. Decode the YAML using the strict decoder.
 	if err := decoder.Decode(&config); err != nil {
 		// This error will now explicitly include the unknown field error message.
-		return nil, nil, nil, nil, "", 0, fmt.Errorf("failed to strictly unmarshal YAML (unknown field found): %w", err)
+		return nil, fmt.Errorf("failed to strictly unmarshal YAML (unknown field found): %w", err)
 	}
 	// ---------------------------------------------------------------------------------
 
 	// Define the expected version for this application code.
 	if config.Version == "" {
 		// Enforce that the 'version' field must be present.
-		return nil, nil, nil, nil, "", 0, fmt.Errorf("configuration file is missing the required 'version' field")
+		return nil, fmt.Errorf("configuration file is missing the required 'version' field")
 	}
 
 	// 1. Check if the version is supported.
@@ -89,9 +89,9 @@ func LoadChainsFromYAML() ([]BehavioralChain, []*net.IPNet, []string, map[time.D
 	}
 
 	if !isSupported {
-		// 2. Report an error showing the unsupported version and the list of supported ones.
+		// Report an error showing the unsupported version and the list of supported ones.
 		supportedList := strings.Join(SupportedConfigVersions, ", ")
-		return nil, nil, nil, nil, "", 0, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"configuration version mismatch: got '%s'. This version of the application supports: %s. Please update your YAML config file.",
 			config.Version,
 			supportedList,
@@ -123,7 +123,7 @@ func LoadChainsFromYAML() ([]BehavioralChain, []*net.IPNet, []string, map[time.D
 		// net.ParseCIDR returns the IP and the IPNet. The IPNet is what we store for comparison.
 		_, ipNet, err := net.ParseCIDR(normalizedCIDR)
 		if err != nil {
-			return nil, nil, nil, nil, "", 0, fmt.Errorf("invalid CIDR in whitelist: %s: %w", cidr, err)
+			return nil, fmt.Errorf("invalid CIDR in whitelist: %s: %w", cidr, err)
 		}
 		newWhitelistNets = append(newWhitelistNets, ipNet)
 	}
@@ -136,7 +136,7 @@ func LoadChainsFromYAML() ([]BehavioralChain, []*net.IPNet, []string, map[time.D
 	for durationStr, tableName := range config.DurationTables {
 		duration, err := time.ParseDuration(durationStr)
 		if err != nil {
-			return nil, nil, nil, nil, "", 0, fmt.Errorf("invalid duration '%s' in 'duration_tables': %w", durationStr, err)
+			return nil, fmt.Errorf("invalid duration '%s' in 'duration_tables': %w", durationStr, err)
 		}
 		newDurationTables[duration] = tableName
 
@@ -161,7 +161,7 @@ func LoadChainsFromYAML() ([]BehavioralChain, []*net.IPNet, []string, map[time.D
 		var err error
 		defaultBlockDuration, err = time.ParseDuration(config.DefaultBlockDuration)
 		if err != nil {
-			return nil, nil, nil, nil, "", 0, fmt.Errorf("invalid block_duration format for default_block_duration: %w", err)
+			return nil, fmt.Errorf("invalid block_duration format for default_block_duration: %w", err)
 		}
 	}
 
@@ -171,7 +171,7 @@ func LoadChainsFromYAML() ([]BehavioralChain, []*net.IPNet, []string, map[time.D
 			var err error
 			blockDuration, err = time.ParseDuration(yamlChain.BlockDuration)
 			if err != nil {
-				return nil, nil, nil, nil, "", 0, fmt.Errorf("chain '%s': invalid block_duration format: %w", yamlChain.Name, err)
+				return nil, fmt.Errorf("chain '%s': invalid block_duration format: %w", yamlChain.Name, err)
 			}
 		} else {
 			// If the chain's duration is not set, apply the pre-parsed default.
@@ -180,12 +180,12 @@ func LoadChainsFromYAML() ([]BehavioralChain, []*net.IPNet, []string, map[time.D
 
 		// 4. Enforce that 'block' actions must have a non-zero duration.
 		if yamlChain.Action == "block" && blockDuration == 0 {
-			return nil, nil, nil, nil, "", 0, fmt.Errorf("chain '%s' has action 'block' but block_duration is missing or zero", yamlChain.Name)
+			return nil, fmt.Errorf("chain '%s' has action 'block' but block_duration is missing or zero", yamlChain.Name)
 		}
 
 		// 2. Validate Match Key
 		if yamlChain.MatchKey == "" {
-			return nil, nil, nil, nil, "", 0, fmt.Errorf("chain '%s': match_key cannot be empty", yamlChain.Name)
+			return nil, fmt.Errorf("chain '%s': match_key cannot be empty", yamlChain.Name)
 		}
 
 		runtimeChain := BehavioralChain{
@@ -207,19 +207,19 @@ func LoadChainsFromYAML() ([]BehavioralChain, []*net.IPNet, []string, map[time.D
 			if yamlStep.MaxDelay != "" {
 				runtimeStep.MaxDelayDuration, err = time.ParseDuration(yamlStep.MaxDelay)
 				if err != nil {
-					return nil, nil, nil, nil, "", 0, fmt.Errorf("chain '%s', step %d: invalid max_delay: %w", yamlChain.Name, runtimeStep.Order, err)
+					return nil, fmt.Errorf("chain '%s', step %d: invalid max_delay: %w", yamlChain.Name, runtimeStep.Order, err)
 				}
 			}
 			if yamlStep.MinDelay != "" {
 				runtimeStep.MinDelayDuration, err = time.ParseDuration(yamlStep.MinDelay)
 				if err != nil {
-					return nil, nil, nil, nil, "", 0, fmt.Errorf("chain '%s', step %d: invalid min_delay: %w", yamlChain.Name, runtimeStep.Order, err)
+					return nil, fmt.Errorf("chain '%s', step %d: invalid min_delay: %w", yamlChain.Name, runtimeStep.Order, err)
 				}
 			}
 			if i == 0 && yamlStep.FirstHitSince != "" { // Only parse for the first step
 				runtimeStep.FirstHitSinceDuration, err = time.ParseDuration(yamlStep.FirstHitSince)
 				if err != nil {
-					return nil, nil, nil, nil, "", 0, fmt.Errorf("chain '%s', step %d: invalid first_hit_since: %w", yamlChain.Name, runtimeStep.Order, err)
+					return nil, fmt.Errorf("chain '%s', step %d: invalid first_hit_since: %w", yamlChain.Name, runtimeStep.Order, err)
 				}
 			}
 
@@ -233,7 +233,7 @@ func LoadChainsFromYAML() ([]BehavioralChain, []*net.IPNet, []string, map[time.D
 			for field, regexStr := range yamlStep.FieldMatches {
 				re, err := regexp.Compile(regexStr)
 				if err != nil {
-					return nil, nil, nil, nil, "", 0, fmt.Errorf("chain '%s', step %d, field '%s': failed to compile regex '%s': %w", yamlChain.Name, runtimeStep.Order, field, regexStr, err)
+					return nil, fmt.Errorf("chain '%s', step %d, field '%s': failed to compile regex '%s': %w", yamlChain.Name, runtimeStep.Order, field, regexStr, err)
 				}
 				runtimeStep.CompiledRegexes[field] = re
 			}
@@ -250,7 +250,14 @@ func LoadChainsFromYAML() ([]BehavioralChain, []*net.IPNet, []string, map[time.D
 		}
 	}
 
-	return newChains, newWhitelistNets, config.HAProxyAddresses, newDurationTables, newFallbackName, maxFirstHitSince, nil
+	return &LoadedConfig{
+		Chains:                   newChains,
+		WhitelistNets:            newWhitelistNets,
+		HAProxyAddresses:         config.HAProxyAddresses,
+		DurationToTableName:      newDurationTables,
+		BlockTableNameFallback:   newFallbackName,
+		MaxFirstHitSinceDuration: maxFirstHitSince,
+	}, nil
 }
 
 // ChainWatcher monitors the YAML config file for modifications and reloads the chains dynamically.
@@ -285,7 +292,7 @@ func (p *Processor) ChainWatcher() {
 			p.LogFunc(LevelInfo, "WATCH", "Detected change in chains.yaml. Attempting reload...")
 
 			// LoadChainsFromYAML now returns parsed data, not modifying global state.
-			newChains, newWhitelistNets, newHAProxyAddrs, newDurationTables, newFallbackTable, maxFirstHitSince, err := LoadChainsFromYAML()
+			loadedCfg, err := LoadChainsFromYAML()
 			if err != nil {
 				p.LogFunc(LevelError, "LOAD_ERROR", "Failed to reload chains: %v", err)
 				continue
@@ -293,12 +300,12 @@ func (p *Processor) ChainWatcher() {
 
 			// Update the processor's state with the new config.
 			p.ChainMutex.Lock()
-			p.Chains = newChains
-			p.Config.WhitelistNets = newWhitelistNets
-			p.Config.HAProxyAddresses = newHAProxyAddrs
-			p.Config.DurationToTableName = newDurationTables
-			p.Config.BlockTableNameFallback = newFallbackTable
-			p.Config.MaxFirstHitSinceDuration = maxFirstHitSince
+			p.Chains = loadedCfg.Chains
+			p.Config.WhitelistNets = loadedCfg.WhitelistNets
+			p.Config.HAProxyAddresses = loadedCfg.HAProxyAddresses
+			p.Config.DurationToTableName = loadedCfg.DurationToTableName
+			p.Config.BlockTableNameFallback = loadedCfg.BlockTableNameFallback
+			p.Config.MaxFirstHitSinceDuration = loadedCfg.MaxFirstHitSinceDuration
 			p.Config.LastModTime = fileInfo.ModTime()
 			p.ChainMutex.Unlock()
 

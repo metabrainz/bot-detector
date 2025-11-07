@@ -60,41 +60,41 @@ chains:
 	})
 
 	// --- Act ---
-	chains, whitelistNets, haProxyAddrs, durationTables, fallbackTable, _, err := LoadChainsFromYAML()
+	loadedCfg, err := LoadChainsFromYAML() // Now returns *LoadedConfig, error
 
 	// --- Assert ---
 	if err != nil {
 		t.Fatalf("LoadChainsFromYAML() returned an unexpected error: %v", err)
 	}
 
-	if len(chains) != 2 {
-		t.Fatalf("Expected 2 chains to be loaded, got %d", len(chains))
+	if len(loadedCfg.Chains) != 2 {
+		t.Fatalf("Expected 2 chains to be loaded, got %d", len(loadedCfg.Chains))
 	}
 
-	if chains[0].Name != "TestChain" {
-		t.Errorf("Expected chain name 'TestChain', got '%s'", chains[0].Name)
+	if loadedCfg.Chains[0].Name != "TestChain" {
+		t.Errorf("Expected chain name 'TestChain', got '%s'", loadedCfg.Chains[0].Name)
 	}
 
-	if chains[0].BlockDuration != 5*time.Minute {
-		t.Errorf("Expected block duration 5m, got %v", chains[0].BlockDuration)
+	if loadedCfg.Chains[0].BlockDuration != 5*time.Minute {
+		t.Errorf("Expected block duration 5m, got %v", loadedCfg.Chains[0].BlockDuration)
 	}
 
 	// Assert that the second chain received the default block duration
-	if chains[1].BlockDuration != 1*time.Hour {
-		t.Errorf("Expected default block duration of 1h for second chain, got %v", chains[1].BlockDuration)
+	if loadedCfg.Chains[1].BlockDuration != 1*time.Hour {
+		t.Errorf("Expected default block duration of 1h for second chain, got %v", loadedCfg.Chains[1].BlockDuration)
 	}
 
 	// Assertions for the new two-step chain structure
-	if len(chains[0].Steps) != 2 {
-		t.Fatalf("Expected chain to have 2 steps, got %d", len(chains[0].Steps))
+	if len(loadedCfg.Chains[0].Steps) != 2 {
+		t.Fatalf("Expected chain to have 2 steps, got %d", len(loadedCfg.Chains[0].Steps))
 	}
 
-	step1 := chains[0].Steps[0]
+	step1 := loadedCfg.Chains[0].Steps[0]
 	if step1.Order != 1 {
 		t.Errorf("Expected step 1 to have order 1, got %d", step1.Order)
 	}
 
-	step2 := chains[0].Steps[1]
+	step2 := loadedCfg.Chains[0].Steps[1]
 	if step2.Order != 2 {
 		t.Errorf("Expected step 2 to have order 2, got %d", step2.Order)
 	}
@@ -102,23 +102,22 @@ chains:
 		t.Errorf("Expected step 2 to have min_delay of 1s, got %v", step2.MinDelayDuration)
 	}
 
-	// Check other returned config values
-	if len(whitelistNets) != 4 {
-		t.Errorf("Expected 4 whitelist CIDRs, got %d", len(whitelistNets))
+	if len(loadedCfg.WhitelistNets) != 4 {
+		t.Errorf("Expected 4 whitelist CIDRs, got %d", len(loadedCfg.WhitelistNets))
 	}
 
-	if len(haProxyAddrs) != 1 {
-		t.Errorf("Expected 1 HAProxy address, got %d", len(haProxyAddrs))
+	if len(loadedCfg.HAProxyAddresses) != 1 {
+		t.Errorf("Expected 1 HAProxy address, got %d", len(loadedCfg.HAProxyAddresses))
 	}
 
-	if len(durationTables) != 2 {
-		t.Errorf("Expected 2 duration tables, got %d", len(durationTables))
+	if len(loadedCfg.DurationToTableName) != 2 {
+		t.Errorf("Expected 2 duration tables, got %d", len(loadedCfg.DurationToTableName))
 	}
-	if fallbackTable != "table_1h" {
-		t.Errorf("Expected fallback table 'table_1h', got '%s'", fallbackTable)
+	if loadedCfg.BlockTableNameFallback != "table_1h" {
+		t.Errorf("Expected fallback table 'table_1h', got '%s'", loadedCfg.BlockTableNameFallback)
 	}
 
-	if !IsIPWhitelistedInList(NewIPInfo("10.0.0.1"), whitelistNets) {
+	if !IsIPWhitelistedInList(NewIPInfo("10.0.0.1"), loadedCfg.WhitelistNets) {
 		t.Error("Expected bare IPv4 '10.0.0.1' to be whitelisted, but it was not.")
 	}
 }
@@ -268,8 +267,8 @@ chains:
 			originalPath := YAMLFilePath
 			YAMLFilePath = tempFile
 			t.Cleanup(func() { YAMLFilePath = originalPath })
-			// Expect 7 return values now, ignoring all but the error.
-			_, _, _, _, _, _, err := LoadChainsFromYAML()
+
+			_, err := LoadChainsFromYAML()
 
 			if err == nil || !strings.Contains(err.Error(), tt.expectedError) {
 				t.Errorf("Expected error containing '%s', but got: %v", tt.expectedError, err)

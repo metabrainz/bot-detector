@@ -56,6 +56,16 @@ type AppConfig struct {
 	MaxFirstHitSinceDuration time.Duration // The longest first_hit_since duration across all chains.
 }
 
+// LoadedConfig encapsulates all configuration data loaded from the YAML file.
+type LoadedConfig struct {
+	Chains                   []BehavioralChain
+	WhitelistNets            []*net.IPNet
+	HAProxyAddresses         []string
+	DurationToTableName      map[time.Duration]string
+	BlockTableNameFallback   string
+	MaxFirstHitSinceDuration time.Duration
+}
+
 // --- YAML DATA STRUCTURES ---
 
 type StepDefYAML struct {

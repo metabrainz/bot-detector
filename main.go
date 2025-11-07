@@ -24,7 +24,7 @@ func main() {
 	}
 
 	// Load initial configuration from YAML. This no longer sets global state.
-	chains, whitelistNets, haProxyAddrs, durationTables, fallbackTable, maxFirstHitSince, err := LoadChainsFromYAML()
+	loadedCfg, err := LoadChainsFromYAML()
 	if err != nil {
 		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
 	}
@@ -33,21 +33,21 @@ func main() {
 	idleTimeout, _ := time.ParseDuration(IdleTimeoutStr)
 	cleanupInterval, _ := time.ParseDuration(CleanupIntervalStr)
 
-	if len(durationTables) == 0 {
+	if len(loadedCfg.DurationToTableName) == 0 {
 		LogOutput(LevelWarning, "CONFIG", "No HAProxy duration tables configured. All block attempts will be skipped.")
 	}
 
 	// Create the config struct from the loaded data.
 	appConfig := &AppConfig{
-		WhitelistNets:            whitelistNets,
-		HAProxyAddresses:         haProxyAddrs,
-		DurationToTableName:      durationTables,
-		BlockTableNameFallback:   fallbackTable,
+		WhitelistNets:            loadedCfg.WhitelistNets,
+		HAProxyAddresses:         loadedCfg.HAProxyAddresses,
+		DurationToTableName:      loadedCfg.DurationToTableName,
+		BlockTableNameFallback:   loadedCfg.BlockTableNameFallback,
 		LastModTime:              time.Now(),
 		PollingInterval:          pollingInterval,
 		IdleTimeout:              idleTimeout,
 		CleanupInterval:          cleanupInterval,
-		MaxFirstHitSinceDuration: maxFirstHitSince,
+		MaxFirstHitSinceDuration: loadedCfg.MaxFirstHitSinceDuration,
 	}
 
 	// Initialize the global Processor instance after config is loaded.
@@ -57,7 +57,7 @@ func main() {
 	P = &Processor{
 		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ActivityMutex: &sync.RWMutex{},
-		Chains:        chains,
+		Chains:        loadedCfg.Chains,
 		ChainMutex:    &sync.RWMutex{},
 		DryRun:        DryRun,
 		LogFunc:       LogOutput,
