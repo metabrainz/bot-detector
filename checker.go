@@ -140,6 +140,25 @@ func (p *Processor) handleChainCompletion(chain *BehavioralChain, entry *LogEntr
 	}
 }
 
+// matchStepFields checks if the fields of a log entry match the compiled regexes of a step.
+// It returns true if all fields match, false otherwise.
+func matchStepFields(step *StepDef, entry *LogEntry) bool {
+	for fieldName := range step.FieldMatches {
+		matchValue, err := GetMatchValue(fieldName, entry)
+		if err != nil {
+			// If the field is unknown or cannot be extracted, it's not a match.
+			// This should ideally be caught during config loading, but acts as a safeguard.
+			return false
+		}
+		// Check if the compiled regex matches the extracted value.
+		if !step.CompiledRegexes[fieldName].MatchString(matchValue) {
+			return false
+		}
+	}
+	// All field matches passed.
+	return true
+}
+
 // processChainForEntry evaluates a single log entry against a single behavioral chain.
 // It manages state transitions (advancing, resetting) and triggers completion handling.
 // The caller is responsible for holding the ActivityMutex.
@@ -193,22 +212,9 @@ func (p *Processor) processChainForEntry(chain *BehavioralChain, entry *LogEntry
 		}
 
 		// --- FIELD MATCHING ---
-		match := true
-		for fieldName := range step.FieldMatches {
-			matchValue, err := GetMatchValue(fieldName, entry)
-			if err != nil {
-				match = false
-				break
-			}
-			if !step.CompiledRegexes[fieldName].MatchString(matchValue) {
-				match = false
-				break
-			}
-		}
-
-		if !match {
-			break // No match on this step, exit the `for {}` loop for this chain.
-		}
+		if !matchStepFields(&step, entry) {
+			break
+		} // No match on this step, exit the `for {}` loop for this chain.
 
 		// --- STEP MATCHED ---
 		state.CurrentStep++
