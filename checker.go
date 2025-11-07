@@ -71,10 +71,15 @@ func (p *Processor) handleOutOfOrderEntry(entry *LogEntry, currentActivity *BotA
 	if !previousRequestTime.IsZero() && entry.Timestamp.Before(previousRequestTime) {
 		timeDifference := previousRequestTime.Sub(entry.Timestamp)
 		if timeDifference <= p.Config.OutOfOrderTolerance {
-			p.LogFunc(LevelDebug, "OUT_OF_ORDER_TOLERATED", "Processing out-of-order log entry for IP %s within tolerance (%v). Current: %v, Last seen: %v.", entry.IPInfo.Address, p.Config.OutOfOrderTolerance, entry.Timestamp, previousRequestTime)
+			// Explicitly format timestamps to match the log format for consistent test output.
+			p.LogFunc(LevelDebug, "OUT_OF_ORDER_TOLERATED", "Processing out-of-order log entry for IP %s within tolerance (%v). Current: %s, Last seen: %s.",
+				entry.IPInfo.Address, p.Config.OutOfOrderTolerance,
+				entry.Timestamp.Format(AppLogTimestampFormat), previousRequestTime.Format(AppLogTimestampFormat))
 			return false // Do not skip, process it
 		} else {
-			p.LogFunc(LevelWarning, "OUT_OF_ORDER_SKIPPED", "Skipping out-of-order log entry for IP %s (too old: %v > %v). Current: %v, Last seen: %v.", entry.IPInfo.Address, timeDifference, p.Config.OutOfOrderTolerance, entry.Timestamp, previousRequestTime)
+			p.LogFunc(LevelWarning, "OUT_OF_ORDER_SKIPPED", "Skipping out-of-order log entry for IP %s (too old: %v > %v). Current: %s, Last seen: %s.",
+				entry.IPInfo.Address, timeDifference, p.Config.OutOfOrderTolerance,
+				entry.Timestamp.Format(AppLogTimestampFormat), previousRequestTime.Format(AppLogTimestampFormat))
 			return true // Skip this entry entirely
 		}
 	} else {

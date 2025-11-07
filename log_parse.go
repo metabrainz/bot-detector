@@ -12,8 +12,8 @@ var logRegex = regexp.MustCompile(
 	`^(?P<VHost>\S+) (?P<IP>\S+) (?P<Identity>\S+) (?P<User>\S+) \[(?P<Timestamp>[^\]]+)\] \"(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)\" (?P<StatusCode>\d{3}) (?P<Size>\d+) \"(?P<Referrer>[^\"]*)\" \"(?P<UserAgent>[^\"]*)\"$`,
 )
 
-// Time format used in standard logs
-const logTimeFormat = "02/Jan/2006:15:04:05 -0700"
+// AccessLogTimeFormat defines the timestamp format used in standard access logs.
+const AccessLogTimeFormat = "02/Jan/2006:15:04:05 -0700"
 
 func ParseLogLine(line string) (*LogEntry, error) {
 	if len(line) == 0 || line[0] == '#' {
@@ -39,7 +39,7 @@ func ParseLogLine(line string) (*LogEntry, error) {
 		return nil, fmt.Errorf("malformed status code: %w", err)
 	}
 
-	timestamp, err := time.Parse(logTimeFormat, matches[getMatchIndex("Timestamp")])
+	timestamp, err := time.Parse(AccessLogTimeFormat, matches[getMatchIndex("Timestamp")])
 	if err != nil {
 		return nil, fmt.Errorf("malformed timestamp: %w", err)
 	}

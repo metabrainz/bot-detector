@@ -27,7 +27,7 @@ func (m *MockBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 // (No changes to this section, as it passed in the previous step)
 
 func TestParseLogLine(t *testing.T) {
-	testTime, _ := time.Parse(logTimeFormat, "06/Nov/2025:09:00:00 +0100")
+	testTime, _ := time.Parse(AccessLogTimeFormat, "06/Nov/2025:09:00:00 +0100")
 
 	validReferrer := "http://referrer.com/test?q=1"
 	validUserAgent := "test-agent"
