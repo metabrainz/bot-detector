@@ -13,34 +13,38 @@ import (
 // ReadLineWithLimit reads a line from the reader up to the given limit (in bytes).
 // If the line exceeds the limit, it returns the partial line and ErrLineSkipped.
 func ReadLineWithLimit(reader *bufio.Reader, limit int) (string, error) {
-	var line []byte
-	var isPrefix bool = true
-	var err error
+	line, err := reader.ReadBytes('\n')
 
-	for len(line) < limit {
-		var chunk []byte
-		chunk, isPrefix, err = reader.ReadLine()
-		line = append(line, chunk...)
-
-		if err != nil {
-			// io.EOF is the standard end-of-file signal
-			return string(line), err
+	// If an error occurred, it could be EOF.
+	if err != nil {
+		// If we got some data and an EOF, it's a valid line without a newline.
+		if len(line) > 0 && err == io.EOF {
+			// If this final line exceeds the limit, we must still truncate and report it.
+			if len(line) > limit {
+				return string(line[:limit]), ErrLineSkipped
+			}
+			return string(line), io.EOF
 		}
-
-		if !isPrefix {
-			// Whole line read (line ends with '\n')
-			return string(line), nil
-		}
-
-		// If isPrefix is true here, the line exceeded the buffer and possibly the limit.
-		if len(line) >= limit {
-			// Discard the remainder of the line from the buffer up to the next newline.
-			_, _ = reader.ReadString('\n')
-			return string(line), ErrLineSkipped
-		}
+		// For any other error (including EOF on an empty read), return the error.
+		return string(line), err
 	}
 
-	return string(line), io.EOF
+	// Check if the line content (excluding the newline) exceeds the limit.
+	// The line returned by ReadBytes includes the delimiter.
+	hasNewline := line[len(line)-1] == '\n'
+	contentLen := len(line)
+	if hasNewline {
+		contentLen-- // Don't count the newline character itself against the limit.
+	}
+
+	if contentLen > limit {
+		return string(line[:limit]), ErrLineSkipped
+	}
+
+	// The line is within the limit. Trim the newline character for consistent output.
+	// This handles both `\n` and `\r\n`.
+	line = line[:len(line)-1] // remove \n
+	return string(line), nil
 }
 
 // DryRunLogProcessor reads and processes a static log file for testing.
@@ -61,17 +65,21 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	lineLimit := MaxLogLineSize
 
 	for {
-		lineNumber++
 		line, readErr := ReadLineWithLimit(reader, lineLimit)
+		lineNumber++ // Increment after the read to accurately report the line number of the error.
 
-		if errors.Is(readErr, io.EOF) {
+		// Use a switch for clearer error handling.
+		switch {
+		case errors.Is(readErr, io.EOF):
+			// If we read a line and got EOF, process it before breaking.
+			if len(line) > 0 {
+				p.ProcessLogLine(line, lineNumber)
+			}
 			break
-		}
-		if errors.Is(readErr, ErrLineSkipped) {
+		case errors.Is(readErr, ErrLineSkipped):
 			p.LogFunc(LevelWarning, "DRYRUN_SKIP", "Line %d: Skipped (Length exceeded %d bytes).", lineNumber, lineLimit)
 			continue
-		}
-		if readErr != nil {
+		case readErr != nil:
 			p.LogFunc(LevelError, "DRYRUN_ERROR", "Line %d: Read error: %v", lineNumber, readErr)
 			continue
 		}
@@ -80,8 +88,52 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 		p.ProcessLogLine(line, lineNumber)
 	}
 
-	p.LogFunc(LevelInfo, "DRYRUN", "DryRun complete. Processed %d lines.", lineNumber)
+	// Decrement lineNumber by 1 for the final count, as the loop breaks after the EOF read attempt.
+	p.LogFunc(LevelInfo, "DRYRUN", "DryRun complete. Processed %d lines.", lineNumber-1)
 	close(done)
+}
+
+// hasFileBeenRotated checks if the log file has been rotated or truncated.
+// It returns true if the file should be reopened, false otherwise.
+func hasFileBeenRotated(p *Processor, filePath string, initialStat os.FileInfo) bool {
+	if initialStat == nil {
+		// If we couldn't get initial stats, we can't detect rotation.
+		return false
+	}
+
+	currentStat, err := os.Stat(filePath)
+	if err != nil {
+		p.LogFunc(LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Assuming rotation.", err)
+		return true // If we can't stat the file, it might be gone. Reopen.
+	}
+
+	// Check for truncation (size decreased).
+	if currentStat.Size() < initialStat.Size() {
+		p.LogFunc(LevelInfo, "TAIL", "Detected log file size reduction (truncation/rotation). Reopening file.")
+		return true
+	}
+
+	// Check for Inode/Device change (rotation).
+	initialSysStat := initialStat.Sys().(*syscall.Stat_t)
+	currentSysStat := currentStat.Sys().(*syscall.Stat_t)
+	if currentSysStat.Dev != initialSysStat.Dev || currentSysStat.Ino != initialSysStat.Ino {
+		p.LogFunc(LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialSysStat.Ino, currentSysStat.Ino)
+		return true
+	}
+
+	return false
+}
+
+// delayOrShutdown waits for a specified duration but will return early if a shutdown
+// signal is received on the provided channel. It returns true if a shutdown was triggered.
+func delayOrShutdown(p *Processor, delay time.Duration, signalCh <-chan os.Signal) bool {
+	select {
+	case <-time.After(delay):
+		return false // Delay completed
+	case s := <-signalCh:
+		p.LogFunc(LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
+		return true // Shutdown signal received
+	}
 }
 
 // LiveLogTailer continuously tails a log file, handling rotation and truncation.
@@ -98,29 +150,21 @@ func LiveLogTailer(p *Processor) {
 		if err != nil {
 			// File not found on first attempt, wait and retry.
 			p.LogFunc(LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", LogFilePath, err, ErrorRetryDelay)
-			select {
-			case <-time.After(ErrorRetryDelay):
-				continue
-			case s := <-signalCh:
-				p.LogFunc(LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
-				file.Close()
-				return
+			if delayOrShutdown(p, ErrorRetryDelay, signalCh) {
+				return // Shutdown signal received
 			}
+			continue
 		}
 
 		// Get initial file stats for rotation/truncation detection
 		initialStat, statErr := file.Stat()
-		var initialSize int64
-		var initialDev, initialIno uint64
 		if statErr == nil {
-			initialSize = initialStat.Size()
 			initialSysStat := initialStat.Sys().(*syscall.Stat_t)
-			initialDev = initialSysStat.Dev
-			initialIno = initialSysStat.Ino
-			p.LogFunc(LevelDebug, "TAIL", "Initial file state: Size=%d, Inode=%d, Device=%d", initialSize, initialIno, initialDev)
+			p.LogFunc(LevelDebug, "TAIL", "Initial file state: Size=%d, Inode=%d, Device=%d", initialStat.Size(), initialSysStat.Ino, initialSysStat.Dev)
 		} else {
-			p.LogFunc(LevelWarning, "TAIL", "Failed to get initial file stat: %v. Rotation detection disabled.", statErr)
+			p.LogFunc(LevelWarning, "TAIL_WARN", "Failed to get initial file stat: %v. Rotation detection may be impaired.", statErr)
 		}
+		// We proceed even if statErr is not nil. hasFileBeenRotated will handle it.
 
 		// Seek to the end of the file if not the first run.
 		// Assuming for a persistent tailer, we start at the end if the file already exists.
@@ -129,19 +173,12 @@ func LiveLogTailer(p *Processor) {
 
 		lineNumber := 0
 		lineLimit := MaxLogLineSize
-		isPollingForStatCheck := false
 
 		// Local function to restart the outer loop after a delay
 		restartTailing := func(delay time.Duration) {
-			file.Close() // Close the current file handle
-			if delay > 0 {
-				select {
-				case <-time.After(delay):
-					// continue outer loop
-				case s := <-signalCh:
-					p.LogFunc(LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
-					return // exit function
-				}
+			if delay > 0 && delayOrShutdown(p, delay, signalCh) {
+				// If a shutdown was triggered during the delay, we need to exit LiveLogTailer completely.
+				// We can't just return from restartTailing, so we'll rely on the main loop's signal check.
 			}
 		}
 
@@ -169,42 +206,18 @@ func LiveLogTailer(p *Processor) {
 				}
 
 				if finalErr == io.EOF {
-					// End of file reached, begin polling for new data or file changes
-					isPollingForStatCheck = false // Reset stat check flag
-					if statErr == nil {
-						// Only check for rotation/truncation if initial stat succeeded
-						currentStat, checkStatErr := os.Stat(LogFilePath)
-						if checkStatErr == nil {
-							// Check for truncation (size decreased)
-							if currentStat.Size() < initialSize {
-								p.LogFunc(LevelInfo, "TAIL", "Detected log file size reduction (truncation/rotation). Reopening file.")
-								restartTailing(0) // Restart immediately
-								break
-							}
-
-							// Check for Inode/Device change (rotation)
-							currentSysStat := currentStat.Sys().(*syscall.Stat_t)
-							if currentSysStat.Dev != initialDev || currentSysStat.Ino != initialIno {
-								p.LogFunc(LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialIno, currentSysStat.Ino)
-								restartTailing(0) // Restart immediately
-								break
-							}
-						} else {
-							// Suppress repeated "Failed to stat" messages
-							if !isPollingForStatCheck {
-								p.LogFunc(LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Retrying every %v.", checkStatErr, ErrorRetryDelay)
-								isPollingForStatCheck = true
-							}
-							restartTailing(ErrorRetryDelay) // Wait a bit on stat failure
-							break
-						}
+					// At EOF, check for file rotation before sleeping.
+					if hasFileBeenRotated(p, LogFilePath, initialStat) {
+						file.Close()      // Close the old file handle
+						restartTailing(0) // Restart immediately
+						break             // Break inner loop to reopen
 					}
-
 					time.Sleep(EOFPollingDelay) // Use EOFPollingDelay for standard polling
 					continue
 				} else {
 					// Read error (non-EOF) is typically a one-off event, but we retry
 					p.LogFunc(LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening in %v.", finalErr, ErrorRetryDelay)
+					file.Close()                    // Close the potentially problematic file handle
 					restartTailing(ErrorRetryDelay) // Wait a bit on read error
 					break                           // Break inner loop to trigger file re-opening
 				}
