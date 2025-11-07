@@ -19,3 +19,13 @@ const (
 	EOFPollingDelay    = 200 * time.Millisecond // For regular polling when hitting EOF on an open file
 	ErrorRetryDelay    = 1 * time.Second        // For persistent errors (read failures, stat failures)
 )
+
+// Default configuration values used if not specified in the YAML file.
+const (
+	DefaultLogLevel            = "warning"
+	DefaultPollingInterval     = "5s"
+	DefaultCleanupInterval     = "1m"
+	DefaultIdleTimeout         = "30m"
+	DefaultOutOfOrderTolerance = "5s"
+	DefaultMinPollingInterval  = 1 * time.Second // Minimum safe polling interval to prevent tight loops.
+)

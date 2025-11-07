@@ -102,11 +102,11 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 	var pollingInterval, cleanupInterval, idleTimeout, outOfOrderTolerance time.Duration
 
 	// Set defaults for global settings
-	logLevelStr := "warning"
-	pollingIntervalStr := "5s"
-	cleanupIntervalStr := "1m"
-	idleTimeoutStr := "30m"
-	outOfOrderToleranceStr := "5s"
+	logLevelStr := DefaultLogLevel
+	pollingIntervalStr := DefaultPollingInterval
+	cleanupIntervalStr := DefaultCleanupInterval
+	idleTimeoutStr := DefaultIdleTimeout
+	outOfOrderToleranceStr := DefaultOutOfOrderTolerance
 
 	// Override defaults with values from YAML if they exist
 	if config.LogLevel != "" {
