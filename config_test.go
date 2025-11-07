@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -303,7 +304,10 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 					HAProxyAddresses:    []string{"127.0.0.1:9999"},
 					DurationToTableName: map[time.Duration]string{5 * time.Minute: "table_5m"},
 				},
-				LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
+				// Capture log output for assertion.
+				LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
+					// For this test, we only care about the WHITELIST_UNBLOCK log.
+				},
 			}
 
 			var commandsReceived []string
@@ -315,11 +319,20 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 
 			// 2. Define the IP that is currently blocked but will be whitelisted.
 			trackingKey := TrackingKey{IPInfo: NewIPInfo(tt.blockedIP)}
+			blockExpirationTime := time.Now().Add(time.Hour)
 
 			// 3. Manually set the state in ActivityStore to simulate a blocked IP.
 			processor.ActivityStore[trackingKey] = &BotActivity{
 				IsBlocked:    true,
-				BlockedUntil: time.Now().Add(time.Hour),
+				BlockedUntil: blockExpirationTime,
+			}
+
+			// Capture the specific log message we care about.
+			var capturedLog string
+			processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+				if tag == "WHITELIST_UNBLOCK" {
+					capturedLog = fmt.Sprintf(format, args...)
+				}
 			}
 
 			// 4. Set the WhitelistNets on the processor's config to include the blocked IP.
@@ -330,10 +343,19 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			processor.CheckAndRemoveWhitelistedBlocks()
 
 			// --- Assert ---
+			// Assert Log Output
+			expectedLogSubstring := blockExpirationTime.Format(AppLogTimestampFormat)
+			if !strings.Contains(capturedLog, expectedLogSubstring) {
+				t.Errorf("Expected log message to contain the original block time '%s', but it did not. Log was: '%s'",
+					expectedLogSubstring, capturedLog)
+			}
+
+			// Assert HAProxy Command
 			if len(commandsReceived) != 1 || commandsReceived[0] != tt.expectedCommand {
 				t.Errorf("Expected unblock command '%s', but got %v", tt.expectedCommand, commandsReceived)
 			}
 
+			// Assert Final State
 			activity, exists := processor.ActivityStore[trackingKey]
 			if !exists {
 				t.Fatal("Activity for the IP was unexpectedly deleted.")
