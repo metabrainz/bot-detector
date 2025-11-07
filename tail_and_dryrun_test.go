@@ -58,6 +58,41 @@ func TestReadLineWithLimit(t *testing.T) {
 			expectedLine:  "",
 			expectedError: io.EOF,
 		},
+		{
+			name:          "Windows EOL (CRLF)",
+			input:         "windows line\r\n",
+			limit:         100,
+			expectedLine:  "windows line",
+			expectedError: nil,
+		},
+		{
+			name:          "Windows EOL over limit",
+			input:         "this is a long windows line\r\n",
+			limit:         10,
+			expectedLine:  "this is a ",
+			expectedError: ErrLineSkipped,
+		},
+		{
+			name:          "Classic Mac EOL (CR)",
+			input:         "mac line\rnext line",
+			limit:         100,
+			expectedLine:  "mac line",
+			expectedError: nil,
+		},
+		{
+			name:          "Classic Mac EOL over limit",
+			input:         "this is a long mac line\rnext line",
+			limit:         10,
+			expectedLine:  "this is a ",
+			expectedError: ErrLineSkipped,
+		},
+		{
+			name:          "Mixed EOLs (Windows then Unix)",
+			input:         "line1\r\nline2\n",
+			limit:         100,
+			expectedLine:  "line1",
+			expectedError: nil,
+		},
 	}
 
 	for _, tt := range tests {

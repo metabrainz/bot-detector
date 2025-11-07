@@ -12,38 +12,44 @@ import (
 
 // ReadLineWithLimit reads a line from the reader up to the given limit (in bytes).
 // If the line exceeds the limit, it returns the partial line and ErrLineSkipped.
+// It correctly handles `\n`, `\r`, and `\r\n` line endings.
 func ReadLineWithLimit(reader *bufio.Reader, limit int) (string, error) {
-	line, err := reader.ReadBytes('\n')
-
-	// If an error occurred, it could be EOF.
-	if err != nil {
-		// If we got some data and an EOF, it's a valid line without a newline.
-		if len(line) > 0 && err == io.EOF {
-			// If this final line exceeds the limit, we must still truncate and report it.
-			if len(line) > limit {
-				return string(line[:limit]), ErrLineSkipped
+	var line []byte
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			// If we have content and hit EOF, it's a valid last line.
+			if err == io.EOF && len(line) > 0 {
+				if len(line) > limit {
+					return string(line[:limit]), ErrLineSkipped
+				}
+				return string(line), io.EOF
 			}
-			return string(line), io.EOF
+			// For any other error (including EOF on an empty read), return it.
+			return string(line), err
 		}
-		// For any other error (including EOF on an empty read), return the error.
-		return string(line), err
+
+		if b == '\n' {
+			// Unix EOL. We're done.
+			break
+		}
+
+		if b == '\r' {
+			// Could be Windows (\r\n) or classic Mac (\r).
+			// Peek at the next byte to see if it's a '\n'.
+			if nextByte, err := reader.Peek(1); err == nil && nextByte[0] == '\n' {
+				reader.ReadByte() // It's '\r\n', so consume the '\n' as well.
+			}
+			break // In both cases (\r or \r\n), we're done with this line.
+		}
+
+		line = append(line, b)
 	}
 
-	// Check if the line content (excluding the newline) exceeds the limit.
-	// The line returned by ReadBytes includes the delimiter.
-	hasNewline := line[len(line)-1] == '\n'
-	contentLen := len(line)
-	if hasNewline {
-		contentLen-- // Don't count the newline character itself against the limit.
-	}
-
-	if contentLen > limit {
+	if len(line) > limit {
 		return string(line[:limit]), ErrLineSkipped
 	}
 
-	// The line is within the limit. Trim the newline character for consistent output.
-	// This handles both `\n` and `\r\n`.
-	line = line[:len(line)-1] // remove \n
 	return string(line), nil
 }
 
