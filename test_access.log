@@ -47,3 +47,20 @@ musicbrainz.org 2001:db8::4 - - [28/Oct/2025:17:00:13 +0000] "GET /ua/attack HTT
 musicbrainz.org 10.0.0.5 - - [28/Oct/2025:17:00:15 +0000] "GET /ua-ref/step1 HTTP/1.1" 200 100 "https://common.ref/page" "Consistent_UA_1.0"
 musicbrainz.org 10.0.0.5 - - [28/Oct/2025:17:00:16 +0000] "GET /some/other/path HTTP/1.1" 200 100 "https://common.ref/page" "DifferentUA"
 musicbrainz.org 10.0.0.5 - - [28/Oct/2025:17:00:17 +0000] "GET /ua-ref/step2 HTTP/1.1" 500 100 "https://common.ref/page" "Consistent_UA_2.1"
+
+# ======================================================================================
+# === TEST CASE 8: min_time_since_last_hit - SUCCESS (IP was idle long enough)
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: SleepyBotChain completed by IP 10.0.0.6. Action set to 'log' (DryRun).
+# ===
+# The first hit primes the LastRequestTime. The second hit is >15s later, so the chain matches.
+musicbrainz.org 10.0.0.6 - - [28/Oct/2025:17:00:20 +0000] "GET /some/other/path HTTP/1.1" 200 100 "-" "SleepyBot"
+musicbrainz.org 10.0.0.6 - - [28/Oct/2025:17:00:40 +0000] "GET /sleepy/probe HTTP/1.1" 200 100 "-" "SleepyBot"
+
+# ======================================================================================
+# === TEST CASE 9: min_time_since_last_hit - FAILURE (IP was too active)
+# === (NO EXPECTED LOG for this chain)
+# ===
+# The first hit primes the LastRequestTime. The second hit is only 5s later, which is less
+# than the required 15s, so the chain does not match.
+musicbrainz.org 10.0.0.7 - - [28/Oct/2025:17:00:50 +0000] "GET /some/other/path HTTP/1.1" 200 100 "-" "ActiveBot"
+musicbrainz.org 10.0.0.7 - - [28/Oct/2025:17:00:55 +0000] "GET /sleepy/probe HTTP/1.1" 200 100 "-" "ActiveBot"

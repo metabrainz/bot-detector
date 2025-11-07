@@ -61,3 +61,12 @@ chains:
           Referrer: "^https://common.ref/page$"
           StatusCode: "^5\\d{2}$" # Require an HTTP 5xx error
         max_delay: "10s"
+
+  # --- 6. Sleepy Bot Detection (min_time_since_last_hit) ---
+  - name: "SleepyBotChain"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - min_time_since_last_hit: "15s"
+        field_matches:
+          Path: "^/sleepy/probe$"
