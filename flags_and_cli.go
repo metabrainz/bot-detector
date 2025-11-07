@@ -27,8 +27,3 @@ func init() {
 		fmt.Fprintf(os.Stderr, "\nMemory and CPU are optimized by pre-compiling regexes and using the cleanup routine.\n")
 	}
 }
-
-// ParseDurations validates and parses CLI duration flags.
-func ParseDurations() error {
-	return nil
-}

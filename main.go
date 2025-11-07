@@ -18,11 +18,6 @@ func main() {
 	// Parse CLI flags
 	flag.Parse()
 
-	// Validate and parse duration strings (e.g., "5m", "10s")
-	if err := ParseDurations(); err != nil {
-		log.Fatalf("[FATAL] Configuration Error: %v", err)
-	}
-
 	// Load initial configuration from YAML. This no longer sets global state.
 	loadedCfg, err := LoadChainsFromYAML()
 	if err != nil {
