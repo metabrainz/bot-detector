@@ -64,6 +64,11 @@ type LoadedConfig struct {
 	HAProxyAddresses         []string
 	DurationToTableName      map[time.Duration]string
 	BlockTableNameFallback   string
+	PollingInterval          time.Duration
+	CleanupInterval          time.Duration
+	IdleTimeout              time.Duration
+	OutOfOrderTolerance      time.Duration
+	LogLevel                 string
 	MaxFirstHitSinceDuration time.Duration
 }
 
@@ -87,6 +92,11 @@ type BehavioralChainYAML struct {
 
 type ChainConfig struct {
 	Version              string                `yaml:"version"`
+	LogLevel             string                `yaml:"log_level"`
+	PollingInterval      string                `yaml:"poll_interval"`
+	CleanupInterval      string                `yaml:"cleanup_interval"`
+	IdleTimeout          string                `yaml:"idle_timeout"`
+	OutOfOrderTolerance  string                `yaml:"out_of_order_tolerance"`
 	Chains               []BehavioralChainYAML `yaml:"chains"`
 	WhitelistCIDRs       []string              `yaml:"whitelist_cidrs"`
 	HAProxyAddresses     []string              `yaml:"haproxy_addresses"`

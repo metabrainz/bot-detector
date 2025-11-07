@@ -7,8 +7,4 @@ func resetGlobalState() {
 	CurrentLogLevel = LevelWarning
 	// Reset global testing flags
 	DryRun = false
-	LogLevelStr = ""
-	PollingIntervalStr = ""
-	CleanupIntervalStr = ""
-	IdleTimeoutStr = ""
 }

@@ -29,10 +29,7 @@ func main() {
 		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
 	}
 
-	pollingInterval, _ := time.ParseDuration(PollingIntervalStr)
-	idleTimeout, _ := time.ParseDuration(IdleTimeoutStr)
-	cleanupInterval, _ := time.ParseDuration(CleanupIntervalStr)
-	outOfOrderTolerance, _ := time.ParseDuration(OutOfOrderToleranceStr)
+	SetLogLevel(loadedCfg.LogLevel)
 
 	if len(loadedCfg.DurationToTableName) == 0 {
 		LogOutput(LevelWarning, "CONFIG", "No HAProxy duration tables configured. All block attempts will be skipped.")
@@ -45,10 +42,10 @@ func main() {
 		DurationToTableName:      loadedCfg.DurationToTableName,
 		BlockTableNameFallback:   loadedCfg.BlockTableNameFallback,
 		LastModTime:              time.Now(),
-		PollingInterval:          pollingInterval,
-		IdleTimeout:              idleTimeout,
-		CleanupInterval:          cleanupInterval,
-		OutOfOrderTolerance:      outOfOrderTolerance,
+		PollingInterval:          loadedCfg.PollingInterval,
+		IdleTimeout:              loadedCfg.IdleTimeout,
+		CleanupInterval:          loadedCfg.CleanupInterval,
+		OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
 		MaxFirstHitSinceDuration: loadedCfg.MaxFirstHitSinceDuration,
 	}
 

@@ -1,6 +1,9 @@
 package main
 
-import "log"
+import (
+	"log"
+	"strings"
+)
 
 // --- LOGGING STRUCTURE ---
 type LogLevel int
@@ -26,5 +29,15 @@ var LogLevelMap = map[string]LogLevel{
 func LogOutput(level LogLevel, prefix string, format string, v ...interface{}) {
 	if level <= CurrentLogLevel {
 		log.Printf("[%s] "+format, append([]interface{}{prefix}, v...)...)
+	}
+}
+
+// SetLogLevel safely sets the global CurrentLogLevel from a string.
+func SetLogLevel(levelStr string) {
+	if level, ok := LogLevelMap[strings.ToLower(levelStr)]; ok {
+		CurrentLogLevel = level
+	} else {
+		LogOutput(LevelWarning, "CONFIG", "Invalid log_level '%s' in config. Using default 'warning'.", levelStr)
+		CurrentLogLevel = LevelWarning
 	}
 }

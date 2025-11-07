@@ -98,6 +98,51 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 		)
 	}
 
+	// --- PARSE GLOBAL SETTINGS ---
+	var pollingInterval, cleanupInterval, idleTimeout, outOfOrderTolerance time.Duration
+
+	// Set defaults for global settings
+	logLevelStr := "warning"
+	pollingIntervalStr := "5s"
+	cleanupIntervalStr := "1m"
+	idleTimeoutStr := "30m"
+	outOfOrderToleranceStr := "5s"
+
+	// Override defaults with values from YAML if they exist
+	if config.LogLevel != "" {
+		logLevelStr = config.LogLevel
+	}
+	if config.PollingInterval != "" {
+		pollingIntervalStr = config.PollingInterval
+	}
+	if config.CleanupInterval != "" {
+		cleanupIntervalStr = config.CleanupInterval
+	}
+	if config.IdleTimeout != "" {
+		idleTimeoutStr = config.IdleTimeout
+	}
+	if config.OutOfOrderTolerance != "" {
+		outOfOrderToleranceStr = config.OutOfOrderTolerance
+	}
+
+	// Parse durations
+	pollingInterval, err = time.ParseDuration(pollingIntervalStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid poll_interval format: %w", err)
+	}
+	cleanupInterval, err = time.ParseDuration(cleanupIntervalStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cleanup_interval format: %w", err)
+	}
+	idleTimeout, err = time.ParseDuration(idleTimeoutStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid idle_timeout format: %w", err)
+	}
+	outOfOrderTolerance, err = time.ParseDuration(outOfOrderToleranceStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid out_of_order_tolerance format: %w", err)
+	}
+
 	// Parse Whitelist CIDRs
 	newWhitelistNets := make([]*net.IPNet, 0)
 	for _, cidr := range config.WhitelistCIDRs {
@@ -256,6 +301,11 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 		HAProxyAddresses:         config.HAProxyAddresses,
 		DurationToTableName:      newDurationTables,
 		BlockTableNameFallback:   newFallbackName,
+		PollingInterval:          pollingInterval,
+		CleanupInterval:          cleanupInterval,
+		IdleTimeout:              idleTimeout,
+		OutOfOrderTolerance:      outOfOrderTolerance,
+		LogLevel:                 logLevelStr,
 		MaxFirstHitSinceDuration: maxFirstHitSince,
 	}, nil
 }
@@ -305,6 +355,11 @@ func (p *Processor) ChainWatcher() {
 			p.Config.HAProxyAddresses = loadedCfg.HAProxyAddresses
 			p.Config.DurationToTableName = loadedCfg.DurationToTableName
 			p.Config.BlockTableNameFallback = loadedCfg.BlockTableNameFallback
+			p.Config.PollingInterval = loadedCfg.PollingInterval
+			p.Config.CleanupInterval = loadedCfg.CleanupInterval
+			p.Config.IdleTimeout = loadedCfg.IdleTimeout
+			p.Config.OutOfOrderTolerance = loadedCfg.OutOfOrderTolerance
+			SetLogLevel(loadedCfg.LogLevel) // Update log level dynamically
 			p.Config.MaxFirstHitSinceDuration = loadedCfg.MaxFirstHitSinceDuration
 			p.Config.LastModTime = fileInfo.ModTime()
 			p.ChainMutex.Unlock()
