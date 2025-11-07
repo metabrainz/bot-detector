@@ -1,112 +1,49 @@
 # ======================================================================================
-# === TEST CASE 1: Whitelist Functionality (192.0.2.10) - SKIPPED
-# === EXPECTED LOG: "SKIP: IP 192.0.2.10: Skipped (IP is whitelisted)."
-# ======================================================================================
-musicbrainz.org 192.0.2.10 - - [28/Oct/2025:17:00:02 +0000] "GET /v4/start HTTP/1.1" 200 100 "-" "V4-Bot-A"
-musicbrainz.org 192.0.2.10 - - [28/Oct/2025:17:00:04 +0000] "GET /v4/end HTTP/1.1" 200 100 "-" "V4-Bot-A"
-
-# 2. Test: MatchKey IPv6 + UserAgent (2001:db8::1) - SUCCESS (BLOCKED)
-musicbrainz.org 2001:db8::1 - - [28/Oct/2025:17:00:05 +0000] "GET /v6/start HTTP/1.1" 200 100 "-" "Bot-A/1.0"
-musicbrainz.org 2001:db8::1 - - [28/Oct/2025:17:00:06 +0000] "GET /v6/end HTTP/1.1" 200 100 "-" "Bot-A/1.0"
+# === TEST CASE 1: Whitelisted IP (192.0.2.10) - SKIPPED
+# === EXPECTED LOG: SKIP: IP 192.0.2.10: Skipped (IP is whitelisted).
+# ===
+musicbrainz.org 192.0.2.10 - - [28/Oct/2025:17:00:01 +0000] "GET /whitelisted HTTP/1.1" 200 100 "-" "TestAgent"
 
 # ======================================================================================
-# === TEST CASE 4: Max_Delay Reset (10.0.0.3) - FAILURE
-# === EXPECTED LOG: "RESET: Chain Test-MaxDelay-Reset: MaxDelay 1s exceeded."
-# ======================================================================================
-musicbrainz.org 10.0.0.3 - - [28/Oct/2025:17:00:09 +0000] "GET /max/start HTTP/1.1" 200 100 "-" "Delay-Bot"
-musicbrainz.org 10.0.0.3 - - [28/Oct/2025:17:00:11 +0000] "GET /max/fail HTTP/1.1" 200 100 "-" "Delay-Bot"
+# === TEST CASE 2: Log Action Chain (10.0.0.1) - SUCCESS (LOG)
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: SimpleLogChain completed by IP 10.0.0.1. Action set to 'log' (DryRun).
+# ===
+musicbrainz.org 10.0.0.1 - - [28/Oct/2025:17:00:02 +0000] "GET /log/step1 HTTP/1.1" 200 100 "-" "TestAgent"
+musicbrainz.org 10.0.0.1 - - [28/Oct/2025:17:00:03 +0000] "GET /log/step2 HTTP/1.1" 200 100 "-" "TestAgent"
 
 # ======================================================================================
-# === TEST CASE 5: MatchKey IP + UA Spoof (192.0.2.21) - FAILURE
-# === EXPECTED LOG: No completion log. The change in UserAgent creates a new tracking key, breaking the chain.
-# ======================================================================================
-musicbrainz.org 192.0.2.21 - - [28/Oct/2025:17:00:12 +0000] "GET /spoof/start HTTP/1.1" 200 100 "-" "UA-Original"
-musicbrainz.org 192.0.2.21 - - [28/Oct/2025:17:00:13 +0000] "GET /spoof/end HTTP/1.1" 200 100 "-" "UA-Changed"
+# === TEST CASE 3: Block Action Chain (10.0.0.2) - SUCCESS (BLOCK)
+# === EXPECTED LOG: DRY_RUN: BLOCK! Chain: SimpleBlockChain completed by IP 10.0.0.2. Action set to 'block' (DryRun).
+# ===
+musicbrainz.org 10.0.0.2 - - [28/Oct/2025:17:00:04 +0000] "GET /block/step1 HTTP/1.1" 200 100 "-" "TestAgent"
+musicbrainz.org 10.0.0.2 - - [28/Oct/2025:17:00:05 +0000] "GET /block/step2 HTTP/1.1" 200 100 "-" "TestAgent"
 
 # ======================================================================================
-# === TEST CASE 6: Field: Referrer Match (192.0.2.23) - SUCCESS
-# === EXPECTED LOG: "LOG! Chain: Test-Field-Referrer-Full completed..."
-# ======================================================================================
-musicbrainz.org 192.0.2.23 - - [28/Oct/2025:17:00:14 +0000] "GET /checkout HTTP/1.1" 200 100 "https://external.payment.gateway/return.html?id=12345" "Ref-Bot"
-musicbrainz.org 192.0.2.23 - - [28/Oct/2025:17:00:15 +0000] "GET /complete HTTP/1.1" 200 100 "https://external.payment.gateway/return.html?id=12345" "Ref-Bot"
+# === TEST CASE 4: Parse Failure (Malformed Line)
+# === EXPECTED LOG: PARSE_FAIL: Line %d: Parsing failed: line does not match log format regex
+# ===
+musicbrainz.org 1.2.3.4 - - [28/Oct/2025:17:00:06 +0000] "GET /incomplete HTTP/1.1" 200 100 "-"
 
 # ======================================================================================
-# === TEST CASE 7: Field: Method and StatusCode (192.0.2.26) - SUCCESS
-# === EXPECTED LOG: "LOG! Chain: Test-Fields-Method-Status completed..."
-# ======================================================================================
-musicbrainz.org 192.0.2.26 - - [28/Oct/2025:17:00:19 +0000] "POST /api/auth HTTP/1.1" 403 100 "-" "API-Bot"
-musicbrainz.org 192.0.2.26 - - [28/Oct/2025:17:00:20 +0000] "POST /api/auth HTTP/1.1" 403 100 "-" "API-Bot"
+# === TEST CASE 5: Out-of-order within tolerance (10.0.0.3)
+# === EXPECTED LOG: OUT_OF_ORDER_TOLERATED: Processing out-of-order log entry for IP 10.0.0.3 within tolerance (5s). Current: 2025-10-28 17:00:08 +0000 +0000, Last seen: 2025-10-28 17:00:10 +0000 +0000.
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: OutOfOrderChain completed by IP 10.0.0.3. Action set to 'log' (DryRun).
+# ===
+musicbrainz.org 10.0.0.3 - - [28/Oct/2025:17:00:10 +0000] "GET /order/start HTTP/1.1" 200 100 "-" "OutOfOrderBot"
+musicbrainz.org 10.0.0.3 - - [28/Oct/2025:17:00:08 +0000] "GET /order/end HTTP/1.1" 200 100 "-" "OutOfOrderBot"
 
 # ======================================================================================
-# === TEST CASE 8: Field: Bad User Agent (192.0.2.27) - SUCCESS
-# === EXPECTED LOG: "LOG! Chain: Test-Field-BlockUserAgent completed..."
-# ======================================================================================
-musicbrainz.org 192.0.2.27 - - [28/Oct/2025:17:00:04 +0000] "GET /v4/end HTTP/1.1" 200 100 "-" "badguy"
-musicbrainz.org 2001:db8::27 - - [28/Oct/2025:17:00:05 +0000] "GET /v6/start HTTP/1.1" 200 100 "-" "badguy"
-musicbrainz.org 192.0.2.28 - - [28/Oct/2025:17:00:04 +0000] "GET /v4/end HTTP/2.0" 200 100 "-" "badguy"
+# === TEST CASE 6: IPv6 User-Agent Change Detection (2001:db8::4) - SUCCESS (LOG)
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: IPv6-UA-Change-Detection completed by IP 2001:db8::4. Action set to 'log' (DryRun).
+# ===
+musicbrainz.org 2001:db8::4 - - [28/Oct/2025:17:00:11 +0000] "GET /ua/probe HTTP/1.1" 200 100 "-" "Mozilla/5.0 (UA1)"
+musicbrainz.org 2001:db8::4 - - [28/Oct/2025:17:00:13 +0000] "GET /ua/attack HTTP/1.1" 200 100 "-" "Mozilla/5.0 (UA2)"
 
 # ======================================================================================
-# === TEST CASE 9: Inter-Step Min_Delay (10.0.0.1)
-# === This tests the min_delay between step 1 and step 2.
-# ======================================================================================
-# --- ATTEMPT 1: FAILURE (too fast) ---
-# EXPECTED LOG: "RESET: Chain Test-InterStep-MinDelay: MinDelay 2s not met."
-musicbrainz.org 10.0.0.1 - - [28/Oct/2025:17:00:22 +0000] "GET /interstep/start HTTP/1.1" 200 100 "-" "MinDelay-Bot"
-musicbrainz.org 10.0.0.1 - - [28/Oct/2025:17:00:23 +0000] "GET /interstep/end HTTP/1.1" 200 100 "-" "MinDelay-Bot"
-# --- ATTEMPT 2: SUCCESS (waited long enough) ---
-# EXPECTED LOG: "LOG! Chain: Test-InterStep-MinDelay completed..."
-musicbrainz.org 10.0.0.1 - - [28/Oct/2025:17:00:25 +0000] "GET /interstep/start HTTP/1.1" 200 100 "-" "MinDelay-Bot"
-musicbrainz.org 10.0.0.1 - - [28/Oct/2025:17:00:28 +0000] "GET /interstep/end HTTP/1.1" 200 100 "-" "MinDelay-Bot"
-
-# ======================================================================================
-# === TEST CASE 10: First_Hit_Since (10.0.0.4)
-# ======================================================================================
-# --- ATTEMPT 1: SUCCESS (rapid hits) ---
-# EXPECTED LOG: "LOG! Chain: Test-FirstHitSince completed..."
-musicbrainz.org 10.0.0.4 - - [28/Oct/2025:17:00:30 +0000] "GET /some/other/path HTTP/1.1" 200 100 "-" "Rapid-Bot"
-musicbrainz.org 10.0.0.4 - - [28/Oct/2025:17:00:32 +0000] "GET /rapid/trigger HTTP/1.1" 200 100 "-" "Rapid-Bot"
-musicbrainz.org 10.0.0.4 - - [28/Oct/2025:17:00:33 +0000] "GET /rapid/end HTTP/1.1" 200 100 "-" "Rapid-Bot"
-# --- ATTEMPT 2: FAILURE (hit was too long ago) ---
-# EXPECTED LOG: No completion log. The /rapid/trigger step will not match because it's >3s after the last hit.
-musicbrainz.org 10.0.0.4 - - [28/Oct/2025:17:00:40 +0000] "GET /rapid/trigger HTTP/1.1" 200 100 "-" "Rapid-Bot"
-
-# ======================================================================================
-# === TEST CASE 11: Out of Order Tolerance (10.0.0.5)
-# === EXPECTED LOG: "OUT_OF_ORDER_TOLERATED..." followed by "LOG! Chain: Test-OutOfOrder-Tolerated completed..."
-# ======================================================================================
-musicbrainz.org 10.0.0.5 - - [28/Oct/2025:17:00:50 +0000] "GET /order/start HTTP/1.1" 200 100 "-" "OutOfOrder-Bot"
-musicbrainz.org 10.0.0.5 - - [28/Oct/2025:17:00:48 +0000] "GET /order/end HTTP/1.1" 200 100 "-" "OutOfOrder-Bot"
-
-# ======================================================================================
-# === MISC & ERROR HANDLING
-# ======================================================================================
-# Already Blocked IP Check (192.0.2.10) - Should be skipped by in-memory check
-# EXPECTED LOG: "SKIP: IP 192.0.2.10: Skipped (Already blocked in memory)."
-musicbrainz.org 192.0.2.10 - - [28/Oct/2025:17:00:21 +0000] "GET /already_blocked HTTP/1.1" 200 100 "-" "Already-Blocked-Tester"
-
-# --- Buggy/Malformed Lines Section (Testing Parser Robustness) ---
-
-# A. Normal but complex line (user provided from Source 1/2) - Should parse correctly
-musicbrainz.org 165.0.186.154 - - [28/Oct/2025:15:41:10 +0000] "HEAD /set-language/fr?returnto=%2Frecording%2F7bef20d6-b72b-45a5-b159-09a51c1715de%2Faliases HTTP/1.1" 302 0 "-" "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.2405.185 Safari/537.36"
-
-# B. Incomplete log line (missing last quotes) - Should generate "malformed log line: too few quoted sections"
-musicbrainz.org 1.2.3.4 - - [28/Oct/2025:17:00:22 +0000] "GET /incomplete HTTP/1.1" 200 100 "-"
-
-# C. Malformed time string (invalid format) - Should generate "Failed to parse log time" and use time.Now()
-musicbrainz.org 1.2.3.5 - - [28/Oct/2025:17:00:23 Invalid Time Format] "GET /timefail HTTP/1.1" 200 100 "-" "TimeFail"
-
-# D. Invalid IP format - Should be skipped by all chains (IP version "invalid")
-musicbrainz.org BAD_IP_ADDRESS - - [28/Oct/2025:17:00:24 +0000] "GET /ipfail HTTP/1.1" 200 100 "-" "IPFail"
-
-# E. Non-integer Status Code - Should generate "failed to parse status code"
-musicbrainz.org 1.2.3.6 - - [28/Oct/2025:17:00:25 +0000] "GET /statfail HTTP/1.1" OK 100 "-" "StatusFail"
-
-# F. Fields are too short (missing final part of the timestamp array) - Should generate "malformed essential fields"
-musicbrainz.org 1.2.3.7 - - [28/Oct/2025:17:00:26 +0000" "GET /shortfield HTTP/1.1" 200 100 "-" "ShortField"
-
-# G. Lines with whitespaces
-   
-
-# Actual lines from logs
-musicbrainz.org 2003:c7:e701:2a00:208:9bff:fecc:1c9a - - [29/Oct/2025:13:23:21 +0000] "GET /ws/2/release-group/?query=\x22Knockin\x22+and+artist:\x22Double+Vision\x22&type=album HTTP/1.1" 403 257 "-" "Mozilla/5.0 (Windows; U; Windows NT 5.1; de; rv:1.9.2.3) Gecko/20100401 Firefox/3.6.3"
-musicbrainz.org 43.173.182.62 - - [29/Oct/2025:13:23:21 +0000] "GET /artist/72cdc76d-9d84-41fd-8ceb-57d901c186e5/aliases HTTP/1.1" 200 4817 "-" "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.114 Safari/537.36"
+# === TEST CASE 7: IP+UA with Common Referrer (10.0.0.5) - SUCCESS (LOG)
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: IP-UA-Referrer-Chain completed by IP 10.0.0.5. Action set to 'log' (DryRun).
+# ===
+# --- This sequence tests chain progression while ignoring an irrelevant hit. ---
+musicbrainz.org 10.0.0.5 - - [28/Oct/2025:17:00:15 +0000] "GET /ua-ref/step1 HTTP/1.1" 200 100 "https://common.ref/page" "Consistent_UA_1.0"
+musicbrainz.org 10.0.0.5 - - [28/Oct/2025:17:00:16 +0000] "GET /some/other/path HTTP/1.1" 200 100 "https://common.ref/page" "DifferentUA"
+musicbrainz.org 10.0.0.5 - - [28/Oct/2025:17:00:17 +0000] "GET /ua-ref/step2 HTTP/1.1" 500 100 "https://common.ref/page" "Consistent_UA_2.1"

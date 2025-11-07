@@ -1,120 +1,63 @@
 version: "1.0"
 log_level: "debug" # Set to debug for maximum visibility during dry-run testing
+out_of_order_tolerance: "5s" # Required for Test Case 5
 whitelist_cidrs:
-  - "192.0.2.10/32" # This entry is specifically for testing the whitelist functionality.
-duration_tables:
-  5m: table_5m
-  1h: table_1h
-default_block_duration: "5m"
+  - "192.0.2.10/32" # Whitelist for TEST CASE 1
+
 chains:
-  # --- 1. MatchKey: IPv4 Only & Max_Delay (SUCCESS) ---
-  - name: "Test-MatchKey-IPv4-Only"
+  # --- 1. Simple Log Chain (10.0.0.1) ---
+  - name: "SimpleLogChain"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches: { Path: "^/log/step1$" }
+      - field_matches: { Path: "^/log/step2$" }
+
+  # --- 2. Simple Block Chain (10.0.0.2) ---
+  - name: "SimpleBlockChain"
     action: "block"
     block_duration: "1h"
-    match_key: "ipv4"
-    steps:
-      - field_matches:
-          Path: "^/v4/start$"
-      - field_matches:
-          Path: "^/v4/end$"
-        max_delay: "5s"
-  # --- 2. MatchKey: IPv6 + UserAgent (Success) ---
-  - name: "Test-MatchKey-IPv6-UA-Strict"
-    action: "block"
-    block_duration: "1h"
-    match_key: "ipv6_ua"
-    steps:
-      - field_matches:
-          Path: "^/v6/start$"
-          UserAgent: "^Bot-A/1.0$"
-      - field_matches:
-          Path: "^/v6/end$"
-        max_delay: "5s"
-  # --- 4. Time: Max_Delay Reset (FAILURE) ---
-  - name: "Test-MaxDelay-Reset"
-    action: "log"
     match_key: "ip"
     steps:
-      - field_matches:
-          Path: "^/max/start$"
-      - field_matches:
-          Path: "^/max/fail$"
-        max_delay: "1s"
-  # --- 5. MatchKey: IP + UA Spoof (FAILURE: Key Change) ---
-  - name: "Test-MatchKey-IP-UA-Spoof"
-    action: "log"
-    match_key: "ip_ua"
-    steps:
-      - field_matches:
-          Path: "^/spoof/start$"
-          UserAgent: "^UA-Original$"
-      - field_matches:
-          Path: "^/spoof/end$"
-  # --- 6. Field: Method and StatusCode Match (SUCCESS) ---
-  - name: "Test-Fields-Method-Status"
-    action: "log"
-    match_key: "ip"
-    steps:
-      - field_matches:
-          Path: "^/api/auth$"
-          Method: "POST"
-          StatusCode: "^403$"
-      - field_matches:
-          Path: "^/api/auth$"
-          StatusCode: "^403$"
-        max_delay: "1s"
-  # --- 7. Field: Referrer Match (Full URL) (SUCCESS) ---
-  - name: "Test-Field-Referrer-Full"
-    action: "log"
-    match_key: "ip"
-    steps:
-      - field_matches:
-          Path: "^/checkout$"
-          Referrer: "^https://external\\.payment\\..gateway/return.html\\?id=.*$"
-      - field_matches:
-          Path: "^/complete$"
-        max_delay: "10s"
-  # --- 8. Field: Block User Agent (SUCCESS) ---
-  - name: "Test-Field-BlockUserAgent"
-    action: "log"
-    match_key: "ip_ua"
-    steps:
-      - field_matches:
-          UserAgent: "^badguy$"
-          Protocol: "^HTTP/1\\.1$"
+      - field_matches: { Path: "^/block/step1$" }
+      - field_matches: { Path: "^/block/step2$" }
 
-  # --- 9. Time: Inter-Step Min_Delay (Correct Usage) ---
-  # This tests that min_delay on a second step correctly enforces a pause.
-  - name: "Test-InterStep-MinDelay"
+  # --- 3. Out-of-Order Chain (10.0.0.3) ---
+  - name: "OutOfOrderChain"
     action: "log"
     match_key: "ip"
     steps:
-      - field_matches:
-          Path: "^/interstep/start$"
-      - field_matches:
-          Path: "^/interstep/end$"
-        min_delay: "2s" # Must wait at least 2s after step 1.
+      - field_matches: { Path: "^/order/start$" }
+      - field_matches: { Path: "^/order/end$" }
 
-  # --- 10. Time: First_Hit_Since (Success and Failure) ---
-  # This tests that the first step only matches if a recent hit was seen.
-  - name: "Test-FirstHitSince"
+  # --- 4. IPv6 User-Agent Change Detection (2001:db8::4) ---
+  - name: "IPv6-UA-Change-Detection"
     action: "log"
-    match_key: "ip"
+    match_key: "ipv6" # Track by IPv6, steps will check UserAgent
     steps:
       - field_matches:
-          Path: "^/rapid/trigger$"
-        first_hit_since: "3s" # The last overall hit must be within 3s.
+          Path: "^/ua/probe$"
+          UserAgent: "^Mozilla/5\\.0 \\(UA1\\)$"
       - field_matches:
-          Path: "^/rapid/end$"
+          Path: "^/ua/attack$"
+          UserAgent: "^Mozilla/5\\.0 \\(UA2\\)$"
+        max_delay: "5s" # Must occur within 5 seconds of the first step
 
-  # --- 11. Out of Order Processing ---
-  # This tests that an out-of-order log entry is still processed if within tolerance.
-  - name: "Test-OutOfOrder-Tolerated"
-    action: "log"
-    match_key: "ip"
+  # --- 5. IP+UA with Common Referrer (10.0.0.5) - SUCCESS (LOG) ---
+  # This chain uses match_key: ip_ua and tracks a sequence of 3 hits
+  # with the same IP and User-Agent, and a common referrer.
+  - name: "IP-UA-Referrer-Chain"
+    action: "log" # Action is log
+    match_key: "ip" # Track by IP, allowing UA to change between steps
     steps:
       - field_matches:
-          Path: "^/order/start$"
+          Path: "^/ua-ref/step1$"
+          UserAgent: "^Consistent_UA_\\d+\\.\\d+$" # Match Consistent_UA_X.Y
+          Referrer: "^https://common.ref/page$"
+          StatusCode: "^200$"
       - field_matches:
-          Path: "^/order/end$"
+          Path: "^/ua-ref/step2$"
+          UserAgent: "^Consistent_UA_\\d+\\.\\d+$" # Match Consistent_UA_X.Y
+          Referrer: "^https://common.ref/page$"
+          StatusCode: "^5\\d{2}$" # Require an HTTP 5xx error
         max_delay: "10s"

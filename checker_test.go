@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"fmt"
+	"os"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1037,6 +1042,162 @@ func TestCleanup_FirstHitSince(t *testing.T) {
 	if _, exists := processor.ActivityStore[keyStillUseful]; !exists {
 		t.Error("Expected 'still useful' key to remain, but it was cleaned up.")
 	}
+}
+
+// TestDryRunMode simulates the entire dry-run process using chains.yaml and test_access.log,
+// and verifies the log output against the expected log messages extracted from comments
+// in test_access.log.
+func TestDryRunMode(t *testing.T) {
+	// --- Setup ---
+	resetGlobalState()
+
+	// 1. Load configuration (chains, whitelist, etc.)
+	loadedCfg, err := LoadChainsFromYAML()
+	if err != nil {
+		t.Fatalf("LoadChainsFromYAML() failed: %v", err)
+	}
+
+	// Create a processor (but don't start any background processes like ChainWatcher).
+	processor := &Processor{
+		ActivityStore: make(map[TrackingKey]*BotActivity),
+		ActivityMutex: &sync.RWMutex{},
+		Chains:        loadedCfg.Chains,
+		ChainMutex:    &sync.RWMutex{},
+		DryRun:        true,                                                                    // Simulate dry-run mode
+		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {}, // Will be replaced
+		Config: &AppConfig{
+			OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
+			MaxFirstHitSinceDuration: loadedCfg.MaxFirstHitSinceDuration,
+			WhitelistNets:            loadedCfg.WhitelistNets, // This was the missing piece
+		},
+	}
+	// Set the IsWhitelistedFunc on the *actual* processor instance to avoid nil pointers.
+	processor.IsWhitelistedFunc = processor.IsIPWhitelisted
+
+	// 2. Read test_access.log and extract expected log outputs from comments
+	testLogPath := TestLogPath
+	testLogData, err := os.ReadFile(testLogPath)
+	if err != nil {
+		t.Fatalf("Failed to read test_access.log: %v", err)
+	}
+
+	// Extract the Expected Log output values from comments
+	expectedLogs := make(map[int]string)
+	// Use a separate scanner for extracting expected logs to avoid line number confusion
+	expectedLogScanner := bufio.NewScanner(bytes.NewReader(testLogData))
+	expectedLogLineNum := 0
+	for expectedLogScanner.Scan() {
+		expectedLogLineNum++
+		line := expectedLogScanner.Text()
+		if strings.Contains(line, "=== EXPECTED LOG:") {
+			// Extract the expected log message from the comment line.
+			parts := strings.SplitN(line, "=== EXPECTED LOG:", 2)
+			if len(parts) == 2 && strings.TrimSpace(parts[1]) != "" { // Ensure there's actual content to expect
+				expectedLogs[expectedLogLineNum] = strings.TrimSpace(parts[1]) // Store expected log against line number
+			}
+		}
+	}
+	if err := expectedLogScanner.Err(); err != nil {
+		t.Fatalf("Failed to scan test_access.log: %v", err)
+	}
+
+	// 3. Process test_access.log in dry-run mode, capturing the log output
+	var capturedLogs []string // Collect captured log lines.
+	processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+		// Our custom LogFunc only captures the output. We do NOT call LogOutput here
+		// to prevent verbose output during test runs unless explicitly requested via t.Logf.
+
+		logLine := tag + ": " + fmt.Sprintf(format, args...)
+		capturedLogs = append(capturedLogs, logLine)
+	}
+
+	// Read in each line of the test log, and run CheckChains on it, to simulate log tailing.
+	logEntryScanner := bufio.NewScanner(bytes.NewReader(testLogData)) // Re-scan for log entries
+	actualLogLineNumber := 0
+
+	for logEntryScanner.Scan() {
+		actualLogLineNumber++
+		line := logEntryScanner.Text()
+
+		processor.ProcessLogLine(line, actualLogLineNumber) // Use the actual processing function
+	}
+	if err := logEntryScanner.Err(); err != nil {
+		t.Fatalf("Failed to scan test_access.log for entries: %v", err)
+	}
+
+	// --- Assert ---
+	// 4. Verify that the captured log output matches the expected log entries
+	for commentLineNumber, expectedLog := range expectedLogs {
+		found := false
+		formattedExpectedLog := expectedLog
+
+		// If the expected log contains a line number placeholder, format it dynamically.
+		if strings.Contains(expectedLog, "Line %d:") {
+			// The malformed log entry is on the line immediately after the '======' separator, which is 2 lines after the 'EXPECTED LOG' comment.
+			formattedExpectedLog = fmt.Sprintf(expectedLog, commentLineNumber+2)
+		}
+
+		for _, capturedLog := range capturedLogs {
+			if strings.Contains(capturedLog, formattedExpectedLog) {
+				found = true
+				break // Found the expected log message
+			}
+		}
+
+		if !found {
+			// --- CONCISE FAILURE REPORTING ---
+			// 1. Find the relevant context block from test_access.log.
+			contextMarker := "# ======================"
+			logLines := strings.Split(string(testLogData), "\n")
+			contextStart := 0
+			for i := commentLineNumber - 1; i >= 0; i-- {
+				if strings.Contains(logLines[i], contextMarker) {
+					contextStart = i
+					break
+				}
+			}
+			// Find the end of the context block
+			contextEnd := len(logLines)
+			for i := commentLineNumber; i < len(logLines); i++ {
+				if strings.Contains(logLines[i], contextMarker) {
+					contextEnd = i
+					break
+				}
+			}
+
+			contextLines := logLines[contextStart:contextEnd]
+			if len(contextLines) == 0 {
+				contextLines = capturedLogs
+			}
+			relevantLines := strings.Join(contextLines, "\n")
+
+			t.Errorf("Expected log message was not found.\n\nEXPECTED:\n'%s'\n\nCONTEXT:\n%s\n",
+				formattedExpectedLog, relevantLines)
+		}
+	}
+
+	// Basic sanity check if we extracted *any* expectedLogs.
+	if len(expectedLogs) == 0 {
+		t.Fatal("No EXPECTED LOG entries found in test_access.log.  Test cannot run.")
+	}
+}
+
+func lines(s string) []string {
+	var ls []string
+	sc := bufio.NewScanner(strings.NewReader(s))
+	for sc.Scan() {
+		ls = append(ls, sc.Text())
+	}
+	return ls
+}
+
+func hasLine(multiLine string, match string) bool {
+	for _, line := range lines(multiLine) {
+		if strings.Contains(line, match) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestCheckChains_OutOfOrder verifies that the system correctly handles log entries
