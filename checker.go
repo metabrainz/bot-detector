@@ -83,6 +83,63 @@ func (p *Processor) handleOutOfOrderEntry(entry *LogEntry, currentActivity *BotA
 	return false // Do not skip
 }
 
+// handleChainCompletion takes action when a chain is completed (log, block, etc.).
+// It updates the activity state and returns true if the chain was completed.
+// The caller is responsible for holding the ActivityMutex.
+func (p *Processor) handleChainCompletion(chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity) {
+	isWhitelisted := p.IsWhitelistedFunc(entry.IPInfo)
+
+	// --- 1. Log the completion event ---
+	logLevel := LevelCritical
+	if isTesting() {
+		logLevel = LevelDebug
+	}
+
+	if p.DryRun {
+		// In dry-run, log the intended action with a specific tag.
+		switch chain.Action {
+		case "block":
+			p.LogFunc(LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
+		case "log":
+			p.LogFunc(LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s. Action set to 'log' (DryRun).", chain.Name, entry.IPInfo.Address)
+		default:
+			p.LogFunc(LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s. Unrecognized action '%s' (DryRun).", chain.Name, entry.IPInfo.Address, chain.Action)
+		}
+	} else {
+		// In live mode, log the action taken.
+		switch chain.Action {
+		case "block":
+			p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v.", chain.Name, entry.IPInfo.Address, chain.BlockDuration)
+		case "log":
+			baseMessage := fmt.Sprintf("LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IPInfo.Address)
+			if isWhitelisted {
+				p.LogFunc(logLevel, "ALERT", "%s (IP is whitelisted: NO FURTHER ACTION TAKEN)", baseMessage)
+			} else {
+				p.LogFunc(logLevel, "ALERT", baseMessage)
+			}
+		}
+	}
+
+	// --- 2. Perform the action ---
+	if chain.Action == "block" {
+		// Call the external blocker (e.g., HAProxy), unless in DryRun or whitelisted.
+		if !p.DryRun && !isWhitelisted {
+			if err := p.Blocker.Block(entry.IPInfo, chain.BlockDuration); err != nil {
+				// Error is logged inside Block, no action needed here.
+			}
+		}
+
+		// Update the in-memory state to reflect the block for both live and dry runs.
+		ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
+		ipActivity := GetOrCreateActivityUnsafe(p.ActivityStore, ipOnlyKey)
+		ipActivity.IsBlocked = true
+		ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration)
+
+		currentActivity.IsBlocked = true
+		currentActivity.BlockedUntil = ipActivity.BlockedUntil
+	}
+}
+
 // CheckChains is refactored as a method on Processor.
 func (p *Processor) CheckChains(entry *LogEntry) {
 
@@ -224,55 +281,8 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 
 			// --- CHECK FOR CHAIN COMPLETION ---
 			if state.CurrentStep == len(chain.Steps) {
-				isWhitelisted := p.IsWhitelistedFunc(entry.IPInfo)
-
-				// --- 3. Take Action (Log, Block, etc.) ---
-
-				// Determine the appropriate log level. During tests, downgrade alerts to debug to reduce noise.
-				logLevel := LevelCritical
-				if isTesting() {
-					logLevel = LevelDebug
-				}
-
-				// First, handle the logging for all actions.
-				if p.DryRun { // In DryRun mode, log the *actual* action of the chain.
-					// In dry-run, we use LevelInfo for the "DRY_RUN" tag.
-					if chain.Action == "block" {
-						p.LogFunc(LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
-					} else if chain.Action == "log" {
-						p.LogFunc(LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s. Action set to 'log' (DryRun).", chain.Name, entry.IPInfo.Address)
-					} else {
-						p.LogFunc(LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s. Unrecognized action '%s' (DryRun).", chain.Name, entry.IPInfo.Address, chain.Action)
-					}
-				} else if chain.Action == "block" { // Live mode: block action
-					p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v.", chain.Name, entry.IPInfo.Address, chain.BlockDuration)
-				} else if chain.Action == "log" { // Live mode: log action
-					baseMessage := fmt.Sprintf("LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IPInfo.Address)
-					if isWhitelisted {
-						p.LogFunc(logLevel, "ALERT", "%s (IP is whitelisted: NO FURTHER ACTION TAKEN)", baseMessage)
-					} else {
-						p.LogFunc(logLevel, "ALERT", baseMessage)
-					}
-				}
-
-				// Second, if the action is 'block', perform the blocking steps.
-				if chain.Action == "block" {
-					// Call the external blocker (e.g., HAProxy), unless in DryRun or whitelisted.
-					if !p.DryRun && !isWhitelisted {
-						if err := p.Blocker.Block(entry.IPInfo, chain.BlockDuration); err != nil {
-							// Error is logged inside Block, no action needed here
-						}
-					}
-
-					// Update the in-memory state to reflect the block for both live and dry runs.
-					ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
-					ipActivity := GetOrCreateActivityUnsafe(p.ActivityStore, ipOnlyKey)
-					ipActivity.IsBlocked = true
-					ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration) // Set block expiration time
-
-					currentActivity.IsBlocked = true
-					currentActivity.BlockedUntil = ipActivity.BlockedUntil
-				}
+				// The chain is complete. Handle logging and actions.
+				p.handleChainCompletion(&chain, entry, currentActivity)
 
 				// Reset state *after* action is taken.
 				state.CurrentStep = 0
