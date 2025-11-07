@@ -24,7 +24,7 @@ func main() {
 	}
 
 	// Load initial configuration from YAML. This no longer sets global state.
-	chains, whitelistNets, haProxyAddrs, durationTables, fallbackTable, err := LoadChainsFromYAML()
+	chains, whitelistNets, haProxyAddrs, durationTables, fallbackTable, maxFirstHitSince, err := LoadChainsFromYAML()
 	if err != nil {
 		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
 	}
@@ -39,14 +39,15 @@ func main() {
 
 	// Create the config struct from the loaded data.
 	appConfig := &AppConfig{
-		WhitelistNets:          whitelistNets,
-		HAProxyAddresses:       haProxyAddrs,
-		DurationToTableName:    durationTables,
-		BlockTableNameFallback: fallbackTable,
-		LastModTime:            time.Now(),
-		PollingInterval:        pollingInterval,
-		IdleTimeout:            idleTimeout,
-		CleanupInterval:        cleanupInterval,
+		WhitelistNets:            whitelistNets,
+		HAProxyAddresses:         haProxyAddrs,
+		DurationToTableName:      durationTables,
+		BlockTableNameFallback:   fallbackTable,
+		LastModTime:              time.Now(),
+		PollingInterval:          pollingInterval,
+		IdleTimeout:              idleTimeout,
+		CleanupInterval:          cleanupInterval,
+		MaxFirstHitSinceDuration: maxFirstHitSince,
 	}
 
 	// Initialize the global Processor instance after config is loaded.

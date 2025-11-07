@@ -60,7 +60,7 @@ chains:
 	})
 
 	// --- Act ---
-	chains, whitelistNets, haProxyAddrs, durationTables, fallbackTable, err := LoadChainsFromYAML()
+	chains, whitelistNets, haProxyAddrs, durationTables, fallbackTable, _, err := LoadChainsFromYAML()
 
 	// --- Assert ---
 	if err != nil {
@@ -268,8 +268,8 @@ chains:
 			originalPath := YAMLFilePath
 			YAMLFilePath = tempFile
 			t.Cleanup(func() { YAMLFilePath = originalPath })
-
-			_, _, _, _, _, err := LoadChainsFromYAML()
+			// Expect 7 return values now, ignoring all but the error.
+			_, _, _, _, _, _, err := LoadChainsFromYAML()
 
 			if err == nil || !strings.Contains(err.Error(), tt.expectedError) {
 				t.Errorf("Expected error containing '%s', but got: %v", tt.expectedError, err)

@@ -953,3 +953,88 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		})
 	}
 }
+
+// TestCleanup_FirstHitSince verifies that the cleanup routine correctly removes IPs
+// that are no longer useful for `first_hit_since` checks, even if they are not yet
+// past the main `IdleTimeout`.
+func TestCleanup_FirstHitSince(t *testing.T) {
+	// 1. Setup
+	resetGlobalState()
+
+	// Create a processor with specific timeout values for the test.
+	processor := &Processor{
+		ActivityStore: make(map[TrackingKey]*BotActivity),
+		ActivityMutex: &sync.RWMutex{},
+		Chains:        []BehavioralChain{}, // No chains needed for this test
+		ChainMutex:    &sync.RWMutex{},
+		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+		Config: &AppConfig{
+			IdleTimeout:              30 * time.Minute, // A long general timeout
+			MaxFirstHitSinceDuration: 5 * time.Second,  // A short first_hit_since timeout
+			CleanupInterval:          100 * time.Millisecond,
+		},
+	}
+
+	// Start the cleanup routine in a goroutine.
+	// The test will stop it via the done channel.
+	done := make(chan struct{})
+	go func() {
+		// We need to mock the ticker behavior for a single run.
+		processor.ActivityMutex.Lock()
+		now := time.Now()
+		cleanedCount := 0
+		for key, activity := range processor.ActivityStore {
+			if !activity.IsBlocked && len(activity.ChainProgress) == 0 {
+				timeSinceLastHit := now.Sub(activity.LastRequestTime)
+				isIdle := timeSinceLastHit > processor.Config.IdleTimeout
+				isUselessForFirstHit := processor.Config.MaxFirstHitSinceDuration > 0 && timeSinceLastHit > processor.Config.MaxFirstHitSinceDuration
+
+				if isIdle || isUselessForFirstHit {
+					delete(processor.ActivityStore, key)
+					cleanedCount++
+				}
+			}
+		}
+		processor.ActivityMutex.Unlock()
+		close(done)
+	}()
+
+	// 2. Create different activity states
+	now := time.Now()
+	keyUseless := TrackingKey{IPInfo: NewIPInfo("192.0.2.1")}     // Will be older than MaxFirstHitSinceDuration
+	keyStillUseful := TrackingKey{IPInfo: NewIPInfo("192.0.2.2")} // Will be recent
+	keyIdle := TrackingKey{IPInfo: NewIPInfo("192.0.2.3")}        // Will be older than IdleTimeout
+
+	processor.ActivityMutex.Lock()
+	processor.ActivityStore[keyUseless] = &BotActivity{
+		LastRequestTime: now.Add(-10 * time.Second), // 10s ago > 5s MaxFirstHitSinceDuration
+		ChainProgress:   make(map[string]StepState),
+	}
+	processor.ActivityStore[keyStillUseful] = &BotActivity{
+		LastRequestTime: now.Add(-1 * time.Second), // 1s ago < 5s MaxFirstHitSinceDuration
+		ChainProgress:   make(map[string]StepState),
+	}
+	processor.ActivityStore[keyIdle] = &BotActivity{
+		LastRequestTime: now.Add(-31 * time.Minute), // 31m ago > 30m IdleTimeout
+		ChainProgress:   make(map[string]StepState),
+	}
+	processor.ActivityMutex.Unlock()
+
+	// --- Act ---
+	// Wait for the cleanup goroutine to finish its single run.
+	<-done
+
+	// --- Assert ---
+	processor.ActivityMutex.RLock()
+	defer processor.ActivityMutex.RUnlock()
+
+	if _, exists := processor.ActivityStore[keyUseless]; exists {
+		t.Error("Expected 'useless' key to be cleaned up by MaxFirstHitSinceDuration, but it still exists.")
+	}
+	if _, exists := processor.ActivityStore[keyIdle]; exists {
+		t.Error("Expected 'idle' key to be cleaned up by IdleTimeout, but it still exists.")
+	}
+	if _, exists := processor.ActivityStore[keyStillUseful]; !exists {
+		t.Error("Expected 'still useful' key to remain, but it was cleaned up.")
+	}
+}

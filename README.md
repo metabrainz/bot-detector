@@ -10,6 +10,7 @@ Bot-Detector is a high-performance Go application designed to monitor live acces
 * **Log Rotation Safe:** Continuously tails live log files, automatically detecting and re-opening the file after log rotation events (e.g., logrotate).
 * **Graceful Shutdown:** Implements signal handlers (SIGINT, SIGTERM) for safe, controlled process termination.
 * **Dry Run Mode:** Allows testing behavioral chains against static log files without affecting a live HAProxy instance.
+* **Memory Optimization:** Automatically purges state for IPs that are no longer relevant for time-based rules, minimizing memory footprint.
 
 ## **Setup and Usage**
 
@@ -167,6 +168,17 @@ Each step in the steps array defines a specific log entry characteristic that mu
 | **StatusCode** | `int` | The HTTP response status code (e.g., `200`, `404`). |
 | **Referrer** | `string` | The full HTTP Referer header value. Use a regular expression to match specific parts, such as the path (e.g., `^https?://[^/]+/login$`). |
 | **UserAgent** | `string` | The HTTP User-Agent header value. |
+
+---
+
+## **Memory Management and State Cleanup**
+
+The bot-detector holds the state of IPs in memory. To prevent memory from growing indefinitely, two cleanup mechanisms are in place:
+
+1.  **Idle Timeout (`--idle-timeout`):** An IP's state is purged if it has been inactive (no requests seen) for longer than this duration. This is the general-purpose cleanup for all IPs.
+
+2.  **`first_hit_since` Optimization:** If your configuration uses `first_hit_since` rules, the application performs a more aggressive cleanup. It calculates the longest `first_hit_since` duration across all your chains. If an IP's last request is older than this duration, and it's not in the middle of a chain, its state is purged immediately, even if it hasn't reached the main `idle-timeout`. This ensures that memory is not wasted on single-hit IPs that can no longer trigger a time-based rule. If no chains use `first_hit_since`, this optimization is disabled, and state is only stored for IPs that are actively progressing in a chain.
+
 
 ---
 

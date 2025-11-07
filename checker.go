@@ -83,8 +83,12 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 	}
 
 	previousRequestTime := currentActivity.LastRequestTime
-	// Always update the last request time for this key at the end of processing.
-	defer func() { currentActivity.LastRequestTime = entry.Timestamp }()
+	// Update LastRequestTime only if any chain uses first_hit_since, to avoid storing
+	// activity for single-hit IPs that can't trigger any time-based rules.
+	if p.Config.MaxFirstHitSinceDuration > 0 {
+		defer func() { currentActivity.LastRequestTime = entry.Timestamp }()
+	}
+
 	// 2. Iterate over all configured chains.
 	for _, chain := range chains {
 		// Check if the current log entry's tracking key is applicable to this chain

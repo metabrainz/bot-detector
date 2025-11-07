@@ -45,14 +45,15 @@ type Processor struct {
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
 type AppConfig struct {
-	WhitelistNets          []*net.IPNet
-	HAProxyAddresses       []string
-	DurationToTableName    map[time.Duration]string
-	BlockTableNameFallback string
-	LastModTime            time.Time
-	PollingInterval        time.Duration
-	IdleTimeout            time.Duration
-	CleanupInterval        time.Duration
+	WhitelistNets            []*net.IPNet
+	HAProxyAddresses         []string
+	DurationToTableName      map[time.Duration]string
+	BlockTableNameFallback   string
+	LastModTime              time.Time
+	PollingInterval          time.Duration
+	IdleTimeout              time.Duration
+	CleanupInterval          time.Duration
+	MaxFirstHitSinceDuration time.Duration // The longest first_hit_since duration across all chains.
 }
 
 // --- YAML DATA STRUCTURES ---
