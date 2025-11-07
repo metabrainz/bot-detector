@@ -216,15 +216,15 @@ chains:
 			expectedError: "invalid min_delay",
 		},
 		{
-			name: "Invalid First Hit Since",
+			name: "Invalid Min Time Since Last Hit",
 			yamlContent: `
 version: "1.0"
 chains:
   - name: "Test"
     match_key: "ip"
-    steps: [ { first_hit_since: "10x" } ]
+    steps: [ { min_time_since_last_hit: "10x" } ]
 `,
-			expectedError: "invalid first_hit_since",
+			expectedError: "invalid min_time_since_last_hit",
 		},
 		{
 			name: "Invalid Regex",

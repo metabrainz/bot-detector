@@ -192,11 +192,6 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 		}
 	}
 
-	if longestDuration == 0*time.Second {
-		// Log a warning if no tables are configured, but allow startup for testing.
-		LogOutput(LevelWarning, "CONFIG", "No HAProxy duration tables configured. All block attempts will be skipped.")
-	}
-
 	// --- PARSE CHAINS ---
 	newChains := make([]BehavioralChain, 0)
 
@@ -261,15 +256,15 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 					return nil, fmt.Errorf("chain '%s', step %d: invalid min_delay: %w", yamlChain.Name, runtimeStep.Order, err)
 				}
 			}
-			if i == 0 && yamlStep.FirstHitSince != "" { // Only parse for the first step
-				runtimeStep.FirstHitSinceDuration, err = time.ParseDuration(yamlStep.FirstHitSince)
+			if i == 0 && yamlStep.MinTimeSinceLastHit != "" { // Only parse for the first step
+				runtimeStep.MinTimeSinceLastHit, err = time.ParseDuration(yamlStep.MinTimeSinceLastHit)
 				if err != nil {
-					return nil, fmt.Errorf("chain '%s', step %d: invalid first_hit_since: %w", yamlChain.Name, runtimeStep.Order, err)
+					return nil, fmt.Errorf("chain '%s', step %d: invalid min_time_since_last_hit: %w", yamlChain.Name, runtimeStep.Order, err)
 				}
 			}
 
 			// DIAGNOSTIC LOG: Check the loaded durations for all steps.
-			// This is the key to debugging the silent load failure.
+			// This is useful for debugging duration parsing.
 			LogOutput(LevelDebug, "CONFIG", "Chain '%s', Step %d: max_delay (raw: '%s', loaded: %v); min_delay (raw: '%s', loaded: %v)",
 				yamlChain.Name, runtimeStep.Order,
 				yamlStep.MaxDelay, runtimeStep.MaxDelayDuration,
@@ -287,26 +282,38 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 		newChains = append(newChains, runtimeChain)
 	}
 
-	// Find the maximum first_hit_since duration across all chains.
-	var maxFirstHitSince time.Duration
+	// After parsing all chains, check if any use the 'block' action.
+	// If so, and no duration tables are configured, issue a single warning.
+	if longestDuration == 0*time.Second {
+		for _, chain := range newChains {
+			if chain.Action == "block" {
+				logLevel := LevelWarning
+				LogOutput(logLevel, "CONFIG", "One or more chains use the 'block' action, but no 'duration_tables' are configured. All block attempts will be skipped.")
+				break // We only need to log this warning once.
+			}
+		}
+	}
+
+	// Find the maximum min_time_since_last_hit duration across all chains for cleanup optimization.
+	var maxTimeSinceLastHit time.Duration
 	for _, chain := range newChains {
-		if len(chain.Steps) > 0 && chain.Steps[0].FirstHitSinceDuration > maxFirstHitSince {
-			maxFirstHitSince = chain.Steps[0].FirstHitSinceDuration
+		if len(chain.Steps) > 0 && chain.Steps[0].MinTimeSinceLastHit > maxTimeSinceLastHit {
+			maxTimeSinceLastHit = chain.Steps[0].MinTimeSinceLastHit
 		}
 	}
 
 	return &LoadedConfig{
-		Chains:                   newChains,
-		WhitelistNets:            newWhitelistNets,
-		HAProxyAddresses:         config.HAProxyAddresses,
-		DurationToTableName:      newDurationTables,
-		BlockTableNameFallback:   newFallbackName,
-		PollingInterval:          pollingInterval,
-		CleanupInterval:          cleanupInterval,
-		IdleTimeout:              idleTimeout,
-		OutOfOrderTolerance:      outOfOrderTolerance,
-		LogLevel:                 logLevelStr,
-		MaxFirstHitSinceDuration: maxFirstHitSince,
+		Chains:                 newChains,
+		WhitelistNets:          newWhitelistNets,
+		HAProxyAddresses:       config.HAProxyAddresses,
+		DurationToTableName:    newDurationTables,
+		BlockTableNameFallback: newFallbackName,
+		PollingInterval:        pollingInterval,
+		CleanupInterval:        cleanupInterval,
+		IdleTimeout:            idleTimeout,
+		OutOfOrderTolerance:    outOfOrderTolerance,
+		LogLevel:               logLevelStr,
+		MaxTimeSinceLastHit:    maxTimeSinceLastHit,
 	}, nil
 }
 
@@ -369,7 +376,7 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}) {
 			p.Config.IdleTimeout = loadedCfg.IdleTimeout
 			p.Config.OutOfOrderTolerance = loadedCfg.OutOfOrderTolerance
 			SetLogLevel(loadedCfg.LogLevel) // Update log level dynamically
-			p.Config.MaxFirstHitSinceDuration = loadedCfg.MaxFirstHitSinceDuration
+			p.Config.MaxTimeSinceLastHit = loadedCfg.MaxTimeSinceLastHit
 			p.Config.LastModTime = fileInfo.ModTime()
 			p.ChainMutex.Unlock()
 

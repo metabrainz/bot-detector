@@ -159,7 +159,7 @@ Each step in the steps array defines a specific log entry characteristic that mu
 | **field_matches** | map\[string\]string | Yes | A set of key-value pairs where the key is a field from the log line (e.g., **Method**, **StatusCode**, **Path**, **UserAgent**) and the value is a **Go Regular Expression** that must match the corresponding log entry field. |
 | **max_delay** | string | No | **(Steps 2+)** The maximum allowed time between the previous step and this one. If exceeded, the chain resets. Ignored on the first step. Format: Go duration string (e.g., "10s", "1m"). |
 | **min_delay**	| string | No | **(Steps 2+)** The minimum required time between the *previous successful step in this chain* and the current step. If not met, the chain resets. Ignored on the first step. Format: Go duration string (e.g., "10s", "1m"). |
-| **first_hit_since** | string | No | **(First Step Only)** The first step will only match if the *last overall request* for the associated tracking key (IP or IP+UA) occurred *within* this duration. If the last request was too long ago, or if the IP has never been seen, the first step will not match. Useful for detecting rapid-fire activity from a known actor. Format: Go duration string (e.g., "30m", "12h"). |
+| **min_time_since_last_hit** | string | No | **(First Step Only)** The first step will only match if the time since the *last overall request* from the same tracking key (IP or IP+UA) is **greater than** this duration. If the last request was too recent, or if the IP has never been seen before, the step will not match. This is useful for detecting "sleepy" bots that have long periods of inactivity between requests, helping to distinguish them from normal user traffic. Format: Go duration string (e.g., "30m", "12h"). |
 
 ### `field_matches`
 
@@ -180,7 +180,7 @@ The bot-detector holds the state of IPs in memory. To prevent memory from growin
 
 1.  **Idle Timeout (`--idle-timeout`):** An IP's state is purged if it has been inactive (no requests seen) for longer than this duration. This is the general-purpose cleanup for all IPs.
 
-2.  **`first_hit_since` Optimization:** If your configuration uses `first_hit_since` rules, the application performs a more aggressive cleanup. It calculates the longest `first_hit_since` duration across all your chains. If an IP's last request is older than this duration, and it's not in the middle of a chain, its state is purged immediately, even if it hasn't reached the main `idle-timeout`. This ensures that memory is not wasted on single-hit IPs that can no longer trigger a time-based rule. If no chains use `first_hit_since`, this optimization is disabled, and state is only stored for IPs that are actively progressing in a chain.
+2.  **`min_time_since_last_hit` Optimization:** If your configuration uses `min_time_since_last_hit` rules, the application performs a more aggressive cleanup. It calculates the longest `min_time_since_last_hit` duration across all your chains. If an IP's last request is older than this duration, and it's not in the middle of a chain, its state is purged immediately, even if it hasn't reached the main `idle-timeout`. This ensures that memory is not wasted on IPs that can no longer trigger a time-based rule. If no chains use this rule, this optimization is disabled.
 
 
 ---

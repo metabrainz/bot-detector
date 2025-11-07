@@ -17,7 +17,7 @@ func GetOrCreateActivityUnsafe(store map[TrackingKey]*BotActivity, trackingKey T
 
 // CleanUpIdleActivity periodically iterates through the ActivityStore and removes entries
 // for IPs that have been inactive for longer than the configured IdleTimeout or have become
-// irrelevant for `first_hit_since` checks.
+// irrelevant for `min_time_since_last_hit` checks.
 func (p *Processor) CleanUpIdleActivity() {
 	// Enforce a minimum cleanup interval to prevent a tight loop on a zero-value duration.
 	cleanupInterval := p.Config.CleanupInterval
@@ -39,10 +39,10 @@ func (p *Processor) CleanUpIdleActivity() {
 				timeSinceLastHit := now.Sub(activity.LastRequestTime)
 				// Condition 1: General idle timeout.
 				isIdle := timeSinceLastHit > p.Config.IdleTimeout
-				// Condition 2: Useless for first_hit_since checks.
-				isUselessForFirstHit := p.Config.MaxFirstHitSinceDuration > 0 && timeSinceLastHit > p.Config.MaxFirstHitSinceDuration
+				// Condition 2: Useless for min_time_since_last_hit checks.
+				isUselessForTimeRule := p.Config.MaxTimeSinceLastHit > 0 && timeSinceLastHit > p.Config.MaxTimeSinceLastHit
 
-				if isIdle || isUselessForFirstHit {
+				if isIdle || isUselessForTimeRule {
 					delete(p.ActivityStore, key)
 					cleanedCount++
 				}

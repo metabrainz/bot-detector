@@ -117,7 +117,7 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 		}
 	} else {
 		// If the entry is in-order or the first for this IP, update LastRequestTime if needed.
-		if p.Config.MaxFirstHitSinceDuration > 0 { // Only update if first_hit_since rules are active
+		if p.Config.MaxTimeSinceLastHit > 0 { // Only update if min_time_since_last_hit rules are active
 			defer func() {
 				if entry.Timestamp.After(currentActivity.LastRequestTime) { // Only update if current entry is newer
 					currentActivity.LastRequestTime = entry.Timestamp
@@ -158,9 +158,12 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 
 			if isFirstStep {
 				// First-step specific checks
-				if step.FirstHitSinceDuration > 0 {
-					if previousRequestTime.IsZero() || timeSinceLastHit >= step.FirstHitSinceDuration {
-						break // Not a rapid first hit, skip.
+				// `min_time_since_last_hit` rule: The first step only matches if the time since the
+				// last overall request from this key is GREATER than the specified duration.
+				// This is useful for detecting "sleepy" bots that are not continuously active.
+				if step.MinTimeSinceLastHit > 0 {
+					if previousRequestTime.IsZero() || timeSinceLastHit < step.MinTimeSinceLastHit {
+						break // Last hit was too recent, or it's the first ever hit. Skip.
 					}
 				}
 			} else {

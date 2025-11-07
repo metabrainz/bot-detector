@@ -874,9 +874,9 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		Action:   "log",
 		Steps: []StepDef{
 			{
-				Order:                 1,
-				FirstHitSinceDuration: 2 * time.Second, // Must have seen this IP within the last 2s
-				FieldMatches:          map[string]string{"Path": "/step1"},
+				Order:               1,
+				MinTimeSinceLastHit: 2 * time.Second, // Must have seen this IP within the last 2s
+				FieldMatches:        map[string]string{"Path": "/step1"},
 			}, {
 				Order:        2,
 				FieldMatches: map[string]string{"Path": "/step2"}, // Add a second step to prevent immediate completion
@@ -904,20 +904,20 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		shouldChainProgress bool
 	}{
 		{
-			name: "first_hit_since SUCCESS - IP seen recently",
-			// Last seen 1 second ago, which is within the 2s window.
-			primingTimeOffset:   -1 * time.Second,
-			shouldChainProgress: true,
-		},
-		{
-			name: "first_hit_since FAILURE - IP seen too long ago",
-			// Last seen 3 seconds ago, which is outside the 2s window.
-			primingTimeOffset:   -3 * time.Second,
+			name: "min_time_since_last_hit FAILURE - IP seen too recently",
+			// Last seen 1 second ago, which is LESS than the 2s minimum.
+			primingTimeOffset:   -1 * time.Second, // 1s ago
 			shouldChainProgress: false,
 		},
 		{
-			name: "first_hit_since FAILURE - IP never seen before",
-			// Zero time indicates the IP has never been seen.
+			name: "min_time_since_last_hit SUCCESS - IP seen long enough ago",
+			// Last seen 3 seconds ago, which is GREATER than the 2s minimum.
+			primingTimeOffset:   -3 * time.Second, // 3s ago
+			shouldChainProgress: true,
+		},
+		{
+			name: "min_time_since_last_hit FAILURE - IP never seen before",
+			// Zero time indicates the IP has never been seen, so the rule doesn't match.
 			primingTimeOffset:   0,
 			shouldChainProgress: false,
 		},
@@ -959,10 +959,10 @@ func TestCheckChains_TimeRules(t *testing.T) {
 	}
 }
 
-// TestCleanup_FirstHitSince verifies that the cleanup routine correctly removes IPs
-// that are no longer useful for `first_hit_since` checks, even if they are not yet
+// TestCleanup_MinTimeSinceLastHit verifies that the cleanup routine correctly removes IPs
+// that are no longer useful for `min_time_since_last_hit` checks, even if they are not yet
 // past the main `IdleTimeout`.
-func TestCleanup_FirstHitSince(t *testing.T) {
+func TestCleanup_MinTimeSinceLastHit(t *testing.T) {
 	// 1. Setup
 	resetGlobalState()
 
@@ -974,9 +974,9 @@ func TestCleanup_FirstHitSince(t *testing.T) {
 		ChainMutex:    &sync.RWMutex{},
 		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
 		Config: &AppConfig{
-			IdleTimeout:              30 * time.Minute, // A long general timeout
-			MaxFirstHitSinceDuration: 5 * time.Second,  // A short first_hit_since timeout
-			CleanupInterval:          100 * time.Millisecond,
+			IdleTimeout:         30 * time.Minute, // A long general timeout
+			MaxTimeSinceLastHit: 5 * time.Second,  // A short min_time_since_last_hit timeout
+			CleanupInterval:     100 * time.Millisecond,
 		},
 	}
 
@@ -992,9 +992,9 @@ func TestCleanup_FirstHitSince(t *testing.T) {
 			if !activity.IsBlocked && len(activity.ChainProgress) == 0 {
 				timeSinceLastHit := now.Sub(activity.LastRequestTime)
 				isIdle := timeSinceLastHit > processor.Config.IdleTimeout
-				isUselessForFirstHit := processor.Config.MaxFirstHitSinceDuration > 0 && timeSinceLastHit > processor.Config.MaxFirstHitSinceDuration
+				isUselessForTimeRule := processor.Config.MaxTimeSinceLastHit > 0 && timeSinceLastHit > processor.Config.MaxTimeSinceLastHit
 
-				if isIdle || isUselessForFirstHit {
+				if isIdle || isUselessForTimeRule {
 					delete(processor.ActivityStore, key)
 					cleanedCount++
 				}
@@ -1006,17 +1006,17 @@ func TestCleanup_FirstHitSince(t *testing.T) {
 
 	// 2. Create different activity states
 	now := time.Now()
-	keyUseless := TrackingKey{IPInfo: NewIPInfo("192.0.2.1")}     // Will be older than MaxFirstHitSinceDuration
+	keyUseless := TrackingKey{IPInfo: NewIPInfo("192.0.2.1")}     // Will be older than MaxTimeSinceLastHit
 	keyStillUseful := TrackingKey{IPInfo: NewIPInfo("192.0.2.2")} // Will be recent
 	keyIdle := TrackingKey{IPInfo: NewIPInfo("192.0.2.3")}        // Will be older than IdleTimeout
 
 	processor.ActivityMutex.Lock()
 	processor.ActivityStore[keyUseless] = &BotActivity{
-		LastRequestTime: now.Add(-10 * time.Second), // 10s ago > 5s MaxFirstHitSinceDuration
+		LastRequestTime: now.Add(-10 * time.Second), // 10s ago > 5s MaxTimeSinceLastHit
 		ChainProgress:   make(map[string]StepState),
 	}
 	processor.ActivityStore[keyStillUseful] = &BotActivity{
-		LastRequestTime: now.Add(-1 * time.Second), // 1s ago < 5s MaxFirstHitSinceDuration
+		LastRequestTime: now.Add(-1 * time.Second), // 1s ago < 5s MaxTimeSinceLastHit
 		ChainProgress:   make(map[string]StepState),
 	}
 	processor.ActivityStore[keyIdle] = &BotActivity{
@@ -1034,7 +1034,7 @@ func TestCleanup_FirstHitSince(t *testing.T) {
 	defer processor.ActivityMutex.RUnlock()
 
 	if _, exists := processor.ActivityStore[keyUseless]; exists {
-		t.Error("Expected 'useless' key to be cleaned up by MaxFirstHitSinceDuration, but it still exists.")
+		t.Error("Expected 'useless' key to be cleaned up by MaxTimeSinceLastHit, but it still exists.")
 	}
 	if _, exists := processor.ActivityStore[keyIdle]; exists {
 		t.Error("Expected 'idle' key to be cleaned up by IdleTimeout, but it still exists.")
@@ -1066,9 +1066,9 @@ func TestDryRunMode(t *testing.T) {
 		DryRun:        true,                                                                    // Simulate dry-run mode
 		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {}, // Will be replaced
 		Config: &AppConfig{
-			OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
-			MaxFirstHitSinceDuration: loadedCfg.MaxFirstHitSinceDuration,
-			WhitelistNets:            loadedCfg.WhitelistNets, // This was the missing piece
+			OutOfOrderTolerance: loadedCfg.OutOfOrderTolerance,
+			MaxTimeSinceLastHit: loadedCfg.MaxTimeSinceLastHit,
+			WhitelistNets:       loadedCfg.WhitelistNets,
 		},
 	}
 	// Set the IsWhitelistedFunc on the *actual* processor instance to avoid nil pointers.
@@ -1264,7 +1264,7 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 				Chains: []BehavioralChain{chain}, ChainMutex: &sync.RWMutex{},
 				LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 				IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false }, // Explicitly set to no-op for this test
-				Config:            &AppConfig{OutOfOrderTolerance: tt.tolerance, MaxFirstHitSinceDuration: 1 * time.Minute},
+				Config:            &AppConfig{OutOfOrderTolerance: tt.tolerance, MaxTimeSinceLastHit: 1 * time.Minute},
 			}
 
 			// 1. Process a "newer" entry first to set the LastRequestTime.

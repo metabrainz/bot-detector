@@ -37,16 +37,16 @@ func main() {
 
 	// Create the config struct from the loaded data.
 	appConfig := &AppConfig{
-		WhitelistNets:            loadedCfg.WhitelistNets,
-		HAProxyAddresses:         loadedCfg.HAProxyAddresses,
-		DurationToTableName:      loadedCfg.DurationToTableName,
-		BlockTableNameFallback:   loadedCfg.BlockTableNameFallback,
-		LastModTime:              time.Now(),
-		PollingInterval:          loadedCfg.PollingInterval,
-		IdleTimeout:              loadedCfg.IdleTimeout,
-		CleanupInterval:          loadedCfg.CleanupInterval,
-		OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
-		MaxFirstHitSinceDuration: loadedCfg.MaxFirstHitSinceDuration,
+		WhitelistNets:          loadedCfg.WhitelistNets,
+		HAProxyAddresses:       loadedCfg.HAProxyAddresses,
+		DurationToTableName:    loadedCfg.DurationToTableName,
+		BlockTableNameFallback: loadedCfg.BlockTableNameFallback,
+		LastModTime:            time.Now(),
+		PollingInterval:        loadedCfg.PollingInterval,
+		IdleTimeout:            loadedCfg.IdleTimeout,
+		CleanupInterval:        loadedCfg.CleanupInterval,
+		OutOfOrderTolerance:    loadedCfg.OutOfOrderTolerance,
+		MaxTimeSinceLastHit:    loadedCfg.MaxTimeSinceLastHit,
 	}
 
 	// Initialize the global Processor instance after config is loaded.

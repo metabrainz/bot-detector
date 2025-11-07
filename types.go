@@ -53,34 +53,34 @@ type AppConfig struct {
 	PollingInterval             time.Duration
 	IdleTimeout                 time.Duration
 	CleanupInterval             time.Duration
-	MaxFirstHitSinceDuration    time.Duration // The longest first_hit_since duration across all chains.
+	MaxTimeSinceLastHit         time.Duration // The longest min_time_since_last_hit duration across all chains.
 	OutOfOrderTolerance         time.Duration // Max duration an out-of-order log entry will be processed.
 	testOverridePollingInterval time.Duration // Unexported field for test-only overrides.
 }
 
 // LoadedConfig encapsulates all configuration data loaded from the YAML file.
 type LoadedConfig struct {
-	Chains                   []BehavioralChain
-	WhitelistNets            []*net.IPNet
-	HAProxyAddresses         []string
-	DurationToTableName      map[time.Duration]string
-	BlockTableNameFallback   string
-	PollingInterval          time.Duration
-	CleanupInterval          time.Duration
-	IdleTimeout              time.Duration
-	OutOfOrderTolerance      time.Duration
-	LogLevel                 string
-	MaxFirstHitSinceDuration time.Duration
+	Chains                 []BehavioralChain
+	WhitelistNets          []*net.IPNet
+	HAProxyAddresses       []string
+	DurationToTableName    map[time.Duration]string
+	BlockTableNameFallback string
+	PollingInterval        time.Duration
+	CleanupInterval        time.Duration
+	IdleTimeout            time.Duration
+	OutOfOrderTolerance    time.Duration
+	LogLevel               string
+	MaxTimeSinceLastHit    time.Duration
 }
 
 // --- YAML DATA STRUCTURES ---
 
 type StepDefYAML struct {
-	Order         int
-	FieldMatches  map[string]string `yaml:"field_matches"`
-	MaxDelay      string            `yaml:"max_delay"`
-	MinDelay      string            `yaml:"min_delay"`
-	FirstHitSince string            `yaml:"first_hit_since"` // New field
+	Order               int
+	FieldMatches        map[string]string `yaml:"field_matches"`
+	MaxDelay            string            `yaml:"max_delay"`
+	MinDelay            string            `yaml:"min_delay"`
+	MinTimeSinceLastHit string            `yaml:"min_time_since_last_hit"` // Renamed from first_hit_since
 }
 
 type BehavioralChainYAML struct {
@@ -119,12 +119,12 @@ type LogEntry struct {
 }
 
 type StepDef struct {
-	Order                 int
-	FieldMatches          map[string]string
-	MaxDelayDuration      time.Duration
-	MinDelayDuration      time.Duration
-	FirstHitSinceDuration time.Duration             // New field
-	CompiledRegexes       map[string]*regexp.Regexp // Pre-compiled regexes for performance.
+	Order               int
+	FieldMatches        map[string]string
+	MaxDelayDuration    time.Duration
+	MinDelayDuration    time.Duration
+	MinTimeSinceLastHit time.Duration             // Renamed from FirstHitSinceDuration
+	CompiledRegexes     map[string]*regexp.Regexp // Pre-compiled regexes for performance.
 }
 
 type BehavioralChain struct {
