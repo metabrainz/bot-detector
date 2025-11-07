@@ -140,6 +140,105 @@ func (p *Processor) handleChainCompletion(chain *BehavioralChain, entry *LogEntr
 	}
 }
 
+// processChainForEntry evaluates a single log entry against a single behavioral chain.
+// It manages state transitions (advancing, resetting) and triggers completion handling.
+// The caller is responsible for holding the ActivityMutex.
+func (p *Processor) processChainForEntry(chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity, previousRequestTime time.Time) {
+	// If GetTrackingKey returns an empty key, it's a mismatch for this chain (e.g., wrong IP version).
+	if GetTrackingKey(chain, entry).IPInfo.Address == "" {
+		return
+	}
+
+	// Get the current state for this chain.
+	state, exists := currentActivity.ChainProgress[chain.Name]
+	if !exists {
+		// Initialize state if it's the first time we're seeing this chain for this key.
+		state = StepState{CurrentStep: 0, LastMatchTime: time.Time{}}
+	}
+
+	// Use a loop to handle step progression and potential resets within a single log entry.
+	// This is important for rules like max_delay that can cause a reset and then an immediate
+	// re-evaluation of the first step.
+	for {
+		nextStepIndex := state.CurrentStep
+		if nextStepIndex >= len(chain.Steps) {
+			break // Chain already completed or no more steps.
+		}
+		step := chain.Steps[nextStepIndex]
+
+		// --- TIME WINDOW CHECKS ---
+		isFirstStep := state.CurrentStep == 0
+		timeSinceLastHit := entry.Timestamp.Sub(previousRequestTime)
+		timeSinceLastStepHit := entry.Timestamp.Sub(state.LastMatchTime)
+
+		if isFirstStep {
+			// First-step specific checks
+			if step.MinTimeSinceLastHit > 0 {
+				if previousRequestTime.IsZero() || timeSinceLastHit <= step.MinTimeSinceLastHit {
+					break // Condition not met: IP is new or was seen too recently.
+				}
+			}
+		} else {
+			// Inter-step (2nd step onwards) checks
+			if step.MaxDelayDuration > 0 && timeSinceLastStepHit > step.MaxDelayDuration {
+				p.LogFunc(LevelDebug, "RESET", "Chain %s: MaxDelay %v exceeded. Resetting.", chain.Name, step.MaxDelayDuration)
+				state.CurrentStep = 0
+				continue // Restart check from step 0.
+			}
+			if step.MinDelayDuration > 0 && timeSinceLastStepHit < step.MinDelayDuration {
+				p.LogFunc(LevelDebug, "RESET", "Chain %s: MinDelay %v not met. Resetting.", chain.Name, step.MinDelayDuration)
+				state.CurrentStep = 0
+				continue // Restart check from step 0.
+			}
+		}
+
+		// --- FIELD MATCHING ---
+		match := true
+		for fieldName := range step.FieldMatches {
+			matchValue, err := GetMatchValue(fieldName, entry)
+			if err != nil {
+				match = false
+				break
+			}
+			if !step.CompiledRegexes[fieldName].MatchString(matchValue) {
+				match = false
+				break
+			}
+		}
+
+		if !match {
+			break // No match on this step, exit the `for {}` loop for this chain.
+		}
+
+		// --- STEP MATCHED ---
+		state.CurrentStep++
+		state.LastMatchTime = entry.Timestamp
+
+		// --- CHECK FOR CHAIN COMPLETION ---
+		if state.CurrentStep == len(chain.Steps) {
+			p.handleChainCompletion(chain, entry, currentActivity)
+			state.CurrentStep = 0 // Reset state after action is taken.
+		}
+
+		// If the chain did not complete, or if it completed and was reset,
+		// break from the loop to save the new state.
+		break
+	}
+
+	// --- STATE MANAGEMENT ---
+	// Only store the state if the key is actively progressing (CurrentStep > 0).
+	// This saves memory by not storing state for IPs that are at step 0.
+	if state.CurrentStep > 0 {
+		currentActivity.ChainProgress[chain.Name] = state
+	} else {
+		// If CurrentStep is 0 (due to reset or completion) and state exists in the map,
+		// clean it up to save memory.
+		if _, exists := currentActivity.ChainProgress[chain.Name]; exists {
+			delete(currentActivity.ChainProgress, chain.Name)
+		}
+	}
+}
+
 // CheckChains is refactored as a method on Processor.
 func (p *Processor) CheckChains(entry *LogEntry) {
 
@@ -199,108 +298,7 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 
 	// 2. Iterate over all configured chains.
 	for _, chain := range chains {
-		// Check if the current log entry's tracking key is applicable to this chain
-		// (e.g., check IP version compatibility again, as not all chains may be applicable).
-		chainKey := GetTrackingKey(&chain, entry)
-		// If GetTrackingKey returns an empty key, it's a mismatch for this chain.
-		if chainKey.IPInfo.Address == "" {
-			continue
-		}
-
-		// Get the current state for this chain.
-		state, exists := currentActivity.ChainProgress[chain.Name]
-		if !exists {
-			// Initialize state if it's the first step for this chain.
-			state = StepState{CurrentStep: 0, LastMatchTime: time.Time{}}
-		}
-
-		// Use a loop to handle step progression and potential resets (replaces goto).
-		for {
-			nextStepIndex := state.CurrentStep
-			if nextStepIndex >= len(chain.Steps) {
-				break // Chain already completed or no more steps.
-			}
-			step := chain.Steps[nextStepIndex]
-
-			// --- TIME WINDOW CHECKS ---
-			isFirstStep := state.CurrentStep == 0
-			timeSinceLastHit := entry.Timestamp.Sub(previousRequestTime)
-			timeSinceLastStepHit := entry.Timestamp.Sub(state.LastMatchTime)
-
-			if isFirstStep {
-				// First-step specific checks
-				// `min_time_since_last_hit` rule: The first step only matches if the time since the
-				// last overall request from this key is GREATER than the specified duration.
-				// This is useful for detecting "sleepy" bots that are not continuously active.
-				if step.MinTimeSinceLastHit > 0 { // Apply if rule is configured for this step
-					// The rule requires the IP to have been seen before, and for the time since
-					// that last hit to be GREATER than the minimum required.
-					if previousRequestTime.IsZero() || timeSinceLastHit <= step.MinTimeSinceLastHit {
-						break // Condition not met: IP is new or was seen too recently.
-					}
-				}
-			} else {
-				// Inter-step (2nd step onwards) checks
-				if step.MaxDelayDuration > 0 && timeSinceLastStepHit > step.MaxDelayDuration {
-					p.LogFunc(LevelDebug, "RESET", "Chain %s: MaxDelay %v exceeded. Resetting.", chain.Name, step.MaxDelayDuration)
-					state.CurrentStep = 0
-					continue // Restart check from step 0.
-				}
-				if step.MinDelayDuration > 0 && timeSinceLastStepHit < step.MinDelayDuration {
-					p.LogFunc(LevelDebug, "RESET", "Chain %s: MinDelay %v not met. Resetting.", chain.Name, step.MinDelayDuration)
-					state.CurrentStep = 0
-					continue // Restart check from step 0.
-				}
-			}
-
-			match := true
-			for fieldName, _ := range step.FieldMatches {
-				matchValue := ""
-				var err error
-
-				matchValue, err = GetMatchValue(fieldName, entry)
-				if err != nil {
-					// This can happen if the field is unknown. In that case, it's not a match.
-					match = false
-					break
-				}
-
-				if !step.CompiledRegexes[fieldName].MatchString(matchValue) {
-					match = false
-					break
-				}
-			}
-
-			if !match {
-				break // No match on this step, exit the `for {}` loop for this chain.
-			}
-
-			// Step matched! Advance the state.
-			state.CurrentStep++
-			state.LastMatchTime = entry.Timestamp
-
-			// --- CHECK FOR CHAIN COMPLETION ---
-			if state.CurrentStep == len(chain.Steps) {
-				// The chain is complete. Handle logging and actions.
-				p.handleChainCompletion(&chain, entry, currentActivity)
-
-				// Reset state *after* action is taken.
-				state.CurrentStep = 0
-			}
-			// If the chain did not complete, break from the for loop to save the new state.
-			break
-		}
-
-		// 5. Conditional Update and Cleanup of ChainProgress State (Memory Optimization)
-		// Only store the state if the key is actively progressing (CurrentStep > 0).
-		if state.CurrentStep > 0 {
-			currentActivity.ChainProgress[chain.Name] = state
-		} else {
-			// If CurrentStep is 0 (reset/complete) and state exists, clean up to save memory.
-			if _, exists := currentActivity.ChainProgress[chain.Name]; exists {
-				delete(currentActivity.ChainProgress, chain.Name)
-			}
-		}
+		p.processChainForEntry(&chain, entry, currentActivity, previousRequestTime)
 	}
 
 }
