@@ -1,9 +1,7 @@
 version: "1.0"
+log_level: "debug" # Set to debug for maximum visibility during dry-run testing
 whitelist_cidrs:
-  - "10.0.0.0/8" # Example: Whitelist entire 10.x.x.x network
-  - "192.0.2.10/32" # Whitelist the specific IP that completes Chain 1 (Test-MatchKey-IPv4-Only)
-  - "2001:db8::/64" # Example: Whitelist an IPv6 range
-  - "192.0.2.20/31" # Whitelist 192.0.2.20 and 192.0.2.21
+  - "192.0.2.10/32" # This entry is specifically for testing the whitelist functionality.
 duration_tables:
   5m: table_5m
   1h: table_1h
@@ -32,16 +30,6 @@ chains:
       - field_matches:
           Path: "^/v6/end$"
         max_delay: "5s"
-  # --- 3. Time: Min_Delay Success (IP-only key) ---
-  - name: "Test-MinDelay-Success"
-    action: "log"
-    match_key: "ip"
-    steps:
-      - field_matches:
-          Path: "^/delay/start$"
-        min_delay: "2s" # Requires >2s since IP's last request (which was at 17:00:00).
-      - field_matches:
-          Path: "^/delay/end$"
   # --- 4. Time: Max_Delay Reset (FAILURE) ---
   - name: "Test-MaxDelay-Reset"
     action: "log"
@@ -94,3 +82,39 @@ chains:
       - field_matches:
           UserAgent: "^badguy$"
           Protocol: "^HTTP/1\\.1$"
+
+  # --- 9. Time: Inter-Step Min_Delay (Correct Usage) ---
+  # This tests that min_delay on a second step correctly enforces a pause.
+  - name: "Test-InterStep-MinDelay"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          Path: "^/interstep/start$"
+      - field_matches:
+          Path: "^/interstep/end$"
+        min_delay: "2s" # Must wait at least 2s after step 1.
+
+  # --- 10. Time: First_Hit_Since (Success and Failure) ---
+  # This tests that the first step only matches if a recent hit was seen.
+  - name: "Test-FirstHitSince"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          Path: "^/rapid/trigger$"
+        first_hit_since: "3s" # The last overall hit must be within 3s.
+      - field_matches:
+          Path: "^/rapid/end$"
+
+  # --- 11. Out of Order Processing ---
+  # This tests that an out-of-order log entry is still processed if within tolerance.
+  - name: "Test-OutOfOrder-Tolerated"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          Path: "^/order/start$"
+      - field_matches:
+          Path: "^/order/end$"
+        max_delay: "10s"
