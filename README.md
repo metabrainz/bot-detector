@@ -83,6 +83,7 @@ This will produce a single executable named `bot-detector`.
 | Flag | Default | Description |
 | :--- | :--- | :--- |
 | **`--log-path`** | `/var/log/http/access.log` | Path to the live access log file to tail (ignored in dry-run). |
+| **`--poll-interval`** | `5s` | Interval to check the YAML file for changes (ignored in dry-run). |
 | **`--cleanup-interval`**| `1m` | Interval to run the routine that cleans up idle IP state. |
 | **`--idle-timeout`** | `30m` | Duration an IP must be inactive before its state is purged from memory. |
 | **`--log-level`** | `warning` | Set minimum log level to display. *See Log Levels below.* |
@@ -131,7 +132,8 @@ The file is structured as a top-level map containing a single key, chains, which
 
 | Field | Type | Description |
 | :---- | :---- | :---- |
-| chains | array of object | The list of behavioral chains to be loaded. |
+| **chains** | array of object | The list of behavioral chains to be loaded. |
+| **default_block_duration** | string | Optional. A global block duration to apply to any `block` action chain that does not define its own `block_duration`. Format: Go duration string (e.g., "5m", "1h"). |
 
 ## **BehavioralChain Definition (Top Level)**
 
