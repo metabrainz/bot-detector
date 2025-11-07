@@ -29,15 +29,40 @@ func GetMatchValue(fieldName string, entry *LogEntry) (string, error) {
 	}
 }
 
-// CheckChains is refactored as a method on Processor.
-func (p *Processor) CheckChains(entry *LogEntry) {
-
-	// FIX 1: Check whitelisting immediately after acquiring the IP/key
-	// This prevents creating activity state for whitelisted IPs, fixing TestCheckChains_WhitelistSkip.
+// preCheckActivity performs initial checks on an IP/key before processing against chains.
+// It returns the relevant BotActivity and a boolean indicating if further processing should be skipped.
+// The caller is responsible for locking/unlocking the ActivityMutex.
+func (p *Processor) preCheckActivity(entry *LogEntry, trackingKey TrackingKey) (*BotActivity, bool) {
+	// 1. Check whitelisting immediately.
 	if p.IsWhitelistedFunc(entry.IPInfo) {
 		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IPInfo.Address)
-		return
+		return nil, true // Skip processing
 	}
+
+	// 2. Get or create activity and check for existing blocks.
+	activity := GetOrCreateActivityUnsafe(p.ActivityStore, trackingKey)
+
+	if activity.IsBlocked {
+		if time.Now().After(activity.BlockedUntil) {
+			// Block has expired, clear it and proceed.
+			p.LogFunc(LevelInfo, "EXPIRE", "Chain-specific block expired for key %s (UA: %s).", trackingKey.IPInfo.Address, trackingKey.UA)
+			activity.IsBlocked = false
+			activity.BlockedUntil = time.Time{}
+		} else {
+			// Still blocked, update timestamp and skip.
+			if entry.Timestamp.After(activity.LastRequestTime) {
+				activity.LastRequestTime = entry.Timestamp
+			}
+			p.LogFunc(LevelDebug, "SKIP", "Key %s (UA: %s): Skipped (Already blocked in memory by a chain).", trackingKey.IPInfo.Address, trackingKey.UA)
+			return activity, true // Skip processing
+		}
+	}
+
+	return activity, false // Do not skip
+}
+
+// CheckChains is refactored as a method on Processor.
+func (p *Processor) CheckChains(entry *LogEntry) {
 
 	// Determine the most specific tracking key required by any matching chain.
 	// This ensures we use the correct BotActivity store for the request.
@@ -65,33 +90,12 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 	// Ensure the lock is released when the function exits.
 	defer p.ActivityMutex.Unlock()
 
-	// Get or create the activity struct for the current log line's tracking key.
-	currentActivity := GetOrCreateActivityUnsafe(p.ActivityStore, trackingKey)
-	// This is the baseline for first-step time checks. It's the time of the IP's last hit.
-
-	// Always defer the update of LastRequestTime. It should always reflect the latest timestamp seen
-	// for this key, but only after all checks have used the 'previousRequestTime'.
-	// This ensures monotonicity.
-	defer func() {
-		if entry.Timestamp.After(currentActivity.LastRequestTime) {
-			currentActivity.LastRequestTime = entry.Timestamp
-		}
-	}()
-
-	if currentActivity.IsBlocked {
-		if time.Now().After(currentActivity.BlockedUntil) {
-			p.LogFunc(LevelInfo, "EXPIRE", "Chain-specific block expired for key %s (UA: %s).", trackingKey.IPInfo.Address, trackingKey.UA)
-			currentActivity.IsBlocked = false
-			currentActivity.BlockedUntil = time.Time{}
-		} else {
-			// Even if blocked, ensure LastRequestTime is updated if this entry is newer,
-			// to prevent premature cleanup by the idle routine.
-			if entry.Timestamp.After(currentActivity.LastRequestTime) {
-				currentActivity.LastRequestTime = entry.Timestamp
-			}
-			p.LogFunc(LevelDebug, "SKIP", "Key %s (UA: %s): Skipped (Already blocked in memory by a chain).", trackingKey.IPInfo.Address, trackingKey.UA)
-			return
-		}
+	// Perform pre-checks for whitelisting and existing blocks.
+	currentActivity, skip := p.preCheckActivity(entry, trackingKey)
+	if skip {
+		// If preCheckActivity returns a skip, the lock is still held,
+		// so we can just return. The defer will unlock.
+		return
 	}
 
 	previousRequestTime := currentActivity.LastRequestTime
