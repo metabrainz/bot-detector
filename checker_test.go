@@ -10,8 +10,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/google/go-cmp/cmp"
 )
 
 // MockBlocker and its methods are defined in log_parse_test.go for the 'main' package,
@@ -1147,19 +1145,8 @@ func TestDryRunMode(t *testing.T) {
 		}
 
 		if !found {
-			// --- ENHANCED FAILURE REPORTING ---
-			// If we didn't find an exact match, find the closest captured log to provide a helpful diff.
-			var closestMatch string
-			// A simple way to find a close match is to look for one with the same tag.
-			expectedTag := strings.SplitN(formattedExpectedLog, ":", 2)[0]
-			for _, captured := range capturedLogs {
-				if strings.HasPrefix(captured, expectedTag) {
-					closestMatch = captured
-					break
-				}
-			}
-
-			// Find the relevant context block from the test log file for context.
+			// --- CONCISE FAILURE REPORTING ---
+			// 1. Find the relevant context block from test_access.log.
 			contextMarker := "# ======================"
 			logLines := strings.Split(string(testLogData), "\n")
 			contextStart := 0
@@ -1184,13 +1171,8 @@ func TestDryRunMode(t *testing.T) {
 			}
 			relevantLines := strings.Join(contextLines, "\n")
 
-			// Provide a detailed diff if a close match was found.
-			if closestMatch != "" {
-				diff := cmp.Diff(formattedExpectedLog, closestMatch)
-				t.Errorf("Expected log message was not found.\n\nCONTEXT:\n%s\n\nDIFF (-expected +got):\n%s", relevantLines, diff)
-			} else {
-				t.Errorf("Expected log message was not found.\n\nEXPECTED:\n'%s'\n\nCONTEXT:\n%s\n\n(No close match found in captured logs)", formattedExpectedLog, relevantLines)
-			}
+			t.Errorf("Expected log message was not found.\n\nEXPECTED:\n'%s'\n\nCONTEXT:\n%s\n",
+				formattedExpectedLog, relevantLines)
 		}
 	}
 
