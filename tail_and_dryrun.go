@@ -71,11 +71,11 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 		// Use a switch for clearer error handling.
 		switch {
 		case errors.Is(readErr, io.EOF):
-			// If we read a line and got EOF, process it before breaking.
+			// If we read a line and got EOF, process it and then exit the loop.
 			if len(line) > 0 {
 				p.ProcessLogLine(line, lineNumber)
 			}
-			break
+			goto endLoop // Use goto to break out of the outer for loop.
 		case errors.Is(readErr, ErrLineSkipped):
 			p.LogFunc(LevelWarning, "DRYRUN_SKIP", "Line %d: Skipped (Length exceeded %d bytes).", lineNumber, lineLimit)
 			continue
@@ -88,6 +88,7 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 		p.ProcessLogLine(line, lineNumber)
 	}
 
+endLoop:
 	// Decrement lineNumber by 1 for the final count, as the loop breaks after the EOF read attempt.
 	p.LogFunc(LevelInfo, "DRYRUN", "DryRun complete. Processed %d lines.", lineNumber-1)
 	close(done)
