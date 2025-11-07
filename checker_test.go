@@ -1038,3 +1038,103 @@ func TestCleanup_FirstHitSince(t *testing.T) {
 		t.Error("Expected 'still useful' key to remain, but it was cleaned up.")
 	}
 }
+
+// TestCheckChains_OutOfOrder verifies that the system correctly handles log entries
+// that arrive out of chronological order, either processing them if within tolerance
+// or skipping them if too old.
+func TestCheckChains_OutOfOrder(t *testing.T) {
+	// Define 'now' once, before the test slice, so it can be used in initialization.
+	now := time.Now()
+
+	tests := []struct {
+		name                         string
+		outOfOrderOffset             time.Duration // How much older the out-of-order entry is than the last seen.
+		tolerance                    time.Duration
+		expectProcessed              bool // True if the out-of-order entry should be processed.
+		expectLastRequestTime        time.Time
+		expectedFinalLastRequestTime time.Time // The expected LastRequestTime after the second entry.
+	}{
+		{
+			name:             "Out-of-order within tolerance (processed)",
+			outOfOrderOffset: 3 * time.Second, // 3s older
+			tolerance:        5 * time.Second, // 5s tolerance
+			expectProcessed:  true,
+		},
+		// The test's `expectLastRequestTime` assertion was hardcoded to `now`, which is incorrect for the in-order case.
+		{
+			name:             "Out-of-order exactly at tolerance (processed)",
+			outOfOrderOffset: 5 * time.Second, // 5s older
+			tolerance:        5 * time.Second, // 5s tolerance
+			expectProcessed:  true,
+		},
+		{
+			name:                         "Out-of-order outside tolerance (skipped)",
+			outOfOrderOffset:             6 * time.Second, // 6s older
+			tolerance:                    5 * time.Second, // 5s tolerance
+			expectProcessed:              false,
+			expectedFinalLastRequestTime: now, // LastRequestTime should remain 'now' because outOfOrderEntry was skipped.
+		},
+		{
+			name:             "In-order entry (processed)",
+			outOfOrderOffset: -1 * time.Second, // 1s newer
+			tolerance:        5 * time.Second,
+			expectProcessed:  true,
+		},
+		// The test's `expectLastRequestTime` assertion was hardcoded to `now`, which is incorrect for the in-order case.
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetGlobalState()
+			targetIP := "192.0.2.1"
+			chain := BehavioralChain{
+				Name:     "SimpleChain",
+				MatchKey: "ip",
+				Action:   "log",
+				Steps: []StepDef{
+					{Order: 1, FieldMatches: map[string]string{"Path": "/step1"}},
+					{Order: 2, FieldMatches: map[string]string{"Path": "/step2"}}, // Add a second step to prevent immediate completion
+				},
+			}
+			compileChainRegexes(t, []BehavioralChain{chain})
+
+			processor := &Processor{
+				ActivityStore: make(map[TrackingKey]*BotActivity), ActivityMutex: &sync.RWMutex{},
+				Chains: []BehavioralChain{chain}, ChainMutex: &sync.RWMutex{},
+				LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
+				IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false }, // Explicitly set to no-op for this test
+				Config:            &AppConfig{OutOfOrderTolerance: tt.tolerance, MaxFirstHitSinceDuration: 1 * time.Minute},
+			}
+
+			// 1. Process a "newer" entry first to set the LastRequestTime.
+			newerEntry := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: now, Path: "/other-path"}
+			processor.CheckChains(newerEntry)
+
+			// 2. Process the out-of-order entry.
+			outOfOrderEntry := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: now.Add(-tt.outOfOrderOffset), Path: "/step1"}
+			processor.CheckChains(outOfOrderEntry)
+
+			// 3. Assert the outcome.
+			processor.ActivityMutex.RLock()
+			defer processor.ActivityMutex.RUnlock()
+			activity := processor.ActivityStore[TrackingKey{IPInfo: NewIPInfo(targetIP)}]
+
+			_, progressExists := activity.ChainProgress[chain.Name]
+
+			if progressExists != tt.expectProcessed {
+				t.Errorf("Expected chain progress existence to be %t, but got %t", tt.expectProcessed, progressExists)
+			}
+
+			// Determine the expected LastRequestTime based on the test case.
+			expectedLRT := now           // Default: if out-of-order or skipped, it should remain 'now' from newerEntry.
+			if tt.outOfOrderOffset < 0 { // This means the outOfOrderEntry's timestamp is newer than 'now'.
+				expectedLRT = now.Add(-tt.outOfOrderOffset)
+			}
+
+			// Verify LastRequestTime monotonicity.
+			if !activity.LastRequestTime.Equal(expectedLRT) {
+				t.Errorf("LastRequestTime was %v, expected %v (should always be the latest seen)", activity.LastRequestTime, expectedLRT)
+			}
+		})
+	}
+}

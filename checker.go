@@ -69,24 +69,61 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 	currentActivity := GetOrCreateActivityUnsafe(p.ActivityStore, trackingKey)
 	// This is the baseline for first-step time checks. It's the time of the IP's last hit.
 
+	// Always defer the update of LastRequestTime. It should always reflect the latest timestamp seen
+	// for this key, but only after all checks have used the 'previousRequestTime'.
+	// This ensures monotonicity.
+	defer func() {
+		if entry.Timestamp.After(currentActivity.LastRequestTime) {
+			currentActivity.LastRequestTime = entry.Timestamp
+		}
+	}()
+
 	if currentActivity.IsBlocked {
 		if time.Now().After(currentActivity.BlockedUntil) {
 			p.LogFunc(LevelInfo, "EXPIRE", "Chain-specific block expired for key %s (UA: %s).", trackingKey.IPInfo.Address, trackingKey.UA)
 			currentActivity.IsBlocked = false
 			currentActivity.BlockedUntil = time.Time{}
 		} else {
-			// Even if blocked, update the timestamp to prevent premature cleanup by the idle routine.
-			currentActivity.LastRequestTime = entry.Timestamp
+			// Even if blocked, ensure LastRequestTime is updated if this entry is newer,
+			// to prevent premature cleanup by the idle routine.
+			if entry.Timestamp.After(currentActivity.LastRequestTime) {
+				currentActivity.LastRequestTime = entry.Timestamp
+			}
 			p.LogFunc(LevelDebug, "SKIP", "Key %s (UA: %s): Skipped (Already blocked in memory by a chain).", trackingKey.IPInfo.Address, trackingKey.UA)
 			return
 		}
 	}
 
 	previousRequestTime := currentActivity.LastRequestTime
-	// Update LastRequestTime only if any chain uses first_hit_since, to avoid storing
-	// activity for single-hit IPs that can't trigger any time-based rules.
-	if p.Config.MaxFirstHitSinceDuration > 0 {
-		defer func() { currentActivity.LastRequestTime = entry.Timestamp }()
+
+	// Handle out-of-order log entries.
+	// If the current entry's timestamp is older than the last recorded request time for this key,
+	// it's an out-of-order entry.
+	if !previousRequestTime.IsZero() && entry.Timestamp.Before(previousRequestTime) {
+		timeDifference := previousRequestTime.Sub(entry.Timestamp)
+		if timeDifference <= p.Config.OutOfOrderTolerance {
+			// This entry is out-of-order but within tolerance. Process it.
+			// IMPORTANT: For time-based rules (min_delay, max_delay, first_hit_since),
+			// we must *still* use `previousRequestTime` (the newer timestamp)
+			// to avoid negative durations or incorrect rule evaluations.
+			// The `LastRequestTime` in `currentActivity` will *not* be updated by this entry
+			// to maintain monotonicity.
+			p.LogFunc(LevelDebug, "OUT_OF_ORDER_TOLERATED", "Processing out-of-order log entry for IP %s within tolerance (%v). Current: %v, Last seen: %v.", entry.IPInfo.Address, p.Config.OutOfOrderTolerance, entry.Timestamp, previousRequestTime)
+			// We proceed, but the defer below needs to be conditional on entry.Timestamp being newer.
+		} else {
+			// This entry is too old and out-of-order. Skip it.
+			p.LogFunc(LevelWarning, "OUT_OF_ORDER_SKIPPED", "Skipping out-of-order log entry for IP %s (too old: %v > %v). Current: %v, Last seen: %v.", entry.IPInfo.Address, timeDifference, p.Config.OutOfOrderTolerance, entry.Timestamp, previousRequestTime)
+			return // Skip this entry entirely.
+		}
+	} else {
+		// If the entry is in-order or the first for this IP, update LastRequestTime if needed.
+		if p.Config.MaxFirstHitSinceDuration > 0 { // Only update if first_hit_since rules are active
+			defer func() {
+				if entry.Timestamp.After(currentActivity.LastRequestTime) { // Only update if current entry is newer
+					currentActivity.LastRequestTime = entry.Timestamp
+				}
+			}()
+		}
 	}
 
 	// 2. Iterate over all configured chains.

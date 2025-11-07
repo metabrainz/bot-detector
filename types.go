@@ -54,6 +54,7 @@ type AppConfig struct {
 	IdleTimeout              time.Duration
 	CleanupInterval          time.Duration
 	MaxFirstHitSinceDuration time.Duration // The longest first_hit_since duration across all chains.
+	OutOfOrderTolerance      time.Duration // Max duration an out-of-order log entry will be processed.
 }
 
 // LoadedConfig encapsulates all configuration data loaded from the YAML file.

@@ -15,8 +15,9 @@ var (
 	YAMLFilePath       string
 	PollingIntervalStr string
 
-	CleanupIntervalStr string
-	IdleTimeoutStr     string // Duration an IP must be inactive before its state is purged.
+	CleanupIntervalStr     string
+	IdleTimeoutStr         string // Duration an IP must be inactive before its state is purged.
+	OutOfOrderToleranceStr string // Max duration an out-of-order log entry will be processed.
 
 	LogLevelStr string
 	DryRun      bool
@@ -31,6 +32,7 @@ func init() {
 
 	flag.StringVar(&CleanupIntervalStr, "cleanup-interval", "1m", "Interval (e.g., '5m') to run the routine that cleans up idle IP state.")
 	flag.StringVar(&IdleTimeoutStr, "idle-timeout", "30m", "Duration (e.g., '45m') an IP must be inactive before its state is purged from memory.")
+	flag.StringVar(&OutOfOrderToleranceStr, "out-of-order-tolerance", "5s", "Maximum duration (e.g., '5s') an out-of-order log entry will be processed. Older entries are skipped.")
 
 	flag.StringVar(&LogLevelStr, "log-level", "warning", "Set minimum log level to display: critical, error, warning, info, debug.")
 	flag.BoolVar(&DryRun, "dry-run", false, "If true, runs in test mode: skips HAProxy/live logging, ignores cleanup/polling, and uses --test-log.")
@@ -66,6 +68,10 @@ func ParseDurations() error {
 		_, err = time.ParseDuration(IdleTimeoutStr)
 		if err != nil {
 			return fmt.Errorf("invalid idle-timeout format: %w", err)
+		}
+		_, err = time.ParseDuration(OutOfOrderToleranceStr)
+		if err != nil {
+			return fmt.Errorf("invalid out-of-order-tolerance format: %w", err)
 		}
 	}
 	return nil

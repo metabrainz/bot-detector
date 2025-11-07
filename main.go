@@ -32,6 +32,7 @@ func main() {
 	pollingInterval, _ := time.ParseDuration(PollingIntervalStr)
 	idleTimeout, _ := time.ParseDuration(IdleTimeoutStr)
 	cleanupInterval, _ := time.ParseDuration(CleanupIntervalStr)
+	outOfOrderTolerance, _ := time.ParseDuration(OutOfOrderToleranceStr)
 
 	if len(loadedCfg.DurationToTableName) == 0 {
 		LogOutput(LevelWarning, "CONFIG", "No HAProxy duration tables configured. All block attempts will be skipped.")
@@ -47,6 +48,7 @@ func main() {
 		PollingInterval:          pollingInterval,
 		IdleTimeout:              idleTimeout,
 		CleanupInterval:          cleanupInterval,
+		OutOfOrderTolerance:      outOfOrderTolerance,
 		MaxFirstHitSinceDuration: loadedCfg.MaxFirstHitSinceDuration,
 	}
 
