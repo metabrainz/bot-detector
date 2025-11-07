@@ -212,23 +212,30 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 
 				// --- 3. Take Action (Log, Block, etc.) ---
 
+				// Determine the appropriate log level. During tests, downgrade alerts to debug to reduce noise.
+				logLevel := LevelCritical
+				if isTesting() {
+					logLevel = LevelDebug
+				}
+
 				// First, handle the logging for all actions.
 				if p.DryRun { // In DryRun mode, log the *actual* action of the chain.
+					// In dry-run, we use LevelInfo for the "DRY_RUN" tag.
 					if chain.Action == "block" {
-						p.LogFunc(LevelCritical, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
+						p.LogFunc(LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
 					} else if chain.Action == "log" {
-						p.LogFunc(LevelCritical, "DRY_RUN", "LOG! Chain: %s completed by IP %s. Action set to 'log' (DryRun).", chain.Name, entry.IPInfo.Address)
+						p.LogFunc(LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s. Action set to 'log' (DryRun).", chain.Name, entry.IPInfo.Address)
 					} else {
-						p.LogFunc(LevelCritical, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s. Unrecognized action '%s' (DryRun).", chain.Name, entry.IPInfo.Address, chain.Action)
+						p.LogFunc(LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s. Unrecognized action '%s' (DryRun).", chain.Name, entry.IPInfo.Address, chain.Action)
 					}
 				} else if chain.Action == "block" { // Live mode: block action
-					p.LogFunc(LevelCritical, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v.", chain.Name, entry.IPInfo.Address, chain.BlockDuration)
+					p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v.", chain.Name, entry.IPInfo.Address, chain.BlockDuration)
 				} else if chain.Action == "log" { // Live mode: log action
 					baseMessage := fmt.Sprintf("LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IPInfo.Address)
 					if isWhitelisted {
-						p.LogFunc(LevelCritical, "ALERT", "%s (IP is whitelisted: NO FURTHER ACTION TAKEN)", baseMessage)
+						p.LogFunc(logLevel, "ALERT", "%s (IP is whitelisted: NO FURTHER ACTION TAKEN)", baseMessage)
 					} else {
-						p.LogFunc(LevelCritical, "ALERT", baseMessage)
+						p.LogFunc(logLevel, "ALERT", baseMessage)
 					}
 				}
 

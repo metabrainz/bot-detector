@@ -287,7 +287,11 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 	if longestDuration == 0*time.Second {
 		for _, chain := range newChains {
 			if chain.Action == "block" {
+				// Downgrade this warning to Debug level during test runs to reduce noise.
 				logLevel := LevelWarning
+				if isTesting() {
+					logLevel = LevelDebug
+				}
 				LogOutput(logLevel, "CONFIG", "One or more chains use the 'block' action, but no 'duration_tables' are configured. All block attempts will be skipped.")
 				break // We only need to log this warning once.
 			}
