@@ -372,6 +372,49 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("Unblock Fails", func(t *testing.T) {
+		// --- Setup ---
+		resetGlobalState()
+		t.Cleanup(resetGlobalState)
+
+		// Mock the UnblockIP function to return an error.
+		// We need to do this by mocking the underlying executor.
+		mockExecutor := func(addr, ip, command string) error {
+			return fmt.Errorf("simulated HAProxy failure")
+		}
+		setupMockExecutor(t, mockExecutor)
+
+		processor := &Processor{
+			ActivityStore: make(map[TrackingKey]*BotActivity),
+			ActivityMutex: &sync.RWMutex{},
+			ChainMutex:    &sync.RWMutex{},
+			LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+			Config: &AppConfig{
+				HAProxyAddresses:    []string{"127.0.0.1:9999"},
+				DurationToTableName: map[time.Duration]string{time.Minute: "t1"},
+			},
+		}
+
+		// Manually set a blocked IP that is also on the whitelist.
+		blockedIP := "192.0.2.100"
+		trackingKey := TrackingKey{IPInfo: NewIPInfo(blockedIP)}
+		processor.ActivityStore[trackingKey] = &BotActivity{
+			IsBlocked:    true,
+			BlockedUntil: time.Now().Add(time.Hour),
+		}
+		_, ipNet, _ := net.ParseCIDR(blockedIP + "/32")
+		processor.Config.WhitelistNets = []*net.IPNet{ipNet}
+
+		// --- Act ---
+		processor.CheckAndRemoveWhitelistedBlocks()
+
+		// --- Assert ---
+		// The IP should remain blocked in memory because the HAProxy command failed.
+		if !processor.ActivityStore[trackingKey].IsBlocked {
+			t.Error("Expected IsBlocked to remain true after a failed unblock attempt, but it was set to false.")
+		}
+	})
 }
 
 func TestChainWatcher_Reload(t *testing.T) {
