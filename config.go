@@ -524,21 +524,21 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 	}
 
 	return &LoadedConfig{
+		BlockTableNameFallback: newFallbackName,
 		Chains:                 newChains,
-		WhitelistNets:          newWhitelistNets,
+		CleanupInterval:        cleanupInterval,
+		DurationToTableName:    newDurationTables,
+		FileDependencies:       fileDependencies,
 		HAProxyAddresses:       config.HAProxyAddresses,
+		HAProxyDialTimeout:     haProxyDialTimeout,
 		HAProxyMaxRetries:      haProxyMaxRetries,
 		HAProxyRetryDelay:      haProxyRetryDelay,
-		HAProxyDialTimeout:     haProxyDialTimeout,
-		DurationToTableName:    newDurationTables,
-		BlockTableNameFallback: newFallbackName,
-		PollingInterval:        pollingInterval,
-		CleanupInterval:        cleanupInterval,
 		IdleTimeout:            idleTimeout,
-		OutOfOrderTolerance:    outOfOrderTolerance,
 		LogLevel:               logLevelStr,
 		MaxTimeSinceLastHit:    maxTimeSinceLastHit,
-		FileDependencies:       fileDependencies,
+		OutOfOrderTolerance:    outOfOrderTolerance,
+		PollingInterval:        pollingInterval,
+		WhitelistNets:          newWhitelistNets,
 	}, nil
 }
 

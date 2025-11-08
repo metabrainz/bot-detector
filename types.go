@@ -39,43 +39,60 @@ type Processor struct {
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
 type AppConfig struct {
-	WhitelistNets               []*net.IPNet
+	BlockTableNameFallback      string
+	CleanupInterval             time.Duration
+	DurationToTableName         map[time.Duration]string
+	FileDependencies            []string // List of file paths used in `file:` matchers.
 	HAProxyAddresses            []string
+	HAProxyDialTimeout          time.Duration
 	HAProxyMaxRetries           int
 	HAProxyRetryDelay           time.Duration
-	HAProxyDialTimeout          time.Duration
-	DurationToTableName         map[time.Duration]string
-	BlockTableNameFallback      string
-	LastModTime                 time.Time
-	PollingInterval             time.Duration
 	IdleTimeout                 time.Duration
-	CleanupInterval             time.Duration
+	LastModTime                 time.Time
 	MaxTimeSinceLastHit         time.Duration // The longest min_time_since_last_hit duration across all chains.
 	OutOfOrderTolerance         time.Duration // Max duration an out-of-order log entry will be processed.
-	FileDependencies            []string      // List of file paths used in `file:` matchers.
+	PollingInterval             time.Duration
+	WhitelistNets               []*net.IPNet
 	testOverridePollingInterval time.Duration // Unexported field for test-only overrides.
 }
 
 // LoadedConfig encapsulates all configuration data loaded from the YAML file.
 type LoadedConfig struct {
+	BlockTableNameFallback string
 	Chains                 []BehavioralChain
-	WhitelistNets          []*net.IPNet
+	CleanupInterval        time.Duration
+	DurationToTableName    map[time.Duration]string
+	FileDependencies       []string
 	HAProxyAddresses       []string
+	HAProxyDialTimeout     time.Duration
 	HAProxyMaxRetries      int
 	HAProxyRetryDelay      time.Duration
-	HAProxyDialTimeout     time.Duration
-	DurationToTableName    map[time.Duration]string
-	BlockTableNameFallback string
-	PollingInterval        time.Duration
-	CleanupInterval        time.Duration
 	IdleTimeout            time.Duration
-	OutOfOrderTolerance    time.Duration
 	LogLevel               string
 	MaxTimeSinceLastHit    time.Duration
-	FileDependencies       []string
+	OutOfOrderTolerance    time.Duration
+	PollingInterval        time.Duration
+	WhitelistNets          []*net.IPNet
 }
 
 // --- YAML DATA STRUCTURES ---
+
+type ChainConfig struct {
+	Chains               []BehavioralChainYAML `yaml:"chains"`
+	CleanupInterval      string                `yaml:"cleanup_interval"`
+	DefaultBlockDuration string                `yaml:"default_block_duration"`
+	DurationTables       map[string]string     `yaml:"duration_tables"`
+	HAProxyAddresses     []string              `yaml:"haproxy_addresses"`
+	HAProxyDialTimeout   string                `yaml:"haproxy_dial_timeout"`
+	HAProxyMaxRetries    int                   `yaml:"haproxy_max_retries"`
+	HAProxyRetryDelay    string                `yaml:"haproxy_retry_delay"`
+	IdleTimeout          string                `yaml:"idle_timeout"`
+	LogLevel             string                `yaml:"log_level"`
+	OutOfOrderTolerance  string                `yaml:"out_of_order_tolerance"`
+	PollingInterval      string                `yaml:"poll_interval"`
+	Version              string                `yaml:"version"`
+	WhitelistCIDRs       []string              `yaml:"whitelist_cidrs"`
+}
 
 type StepDefYAML struct {
 	Order               int
@@ -86,28 +103,11 @@ type StepDefYAML struct {
 }
 
 type BehavioralChainYAML struct {
-	Name          string        `yaml:"name"`
-	Steps         []StepDefYAML `yaml:"steps"`
 	Action        string        `yaml:"action"`
 	BlockDuration string        `yaml:"block_duration"`
 	MatchKey      string        `yaml:"match_key"`
-}
-
-type ChainConfig struct {
-	Version              string                `yaml:"version"`
-	LogLevel             string                `yaml:"log_level"`
-	PollingInterval      string                `yaml:"poll_interval"`
-	CleanupInterval      string                `yaml:"cleanup_interval"`
-	IdleTimeout          string                `yaml:"idle_timeout"`
-	OutOfOrderTolerance  string                `yaml:"out_of_order_tolerance"`
-	Chains               []BehavioralChainYAML `yaml:"chains"`
-	WhitelistCIDRs       []string              `yaml:"whitelist_cidrs"`
-	HAProxyAddresses     []string              `yaml:"haproxy_addresses"`
-	DurationTables       map[string]string     `yaml:"duration_tables"`
-	DefaultBlockDuration string                `yaml:"default_block_duration"`
-	HAProxyMaxRetries    int                   `yaml:"haproxy_max_retries"`
-	HAProxyRetryDelay    string                `yaml:"haproxy_retry_delay"`
-	HAProxyDialTimeout   string                `yaml:"haproxy_dial_timeout"`
+	Name          string        `yaml:"name"`
+	Steps         []StepDefYAML `yaml:"steps"`
 }
 
 // --- RUNTIME DATA STRUCTURES ---

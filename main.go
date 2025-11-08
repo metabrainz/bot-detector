@@ -31,19 +31,19 @@ func main() {
 
 	// Create the config struct from the loaded data.
 	appConfig := &AppConfig{
-		WhitelistNets:          loadedCfg.WhitelistNets,
+		BlockTableNameFallback: loadedCfg.BlockTableNameFallback,
+		CleanupInterval:        loadedCfg.CleanupInterval,
+		DurationToTableName:    loadedCfg.DurationToTableName,
 		HAProxyAddresses:       loadedCfg.HAProxyAddresses,
+		HAProxyDialTimeout:     loadedCfg.HAProxyDialTimeout,
 		HAProxyMaxRetries:      loadedCfg.HAProxyMaxRetries,
 		HAProxyRetryDelay:      loadedCfg.HAProxyRetryDelay,
-		HAProxyDialTimeout:     loadedCfg.HAProxyDialTimeout,
-		DurationToTableName:    loadedCfg.DurationToTableName,
-		BlockTableNameFallback: loadedCfg.BlockTableNameFallback,
-		LastModTime:            time.Now(),
-		PollingInterval:        loadedCfg.PollingInterval,
 		IdleTimeout:            loadedCfg.IdleTimeout,
-		CleanupInterval:        loadedCfg.CleanupInterval,
-		OutOfOrderTolerance:    loadedCfg.OutOfOrderTolerance,
+		LastModTime:            time.Now(),
 		MaxTimeSinceLastHit:    loadedCfg.MaxTimeSinceLastHit,
+		OutOfOrderTolerance:    loadedCfg.OutOfOrderTolerance,
+		PollingInterval:        loadedCfg.PollingInterval,
+		WhitelistNets:          loadedCfg.WhitelistNets,
 	}
 
 	// Initialize the Processor instance.
