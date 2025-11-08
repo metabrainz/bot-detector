@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -646,5 +647,43 @@ func TestExecuteHAProxyCommandImpl_RetryLogging(t *testing.T) {
 	<-logReceived // Wait for the retry log to be captured.
 	if !strings.Contains(capturedLog, "Retrying HAProxy command") {
 		t.Errorf("Expected a 'HAPROXY_RETRY' log message, but got: '%s'", capturedLog)
+	}
+}
+
+// TestExecuteHAProxyCommandImpl_UnixSocket tests successful command execution over a Unix domain socket.
+func TestExecuteHAProxyCommandImpl_UnixSocket(t *testing.T) {
+	// --- Setup ---
+	// Create a temporary Unix socket path.
+	tmpDir := t.TempDir()
+	socketPath := filepath.Join(tmpDir, "haproxy.sock")
+
+	// Start a minimal Unix socket server that returns an empty response (success).
+	l, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Failed to listen on Unix socket: %v", err)
+	}
+	defer l.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		conn, err := l.Accept()
+		if err != nil {
+			return // Expected on listener close
+		}
+		defer conn.Close()
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')   // Read the command
+		_, _ = conn.Write([]byte(" \n")) // Write success response
+	}()
+
+	processor := &Processor{
+		Config:  &AppConfig{HAProxyMaxRetries: 1, HAProxyDialTimeout: 100 * time.Millisecond},
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
+	}
+	err = executeCommandImpl(processor, socketPath, "192.0.2.1", "set table foo key bar\n")
+	if err != nil {
+		t.Fatalf("Expected success for Unix socket command, got error: %v", err)
 	}
 }
