@@ -632,6 +632,11 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}) {
 
 			// Cleanup any blocked IPs (This function still uses global state)
 			p.CheckAndRemoveWhitelistedBlocks()
+
+			// Signal for test synchronization, if the channel is set.
+			if p.testReloadSignal != nil {
+				p.testReloadSignal <- struct{}{}
+			}
 		}
 	}
 }

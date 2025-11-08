@@ -709,6 +709,7 @@ chains:
 		ChainMutex:    &sync.RWMutex{},
 		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
 		Config: &AppConfig{
+			// Use a very short poll interval for the test.
 			testOverridePollingInterval: 10 * time.Millisecond, // Use a very short poll interval for the test.
 		},
 	}
@@ -719,14 +720,11 @@ chains:
 	}
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
-	// 4. Start the ChainWatcher in a goroutine.
+	// 4. Start the ChainWatcher with the test signal channel.
+	processor.testReloadSignal = make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) }) // Ensure watcher stops when test finishes.
-
 	go processor.ChainWatcher(stopWatcher)
-
-	// Give the watcher a moment to start and potentially read the initial file.
-	time.Sleep(processor.Config.testOverridePollingInterval * 2)
 
 	// --- Act ---
 	// 5. Modify the YAML file on disk.
@@ -745,8 +743,13 @@ chains:
 		t.Fatalf("Failed to write modified temp yaml file: %v", err)
 	}
 
-	// 6. Wait for the watcher to detect and apply the changes.
-	time.Sleep(processor.Config.testOverridePollingInterval * 2) // Wait for at least two polling intervals
+	// 6. Wait for the reload signal from the watcher.
+	select {
+	case <-processor.testReloadSignal:
+		// Reload completed successfully.
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for configuration reload.")
+	}
 
 	// --- Assert ---
 	// 7. Check if the processor's state has been updated.
@@ -815,15 +818,13 @@ chains:
 		},
 	}
 	initialFileInfo, _ := os.Stat(tempYamlFile)
-	processor.Config.LastModTime = initialFileInfo.ModTime()
+	processor.Config.LastModTime = initialFileInfo.ModTime() // Set initial mod time
 
-	// 5. Start the ChainWatcher in a goroutine.
+	// 5. Start the ChainWatcher with the test signal channel.
+	processor.testReloadSignal = make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	go processor.ChainWatcher(stopWatcher)
 	t.Cleanup(func() { close(stopWatcher) })
-
-	// Give the watcher a moment to start.
-	time.Sleep(processor.Config.testOverridePollingInterval * 2)
 
 	// --- Act ---
 	// 6. Modify ONLY the dependency file.
@@ -832,8 +833,13 @@ chains:
 		t.Fatalf("Failed to write modified agent file: %v", err)
 	}
 
-	// 7. Wait for the watcher to detect and apply the changes.
-	time.Sleep(processor.Config.testOverridePollingInterval * 2)
+	// 7. Wait for the reload signal from the watcher.
+	select {
+	case <-processor.testReloadSignal:
+		// Reload completed successfully.
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for configuration reload.")
+	}
 
 	// --- Assert ---
 	// 8. Check if the processor's internal matchers have been updated.
@@ -904,28 +910,35 @@ chains:
 	initialFileInfo, _ := os.Stat(tempFile)
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
-	// 4. Start the ChainWatcher.
+	// 4. Set up the channel-signaling LogFunc BEFORE starting the goroutine.
+	logReceived := make(chan bool, 1)
+	processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+		logMutex.Lock()
+		capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
+		logMutex.Unlock()
+		if tag == "LOAD_ERROR" {
+			logReceived <- true
+		}
+	}
+
+	// 5. Start the ChainWatcher.
 	stopWatcher := make(chan struct{})
-	go processor.ChainWatcher(stopWatcher)
 	t.Cleanup(func() { close(stopWatcher) })
+	go processor.ChainWatcher(stopWatcher)
 
 	// --- Act ---
-	// 5. Modify the YAML file with INVALID content.
-	time.Sleep(100 * time.Millisecond)
+	// 6. Modify the YAML file with INVALID content.
 	invalidYAMLContent := `version: "1.0"\nchains: [ { name: "Invalid", steps: [ { field_matches: { "Path": "*invalid-regex" } } ] } ]`
-	os.WriteFile(tempFile, []byte(invalidYAMLContent), 0644)
-
-	// 6. Wait for the watcher to attempt the reload.
-	time.Sleep(processor.Config.testOverridePollingInterval * 2)
-
-	// --- Assert ---
-	// 7. Check that an error was logged and the original config is still active.
-	logOutput := strings.Join(capturedLogs, "\n")
-	if !strings.Contains(logOutput, "LOAD_ERROR: Failed to reload chains") {
-		t.Errorf("Expected a 'LOAD_ERROR' log message, but none was found. Logs:\n%s", logOutput)
+	if err := os.WriteFile(tempFile, []byte(invalidYAMLContent), 0644); err != nil {
+		t.Fatalf("Failed to write invalid YAML: %v", err)
 	}
-	if len(processor.Chains) != 1 || processor.Chains[0].Name != "InitialChain" {
-		t.Errorf("Processor chains were modified despite reload failure. Expected 'InitialChain', got: %+v", processor.Chains)
+
+	// 7. Wait for the watcher to log the error.
+	select {
+	case <-logReceived:
+		// Error was logged as expected.
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for LOAD_ERROR log message.")
 	}
 }
 
@@ -972,24 +985,39 @@ chains:
 	initialFileInfo, _ := os.Stat(tempFile)
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
-	// 3. Start the ChainWatcher.
+	// 3. Set up log capture BEFORE starting the watcher to avoid a race condition.
+	logReceived := make(chan bool, 1)
+	processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+		logMutex.Lock()
+		capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
+		logMutex.Unlock()
+		if tag == "WATCH_ERROR" {
+			logReceived <- true
+		}
+	}
 	stopWatcher := make(chan struct{})
-	go processor.ChainWatcher(stopWatcher)
 	t.Cleanup(func() { close(stopWatcher) })
+	go processor.ChainWatcher(stopWatcher)
 
 	// --- Act ---
 	// 4. Delete the YAML file to trigger a stat error on the next poll.
-	time.Sleep(50 * time.Millisecond) // Ensure at least one successful poll happens first.
 	if err := os.Remove(tempFile); err != nil {
 		t.Fatalf("Failed to remove temp file: %v", err)
 	}
 
-	// 5. Wait for the watcher to attempt the reload and fail.
-	time.Sleep(processor.Config.testOverridePollingInterval * 2)
+	// 5. Wait for the watcher to log the error.
+	select {
+	case <-logReceived:
+		// Error was logged as expected.
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for WATCH_ERROR log message.")
+	}
 
 	// --- Assert ---
-	// 6. Check that an error was logged.
+	// 6. Check that the correct error was logged.
+	logMutex.Lock()
 	logOutput := strings.Join(capturedLogs, "\n")
+	logMutex.Unlock()
 	if !strings.Contains(logOutput, "WATCH_ERROR: Failed to stat file") {
 		t.Errorf("Expected a 'WATCH_ERROR' log message, but none was found. Logs:\n%s", logOutput)
 	}

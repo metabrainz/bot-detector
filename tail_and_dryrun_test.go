@@ -367,9 +367,13 @@ func TestLiveLogTailer(t *testing.T) {
 	// --- Mocks and Captures ---
 	var processedLines []string
 	var logMutex sync.Mutex
+	lineProcessed := make(chan string, 1) // Channel to signal when a line is processed.
+
 	mockProcessLogLine := func(line string, lineNumber int) {
 		logMutex.Lock()
 		processedLines = append(processedLines, line)
+		// Send the processed line to the channel to unblock the test.
+		lineProcessed <- line
 		logMutex.Unlock()
 	}
 
@@ -388,6 +392,8 @@ func TestLiveLogTailer(t *testing.T) {
 	// Run LiveLogTailer in a goroutine so we can interact with it.
 	go func() {
 		LiveLogTailer(processor, signalCh)
+		// When LiveLogTailer exits, close the 'done' channel to signal completion.
+		// This is crucial for the test's final assertion.
 		close(done)
 	}()
 
@@ -411,8 +417,13 @@ func TestLiveLogTailer(t *testing.T) {
 	}
 	f.Close()
 
-	// Wait for the tailer to process the new line.
-	time.Sleep(EOFPollingDelay * 2)
+	// Wait for the tailer to process the new line by listening on the channel.
+	select {
+	case <-lineProcessed:
+		// Line was processed successfully.
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for 'new line 1' to be processed.")
+	}
 
 	// --- Assert 2: The new line should be processed ---
 	logMutex.Lock()
@@ -431,8 +442,13 @@ func TestLiveLogTailer(t *testing.T) {
 		t.Fatalf("Failed to create new log file after rotation: %v", err)
 	}
 
-	// Wait for the tailer to detect rotation and process the line in the new file.
-	time.Sleep(EOFPollingDelay * 2)
+	// Wait for the tailer to process the line from the new file.
+	select {
+	case <-lineProcessed:
+		// Line was processed successfully.
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for 'rotated line' to be processed.")
+	}
 
 	// --- Assert 3: The line from the new file should be processed ---
 	logMutex.Lock()
@@ -444,11 +460,9 @@ func TestLiveLogTailer(t *testing.T) {
 	// --- Cleanup: Send shutdown signal ---
 	// Stop the tailer to ensure a clean exit and prevent race conditions.
 	signalCh <- syscall.SIGTERM
-	select {
-	case <-done:
-	case <-time.After(1 * time.Second):
-		t.Error("LiveLogTailer did not shut down gracefully after test completion.")
-	}
+	// Wait for the tailer to shut down gracefully.
+	// The test will fail on a timeout if the tailer hangs.
+	<-done
 }
 
 func TestLiveLogTailer_Shutdown(t *testing.T) {
@@ -650,6 +664,9 @@ func TestLiveLogTailer_InitialOpenErrorAndShutdown(t *testing.T) {
 // TestLiveLogTailer_ReadError simulates a read error occurring mid-tail,
 // forcing the tailer to log the error and attempt to reopen the file.
 func TestLiveLogTailer_ReadError(t *testing.T) {
+	// This test uses a channel to synchronize with the tailer, avoiding long sleeps.
+	errorLogged := make(chan bool, 1)
+
 	// --- Setup: Use a pipe to simulate a file and control read errors ---
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -674,6 +691,10 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
 			logMutex.Lock()
 			capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
+			if tag == "TAIL_ERROR" && strings.Contains(format, "Read error") {
+				// Signal that the expected error has been logged.
+				errorLogged <- true
+			}
 			logMutex.Unlock()
 		},
 		ProcessLogLine: func(line string, lineNumber int) {},
@@ -699,8 +720,13 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 	w.Close()
 	r.Close()
 
-	// Wait for the error to be logged, then shut down the tailer.
-	time.Sleep(ErrorRetryDelay + 50*time.Millisecond)
+	// Wait for the tailer to log the read error. This replaces the long sleep.
+	select {
+	case <-errorLogged:
+		// The error was logged as expected.
+	case <-time.After(1 * time.Second): // Use a generous timeout for safety.
+		t.Fatal("Timed out waiting for the tailer to log a read error.")
+	}
 	signalCh <- syscall.SIGINT
 
 	// --- Assert ---

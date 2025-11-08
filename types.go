@@ -33,6 +33,7 @@ type Processor struct {
 	Blocker           Blocker
 	CommandExecutor   func(p *Processor, addr, ip, command string) error // The function that executes the backend command
 	Config            *AppConfig
+	testReloadSignal  chan struct{} // Unexported channel for test synchronization
 }
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
