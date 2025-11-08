@@ -79,3 +79,56 @@ func TestCleanUpIdleActivity(t *testing.T) {
 		t.Error("Expected 'blocked' key to remain, but it was cleaned up.")
 	}
 }
+
+func TestCleanUpIdleActivity_MinTimeSinceLastHit(t *testing.T) {
+	// This test specifically validates the cleanup logic for IPs that are no longer
+	// relevant for `min_time_since_last_hit` rules.
+
+	// 1. Setup
+	resetGlobalState()
+
+	processor := &Processor{
+		ActivityStore: make(map[TrackingKey]*BotActivity),
+		ActivityMutex: &sync.RWMutex{},
+		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+		Config: &AppConfig{
+			// A general idle timeout that is very long.
+			IdleTimeout: 1 * time.Hour,
+			// A specific, shorter timeout for the time-based rule optimization.
+			MaxTimeSinceLastHit: 5 * time.Minute,
+			CleanupInterval:     10 * time.Millisecond,
+		},
+	}
+
+	// 2. Create different activity states
+	now := time.Now()
+	// This IP was last seen 6 minutes ago, which is > MaxTimeSinceLastHit. It should be cleaned up.
+	keyUselessForTimeRule := TrackingKey{IPInfo: NewIPInfo("192.0.2.10")}
+	// This IP was last seen 4 minutes ago, which is < MaxTimeSinceLastHit. It should be kept.
+	keyStillRelevantForTimeRule := TrackingKey{IPInfo: NewIPInfo("192.0.2.20")}
+
+	processor.ActivityMutex.Lock()
+	processor.ActivityStore[keyUselessForTimeRule] = &BotActivity{LastRequestTime: now.Add(-6 * time.Minute)}
+	processor.ActivityStore[keyStillRelevantForTimeRule] = &BotActivity{LastRequestTime: now.Add(-4 * time.Minute)}
+	processor.ActivityMutex.Unlock()
+
+	// --- Act ---
+	stopChan := make(chan struct{})
+	go processor.CleanUpIdleActivity(stopChan)
+
+	// Wait long enough for the ticker to fire at least once.
+	time.Sleep(processor.Config.CleanupInterval * 2)
+
+	close(stopChan)
+
+	// --- Assert ---
+	processor.ActivityMutex.RLock()
+	defer processor.ActivityMutex.RUnlock()
+
+	if _, exists := processor.ActivityStore[keyUselessForTimeRule]; exists {
+		t.Error("Expected key older than MaxTimeSinceLastHit to be cleaned up, but it still exists.")
+	}
+	if _, exists := processor.ActivityStore[keyStillRelevantForTimeRule]; !exists {
+		t.Error("Expected key still relevant for MaxTimeSinceLastHit to remain, but it was cleaned up.")
+	}
+}
