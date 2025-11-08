@@ -45,20 +45,8 @@ chains:
     steps:
       - field_matches: { Path: "/default" }
 `
-	// Use t.TempDir() to create a temporary directory that is automatically cleaned up.
-	tempDir := t.TempDir()
-	tempFile := filepath.Join(tempDir, "chains.yaml")
-	if err := os.WriteFile(tempFile, []byte(yamlContent), 0644); err != nil {
-		t.Fatalf("Failed to write temp yaml file: %v", err)
-	}
-
-	// Point the global YAMLFilePath to our temp file
-	originalPath := YAMLFilePath
-	YAMLFilePath = tempFile
-	t.Cleanup(func() {
-		YAMLFilePath = originalPath
-		resetGlobalState()
-	})
+	setupTestYAML(t, yamlContent)
+	t.Cleanup(resetGlobalState)
 
 	// --- Act ---
 	loadedCfg, err := LoadChainsFromYAML() // Now returns *LoadedConfig, error
@@ -120,6 +108,68 @@ chains:
 
 	if !IsIPWhitelistedInList(NewIPInfo("10.0.0.1"), loadedCfg.WhitelistNets) {
 		t.Error("Expected bare IPv4 '10.0.0.1' to be whitelisted, but it was not.")
+	}
+}
+
+func setupTestYAML(t *testing.T, content string) {
+	t.Helper() // Mark this as a test helper function.
+
+	tempDir := t.TempDir()
+	tempFile := filepath.Join(tempDir, "chains.yaml")
+	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write temp yaml file: %v", err)
+	}
+
+	originalPath := YAMLFilePath
+	YAMLFilePath = tempFile
+	t.Cleanup(func() {
+		YAMLFilePath = originalPath
+	})
+}
+
+func TestLoadChainsFromYAML_HAProxySettings(t *testing.T) {
+	tests := []struct {
+		name                string
+		yamlContent         string
+		expectedMaxRetries  int
+		expectedRetryDelay  time.Duration
+		expectedDialTimeout time.Duration
+		expectError         bool
+	}{
+		{
+			name: "Custom values",
+			yamlContent: `
+version: "1.0"
+haproxy_max_retries: 5
+haproxy_retry_delay: "300ms"
+haproxy_dial_timeout: "10s"
+`,
+			expectedMaxRetries:  5,
+			expectedRetryDelay:  300 * time.Millisecond,
+			expectedDialTimeout: 10 * time.Second,
+		},
+		{
+			name: "Default values",
+			yamlContent: `
+version: "1.0"
+`,
+			expectedMaxRetries:  DefaultHAProxyMaxRetries,
+			expectedRetryDelay:  DefaultHAProxyRetryDelay,
+			expectedDialTimeout: DefaultHAProxyDialTimeout,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupTestYAML(t, tt.yamlContent)
+			loadedCfg, err := LoadChainsFromYAML()
+			if err != nil {
+				t.Fatalf("LoadChainsFromYAML() failed: %v", err)
+			}
+			if loadedCfg.HAProxyMaxRetries != tt.expectedMaxRetries || loadedCfg.HAProxyRetryDelay != tt.expectedRetryDelay || loadedCfg.HAProxyDialTimeout != tt.expectedDialTimeout {
+				t.Errorf("HAProxy settings mismatch. Got retries=%d, delay=%v, timeout=%v. Expected retries=%d, delay=%v, timeout=%v", loadedCfg.HAProxyMaxRetries, loadedCfg.HAProxyRetryDelay, loadedCfg.HAProxyDialTimeout, tt.expectedMaxRetries, tt.expectedRetryDelay, tt.expectedDialTimeout)
+			}
+		})
 	}
 }
 
@@ -277,15 +327,12 @@ chains:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tempDir := t.TempDir()
-			tempFile := filepath.Join(tempDir, "test_chains.yaml")
-			if tt.yamlContent != "" {
-				os.WriteFile(tempFile, []byte(tt.yamlContent), 0644)
+			if tt.name == "File Not Found" {
+				// For this specific test, ensure the file does not exist.
+				YAMLFilePath = filepath.Join(t.TempDir(), "nonexistent.yaml")
+			} else {
+				setupTestYAML(t, tt.yamlContent)
 			}
-
-			originalPath := YAMLFilePath
-			YAMLFilePath = tempFile
-			t.Cleanup(func() { YAMLFilePath = originalPath })
 
 			// For tests that expect non-fatal errors, we can suppress the log output
 			// to keep the test runner output clean.
