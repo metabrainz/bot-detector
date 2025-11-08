@@ -85,8 +85,6 @@ func (p *Processor) handleOutOfOrderEntry(entry *LogEntry, currentActivity *BotA
 // It updates the activity state and returns true if the chain was completed.
 // The caller is responsible for holding the ActivityMutex.
 func (p *Processor) handleChainCompletion(chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity) {
-	isWhitelisted := p.IsWhitelistedFunc(entry.IPInfo)
-
 	// --- 1. Log the completion event ---
 	logLevel := LevelCritical
 	if isTesting() {
@@ -94,39 +92,20 @@ func (p *Processor) handleChainCompletion(chain *BehavioralChain, entry *LogEntr
 	}
 
 	if p.DryRun {
-		// In dry-run, log the intended action with a specific tag.
-		switch chain.Action {
-		case "block":
-			p.LogFunc(LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
-		case "log":
-			p.LogFunc(LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s. Action set to 'log' (DryRun).", chain.Name, entry.IPInfo.Address)
-		default:
-			p.LogFunc(LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s. Unrecognized action '%s' (DryRun).", chain.Name, entry.IPInfo.Address, chain.Action)
-		}
+		p.logDryRunCompletion(chain, entry)
 	} else {
 		// In live mode, log the action taken.
 		switch chain.Action {
 		case "block":
 			p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v.", chain.Name, entry.IPInfo.Address, chain.BlockDuration)
 		case "log":
-			baseMessage := fmt.Sprintf("LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IPInfo.Address)
-			if isWhitelisted {
-				p.LogFunc(logLevel, "ALERT", "%s (IP is whitelisted: NO FURTHER ACTION TAKEN)", baseMessage)
-			} else {
-				p.LogFunc(logLevel, "ALERT", baseMessage)
-			}
+			p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IPInfo.Address)
 		}
 	}
 
 	// --- 2. Perform the action ---
 	if chain.Action == "block" {
-		// Call the external blocker (e.g., HAProxy), unless in DryRun or whitelisted.
-		if !p.DryRun && !isWhitelisted {
-			if err := p.Blocker.Block(entry.IPInfo, chain.BlockDuration); err != nil {
-				// Error is logged inside Block, no action needed here.
-			}
-		}
-
+		p.executeBlock(entry, chain)
 		// Update the in-memory state to reflect the block for both live and dry runs.
 		ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
 		ipActivity := GetOrCreateActivityUnsafe(p.ActivityStore, ipOnlyKey)
@@ -135,6 +114,28 @@ func (p *Processor) handleChainCompletion(chain *BehavioralChain, entry *LogEntr
 
 		currentActivity.IsBlocked = true
 		currentActivity.BlockedUntil = ipActivity.BlockedUntil
+	}
+}
+
+// executeBlock calls the external blocker unless in DryRun mode.
+func (p *Processor) executeBlock(entry *LogEntry, chain *BehavioralChain) {
+	if p.DryRun {
+		return
+	}
+	if err := p.Blocker.Block(entry.IPInfo, chain.BlockDuration); err != nil {
+		// Error is logged inside Block, no action needed here.
+	}
+}
+
+// logDryRunCompletion handles logging for completed chains in dry-run mode.
+func (p *Processor) logDryRunCompletion(chain *BehavioralChain, entry *LogEntry) {
+	switch chain.Action {
+	case "block":
+		p.LogFunc(LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
+	case "log":
+		p.LogFunc(LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s. Action set to 'log' (DryRun).", chain.Name, entry.IPInfo.Address)
+	default:
+		p.LogFunc(LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s. Unrecognized action '%s' (DryRun).", chain.Name, entry.IPInfo.Address, chain.Action)
 	}
 }
 
@@ -236,15 +237,13 @@ func (p *Processor) processChainForEntry(chain *BehavioralChain, entry *LogEntry
 
 // CheckChains is refactored as a method on Processor.
 func (p *Processor) CheckChains(entry *LogEntry) {
-
-	// Immediately skip processing if the IP is whitelisted.
+	// Immediately skip processing if the IP is whitelisted. This is the primary guard.
 	if p.IsWhitelistedFunc(entry.IPInfo) {
 		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IPInfo.Address)
 		return
 	}
 
-	// Determine the most specific tracking key required by any matching chain.
-	// This ensures we use the correct BotActivity store for the request.
+	// Determine the most specific tracking key required by any applicable chain.
 	primaryKeySpecificity := 0 // 0=none, 1=ip, 2=ip_ua
 	p.ChainMutex.RLock()
 	chains := p.Chains

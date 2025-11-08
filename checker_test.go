@@ -726,6 +726,7 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 		DryRun:            false,
 		IsWhitelistedFunc: mockIsWhitelisted, // Inject mock whitelisting
 		LogFunc:           logCaptureFunc,
+		CheckChainsFunc:   func(entry *LogEntry) {}, // Dummy to prevent nil panic
 	}
 
 	whitelistedKey := GetTrackingKey(&chain, whitelistedEntry)
@@ -733,18 +734,19 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 	// --- ACT: Process the whitelisted request ---
 	processor.CheckChains(whitelistedEntry) // Process the 'block' action chain
 
-	// --- Assertions for Whitelisted IP ---
-	processor.ActivityMutex.RLock()
-	_, exists := processor.ActivityStore[whitelistedKey]
-
+	// --- Assertions for Whitelisted IP (should be skipped) ---
+	var activity *BotActivity
+	var exists bool
+	processor.ActivityMutex.RLock() // Lock before accessing the map
+	activity, exists = processor.ActivityStore[whitelistedKey]
 	processor.ActivityMutex.RUnlock()
-
-	if exists {
-		t.Errorf("Activity state exists for whitelisted IP %s, but it should have been skipped.", whitelistedIP)
-	}
 
 	if blockCalled {
 		t.Fatal("Blocker was called, but should be skipped for a whitelisted IP.")
+	}
+
+	if exists {
+		t.Errorf("Activity state exists for whitelisted IP %s, but it should have been skipped entirely.", whitelistedIP)
 	}
 
 	// Bonus check: ensure a non-whitelisted IP works normally
@@ -755,12 +757,13 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 	}
 
 	// --- ACT: Process the non-whitelisted request ---
+	processor.CheckChainsFunc = processor.CheckChains // Set the real method for this part
 	processor.CheckChains(nonWhitelistedEntry)
 	nonWhitelistedKey := GetTrackingKey(&chain, nonWhitelistedEntry)
 
 	processor.ActivityMutex.RLock()
 	defer processor.ActivityMutex.RUnlock()
-	activity, exists := processor.ActivityStore[nonWhitelistedKey]
+	activity, exists = processor.ActivityStore[nonWhitelistedKey]
 	if !exists {
 		t.Error("Activity state for non-whitelisted IP should exist, but did not.")
 	} else {
@@ -861,6 +864,67 @@ func TestCheckChains_LogAction(t *testing.T) {
 	}
 	if len(activityFinal.ChainProgress) != 0 {
 		t.Errorf("Expected ChainProgress to be cleared for 'log' action, but has %d entries: %v", len(activityFinal.ChainProgress), activityFinal.ChainProgress)
+	}
+}
+
+// TestCheckChains_LogAction_Whitelisted verifies that when a whitelisted IP completes
+// a chain with action: "log", a specific log message is generated and no block occurs.
+func TestCheckChains_LogAction_Whitelisted(t *testing.T) {
+	// 1. Setup
+	resetGlobalState()
+
+	const whitelistedIP = "192.0.2.10"
+	chain := BehavioralChain{
+		Name:   "LogOnlyForWhitelist",
+		Action: "log",
+		Steps:  []StepDef{{Order: 1}},
+	}
+	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/trigger", new([]string))
+	chain.Steps[0].Matchers = []fieldMatcher{matcher}
+
+	// Capture log output
+	var capturedLog string
+	var logMutex sync.Mutex
+	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
+		logMutex.Lock()
+		defer logMutex.Unlock()
+		if tag == "ALERT" {
+			capturedLog = fmt.Sprintf(format, args...)
+		}
+	}
+
+	processor := &Processor{
+		ActivityMutex: &sync.RWMutex{},
+		ActivityStore: make(map[TrackingKey]*BotActivity),
+		Blocker:       &MockBlocker{},
+		ChainMutex:    &sync.RWMutex{},
+		Chains:        []BehavioralChain{chain},
+		Config:        &AppConfig{},
+		// Mock the whitelist check to always return true for our target IP
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool {
+			return ipInfo.Address == whitelistedIP
+		},
+		CheckChainsFunc: func(entry *LogEntry) {}, // Dummy func to prevent nil panic
+		LogFunc:         logCaptureFunc,
+	}
+
+	entry := &LogEntry{
+		IPInfo:    NewIPInfo(whitelistedIP),
+		Timestamp: time.Now(),
+		Path:      "/trigger",
+	}
+
+	// Set the CheckChainsFunc to the real method on the processor instance.
+	processor.CheckChainsFunc = processor.CheckChains
+
+	// --- Act ---
+	processor.CheckChains(entry)
+
+	// --- Assert ---
+	// With the corrected logic, CheckChains should exit immediately for a whitelisted IP.
+	// Therefore, no "ALERT" log should be generated.
+	if capturedLog != "" {
+		t.Errorf("Expected no log message for a whitelisted IP, but got: '%s'", capturedLog)
 	}
 }
 
