@@ -31,9 +31,7 @@ Run the application pointing to your live log file, HAProxy socket, and map file
 ```bash
 ./bot-detector \
     -log-path "/var/log/http/access.log" \
-    -yaml-path "chains.yaml" \
-    -cleanup-interval "5m" \
-    -idle-timeout "1h"
+    -yaml-path "chains.yaml"
 ```
 
 #### **Dry Run Mode (Testing)**
