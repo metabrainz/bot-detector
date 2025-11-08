@@ -338,6 +338,37 @@ func LoadChainsFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 		return nil, fmt.Errorf("invalid out_of_order_tolerance format: %w", err)
 	}
 
+	// Parse custom timestamp format if provided, otherwise use default.
+	timestampFormat := AccessLogTimeFormat
+	if config.TimestampFormat != "" {
+		timestampFormat = config.TimestampFormat
+	}
+
+	// Parse custom log format regex if provided
+	var customLogRegex *regexp.Regexp
+	if config.LogFormatRegex != "" {
+		re, err := regexp.Compile(config.LogFormatRegex)
+		if err != nil {
+			return nil, fmt.Errorf("invalid log_format_regex: %w", err)
+		}
+		// Validate that the regex has the required named capture groups.
+		requiredGroups := []string{"IP", "Timestamp"}
+		foundGroups := make(map[string]bool)
+		for _, name := range re.SubexpNames() {
+			if name != "" {
+				foundGroups[name] = true
+			}
+		}
+
+		for _, required := range requiredGroups {
+			if !foundGroups[required] {
+				return nil, fmt.Errorf("invalid log_format_regex: missing required named capture group '(?P<%s>...)'", required)
+			}
+		}
+
+		customLogRegex = re
+	}
+
 	// Parse Whitelist CIDRs
 	newWhitelistNets := make([]*net.IPNet, 0)
 	for _, cidr := range config.WhitelistCIDRs {
@@ -543,9 +574,11 @@ func LoadChainsFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 		HAProxyRetryDelay:      haProxyRetryDelay,
 		IdleTimeout:            idleTimeout,
 		LogLevel:               logLevelStr,
+		LogFormatRegex:         customLogRegex,
 		MaxTimeSinceLastHit:    maxTimeSinceLastHit,
 		OutOfOrderTolerance:    outOfOrderTolerance,
 		PollingInterval:        pollingInterval,
+		TimestampFormat:        timestampFormat,
 		WhitelistNets:          newWhitelistNets,
 	}, nil
 }
@@ -640,7 +673,9 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}, forceCheckSignal <-chan s
 				p.Config.CleanupInterval = loadedCfg.CleanupInterval
 				p.Config.IdleTimeout = loadedCfg.IdleTimeout
 				p.Config.OutOfOrderTolerance = loadedCfg.OutOfOrderTolerance
-				SetLogLevel(loadedCfg.LogLevel) // Update log level dynamically
+				p.Config.TimestampFormat = loadedCfg.TimestampFormat
+				p.LogRegex = loadedCfg.LogFormatRegex // Update the regex on the processor
+				SetLogLevel(loadedCfg.LogLevel)       // Update log level dynamically
 				p.Config.MaxTimeSinceLastHit = loadedCfg.MaxTimeSinceLastHit
 				p.Config.FileDependencies = loadedCfg.FileDependencies
 				p.Config.LastModTime = time.Now() // Use time.Now() to avoid race conditions with fast edits

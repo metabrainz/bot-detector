@@ -50,6 +50,7 @@ func main() {
 		MaxTimeSinceLastHit:    loadedCfg.MaxTimeSinceLastHit,
 		OutOfOrderTolerance:    loadedCfg.OutOfOrderTolerance,
 		PollingInterval:        loadedCfg.PollingInterval,
+		TimestampFormat:        loadedCfg.TimestampFormat,
 		WhitelistNets:          loadedCfg.WhitelistNets,
 	}
 
@@ -63,6 +64,7 @@ func main() {
 			return executeCommandImpl(p, addr, ip, command)
 		},
 		Config:   appConfig,
+		LogRegex: loadedCfg.LogFormatRegex,
 		DryRun:   DryRun,
 		signalCh: make(chan os.Signal, 1),
 		LogFunc:  LogOutput,

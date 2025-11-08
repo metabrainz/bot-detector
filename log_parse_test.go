@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -129,7 +130,11 @@ func TestParseLogLine(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			entry, err := ParseLogLine(tt.line)
+			// Create a processor to call the method on.
+			p := &Processor{
+				Config: &AppConfig{TimestampFormat: AccessLogTimeFormat},
+			}
+			entry, err := p.ParseLogLine(tt.line)
 
 			if tt.expectError {
 				if err == nil {
@@ -144,6 +149,63 @@ func TestParseLogLine(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestParseLogLine_CustomRegex verifies that a custom log format regex provided
+// in the processor's configuration is used instead of the default.
+func TestParseLogLine_CustomRegex(t *testing.T) {
+	// 1. Define a custom regex (e.g., standard combined log format without a VHost prefix).
+	customRegexString := `^(?P<IP>\S+) (?P<Identity>\S+) (?P<User>\S+) \[(?P<Timestamp>[^\]]+)\] \"(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)\" (?P<StatusCode>\d{1,3}) (?P<Size>\d+) \"(?P<Referrer>[^\"]*)\" \"(?P<UserAgent>[^\"]*)\"$`
+	customRegex, err := regexp.Compile(customRegexString)
+	if err != nil {
+		t.Fatalf("Failed to compile custom regex: %v", err)
+	}
+
+	// 2. Create a log line that matches the custom format but NOT the default format.
+	customLogLine := `198.51.100.5 - - [10/Nov/2025:13:55:36 +0000] "GET /custom/path HTTP/1.1" 404 500 "http://custom.referrer/from" "CustomAgent/1.0"`
+
+	// 3. Create a processor and assign the custom regex.
+	p := &Processor{
+		LogRegex: customRegex,
+		Config:   &AppConfig{TimestampFormat: AccessLogTimeFormat},
+	}
+
+	// 4. Act: Parse the log line using the processor with the custom regex.
+	entry, err := p.ParseLogLine(customLogLine)
+
+	// 5. Assert: The parsing should succeed and the data should be correct.
+	if err != nil {
+		t.Fatalf("p.ParseLogLine with custom regex failed unexpectedly: %v", err)
+	}
+
+	expectedTime, _ := time.Parse(AccessLogTimeFormat, "10/Nov/2025:13:55:36 +0000")
+	expectedEntry := &LogEntry{
+		Timestamp:  expectedTime,
+		IPInfo:     NewIPInfo("198.51.100.5"),
+		Method:     "GET",
+		Path:       "/custom/path",
+		Protocol:   "HTTP/1.1",
+		Referrer:   "http://custom.referrer/from",
+		StatusCode: 404,
+		UserAgent:  "CustomAgent/1.0",
+	}
+
+	if !reflect.DeepEqual(entry, expectedEntry) {
+		t.Errorf("LogEntry mismatch.\nGot:  %+v\nWant: %+v", entry, expectedEntry)
+	}
+
+	// 6. Control Assertion: Verify the default parser (processor with nil regex) FAILS.
+	defaultProcessor := &Processor{
+		Config: &AppConfig{TimestampFormat: AccessLogTimeFormat},
+	}
+	_, defaultErr := defaultProcessor.ParseLogLine(customLogLine)
+	if defaultErr == nil {
+		t.Error("Expected the default parser to fail on the custom log line, but it succeeded.")
+	}
+	expectedErrorString := "line does not match log format regex"
+	if !strings.Contains(defaultErr.Error(), expectedErrorString) {
+		t.Errorf("Expected error to contain '%s', but got: %v", expectedErrorString, defaultErr)
 	}
 }
 
@@ -173,7 +235,9 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 		MatchKey:      "ip",
 	}
 
-	p := newTestProcessor(&AppConfig{}, []BehavioralChain{chain})
+	p := newTestProcessor(&AppConfig{
+		TimestampFormat: AccessLogTimeFormat, // Set the required timestamp format
+	}, []BehavioralChain{chain})
 	p.DryRun = true
 	p.Blocker = mockBlocker
 

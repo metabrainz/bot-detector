@@ -3,6 +3,7 @@ package main
 import (
 	"net"
 	"os"
+	"regexp"
 	"sync"
 	"time"
 )
@@ -32,6 +33,7 @@ type Processor struct {
 	Config            *AppConfig
 	DryRun            bool
 	IsWhitelistedFunc func(ipInfo IPInfo) bool
+	LogRegex          *regexp.Regexp // The currently active log parsing regex.
 	CheckChainsFunc   func(entry *LogEntry)
 	signalCh          chan os.Signal
 	LogFunc           func(level LogLevel, tag string, format string, v ...interface{})
@@ -54,6 +56,7 @@ type AppConfig struct {
 	MaxTimeSinceLastHit    time.Duration // The longest min_time_since_last_hit duration across all chains.
 	OutOfOrderTolerance    time.Duration // Max duration an out-of-order log entry will be processed.
 	PollingInterval        time.Duration
+	TimestampFormat        string                            // The format for parsing timestamps from log lines.
 	StatFunc               func(string) (os.FileInfo, error) // Mockable stat function for testing.
 	WhitelistNets          []*net.IPNet
 }
@@ -72,9 +75,11 @@ type LoadedConfig struct {
 	HAProxyRetryDelay      time.Duration
 	IdleTimeout            time.Duration
 	LogLevel               string
+	LogFormatRegex         *regexp.Regexp
 	MaxTimeSinceLastHit    time.Duration
 	OutOfOrderTolerance    time.Duration
 	PollingInterval        time.Duration
+	TimestampFormat        string
 	StatFunc               func(string) (os.FileInfo, error)
 	WhitelistNets          []*net.IPNet
 }
@@ -94,8 +99,10 @@ type ChainConfig struct {
 	HAProxyRetryDelay    string                `yaml:"haproxy_retry_delay"`
 	IdleTimeout          string                `yaml:"idle_timeout"`
 	LogLevel             string                `yaml:"log_level"`
+	LogFormatRegex       string                `yaml:"log_format_regex"`
 	OutOfOrderTolerance  string                `yaml:"out_of_order_tolerance"`
 	PollingInterval      string                `yaml:"poll_interval"`
+	TimestampFormat      string                `yaml:"timestamp_format"`
 	WhitelistCIDRs       []string              `yaml:"whitelist_cidrs"`
 }
 

@@ -1178,6 +1178,7 @@ func TestDryRunMode(t *testing.T) {
 		Config: &AppConfig{
 			OutOfOrderTolerance: loadedCfg.OutOfOrderTolerance,
 			MaxTimeSinceLastHit: loadedCfg.MaxTimeSinceLastHit,
+			TimestampFormat:     loadedCfg.TimestampFormat,
 			WhitelistNets:       loadedCfg.WhitelistNets,
 		},
 		DryRun:  true,                                                                    // Simulate dry-run mode

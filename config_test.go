@@ -615,6 +615,107 @@ haproxy_dial_timeout: "1y"`,
 	}
 }
 
+func TestLoadChainsFromYAML_MissingOptionalCaptureGroup(t *testing.T) {
+	// This test verifies that a custom regex is valid even if it's missing
+	// optional capture groups like 'Referrer'.
+
+	// Regex without the 'Referrer' named capture group.
+	yamlContent := `
+version: "1.0"
+log_format_regex: '^(?P<VHost>\S+) (?P<IP>\S+) \S+ \S+ \[(?P<Timestamp>[^\]]+)\] \"(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)\" (?P<StatusCode>\d{1,3}) \d+ \"[^\"]*\" \"(?P<UserAgent>[^\"]*)\"$'
+chains: []
+`
+	setupTestYAML(t, yamlContent)
+
+	loadedCfg, err := LoadChainsFromYAML()
+	if err != nil {
+		t.Fatalf("LoadChainsFromYAML() failed unexpectedly: %v", err)
+	}
+
+	if loadedCfg.LogFormatRegex == nil {
+		t.Fatal("Expected LogFormatRegex to be loaded, but it was nil.")
+	}
+
+	// Now, test the parsing with this regex.
+	p := &Processor{
+		LogRegex: loadedCfg.LogFormatRegex,
+		Config:   &AppConfig{TimestampFormat: loadedCfg.TimestampFormat},
+	}
+	logLine := `example.com 192.0.2.1 - - [01/Jan/2025:12:00:00 +0000] "GET /path HTTP/1.1" 200 123 "http://a.real.referrer" "TestAgent/1.0"`
+
+	entry, err := p.ParseLogLine(logLine)
+	if err != nil {
+		t.Fatalf("ParseLogLine failed with a valid regex missing an optional group: %v", err)
+	}
+
+	if entry.Referrer != "" {
+		t.Errorf("Expected Referrer to be an empty string since it was not in the regex, but got: '%s'", entry.Referrer)
+	}
+	if entry.UserAgent != "TestAgent/1.0" {
+		t.Errorf("Expected UserAgent to be parsed correctly, but got: '%s'", entry.UserAgent)
+	}
+}
+
+func TestLoadChainsFromYAML_MissingRequiredCaptureGroup(t *testing.T) {
+	// This test verifies that a custom regex fails to load if it's missing
+	// a required capture group like 'IP'.
+	yamlContent := `
+version: "1.0"
+log_format_regex: '^(?P<VHost>\S+) \S+ \S+ \S+ \[(?P<Timestamp>[^\]]+)\] ".+"$'
+chains: []
+`
+	setupTestYAML(t, yamlContent)
+
+	_, err := LoadChainsFromYAML()
+	if err == nil {
+		t.Fatal("Expected an error when loading regex with missing required capture group, but got nil.")
+	}
+	if !strings.Contains(err.Error(), "missing required named capture group '(?P<IP>...)'") {
+		t.Errorf("Expected error about missing 'IP' group, but got: %v", err)
+	}
+}
+
+func TestLoadChainsFromYAML_CustomTimestampFormat(t *testing.T) {
+	// This test verifies that a custom timestamp_format is correctly loaded and used.
+	yamlContent := fmt.Sprintf(`
+version: "1.0"
+timestamp_format: "%s" # Use RFC3339 for this test
+log_format_regex: '^(?P<IP>\S+) \[(?P<Timestamp>[^\]]+)\] (?P<Path>\S+)$'
+chains: []
+`, time.RFC3339)
+
+	setupTestYAML(t, yamlContent)
+
+	loadedCfg, err := LoadChainsFromYAML()
+	if err != nil {
+		t.Fatalf("LoadChainsFromYAML() failed unexpectedly: %v", err)
+	}
+
+	if loadedCfg.TimestampFormat != time.RFC3339 {
+		t.Fatalf("Expected TimestampFormat to be loaded as RFC3339, but got: '%s'", loadedCfg.TimestampFormat)
+	}
+
+	// Now, test the parsing with this config.
+	p := &Processor{
+		LogRegex: loadedCfg.LogFormatRegex,
+		Config:   &AppConfig{TimestampFormat: loadedCfg.TimestampFormat},
+	}
+	logLine := `192.0.2.1 [2025-01-01T12:00:00Z] /test`
+
+	entry, err := p.ParseLogLine(logLine)
+	if err != nil {
+		t.Fatalf("ParseLogLine failed with a custom timestamp format: %v", err)
+	}
+
+	expectedTime, _ := time.Parse(time.RFC3339, "2025-01-01T12:00:00Z")
+	if !entry.Timestamp.Equal(expectedTime) {
+		t.Errorf("Expected parsed timestamp to be %v, but got: %v", expectedTime, entry.Timestamp)
+	}
+	if entry.Path != "/test" {
+		t.Errorf("Expected path to be /test, but got: %s", entry.Path)
+	}
+}
+
 func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 	tests := []struct {
 		name            string
