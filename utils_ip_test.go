@@ -85,6 +85,7 @@ func TestGetTrackingKey(t *testing.T) {
 		{"Mismatch: Unknown MatchKey", "bad_key", baseEntry, TrackingKey{}},
 		{"Mismatch: ipv4_ua (is IPv6)", "ipv4_ua", &LogEntry{IPInfo: NewIPInfo("2001:db8::1")}, TrackingKey{}},
 		{"Mismatch: ipv6_ua (is IPv4)", "ipv6_ua", baseEntry, TrackingKey{}},
+		{"Mismatch: Malformed IP", "ip", &LogEntry{IPInfo: NewIPInfo("1.2.3.4.5")}, TrackingKey{}},
 	}
 
 	for _, tt := range tests {
@@ -97,13 +98,6 @@ func TestGetTrackingKey(t *testing.T) {
 			}
 		})
 	}
-
-	// Add a separate test for GetIPVersion to cover the final return path.
-	t.Run("GetIPVersion Final Fallback", func(t *testing.T) {
-		if GetIPVersion("1.2.3.4.5") != VersionInvalid {
-			t.Error("Expected VersionInvalid for malformed IP string '1.2.3.4.5', but did not get it.")
-		}
-	})
 }
 
 func TestIsIPWhitelistedInList(t *testing.T) {
@@ -137,5 +131,16 @@ func TestIsIPWhitelistedInList(t *testing.T) {
 				t.Errorf("IsIPWhitelistedInList(%s) got %t, want %t", tt.ip, result, tt.expected)
 			}
 		})
+	}
+}
+
+// TestGetIPVersion_Malformed covers the edge case where a string is not a valid
+// IP but is parsed by net.ParseIP into a non-standard byte slice.
+func TestGetIPVersion_Malformed(t *testing.T) {
+	// This specific string is known to be parsed by net.ParseIP into a non-nil, 5-byte slice,
+	// which fails both ip.To4() and len(ip) == net.IPv6len checks, hitting the final return path.
+	version := GetIPVersion("1.2.3.4.5")
+	if version != VersionInvalid {
+		t.Errorf("Expected VersionInvalid for malformed IP string '1.2.3.4.5', but got version %d", version)
 	}
 }

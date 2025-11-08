@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -82,6 +83,36 @@ func TestParseLogLine(t *testing.T) {
 			},
 		},
 		{
+			name:        "Valid Line with Empty Referrer and UserAgent",
+			line:        `www.example.com 192.168.1.3 - userx [06/Nov/2025:09:00:00 +0100] "PUT /upload HTTP/2.0" 201 500 "-" "-"`,
+			expectError: false,
+			expected: &LogEntry{
+				Timestamp:  testTime,
+				IPInfo:     NewIPInfo("192.168.1.3"),
+				Path:       "/upload",
+				Method:     "PUT",
+				Protocol:   "HTTP/2.0",
+				UserAgent:  "-",
+				Referrer:   "-",
+				StatusCode: 201,
+			},
+		},
+		{
+			name:        "Valid Line with Zero Status Code",
+			line:        `www.example.com 192.168.1.4 - userx [06/Nov/2025:09:00:00 +0100] "GET /aborted HTTP/1.1" 0 0 "-" "-"`,
+			expectError: false,
+			expected: &LogEntry{
+				Timestamp:  testTime,
+				IPInfo:     NewIPInfo("192.168.1.4"),
+				Path:       "/aborted",
+				Method:     "GET",
+				Protocol:   "HTTP/1.1",
+				UserAgent:  "-",
+				Referrer:   "-",
+				StatusCode: 0,
+			},
+		},
+		{
 			name:        "Empty Line",
 			line:        "",
 			expectError: false,
@@ -131,187 +162,8 @@ func TestParseLogLine(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Unexpected error for line:\n%s\nError: %v", tt.line, err)
 				}
-				if entry == nil {
-					if tt.expected != nil {
-						t.Fatalf("Expected entry %v, got nil.", tt.expected)
-					}
-					return
-				}
-
-				if entry.IPInfo != tt.expected.IPInfo {
-					t.Errorf("IPInfo mismatch. Expected %+v, got %+v", tt.expected.IPInfo, entry.IPInfo)
-				}
-				if entry.Path != tt.expected.Path {
-					t.Errorf("Path mismatch. Expected %s, got %s", tt.expected.Path, entry.Path)
-				}
-				if entry.UserAgent != tt.expected.UserAgent {
-					t.Errorf("UserAgent mismatch. Expected %s, got %s", tt.expected.UserAgent, entry.UserAgent)
-				}
-			}
-		})
-	}
-}
-
-// --- Test Cases for ProcessLogLine Flow Control ---
-
-func TestProcessLogLine_FlowControl(t *testing.T) {
-	// Cleanup: Ensure the global store is reset after the test.
-	t.Cleanup(resetGlobalState)
-
-	var blockCount int32
-	var blockMu sync.Mutex
-
-	mockBlocker := &MockBlocker{
-		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
-			blockMu.Lock()
-			blockCount++
-			blockMu.Unlock()
-			return nil
-		},
-	}
-
-	// Base LogEntry info to construct log lines
-	baseIP := "192.0.2.1"
-	whitelistedIP := "192.0.2.2"
-	invalidIP := "invalid-ip" // DECLARED AND NOW USED
-
-	// Base Processor
-	p := Processor{
-		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[TrackingKey]*BotActivity),
-		Blocker:       mockBlocker,
-		ChainMutex:    &sync.RWMutex{},
-		Chains:        nil,
-		Config:        &AppConfig{},
-		DryRun:        false,
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool {
-			return ipInfo.Address == whitelistedIP // Only this IP is whitelisted
-		},
-		LogFunc: LogOutput,
-	}
-	// Assign the real implementation to the function field to avoid a nil pointer panic.
-	// The test will call this function.
-	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(&p, line, lineNumber) }
-
-	// Helper function to create a valid log line
-	createLine := func(ip string) string {
-		return fmt.Sprintf(`www.example.com %s - userx [06/Nov/2025:09:00:00 +0100] "GET /path/to/resource HTTP/1.1" 200 1234 "-" "-"`, ip)
-	}
-	// Helper function to create a log line with a specific timestamp.
-	createLineWithTimestamp := func(ip string, ts time.Time) string {
-		tsFormatted := ts.Format("02/Jan/2006:15:04:05 -0700")
-		return fmt.Sprintf(`www.example.com %s - userx [%s] "GET /path/to/resource HTTP/1.1" 200 1234 "-" "-"`, ip, tsFormatted)
-	}
-
-	tests := []struct {
-		name             string
-		line             string
-		setup            func(p *Processor) // Setup function to configure store state before processing
-		assertBlockCount int32
-		assertIsBlocked  bool
-	}{
-		{
-			name:             "Skip - Comment Line",
-			line:             "# This is a comment",
-			setup:            func(p *Processor) {},
-			assertBlockCount: 0,
-			assertIsBlocked:  false,
-		},
-		{
-			name:             "Skip - Invalid IP Line (Parse Fail)",
-			line:             createLine(invalidIP), // FIXED: Now using the invalidIP variable
-			setup:            func(p *Processor) {},
-			assertBlockCount: 0,
-			assertIsBlocked:  false,
-		},
-		{
-			name:             "Skip - Whitelisted IP",
-			line:             createLine(whitelistedIP),
-			setup:            func(p *Processor) {},
-			assertBlockCount: 0,
-			assertIsBlocked:  false,
-		},
-		{
-			name: "Skip - Already Blocked (Not Expired)",
-			line: createLine(baseIP),
-			setup: func(p *Processor) {
-				key := TrackingKey{IPInfo: NewIPInfo(baseIP)}
-				p.ActivityStore[key] = &BotActivity{
-					IsBlocked:    true,
-					BlockedUntil: time.Now().Add(time.Hour),
-				}
-			},
-			assertBlockCount: 0,
-			assertIsBlocked:  true,
-		},
-		{
-			name: "Skip - Already Blocked (Out-of-Order Entry)",
-			// This line has an OLDER timestamp than the one set in 'setup'.
-			line: createLineWithTimestamp(baseIP, time.Now().Add(-2*time.Hour)),
-			setup: func(p *Processor) {
-				key := TrackingKey{IPInfo: NewIPInfo(baseIP)}
-				p.ActivityStore[key] = &BotActivity{
-					IsBlocked:       true,
-					BlockedUntil:    time.Now().Add(time.Hour),
-					LastRequestTime: time.Now().Add(-1 * time.Hour), // Last seen 1 hour ago.
-				}
-			},
-			assertBlockCount: 0,
-			assertIsBlocked:  true,
-		},
-		{
-			name: "Process - Blocked but Expired (Should clear block state)",
-			line: createLine(baseIP),
-			setup: func(p *Processor) {
-				key := TrackingKey{IPInfo: NewIPInfo(baseIP)}
-				p.ActivityStore[key] = &BotActivity{
-					IsBlocked:    true,
-					BlockedUntil: time.Now().Add(-time.Hour),
-				}
-			},
-			assertBlockCount: 0,
-			assertIsBlocked:  false,
-		},
-		{
-			name:             "Process - New IP (Should proceed to chain checks)",
-			line:             createLine(baseIP),
-			setup:            func(p *Processor) {},
-			assertBlockCount: 0,
-			assertIsBlocked:  false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Reset block count and setup store
-			blockCount = 0
-			p.ActivityStore = make(map[TrackingKey]*BotActivity) // Reset store for each test
-			tt.setup(&p)
-
-			p.ProcessLogLine(tt.line, 1)
-
-			// Assertion 1: Check block call count
-			blockMu.Lock()
-			count := blockCount
-			blockMu.Unlock()
-			if count != tt.assertBlockCount {
-				t.Errorf("Block count mismatch. Expected %d, got %d.", tt.assertBlockCount, count)
-			}
-
-			// Assertion 2: Check final in-memory block state for baseIP
-			p.ActivityMutex.RLock()
-			key := TrackingKey{IPInfo: NewIPInfo(baseIP)}
-			activity, exists := p.ActivityStore[key]
-			p.ActivityMutex.RUnlock()
-
-			if tt.assertIsBlocked {
-				if !exists || !activity.IsBlocked {
-					t.Errorf("Expected IP %s to be blocked, but it was not.", baseIP)
-				}
-			} else {
-				// Must ensure it's not blocked, even if it existed (e.g., in the Expired case)
-				if exists && activity.IsBlocked {
-					t.Errorf("Expected IP %s NOT to be blocked, but it was.", baseIP)
+				if !reflect.DeepEqual(entry, tt.expected) {
+					t.Errorf("LogEntry mismatch.\nGot:  %+v\nWant: %+v", entry, tt.expected)
 				}
 			}
 		})

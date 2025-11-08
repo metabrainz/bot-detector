@@ -151,6 +151,59 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 	}
 }
 
+// TestPreCheckActivity_StillBlocked_OldEntry verifies that when an IP is already blocked,
+// and an out-of-order (older) log entry arrives, the LastRequestTime is NOT updated.
+func TestPreCheckActivity_StillBlocked_OldEntry(t *testing.T) {
+	// 1. Setup
+	resetGlobalState()
+
+	const targetIP = "192.0.2.50"
+	trackingKey := TrackingKey{IPInfo: NewIPInfo(targetIP)}
+	now := time.Now()
+
+	processor := &Processor{
+		ActivityMutex: &sync.RWMutex{},
+		ActivityStore: make(map[TrackingKey]*BotActivity),
+		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+	}
+
+	// 2. Manually create a pre-existing, non-expired block state.
+	// The last request was seen at time 'now'.
+	processor.ActivityStore[trackingKey] = &BotActivity{
+		LastRequestTime: now,
+		BlockedUntil:    now.Add(1 * time.Hour),
+		IsBlocked:       true,
+	}
+
+	// 3. Create a log entry with a timestamp OLDER than the last seen request.
+	oldEntry := &LogEntry{
+		IPInfo:    NewIPInfo(targetIP),
+		Timestamp: now.Add(-10 * time.Second), // 10 seconds in the past
+	}
+
+	// --- Act ---
+	// The preCheckActivity function is not exported, so we call CheckChains,
+	// which calls it internally. We lock the mutex to inspect the result.
+	processor.ActivityMutex.Lock()
+	_, skip := processor.preCheckActivity(oldEntry, trackingKey)
+	processor.ActivityMutex.Unlock()
+
+	// --- Assert ---
+	if !skip {
+		t.Error("Expected skip to be true for an already-blocked IP, but it was false.")
+	}
+
+	// Assert that the LastRequestTime was NOT updated because the incoming entry was older.
+	processor.ActivityMutex.RLock()
+	finalActivity := processor.ActivityStore[trackingKey]
+	processor.ActivityMutex.RUnlock()
+
+	if !finalActivity.LastRequestTime.Equal(now) {
+		t.Errorf("Expected LastRequestTime to remain unchanged, but it was updated from %v to %v",
+			now, finalActivity.LastRequestTime)
+	}
+}
+
 // TestCheckChains_DryRun tests that a block is NOT executed when DryRun is true.
 func TestCheckChains_DryRun(t *testing.T) {
 	// 1. Setup Data Structures

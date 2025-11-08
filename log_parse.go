@@ -9,7 +9,7 @@ import (
 
 // Regex for parsing the extended log format (VHost + Combined Log Format).
 var logRegex = regexp.MustCompile(
-	`^(?P<VHost>\S+) (?P<IP>\S+) (?P<Identity>\S+) (?P<User>\S+) \[(?P<Timestamp>[^\]]+)\] \"(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)\" (?P<StatusCode>\d{3}) (?P<Size>\d+) \"(?P<Referrer>[^\"]*)\" \"(?P<UserAgent>[^\"]*)\"$`,
+	`^(?P<VHost>\S+) (?P<IP>\S+) (?P<Identity>\S+) (?P<User>\S+) \[(?P<Timestamp>[^\]]+)\] \"(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)\" (?P<StatusCode>\d{1,3}) (?P<Size>\d+) \"(?P<Referrer>[^\"]*)\" \"(?P<UserAgent>[^\"]*)\"$`,
 )
 
 // AccessLogTimeFormat defines the timestamp format used in standard access logs.
@@ -29,11 +29,7 @@ func ParseLogLine(line string) (*LogEntry, error) {
 		return logRegex.SubexpIndex(name)
 	}
 
-	statusCode, err := strconv.Atoi(matches[getMatchIndex("StatusCode")])
-	if err != nil {
-		return nil, fmt.Errorf("malformed status code: %w", err)
-	}
-
+	statusCode, _ := strconv.Atoi(matches[getMatchIndex("StatusCode")])
 	timestamp, err := time.Parse(AccessLogTimeFormat, matches[getMatchIndex("Timestamp")])
 	if err != nil {
 		return nil, fmt.Errorf("malformed timestamp: %w", err)

@@ -61,25 +61,24 @@ func (p *Processor) preCheckActivity(entry *LogEntry, trackingKey TrackingKey) (
 // The caller is responsible for holding the ActivityMutex.
 func (p *Processor) handleOutOfOrderEntry(entry *LogEntry, currentActivity *BotActivity) (skip bool) {
 	previousRequestTime := currentActivity.LastRequestTime
-
-	if !previousRequestTime.IsZero() && entry.Timestamp.Before(previousRequestTime) {
-		timeDifference := previousRequestTime.Sub(entry.Timestamp)
-		if timeDifference <= p.Config.OutOfOrderTolerance {
-			// Explicitly format timestamps to match the log format for consistent test output.
-			p.LogFunc(LevelDebug, "OUT_OF_ORDER_TOLERATED", "Processing out-of-order log entry for IP %s within tolerance (%v). Current: %s, Last seen: %s.",
-				entry.IPInfo.Address, p.Config.OutOfOrderTolerance,
-				entry.Timestamp.Format(AppLogTimestampFormat), previousRequestTime.Format(AppLogTimestampFormat))
-			return false // Do not skip, process it
-		} else {
-			p.LogFunc(LevelWarning, "OUT_OF_ORDER_SKIPPED", "Skipping out-of-order log entry for IP %s (too old: %v > %v). Current: %s, Last seen: %s.",
-				entry.IPInfo.Address, timeDifference, p.Config.OutOfOrderTolerance,
-				entry.Timestamp.Format(AppLogTimestampFormat), previousRequestTime.Format(AppLogTimestampFormat))
-			return true // Skip this entry entirely
-		}
-	} else {
-		// In-order entries are processed. The LastRequestTime will be updated by the caller.
+	// If the entry is in order or it's the first time we've seen this key, process it.
+	if previousRequestTime.IsZero() || !entry.Timestamp.Before(previousRequestTime) {
+		return false // Do not skip.
 	}
-	return false // Do not skip
+
+	// At this point, we know the entry is out-of-order.
+	timeDifference := previousRequestTime.Sub(entry.Timestamp)
+	if timeDifference <= p.Config.OutOfOrderTolerance {
+		p.LogFunc(LevelDebug, "OUT_OF_ORDER_TOLERATED", "Processing out-of-order log entry for IP %s within tolerance (%v). Current: %s, Last seen: %s.",
+			entry.IPInfo.Address, p.Config.OutOfOrderTolerance,
+			entry.Timestamp.Format(AppLogTimestampFormat), previousRequestTime.Format(AppLogTimestampFormat))
+		return false // Do not skip, process it.
+	}
+
+	p.LogFunc(LevelWarning, "OUT_OF_ORDER_SKIPPED", "Skipping out-of-order log entry for IP %s (too old: %v > %v). Current: %s, Last seen: %s.",
+		entry.IPInfo.Address, timeDifference, p.Config.OutOfOrderTolerance,
+		entry.Timestamp.Format(AppLogTimestampFormat), previousRequestTime.Format(AppLogTimestampFormat))
+	return true // Skip this entry entirely.
 }
 
 // handleChainCompletion takes action when a chain is completed (log, block, etc.).
