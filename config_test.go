@@ -708,10 +708,7 @@ chains:
 		Chains:        initialLoadedCfg.Chains,
 		ChainMutex:    &sync.RWMutex{},
 		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
-		Config: &AppConfig{
-			// Use a very short poll interval for the test.
-			testOverridePollingInterval: 10 * time.Millisecond, // Use a very short poll interval for the test.
-		},
+		Config:        &AppConfig{PollingInterval: 10 * time.Millisecond},
 	}
 	// Set LastModTime to the actual modification time of the initial file.
 	initialFileInfo, err := os.Stat(tempFile)
@@ -744,7 +741,10 @@ chains:
 		t.Fatalf("Failed to write modified temp yaml file: %v", err)
 	}
 
-	// 6. Wait for the reload signal from the watcher.
+	// 6. Force the watcher to check immediately.
+	processor.testForceCheckSignal <- struct{}{}
+
+	// 7. Wait for the reload signal from the watcher.
 	select {
 	case <-processor.testReloadDoneSignal:
 		// Reload completed successfully.
@@ -753,7 +753,7 @@ chains:
 	}
 
 	// --- Assert ---
-	// 7. Check if the processor's state has been updated.
+	// 8. Check if the processor's state has been updated.
 	processor.ChainMutex.RLock()
 	defer processor.ChainMutex.RUnlock()
 
@@ -814,8 +814,8 @@ chains:
 		ChainMutex:    &sync.RWMutex{},
 		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
 		Config: &AppConfig{
-			FileDependencies:            initialLoadedCfg.FileDependencies,
-			testOverridePollingInterval: 10 * time.Millisecond,
+			FileDependencies: initialLoadedCfg.FileDependencies,
+			PollingInterval:  10 * time.Millisecond,
 		},
 	}
 	initialFileInfo, _ := os.Stat(tempYamlFile)
@@ -835,7 +835,10 @@ chains:
 		t.Fatalf("Failed to write modified agent file: %v", err)
 	}
 
-	// 7. Wait for the reload signal from the watcher.
+	// 7. Force the watcher to check immediately.
+	processor.testForceCheckSignal <- struct{}{}
+
+	// 8. Wait for the reload signal from the watcher.
 	select {
 	case <-processor.testReloadDoneSignal:
 		// Reload completed successfully.
@@ -844,7 +847,7 @@ chains:
 	}
 
 	// --- Assert ---
-	// 8. Check if the processor's internal matchers have been updated.
+	// 9. Check if the processor's internal matchers have been updated.
 	processor.ChainMutex.RLock()
 	defer processor.ChainMutex.RUnlock()
 
@@ -902,7 +905,7 @@ chains:
 	processor := &Processor{
 		Chains:     initialLoadedCfg.Chains,
 		ChainMutex: &sync.RWMutex{},
-		Config:     &AppConfig{testOverridePollingInterval: 10 * time.Millisecond},
+		Config:     &AppConfig{PollingInterval: 10 * time.Millisecond},
 	}
 	initialFileInfo, _ := os.Stat(tempFile)
 	processor.Config.LastModTime = initialFileInfo.ModTime()
@@ -1002,7 +1005,7 @@ chains:
 			capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
 			logMutex.Unlock()
 		},
-		Config: &AppConfig{testOverridePollingInterval: 10 * time.Millisecond},
+		Config: &AppConfig{PollingInterval: 10 * time.Millisecond},
 	}
 	initialFileInfo, _ := os.Stat(tempFile)
 	processor.Config.LastModTime = initialFileInfo.ModTime()
@@ -1017,17 +1020,23 @@ chains:
 			logReceived <- true
 		}
 	}
+	processor.testForceCheckSignal = make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
 	go processor.ChainWatcher(stopWatcher)
 
 	// --- Act ---
 	// 4. Delete the YAML file to trigger a stat error on the next poll.
+	// We add a small sleep to ensure the watcher has started and is ready.
+	time.Sleep(50 * time.Millisecond)
 	if err := os.Remove(tempFile); err != nil {
 		t.Fatalf("Failed to remove temp file: %v", err)
 	}
 
-	// 5. Wait for the watcher to log the error.
+	// 5. Force the watcher to check immediately.
+	processor.testForceCheckSignal <- struct{}{}
+
+	// 6. Wait for the watcher to log the error.
 	select {
 	case <-logReceived:
 		// Error was logged as expected.
@@ -1036,7 +1045,7 @@ chains:
 	}
 
 	// --- Assert ---
-	// 6. Check that the correct error was logged.
+	// 7. Check that the correct error was logged.
 	logMutex.Lock()
 	logOutput := strings.Join(capturedLogs, "\n")
 	logMutex.Unlock()

@@ -548,14 +548,9 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}) {
 		return
 	}
 
-	// Determine the polling interval. Use the test override if available.
+	// Enforce a minimum safe interval.
 	pollingInterval := p.Config.PollingInterval
-	if p.Config.testOverridePollingInterval > 0 {
-		pollingInterval = p.Config.testOverridePollingInterval
-	}
-
-	// Enforce a minimum safe interval in production.
-	if p.Config.testOverridePollingInterval == 0 && pollingInterval < DefaultMinPollingInterval {
+	if pollingInterval < DefaultMinPollingInterval {
 		pollingInterval = DefaultMinPollingInterval
 	}
 

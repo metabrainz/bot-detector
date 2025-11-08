@@ -39,21 +39,20 @@ type Processor struct {
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
 type AppConfig struct {
-	BlockTableNameFallback      string
-	CleanupInterval             time.Duration
-	DurationToTableName         map[time.Duration]string
-	FileDependencies            []string // List of file paths used in `file:` matchers.
-	HAProxyAddresses            []string
-	HAProxyDialTimeout          time.Duration
-	HAProxyMaxRetries           int
-	HAProxyRetryDelay           time.Duration
-	IdleTimeout                 time.Duration
-	LastModTime                 time.Time
-	MaxTimeSinceLastHit         time.Duration // The longest min_time_since_last_hit duration across all chains.
-	OutOfOrderTolerance         time.Duration // Max duration an out-of-order log entry will be processed.
-	PollingInterval             time.Duration
-	WhitelistNets               []*net.IPNet
-	testOverridePollingInterval time.Duration // Unexported field for test-only overrides.
+	BlockTableNameFallback string
+	CleanupInterval        time.Duration
+	DurationToTableName    map[time.Duration]string
+	FileDependencies       []string // List of file paths used in `file:` matchers.
+	HAProxyAddresses       []string
+	HAProxyDialTimeout     time.Duration
+	HAProxyMaxRetries      int
+	HAProxyRetryDelay      time.Duration
+	IdleTimeout            time.Duration
+	LastModTime            time.Time
+	MaxTimeSinceLastHit    time.Duration // The longest min_time_since_last_hit duration across all chains.
+	OutOfOrderTolerance    time.Duration // Max duration an out-of-order log entry will be processed.
+	PollingInterval        time.Duration
+	WhitelistNets          []*net.IPNet
 }
 
 // LoadedConfig encapsulates all configuration data loaded from the YAML file.
