@@ -592,3 +592,57 @@ func TestLiveLogTailer_ErrorHandling(t *testing.T) {
 		}
 	})
 }
+
+// TestLiveLogTailer_InitialOpenErrorAndShutdown tests the case where the log file
+// does not exist on startup, and a shutdown signal is received during the retry loop.
+func TestLiveLogTailer_InitialOpenErrorAndShutdown(t *testing.T) {
+	// --- Setup ---
+	tempDir := t.TempDir()
+	tempLogFile := filepath.Join(tempDir, "nonexistent.log")
+
+	originalLogFilePath := LogFilePath
+	LogFilePath = tempLogFile
+	t.Cleanup(func() { LogFilePath = originalLogFilePath })
+
+	// Ensure the file does not exist.
+	os.Remove(tempLogFile)
+
+	var logMutex sync.Mutex
+	var capturedLogs []string
+	processor := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
+			logMutex.Lock()
+			capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
+			logMutex.Unlock()
+		},
+		ProcessLogLine: func(line string, lineNumber int) {},
+		Config: &AppConfig{
+			// Use a short delay for testing
+			PollingInterval: 10 * time.Millisecond,
+		},
+	}
+
+	signalCh := make(chan os.Signal, 1)
+	done := make(chan struct{})
+
+	// --- Act ---
+	go func() {
+		LiveLogTailer(processor, signalCh)
+		close(done)
+	}()
+
+	// Wait long enough for the first open attempt to fail and log an error.
+	time.Sleep(50 * time.Millisecond)
+	signalCh <- syscall.SIGINT // Send shutdown signal
+
+	// --- Assert ---
+	<-done // Wait for the function to exit.
+
+	logOutput := strings.Join(capturedLogs, "\n")
+	if !strings.Contains(logOutput, "TAIL_ERROR: Failed to open log file") {
+		t.Error("Expected a 'Failed to open log file' error, but none was logged.")
+	}
+	if !strings.Contains(logOutput, "SHUTDOWN: Received signal interrupt. Shutting down gracefully.") {
+		t.Error("Expected a graceful shutdown log message, but it was not found.")
+	}
+}
