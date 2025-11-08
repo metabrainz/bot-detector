@@ -886,8 +886,9 @@ func TestCheckChains_BlockExpiration(t *testing.T) {
 	// 2. Manually create a pre-existing, EXPIRED block state.
 	trackingKey := GetTrackingKey(&chain, &LogEntry{IPInfo: NewIPInfo(targetIP)})
 	processor.ActivityStore[trackingKey] = &BotActivity{
-		IsBlocked:    true,
-		BlockedUntil: time.Now().Add(-1 * time.Hour), // Expired an hour ago
+		LastRequestTime: time.Time{},                    // Not relevant for this test
+		BlockedUntil:    time.Now().Add(-1 * time.Hour), // Expired an hour ago
+		IsBlocked:       true,
 	}
 
 	// 3. Create the log entry that will be processed.

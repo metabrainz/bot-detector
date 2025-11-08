@@ -34,6 +34,8 @@ func main() {
 		BlockTableNameFallback: loadedCfg.BlockTableNameFallback,
 		CleanupInterval:        loadedCfg.CleanupInterval,
 		DurationToTableName:    loadedCfg.DurationToTableName,
+		EOFPollingDelay:        loadedCfg.EOFPollingDelay,
+		FileDependencies:       loadedCfg.FileDependencies,
 		HAProxyAddresses:       loadedCfg.HAProxyAddresses,
 		HAProxyDialTimeout:     loadedCfg.HAProxyDialTimeout,
 		HAProxyMaxRetries:      loadedCfg.HAProxyMaxRetries,

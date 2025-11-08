@@ -77,11 +77,12 @@ type LoadedConfig struct {
 // --- YAML DATA STRUCTURES ---
 
 type ChainConfig struct {
+	Version              string                `yaml:"version"`
 	Chains               []BehavioralChainYAML `yaml:"chains"`
 	CleanupInterval      string                `yaml:"cleanup_interval"`
-	EOFPollingDelay      string                `yaml:"eof_polling_delay"`
 	DefaultBlockDuration string                `yaml:"default_block_duration"`
 	DurationTables       map[string]string     `yaml:"duration_tables"`
+	EOFPollingDelay      string                `yaml:"eof_polling_delay"`
 	HAProxyAddresses     []string              `yaml:"haproxy_addresses"`
 	HAProxyDialTimeout   string                `yaml:"haproxy_dial_timeout"`
 	HAProxyMaxRetries    int                   `yaml:"haproxy_max_retries"`
@@ -90,7 +91,6 @@ type ChainConfig struct {
 	LogLevel             string                `yaml:"log_level"`
 	OutOfOrderTolerance  string                `yaml:"out_of_order_tolerance"`
 	PollingInterval      string                `yaml:"poll_interval"`
-	Version              string                `yaml:"version"`
 	WhitelistCIDRs       []string              `yaml:"whitelist_cidrs"`
 }
 
@@ -103,10 +103,10 @@ type StepDefYAML struct {
 }
 
 type BehavioralChainYAML struct {
+	Name          string        `yaml:"name"`
 	Action        string        `yaml:"action"`
 	BlockDuration string        `yaml:"block_duration"`
 	MatchKey      string        `yaml:"match_key"`
-	Name          string        `yaml:"name"`
 	Steps         []StepDefYAML `yaml:"steps"`
 }
 
@@ -115,28 +115,28 @@ type BehavioralChainYAML struct {
 type LogEntry struct {
 	Timestamp  time.Time // Actual time of the request (parsed from log, not time.Now()).
 	IPInfo     IPInfo
-	Path       string
 	Method     string
+	Path       string
 	Protocol   string
-	UserAgent  string
 	Referrer   string
 	StatusCode int
+	UserAgent  string
 }
 
 type StepDef struct {
 	Order               int
+	Matchers            []fieldMatcher // Pre-compiled matcher functions for performance.
 	MaxDelayDuration    time.Duration
 	MinDelayDuration    time.Duration
 	MinTimeSinceLastHit time.Duration
-	Matchers            []fieldMatcher // Pre-compiled matcher functions for performance.
 }
 
 type BehavioralChain struct {
 	Name          string
-	Steps         []StepDef
 	Action        string
 	BlockDuration time.Duration
 	MatchKey      string // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
+	Steps         []StepDef
 }
 
 type StepState struct {
@@ -152,8 +152,8 @@ type TrackingKey struct {
 
 // BotActivity tracks state for a single IP address (or IP+UA combination) across all chains.
 type BotActivity struct {
-	LastRequestTime time.Time // Time of the IP's PREVIOUS overall request.
-	ChainProgress   map[string]StepState
-	IsBlocked       bool      // Flag to skip chain checks if this key is blocked.
+	LastRequestTime time.Time // Time of the IP's most recent request.
 	BlockedUntil    time.Time // Time when the block expires.
+	ChainProgress   map[string]StepState
+	IsBlocked       bool // Flag to skip chain checks if this key is blocked.
 }

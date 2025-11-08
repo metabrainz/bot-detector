@@ -17,9 +17,9 @@ func TestCleanUpIdleActivity(t *testing.T) {
 		ChainMutex:    &sync.RWMutex{},
 		Chains:        []BehavioralChain{}, // No chains needed for this test
 		Config: &AppConfig{
+			CleanupInterval:     10 * time.Millisecond,  // A very short cleanup interval for the test
 			IdleTimeout:         100 * time.Millisecond, // A short general timeout
 			MaxTimeSinceLastHit: 50 * time.Millisecond,  // A shorter time-based rule timeout
-			CleanupInterval:     10 * time.Millisecond,  // A very short cleanup interval for the test
 		},
 		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}

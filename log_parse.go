@@ -46,14 +46,14 @@ func ParseLogLine(line string) (*LogEntry, error) {
 	}
 
 	return &LogEntry{
-		Timestamp:  timestamp,
+		Timestamp:  timestamp, // Keep timestamp first as it's the primary time axis.
 		IPInfo:     ipInfo,
-		Path:       matches[getMatchIndex("Path")],
 		Method:     matches[getMatchIndex("Method")],
+		Path:       matches[getMatchIndex("Path")],
 		Protocol:   matches[getMatchIndex("Protocol")],
-		UserAgent:  matches[getMatchIndex("UserAgent")],
 		Referrer:   matches[getMatchIndex("Referrer")],
 		StatusCode: statusCode,
+		UserAgent:  matches[getMatchIndex("UserAgent")],
 	}, nil
 }
 
