@@ -86,7 +86,7 @@ func start(p *Processor) {
 		stopWatcher := make(chan struct{})
 		defer close(stopWatcher) // Ensure watcher is stopped on main exit
 
-		go p.ChainWatcher(stopWatcher)
+		go p.ChainWatcher(stopWatcher, nil, nil) // Pass nil for test-only channels
 		go p.CleanUpIdleActivity(stopWatcher)
 
 		// Set up signal handling for graceful shutdown in live mode.

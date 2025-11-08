@@ -543,7 +543,7 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 }
 
 // ChainWatcher monitors the YAML config file for modifications and reloads the chains dynamically.
-func (p *Processor) ChainWatcher(stop <-chan struct{}) {
+func (p *Processor) ChainWatcher(stop <-chan struct{}, forceCheckSignal <-chan struct{}, reloadDoneSignal chan<- struct{}) {
 	if p.DryRun {
 		return
 	}
@@ -563,7 +563,7 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}) {
 		case <-stop:
 			p.LogFunc(LevelInfo, "WATCH", "ChainWatcher received stop signal. Shutting down.")
 			return
-		case <-p.testForceCheckSignal:
+		case <-forceCheckSignal:
 			// This case is for testing only, to trigger an immediate check.
 			p.LogFunc(LevelDebug, "WATCH", "Received test signal for immediate reload check.")
 		case <-timer.C:
@@ -607,8 +607,8 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}) {
 			p.LogFunc(LevelInfo, "WATCH", "Detected change in '%s'. Attempting reload...", changedFile)
 			func() { // Use an anonymous function to scope the defer correctly.
 				// Defer the test signal to ensure it's sent whether the reload succeeds or fails.
-				if p.testReloadDoneSignal != nil {
-					defer func() { p.testReloadDoneSignal <- struct{}{} }()
+				if reloadDoneSignal != nil {
+					defer func() { reloadDoneSignal <- struct{}{} }()
 				}
 
 				// LoadChainsFromYAML now returns parsed data, not modifying global state.

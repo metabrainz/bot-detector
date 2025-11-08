@@ -718,11 +718,11 @@ chains:
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
 	// 4. Start the ChainWatcher with the test signal channel.
-	processor.testForceCheckSignal = make(chan struct{}) // Not used in this test
-	processor.testReloadDoneSignal = make(chan struct{}, 1)
+	forceCheckSignal := make(chan struct{}, 1)
+	reloadDoneSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) }) // Ensure watcher stops when test finishes.
-	go processor.ChainWatcher(stopWatcher)
+	go processor.ChainWatcher(stopWatcher, forceCheckSignal, reloadDoneSignal)
 
 	// --- Act ---
 	// 5. Modify the YAML file on disk.
@@ -742,11 +742,11 @@ chains:
 	}
 
 	// 6. Force the watcher to check immediately.
-	processor.testForceCheckSignal <- struct{}{}
+	forceCheckSignal <- struct{}{}
 
 	// 7. Wait for the reload signal from the watcher.
 	select {
-	case <-processor.testReloadDoneSignal:
+	case <-reloadDoneSignal:
 		// Reload completed successfully.
 	case <-time.After(1 * time.Second):
 		t.Fatal("Timed out waiting for configuration reload.")
@@ -822,11 +822,11 @@ chains:
 	processor.Config.LastModTime = initialFileInfo.ModTime() // Set initial mod time
 
 	// 5. Start the ChainWatcher with the test signal channel.
-	processor.testForceCheckSignal = make(chan struct{}) // Not used in this test
-	processor.testReloadDoneSignal = make(chan struct{}, 1)
+	forceCheckSignal := make(chan struct{}, 1)
+	reloadDoneSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
-	go processor.ChainWatcher(stopWatcher)
 	t.Cleanup(func() { close(stopWatcher) })
+	go processor.ChainWatcher(stopWatcher, forceCheckSignal, reloadDoneSignal)
 
 	// --- Act ---
 	// 6. Modify ONLY the dependency file.
@@ -836,11 +836,11 @@ chains:
 	}
 
 	// 7. Force the watcher to check immediately.
-	processor.testForceCheckSignal <- struct{}{}
+	forceCheckSignal <- struct{}{}
 
 	// 8. Wait for the reload signal from the watcher.
 	select {
-	case <-processor.testReloadDoneSignal:
+	case <-reloadDoneSignal:
 		// Reload completed successfully.
 	case <-time.After(1 * time.Second):
 		t.Fatal("Timed out waiting for configuration reload.")
@@ -922,11 +922,11 @@ chains:
 	}
 
 	// 5. Start the ChainWatcher.
-	processor.testForceCheckSignal = make(chan struct{}, 1)
-	processor.testReloadDoneSignal = make(chan struct{}, 1) // We wait on this one
+	forceCheckSignal := make(chan struct{}, 1)
+	reloadDoneSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go processor.ChainWatcher(stopWatcher)
+	go processor.ChainWatcher(stopWatcher, forceCheckSignal, reloadDoneSignal)
 
 	// --- Act ---
 	// 6. Modify the YAML file with INVALID content.
@@ -946,7 +946,7 @@ chains:
 	}
 
 	// 7. Force the watcher to perform a check immediately, bypassing the timer.
-	processor.testForceCheckSignal <- struct{}{}
+	forceCheckSignal <- struct{}{}
 
 	// 8. Wait for the watcher to log the error. This is now deterministic because
 	// we triggered the check manually.
@@ -1020,10 +1020,10 @@ chains:
 			logReceived <- true
 		}
 	}
-	processor.testForceCheckSignal = make(chan struct{}, 1)
+	forceCheckSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go processor.ChainWatcher(stopWatcher)
+	go processor.ChainWatcher(stopWatcher, forceCheckSignal, nil)
 
 	// --- Act ---
 	// 4. Delete the YAML file to trigger a stat error on the next poll.
@@ -1034,7 +1034,7 @@ chains:
 	}
 
 	// 5. Force the watcher to check immediately.
-	processor.testForceCheckSignal <- struct{}{}
+	forceCheckSignal <- struct{}{}
 
 	// 6. Wait for the watcher to log the error.
 	select {
