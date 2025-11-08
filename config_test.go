@@ -173,6 +173,55 @@ version: "1.0"
 	}
 }
 
+func TestLoadChainsFromYAML_ObjectMatcher(t *testing.T) {
+	// --- Setup ---
+	yamlContent := `
+version: "1.0"
+chains:
+  - name: "StatusCodeRangeChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          StatusCode:
+            gte: 400
+            lt: 500
+`
+	setupTestYAML(t, yamlContent)
+
+	// --- Act ---
+	loadedCfg, err := LoadChainsFromYAML()
+	if err != nil {
+		t.Fatalf("LoadChainsFromYAML() failed: %v", err)
+	}
+
+	// --- Assert ---
+	if len(loadedCfg.Chains) != 1 || len(loadedCfg.Chains[0].Steps) != 1 || len(loadedCfg.Chains[0].Steps[0].Matchers) != 1 {
+		t.Fatal("Failed to load or compile the object matcher chain correctly.")
+	}
+
+	matcher := loadedCfg.Chains[0].Steps[0].Matchers[0]
+
+	// Test cases
+	testEntries := map[string]struct {
+		entry    *LogEntry
+		expected bool
+	}{
+		"In Range (404)":              {entry: &LogEntry{StatusCode: 404}, expected: true},
+		"Boundary In Range (400)":     {entry: &LogEntry{StatusCode: 400}, expected: true},
+		"Boundary Out of Range (500)": {entry: &LogEntry{StatusCode: 500}, expected: false},
+		"Out of Range (200)":          {entry: &LogEntry{StatusCode: 200}, expected: false},
+	}
+
+	for name, tc := range testEntries {
+		t.Run(name, func(t *testing.T) {
+			if got := matcher(tc.entry); got != tc.expected {
+				t.Errorf("Matcher returned %v, expected %v for status code %d", got, tc.expected, tc.entry.StatusCode)
+			}
+		})
+	}
+}
+
 func TestLoadChainsFromYAML_Errors(t *testing.T) {
 	tests := []struct {
 		name          string
