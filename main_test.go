@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -91,36 +90,20 @@ func TestStart_LiveMode(t *testing.T) {
 // logs an error and exits if the test log file cannot be opened.
 func TestDryRunLogProcessor_FileOpenError(t *testing.T) {
 	resetGlobalState()
+	harness := newDryRunTestHarness(t)
+	// Ensure the file does not exist.
+	os.Remove(harness.tempLogFile)
 
-	// Point TestLogPath to a file that does not exist.
-	nonExistentFile := "non-existent-test-log.log"
-	originalTestLogPath := TestLogPath
-	TestLogPath = nonExistentFile
-	t.Cleanup(func() { TestLogPath = originalTestLogPath })
-
-	// Capture log output to verify the error is logged.
-	var capturedLog string
-	var logMutex sync.Mutex
-	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
-		logMutex.Lock()
-		defer logMutex.Unlock()
-		if tag == "FATAL" {
-			capturedLog = fmt.Sprintf(format, args...)
-		}
-	}
-
-	p := &Processor{
-		LogFunc: logCaptureFunc,
-	}
 	done := make(chan struct{})
 
 	// Act: Run the processor.
-	go DryRunLogProcessor(p, done)
+	go DryRunLogProcessor(harness.processor, done)
 	<-done // Wait for it to finish.
 
 	// Assert: Check that the correct error was logged.
-	if !strings.Contains(capturedLog, "Failed to open test log file") {
-		t.Fatalf("Expected a 'FATAL' log message containing 'Failed to open test log file', but got: '%s'", capturedLog)
+	logOutput := strings.Join(harness.capturedLogs, "\n")
+	if !strings.Contains(logOutput, "Failed to open test log file") {
+		t.Fatalf("Expected a log message containing 'Failed to open test log file', but got: '%s'", logOutput)
 	}
 }
 
@@ -128,48 +111,23 @@ func TestDryRunLogProcessor_FileOpenError(t *testing.T) {
 // skips lines that are too long and logs a warning.
 func TestDryRunLogProcessor_LineSkipped(t *testing.T) {
 	resetGlobalState()
+	harness := newDryRunTestHarness(t)
 
 	// Create a temporary log file with one valid line and one oversized line.
 	longLine := strings.Repeat("a", MaxLogLineSize+1)
 	logContent := "this is a valid line\n" + longLine + "\n"
+	os.WriteFile(harness.tempLogFile, []byte(logContent), 0644)
 
-	tmpFile, err := os.CreateTemp(t.TempDir(), "longline-*.log")
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
-	}
-	tmpFile.WriteString(logContent)
-	tmpFile.Close()
-
-	originalTestLogPath := TestLogPath
-	TestLogPath = tmpFile.Name()
-	t.Cleanup(func() { TestLogPath = originalTestLogPath })
-
-	// Capture log output and count processed lines.
-	var capturedLog string
-	var logMutex sync.Mutex
-	linesProcessed := 0
-
-	p := &Processor{
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
-			logMutex.Lock()
-			defer logMutex.Unlock()
-			if tag == "DRYRUN_SKIP" {
-				capturedLog = fmt.Sprintf(format, args...)
-			}
-		},
-		ProcessLogLine: func(line string, lineNumber int) {
-			linesProcessed++
-		},
-	}
 	done := make(chan struct{})
 
-	go DryRunLogProcessor(p, done)
+	go DryRunLogProcessor(harness.processor, done)
 	<-done
 
-	if linesProcessed != 1 {
-		t.Errorf("Expected only 1 line to be processed, but got %d", linesProcessed)
+	if len(harness.processedLines) != 1 {
+		t.Errorf("Expected only 1 line to be processed, but got %d", len(harness.processedLines))
 	}
-	if !strings.Contains(capturedLog, "Skipped (Length exceeded") {
-		t.Errorf("Expected a 'DRYRUN_SKIP' log for oversized line, but got: '%s'", capturedLog)
+	logOutput := strings.Join(harness.capturedLogs, "\n")
+	if !strings.Contains(logOutput, "Skipped (Length exceeded") {
+		t.Errorf("Expected a log for oversized line, but got: '%s'", logOutput)
 	}
 }

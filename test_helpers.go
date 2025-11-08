@@ -2,8 +2,10 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"log"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -70,4 +72,41 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 	p.Blocker = blocker
 	p.CheckChainsFunc = p.CheckChains
 	return p
+}
+
+// dryRunTestHarness encapsulates the common setup for DryRunLogProcessor tests.
+type dryRunTestHarness struct {
+	t              *testing.T
+	processor      *Processor
+	tempLogFile    string
+	capturedLogs   []string
+	processedLines []string
+	logMutex       sync.Mutex
+}
+
+// newDryRunTestHarness creates and initializes a test harness for DryRunLogProcessor.
+func newDryRunTestHarness(t *testing.T) *dryRunTestHarness {
+	t.Helper()
+
+	h := &dryRunTestHarness{t: t}
+
+	// Create temp file and set global path
+	tempDir := t.TempDir()
+	h.tempLogFile = filepath.Join(tempDir, "test_dryrun.log")
+	originalTestLogPath := TestLogPath
+	TestLogPath = h.tempLogFile
+	t.Cleanup(func() { TestLogPath = originalTestLogPath })
+
+	// Create processor with mock/capture functions
+	h.processor = &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
+			h.logMutex.Lock()
+			defer h.logMutex.Unlock()
+			h.capturedLogs = append(h.capturedLogs, fmt.Sprintf(format, args...))
+		},
+		ProcessLogLine: func(line string, lineNumber int) {
+			h.processedLines = append(h.processedLines, line)
+		},
+	}
+	return h
 }
