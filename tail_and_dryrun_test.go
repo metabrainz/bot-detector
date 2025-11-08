@@ -295,3 +295,51 @@ line 3`), 0644)
 		})
 	}
 }
+
+func TestDelayOrShutdown(t *testing.T) {
+	// --- Setup ---
+	processor := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
+	}
+
+	tests := []struct {
+		name            string
+		delay           time.Duration
+		sendSignalAfter time.Duration // How long after starting to send the signal. 0 for no signal.
+		expectedReturn  bool          // True if shutdown signal was received.
+	}{
+		{
+			name:            "Delay Completes Without Signal",
+			delay:           50 * time.Millisecond,
+			sendSignalAfter: 0, // No signal sent
+			expectedReturn:  false,
+		},
+		{
+			name:            "Shutdown Signal Received During Delay",
+			delay:           100 * time.Millisecond,
+			sendSignalAfter: 20 * time.Millisecond, // Send signal before delay finishes
+			expectedReturn:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			signalCh := make(chan os.Signal, 1)
+
+			// Act
+			var returned bool
+			if tt.sendSignalAfter > 0 {
+				go func() {
+					time.Sleep(tt.sendSignalAfter)
+					signalCh <- syscall.SIGTERM // Send a mock shutdown signal
+				}()
+			}
+			returned = delayOrShutdown(processor, tt.delay, signalCh)
+
+			// Assert
+			if returned != tt.expectedReturn {
+				t.Errorf("Expected delayOrShutdown to return %v, but got %v", tt.expectedReturn, returned)
+			}
+		})
+	}
+}
