@@ -123,3 +123,53 @@ func TestDryRunLogProcessor_FileOpenError(t *testing.T) {
 		t.Fatalf("Expected a 'FATAL' log message containing 'Failed to open test log file', but got: '%s'", capturedLog)
 	}
 }
+
+// TestDryRunLogProcessor_LineSkipped verifies that DryRunLogProcessor correctly
+// skips lines that are too long and logs a warning.
+func TestDryRunLogProcessor_LineSkipped(t *testing.T) {
+	resetGlobalState()
+
+	// Create a temporary log file with one valid line and one oversized line.
+	longLine := strings.Repeat("a", MaxLogLineSize+1)
+	logContent := "this is a valid line\n" + longLine + "\n"
+
+	tmpFile, err := os.CreateTemp(t.TempDir(), "longline-*.log")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	tmpFile.WriteString(logContent)
+	tmpFile.Close()
+
+	originalTestLogPath := TestLogPath
+	TestLogPath = tmpFile.Name()
+	t.Cleanup(func() { TestLogPath = originalTestLogPath })
+
+	// Capture log output and count processed lines.
+	var capturedLog string
+	var logMutex sync.Mutex
+	linesProcessed := 0
+
+	p := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
+			logMutex.Lock()
+			defer logMutex.Unlock()
+			if tag == "DRYRUN_SKIP" {
+				capturedLog = fmt.Sprintf(format, args...)
+			}
+		},
+		ProcessLogLine: func(line string, lineNumber int) {
+			linesProcessed++
+		},
+	}
+	done := make(chan struct{})
+
+	go DryRunLogProcessor(p, done)
+	<-done
+
+	if linesProcessed != 1 {
+		t.Errorf("Expected only 1 line to be processed, but got %d", linesProcessed)
+	}
+	if !strings.Contains(capturedLog, "Skipped (Length exceeded") {
+		t.Errorf("Expected a 'DRYRUN_SKIP' log for oversized line, but got: '%s'", capturedLog)
+	}
+}
