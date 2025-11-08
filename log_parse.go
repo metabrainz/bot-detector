@@ -82,28 +82,6 @@ func (p *Processor) processLogLineInternal(line string, lineNumber int) {
 		return
 	}
 
-	// 2. Check for in-memory block state (Optimization)
-	ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
-
-	p.ActivityMutex.Lock()
-	activity := GetOrCreateActivityUnsafe(p.ActivityStore, ipOnlyKey)
-
-	// If the IP is blocked, check if the block has expired
-	if activity.IsBlocked && time.Now().After(activity.BlockedUntil) {
-		p.LogFunc(LevelInfo, "EXPIRE", "In-memory block expired for IP %s.", entry.IPInfo.Address)
-		activity.IsBlocked = false
-		activity.BlockedUntil = time.Time{}
-	}
-
-	// If still blocked, skip further chain checks
-	if activity.IsBlocked {
-		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (Already blocked in memory).", entry.IPInfo.Address)
-		activity.LastRequestTime = entry.Timestamp // Update timestamp to prevent premature cleanup
-		p.ActivityMutex.Unlock()
-		return
-	}
-	p.ActivityMutex.Unlock()
-
 	// 3. If not blocked, process the log line through all behavioral chains
 	p.CheckChains(entry)
 }
