@@ -461,6 +461,17 @@ chains:
 			expectedError: "object matcher must not be empty",
 		},
 		{
+			name: "Unsupported Matcher Type",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    steps: [ { field_matches: { "StatusCode": true } } ]
+`,
+			expectedError: "unsupported value type 'bool'",
+		},
+		{
 			name: "File Matcher Not Found (Non-Fatal)",
 			yamlContent: `
 version: "1.0"
