@@ -105,7 +105,6 @@ The application uses a unified logging system with five discrete levels. The `--
 ./bot-detector \
 --log-path "/var/log/nginx/access.log" \
 --yaml-path "test_rules.yaml" \
---idle-timeout "30m"
 ```
 
 **Example Command (Testing Rules):**
@@ -194,6 +193,13 @@ For more complex string matching, use a prefix.
     UserAgent: "regex:(?i)(bot|crawler|python)"
     ```
 *   **Status Code Pattern:** A special shorthand for matching status code classes.
+*   **File-Based Matcher:**
+    ```yaml
+    # Contents of bad_user_agents.txt:
+    # BadBot/1.0
+    # regex:(?i)evil-crawler
+    UserAgent: "file:./bad_user_agents.txt"
+    ```
     ```yaml
     StatusCode: "4XX" # Matches 400-499
     ```
@@ -205,6 +211,7 @@ Provide a list to match if the field's value is **any of** the items in the list
 ```yaml
 field_matches:
   Method: ["POST", "PUT"]
+  UserAgent: ["file:./bad_user_agents.txt", "SpecificBadBot/2.0"] # Mix file and direct values
   StatusCode: [401, 403, "5XX"] # Matches 401, 403, or any 5xx code
   Path:
     - "/login"

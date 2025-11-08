@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -38,8 +39,8 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 	}
 
 	// Manually compile matchers for this test case
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one")
-	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two")
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one", new([]string))
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two", new([]string))
 
 	chain.Steps = []StepDef{
 		{
@@ -174,8 +175,8 @@ func TestCheckChains_DryRun(t *testing.T) {
 		BlockDuration: blockDuration,
 	}
 
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one")
-	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two")
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one", new([]string))
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two", new([]string))
 
 	chain.Steps = []StepDef{
 		{Order: 1, Matchers: []fieldMatcher{matcher1}, MaxDelayDuration: 5 * time.Second},
@@ -244,7 +245,7 @@ func TestCheckChains_DryRun_UnknownAction(t *testing.T) {
 		MatchKey: "ip",
 		Action:   "throttle", // An unrecognized action
 	}
-	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/test")
+	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/test", new([]string))
 	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
 
 	chains := []BehavioralChain{chain}
@@ -307,7 +308,7 @@ func TestCheckChains_LiveMode_UnknownAction(t *testing.T) {
 		MatchKey: "ip",
 		Action:   "throttle", // An unrecognized action
 	}
-	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/test")
+	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/test", new([]string))
 	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
 
 	chains := []BehavioralChain{chain}
@@ -426,8 +427,8 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 		Action:   "log", // Don't block, just log for simplicity
 	}
 
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one")
-	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two")
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one", new([]string))
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two", new([]string))
 
 	chain.Steps = []StepDef{
 		{Order: 1, Matchers: []fieldMatcher{matcher1}, MaxDelayDuration: 5 * time.Second},
@@ -503,8 +504,8 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 		Action:   "log",
 	}
 
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one")
-	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two")
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one", new([]string))
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two", new([]string))
 
 	chain.Steps = []StepDef{
 		{Order: 1, Matchers: []fieldMatcher{matcher1}, MaxDelayDuration: 5 * time.Second},
@@ -579,10 +580,10 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 		Action:   "log", // This chain only logs
 	}
 
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one")
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one", new([]string))
 	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher1}}}
 
-	matcher2, _ := compileStringMatcher(logChain.Name, 0, "Path", "/log/step")
+	matcher2, _ := compileStringMatcher(logChain.Name, 0, "Path", "/log/step", new([]string))
 	logChain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher2}}}
 
 	chains := []BehavioralChain{chain, logChain} // Include both chains
@@ -699,8 +700,8 @@ func TestCheckChains_LogAction(t *testing.T) {
 		BlockDuration: 0,
 	}
 
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one")
-	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two")
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one", new([]string))
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two", new([]string))
 
 	chain.Steps = []StepDef{
 		{Order: 1, Matchers: []fieldMatcher{matcher1}, MaxDelayDuration: 5 * time.Second},
@@ -792,8 +793,8 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 		BlockDuration: blockDuration,
 	}
 
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one")
-	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two")
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one", new([]string))
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two", new([]string))
 
 	chain.Steps = []StepDef{
 		{Order: 1, Matchers: []fieldMatcher{matcher1}, MaxDelayDuration: 5 * time.Second},
@@ -866,7 +867,7 @@ func TestCheckChains_BlockExpiration(t *testing.T) {
 		Action:        "block",
 		BlockDuration: 1 * time.Minute,
 	}
-	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/test")
+	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/test", new([]string))
 	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
 
 	chains := []BehavioralChain{chain}
@@ -936,7 +937,7 @@ func TestCheckChains_IPVersionMismatch(t *testing.T) {
 			Action:   "log",
 		},
 	}
-	matcher, _ := compileStringMatcher("any", 0, "Path", "/test")
+	matcher, _ := compileStringMatcher("any", 0, "Path", "/test", new([]string))
 	chains[0].Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
 	chains[1].Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
 
@@ -986,7 +987,7 @@ func TestCheckChains_IPAndUABlockOptimization(t *testing.T) {
 		Action:        "block",
 		BlockDuration: 5 * time.Minute,
 	}
-	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/trigger")
+	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/trigger", new([]string))
 	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
 	chains := []BehavioralChain{chain}
 
@@ -1035,8 +1036,8 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		MatchKey: "ip",
 		Action:   "log",
 	}
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step1")
-	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step2")
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step1", new([]string))
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step2", new([]string))
 	chain.Steps = []StepDef{
 		{Order: 1, MinTimeSinceLastHit: 2 * time.Second, Matchers: []fieldMatcher{matcher1}},
 		{Order: 2, Matchers: []fieldMatcher{matcher2}},
@@ -1125,6 +1126,17 @@ func TestDryRunMode(t *testing.T) {
 	// --- Setup ---
 	resetGlobalState()
 
+	// The chains.yaml file now references a file matcher. We need to create it.
+	tempDir := t.TempDir()
+	uaFile := filepath.Join(tempDir, "bad_user_agents.txt")
+	if err := os.WriteFile(uaFile, []byte("BadUA/1.0\nregex:NastyBot"), 0644); err != nil {
+		t.Fatalf("Failed to create dummy user agent file: %v", err)
+	}
+	// The test chains.yaml is hardcoded to look for this relative path.
+	// We need to create it in the current working directory.
+	// A better long-term solution would be to make the path in chains.yaml absolute or configurable for tests.
+	os.WriteFile("bad_user_agents.txt", []byte("BadUA/1.0\nregex:NastyBot"), 0644)
+	t.Cleanup(func() { os.Remove("bad_user_agents.txt") })
 	// 1. Load configuration (chains, whitelist, etc.)
 	loadedCfg, err := LoadChainsFromYAML()
 	if err != nil {
@@ -1330,8 +1342,8 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 				MatchKey: "ip",
 				Action:   "log",
 			}
-			matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step1")
-			matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step2")
+			matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step1", new([]string))
+			matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step2", new([]string))
 			chain.Steps = []StepDef{
 				{Order: 1, Matchers: []fieldMatcher{matcher1}},
 				{Order: 2, Matchers: []fieldMatcher{matcher2}},

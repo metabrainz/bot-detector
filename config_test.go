@@ -262,6 +262,17 @@ chains:
 `,
 			expectedError: "block_duration is missing or zero",
 		},
+		{
+			name: "File Matcher Not Found (Non-Fatal)",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    steps: [ { field_matches: { "Path": "file:/path/to/nonexistent/file.txt" } } ]
+`,
+			expectedError: "", // Should NOT produce a fatal error
+		},
 	}
 
 	for _, tt := range tests {
@@ -276,9 +287,21 @@ chains:
 			YAMLFilePath = tempFile
 			t.Cleanup(func() { YAMLFilePath = originalPath })
 
+			// For tests that expect non-fatal errors, we can suppress the log output
+			// to keep the test runner output clean.
+			if tt.name == "File Matcher Not Found (Non-Fatal)" {
+				originalLogFunc := LogOutput
+				LogOutput = func(level LogLevel, tag string, format string, args ...interface{}) {}
+				t.Cleanup(func() { LogOutput = originalLogFunc })
+			}
+
 			_, err := LoadChainsFromYAML()
 
-			if err == nil || !strings.Contains(err.Error(), tt.expectedError) {
+			if tt.expectedError == "" {
+				if err != nil {
+					t.Errorf("Expected no error, but got: %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tt.expectedError) {
 				t.Errorf("Expected error containing '%s', but got: %v", tt.expectedError, err)
 			}
 		})

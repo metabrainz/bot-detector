@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"net"
@@ -62,10 +63,10 @@ func (p *Processor) CheckAndRemoveWhitelistedBlocks() {
 type fieldMatcher func(entry *LogEntry) bool
 
 // compileMatchers parses the raw `field_matches` interface from YAML into a slice of efficient matcher functions.
-func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}) ([]fieldMatcher, error) {
+func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps *[]string) ([]fieldMatcher, error) {
 	var matchers []fieldMatcher
 	for field, value := range fieldMatches {
-		matcher, err := compileSingleMatcher(chainName, stepIndex, field, value)
+		matcher, err := compileSingleMatcher(chainName, stepIndex, field, value, fileDeps)
 		if err != nil {
 			return nil, err // Propagate error up
 		}
@@ -75,14 +76,14 @@ func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]in
 }
 
 // compileSingleMatcher is a large switch that handles the different value "shapes" (string, int, list, map).
-func compileSingleMatcher(chainName string, stepIndex int, field string, value interface{}) (fieldMatcher, error) {
+func compileSingleMatcher(chainName string, stepIndex int, field string, value interface{}, fileDeps *[]string) (fieldMatcher, error) {
 	switch v := value.(type) {
 	case string:
-		return compileStringMatcher(chainName, stepIndex, field, v)
+		return compileStringMatcher(chainName, stepIndex, field, v, fileDeps)
 	case int:
 		return compileIntMatcher(field, v), nil
 	case []interface{}:
-		return compileListMatcher(chainName, stepIndex, field, v)
+		return compileListMatcher(chainName, stepIndex, field, v, fileDeps)
 	case map[string]interface{}:
 		return compileObjectMatcher(chainName, stepIndex, field, v)
 	default:
@@ -90,8 +91,47 @@ func compileSingleMatcher(chainName string, stepIndex int, field string, value i
 	}
 }
 
+// readLinesFromFile is a helper to read a file into a slice of strings, ignoring comments and empty lines.
+func readLinesFromFile(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		// Ignore empty lines and lines that start with '#'
+		if line != "" && !strings.HasPrefix(line, "#") {
+			lines = append(lines, line)
+		}
+	}
+	return lines, scanner.Err()
+}
+
 // compileStringMatcher handles string values, which can be exact, regex, glob, or status code patterns.
-func compileStringMatcher(chainName string, stepIndex int, field, value string) (fieldMatcher, error) {
+func compileStringMatcher(chainName string, stepIndex int, field, value string, fileDeps *[]string) (fieldMatcher, error) {
+	if strings.HasPrefix(value, "file:") {
+		filePath := strings.TrimPrefix(value, "file:")
+		*fileDeps = append(*fileDeps, filePath) // Track file for watching
+		lines, err := readLinesFromFile(filePath)
+		if err != nil {
+			// Log a warning but do not fail the entire config load.
+			// Treat the file as empty, effectively disabling this part of the rule.
+			LogOutput(LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': failed to read file matcher '%s', it will be treated as empty: %v", chainName, stepIndex+1, field, filePath, err)
+			// Return a matcher for an empty list, which will never match. Do not return an error.
+			lines = []string{}
+		}
+		// Convert []string to []interface{} to reuse compileListMatcher
+		interfaceSlice := make([]interface{}, len(lines))
+		for i, v := range lines {
+			interfaceSlice[i] = v
+		}
+		return compileListMatcher(chainName, stepIndex, field, interfaceSlice, fileDeps)
+	}
+
 	if strings.HasPrefix(value, "regex:") {
 		pattern := strings.TrimPrefix(value, "regex:")
 		re, err := regexp.Compile(pattern)
@@ -134,10 +174,10 @@ func compileIntMatcher(field string, value int) fieldMatcher {
 }
 
 // compileListMatcher handles lists, creating an OR condition over its items.
-func compileListMatcher(chainName string, stepIndex int, field string, values []interface{}) (fieldMatcher, error) {
+func compileListMatcher(chainName string, stepIndex int, field string, values []interface{}, fileDeps *[]string) (fieldMatcher, error) {
 	var subMatchers []fieldMatcher
 	for _, item := range values {
-		matcher, err := compileSingleMatcher(chainName, stepIndex, field, item)
+		matcher, err := compileSingleMatcher(chainName, stepIndex, field, item, fileDeps)
 		if err != nil {
 			return nil, err // Error in a sub-matcher
 		}
@@ -349,6 +389,9 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 		}
 	}
 
+	// --- PARSE FILE DEPENDENCIES ---
+	fileDependencies := []string{}
+
 	for _, yamlChain := range config.Chains {
 		var blockDuration time.Duration
 		if yamlChain.BlockDuration != "" {
@@ -415,7 +458,7 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 				yamlStep.MinDelay, runtimeStep.MinDelayDuration)
 
 			// Compile the new flexible matchers
-			runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches)
+			runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, &fileDependencies)
 			if err != nil {
 				return nil, err // Error from compilation
 			}
@@ -460,6 +503,7 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 		OutOfOrderTolerance:    outOfOrderTolerance,
 		LogLevel:               logLevelStr,
 		MaxTimeSinceLastHit:    maxTimeSinceLastHit,
+		FileDependencies:       fileDependencies,
 	}, nil
 }
 
@@ -478,7 +522,7 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}) {
 		pollingInterval = 5 * time.Second // Default to a safe interval.
 	}
 
-	p.LogFunc(LevelDebug, "WATCH", "Starting ChainWatcher, polling %s every %v", YAMLFilePath, pollingInterval)
+	p.LogFunc(LevelDebug, "WATCH", "Starting ChainWatcher, polling every %v", pollingInterval)
 	for {
 		select {
 		case <-stop:
@@ -488,20 +532,41 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}) {
 			// Continue with polling
 		}
 
+		isChanged := false
+		changedFile := ""
+
+		// 1. Check the main YAML file
 		fileInfo, err := os.Stat(YAMLFilePath)
 		if err != nil {
 			p.LogFunc(LevelError, "WATCH_ERROR", "Failed to stat file %s: %v", YAMLFilePath, err)
 			continue
 		}
-		modTime := fileInfo.ModTime()
 
-		// Read lock access for LastModTime check.
 		p.ChainMutex.RLock()
-		isChanged := modTime.After(p.Config.LastModTime)
+		if fileInfo.ModTime().After(p.Config.LastModTime) {
+			isChanged = true
+			changedFile = YAMLFilePath
+		} else {
+			// 2. Check all file dependencies if YAML hasn't changed
+			for _, depPath := range p.Config.FileDependencies {
+				depInfo, err := os.Stat(depPath)
+				if err != nil {
+					// Log at debug level if a dependency file is missing, as this might be temporary.
+					// A reload will only be triggered if chains.yaml itself changes.
+					p.LogFunc(LevelDebug, "WATCH_SKIP", "Could not stat dependency file %s (may have been removed): %v", depPath, err)
+					continue
+				}
+				if depInfo.ModTime().After(p.Config.LastModTime) {
+					isChanged = true
+					changedFile = depPath
+					break
+				}
+			}
+		}
 		p.ChainMutex.RUnlock()
 
 		if isChanged {
-			p.LogFunc(LevelInfo, "WATCH", "Detected change in chains.yaml. Attempting reload...")
+			p.LogFunc(LevelInfo, "WATCH", "Detected change in '%s'. Attempting reload...", changedFile)
 
 			// LoadChainsFromYAML now returns parsed data, not modifying global state.
 			loadedCfg, err := LoadChainsFromYAML()
@@ -523,7 +588,8 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}) {
 			p.Config.OutOfOrderTolerance = loadedCfg.OutOfOrderTolerance
 			SetLogLevel(loadedCfg.LogLevel) // Update log level dynamically
 			p.Config.MaxTimeSinceLastHit = loadedCfg.MaxTimeSinceLastHit
-			p.Config.LastModTime = fileInfo.ModTime()
+			p.Config.FileDependencies = loadedCfg.FileDependencies
+			p.Config.LastModTime = time.Now() // Use time.Now() to avoid race conditions with fast edits
 			p.ChainMutex.Unlock()
 
 			// Cleanup any blocked IPs (This function still uses global state)

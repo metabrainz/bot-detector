@@ -55,6 +55,7 @@ type AppConfig struct {
 	CleanupInterval             time.Duration
 	MaxTimeSinceLastHit         time.Duration // The longest min_time_since_last_hit duration across all chains.
 	OutOfOrderTolerance         time.Duration // Max duration an out-of-order log entry will be processed.
+	FileDependencies            []string      // List of file paths used in `file:` matchers.
 	testOverridePollingInterval time.Duration // Unexported field for test-only overrides.
 }
 
@@ -71,6 +72,7 @@ type LoadedConfig struct {
 	OutOfOrderTolerance    time.Duration
 	LogLevel               string
 	MaxTimeSinceLastHit    time.Duration
+	FileDependencies       []string
 }
 
 // --- YAML DATA STRUCTURES ---
