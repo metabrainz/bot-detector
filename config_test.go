@@ -317,6 +317,13 @@ chains: []
 			expectedError: "unknown field",
 		},
 		{
+			name: "Missing Version",
+			yamlContent: `
+chains: []
+`,
+			expectedError: "configuration file is missing the required 'version' field",
+		},
+		{
 			name: "Invalid CIDR",
 			yamlContent: `
 version: "1.0"
