@@ -384,6 +384,50 @@ func TestCheckChains_LiveMode_UnknownAction(t *testing.T) {
 	}
 }
 
+// TestProcessChainForEntry_AlreadyCompleted tests the edge case where the function is called
+// for a chain that has already been completed but not yet cleared from memory.
+func TestProcessChainForEntry_AlreadyCompleted(t *testing.T) {
+	// 1. Setup
+	resetGlobalState()
+
+	chain := BehavioralChain{
+		Name:  "CompletedChain",
+		Steps: []StepDef{{Order: 1}}, // A simple one-step chain
+	}
+
+	// Create an activity state where the chain is already completed.
+	activity := &BotActivity{
+		ChainProgress: map[string]StepState{
+			"CompletedChain": {
+				CurrentStep:   1, // CurrentStep (1) == len(chain.Steps) (1)
+				LastMatchTime: time.Now(),
+			},
+		},
+	}
+
+	processor := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
+	}
+
+	entry := &LogEntry{} // Dummy entry, its contents don't matter for this test.
+
+	// --- Act ---
+	// Call the function under test. This should hit the 'if nextStepIndex >= len(chain.Steps)'
+	// branch and immediately break.
+	processor.processChainForEntry(&chain, entry, activity, time.Time{})
+
+	// --- Assert ---
+	// The state should remain unchanged.
+	finalState, exists := activity.ChainProgress["CompletedChain"]
+	if !exists {
+		t.Fatal("Expected chain progress to still exist, but it was deleted.")
+	}
+
+	if finalState.CurrentStep != 1 {
+		t.Errorf("Expected CurrentStep to remain 1, but it was changed to %d", finalState.CurrentStep)
+	}
+}
+
 // TestCheckChains_MaxDelayExceeded tests that a chain resets if the time between steps is too long.
 func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 	// 1. Setup Data Structures
