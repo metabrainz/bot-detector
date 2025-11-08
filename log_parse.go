@@ -25,11 +25,6 @@ func ParseLogLine(line string) (*LogEntry, error) {
 		return nil, fmt.Errorf("line does not match log format regex")
 	}
 
-	expectedLength := logRegex.NumSubexp() + 1
-	if len(matches) != expectedLength {
-		return nil, fmt.Errorf("malformed essential fields: expected %d groups, got %d", logRegex.NumSubexp(), len(matches)-1)
-	}
-
 	getMatchIndex := func(name string) int {
 		return logRegex.SubexpIndex(name)
 	}
