@@ -261,6 +261,129 @@ func TestCheckChains_DryRun(t *testing.T) {
 	}
 }
 
+// TestCheckChains_DryRun_UnknownAction tests that an unrecognized action is handled gracefully in dry-run mode.
+func TestCheckChains_DryRun_UnknownAction(t *testing.T) {
+	// 1. Setup
+	resetGlobalState()
+
+	// Define a chain with an action that is not 'block' or 'log'.
+	chain := BehavioralChain{
+		Name:     "UnknownActionChain",
+		MatchKey: "ip",
+		Action:   "throttle", // An unrecognized action
+		Steps:    []StepDef{{Order: 1, FieldMatches: map[string]string{"Path": "/test"}}},
+	}
+	compileChainRegexes(t, []BehavioralChain{chain})
+
+	// Capture log output
+	var capturedLog string
+	var logMutex sync.Mutex
+	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
+		logMutex.Lock()
+		if tag == "DRY_RUN" {
+			capturedLog = fmt.Sprintf(format, args...)
+		}
+		logMutex.Unlock()
+	}
+
+	processor := &Processor{
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
+		ActivityMutex:     &sync.RWMutex{},
+		Chains:            []BehavioralChain{chain},
+		ChainMutex:        &sync.RWMutex{},
+		DryRun:            true, // Must be in dry-run mode
+		LogFunc:           logCaptureFunc,
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		Blocker:           &MockBlocker{},
+		Config:            &AppConfig{},
+	}
+
+	entry := &LogEntry{
+		IPInfo:    NewIPInfo("192.0.2.1"),
+		Timestamp: time.Now(),
+		Path:      "/test",
+	}
+
+	// --- Act ---
+	processor.CheckChains(entry)
+
+	// --- Assert ---
+	expectedLogSubstring := "UNKNOWN_ACTION!"
+	if !strings.Contains(capturedLog, expectedLogSubstring) {
+		t.Errorf("Expected log to contain '%s' for unknown action, but got: '%s'", expectedLogSubstring, capturedLog)
+	}
+
+	// Also assert that no block state was created.
+	processor.ActivityMutex.RLock()
+	activity, _ := processor.ActivityStore[GetTrackingKey(&chain, entry)]
+	processor.ActivityMutex.RUnlock()
+	if activity != nil && activity.IsBlocked {
+		t.Error("IsBlocked should be false for an unknown action, but it was true.")
+	}
+}
+
+// TestCheckChains_LiveMode_UnknownAction tests that an unrecognized action is handled gracefully in live mode.
+func TestCheckChains_LiveMode_UnknownAction(t *testing.T) {
+	// 1. Setup
+	resetGlobalState()
+
+	// Define a chain with an action that is not 'block' or 'log'.
+	chain := BehavioralChain{
+		Name:     "LiveUnknownActionChain",
+		MatchKey: "ip",
+		Action:   "throttle", // An unrecognized action
+		Steps:    []StepDef{{Order: 1, FieldMatches: map[string]string{"Path": "/test"}}},
+	}
+	compileChainRegexes(t, []BehavioralChain{chain})
+
+	// Setup a mock blocker to ensure it's not called
+	var blockCalled bool
+	mockBlocker := &MockBlocker{
+		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
+			blockCalled = true
+			return nil
+		},
+	}
+
+	processor := &Processor{
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
+		ActivityMutex:     &sync.RWMutex{},
+		Chains:            []BehavioralChain{chain},
+		ChainMutex:        &sync.RWMutex{},
+		DryRun:            false, // Must be in live mode
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		Blocker:           mockBlocker,
+		Config:            &AppConfig{},
+	}
+
+	entry := &LogEntry{
+		IPInfo:    NewIPInfo("192.0.2.1"),
+		Timestamp: time.Now(),
+		Path:      "/test",
+	}
+
+	// --- Act ---
+	processor.CheckChains(entry)
+
+	// --- Assert ---
+	if blockCalled {
+		t.Fatal("Blocker was called, but should have been skipped for an unknown action.")
+	}
+
+	// Also assert that the chain progress was reset and no block state was created.
+	processor.ActivityMutex.RLock()
+	activity, _ := processor.ActivityStore[GetTrackingKey(&chain, entry)]
+	processor.ActivityMutex.RUnlock()
+
+	if activity.IsBlocked {
+		t.Error("IsBlocked should be false for an unknown action, but it was true.")
+	}
+	if len(activity.ChainProgress) != 0 {
+		t.Errorf("Expected ChainProgress to be cleared, but it has %d entries.", len(activity.ChainProgress))
+	}
+}
+
 // TestCheckChains_MaxDelayExceeded tests that a chain resets if the time between steps is too long.
 func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 	// 1. Setup Data Structures
