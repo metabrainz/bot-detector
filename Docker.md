@@ -30,9 +30,9 @@ docker run --rm \
     -v ${HOST_TEST_LOG}:${CONTAINER_TEST_LOG}:ro \
     -v ${HOST_CONFIG_PATH}:${CONTAINER_CONFIG_PATH} \
     bot-detector:latest \
-    -dry-run \
-    -test-log "${CONTAINER_TEST_LOG}" \
-    -yaml-path "${CONTAINER_CONFIG_PATH}"
+    --dry-run \
+    --test-log "${CONTAINER_TEST_LOG}" \
+    --yaml-path "${CONTAINER_CONFIG_PATH}"
 ```
 
 ## Deploying a container
@@ -57,9 +57,6 @@ docker run -d \
     -v ${HOST_SOCKET_PATH}:${CONTAINER_SOCKET_PATH} \
     -v ${HOST_CONFIG_PATH}:${CONTAINER_CONFIG_PATH} \
     bot-detector:latest \
-    -log-path "${CONTAINER_LOG_PATH}" \
-    -socket-path "${CONTAINER_SOCKET_PATH}" \
-    -yaml-path "${CONTAINER_CONFIG_PATH}" \
-    -cleanup-interval "5m" \
-    -idle-timeout "30m"
+    --log-path "${CONTAINER_LOG_PATH}" \
+    --yaml-path "${CONTAINER_CONFIG_PATH}"
 ```

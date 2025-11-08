@@ -22,16 +22,14 @@ See details in [HaproxySetup.md](HaproxySetup.md)
 
 ### **Step 2: Running the Bot-Detector**
 
-The application is configured using command-line flags.
+The application is configured using a YAML file and a few command-line flags.
 
 #### **Production Mode (Live Tailing)**
 
-Run the application pointing to your live log file, HAProxy socket, and map file.
-
 ```bash
 ./bot-detector \
-    -log-path "/var/log/http/access.log" \
-    -yaml-path "chains.yaml"
+    --log-path "/var/log/http/access.log" \
+    --yaml-path "chains.yaml"
 ```
 
 #### **Dry Run Mode (Testing)**
@@ -40,14 +38,14 @@ Use `-dry-run` to test your chains against a static log file. This will process 
 
 ```bash
 # test_access.log contains the log lines you want to test
-./bot-detector -dry-run -test-log "test_access.log" -yaml-path "chains.yaml"
+./bot-detector --dry-run --test-log "test_access.log" --yaml-path "chains.yaml"
 ```
 
 ## **Resilience and Logging**
 
 ### **Passive Monitoring Mode (HAProxy Fail-Safe)**
 
-If the HAProxy socket (`-socket-path`) is unavailable during a block attempt (e.g., HAProxy is restarting or down), the program will immediately log the connection error and **downgrade the action to log** for that event. It will continue attempting the block for subsequent events.
+If an HAProxy is unavailable during a block attempt (e.g., HAProxy is restarting or down), the program will immediately log the connection error and **downgrade the action to log** for that event. It will continue attempting the block for subsequent events.
 
 ### **Log Rotation Handling**
 

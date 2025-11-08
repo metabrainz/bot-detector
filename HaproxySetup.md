@@ -126,7 +126,7 @@ YAML
 ```yaml
 # chains.yaml
 
-version: "1.0"
+version: "1.0" # This version field is mandatory
 # ... other config ...
 
 # --- Block Duration Mapping ---
