@@ -30,12 +30,22 @@ func TestCleanUpIdleActivity(t *testing.T) {
 	keyStillUseful := TrackingKey{IPInfo: NewIPInfo("192.0.2.2")} // Will be recent
 	keyIdle := TrackingKey{IPInfo: NewIPInfo("192.0.2.3")}        // Will be older than IdleTimeout
 	keyBlocked := TrackingKey{IPInfo: NewIPInfo("192.0.2.4")}     // Blocked, should not be cleaned up
+	keyStaleChain := TrackingKey{IPInfo: NewIPInfo("192.0.2.5")}  // Has chain progress, but it's stale
 
 	processor.ActivityMutex.Lock()
 	processor.ActivityStore[keyUseless] = &BotActivity{LastRequestTime: now.Add(-60 * time.Millisecond)}
 	processor.ActivityStore[keyStillUseful] = &BotActivity{LastRequestTime: now.Add(-20 * time.Millisecond)}
 	processor.ActivityStore[keyIdle] = &BotActivity{LastRequestTime: now.Add(-110 * time.Millisecond)}
 	processor.ActivityStore[keyBlocked] = &BotActivity{LastRequestTime: now.Add(-200 * time.Millisecond), IsBlocked: true}
+	processor.ActivityStore[keyStaleChain] = &BotActivity{
+		LastRequestTime: now.Add(-110 * time.Millisecond), // The overall activity is idle
+		ChainProgress: map[string]StepState{
+			"StaleChain": {
+				CurrentStep:   1,
+				LastMatchTime: now.Add(-120 * time.Millisecond), // The chain step is older than IdleTimeout
+			},
+		},
+	}
 	processor.ActivityMutex.Unlock()
 
 	// --- Act ---
@@ -58,6 +68,9 @@ func TestCleanUpIdleActivity(t *testing.T) {
 	}
 	if _, exists := processor.ActivityStore[keyIdle]; exists {
 		t.Error("Expected 'idle' key to be cleaned up by IdleTimeout, but it still exists.")
+	}
+	if _, exists := processor.ActivityStore[keyStaleChain]; exists {
+		t.Error("Expected key with stale chain progress to be cleaned up, but it still exists.")
 	}
 	if _, exists := processor.ActivityStore[keyStillUseful]; !exists {
 		t.Error("Expected 'still useful' key to remain, but it was cleaned up.")
