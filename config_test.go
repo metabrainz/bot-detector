@@ -419,6 +419,11 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 
 func TestChainWatcher_Reload(t *testing.T) {
 	// --- Setup ---
+	// This test involves loading configs which can be noisy.
+	// Isolate the log level for this test.
+	originalLogLevel := CurrentLogLevel
+	t.Cleanup(func() { CurrentLogLevel = originalLogLevel })
+
 	// 1. Create a temporary YAML file with initial content.
 	initialYAMLContent := `
 version: "1.0"
@@ -512,9 +517,15 @@ chains:
 
 func TestChainWatcher_ReloadFailure(t *testing.T) {
 	// --- Setup ---
+	// This test involves loading configs which can be noisy.
+	// Isolate the log level for this test.
+	originalLogLevel := CurrentLogLevel
+	t.Cleanup(func() { CurrentLogLevel = originalLogLevel })
+
 	// 1. Create a temporary YAML file with initial valid content.
 	initialYAMLContent := `
 version: "1.0"
+log_level: "info"
 chains:
   - name: "InitialChain"
     match_key: "ip"
@@ -580,9 +591,15 @@ chains:
 
 func TestChainWatcher_StatError(t *testing.T) {
 	// --- Setup ---
+	// This test involves loading configs which can be noisy.
+	// Isolate the log level for this test.
+	originalLogLevel := CurrentLogLevel
+	t.Cleanup(func() { CurrentLogLevel = originalLogLevel })
+
 	// 1. Create a temporary YAML file.
 	initialYAMLContent := `
 version: "1.0"
+log_level: "info"
 chains:
   - name: "InitialChain"
     match_key: "ip"
