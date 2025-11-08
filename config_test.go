@@ -538,6 +538,97 @@ chains:
 	}
 }
 
+func TestChainWatcher_FileDependencyReload(t *testing.T) {
+	// --- Setup ---
+	tempDir := t.TempDir()
+
+	// 1. Create the initial dependency file (bad_agents.txt)
+	agentFilePath := filepath.Join(tempDir, "bad_agents.txt")
+	if err := os.WriteFile(agentFilePath, []byte("InitialBadAgent/1.0"), 0644); err != nil {
+		t.Fatalf("Failed to write initial agent file: %v", err)
+	}
+
+	// 2. Create the initial YAML file that references the dependency
+	initialYAMLContent := fmt.Sprintf(`
+version: "1.0"
+chains:
+  - name: "FileWatcherChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          UserAgent: "file:%s"
+`, agentFilePath)
+
+	tempYamlFile := filepath.Join(tempDir, "chains.yaml")
+	if err := os.WriteFile(tempYamlFile, []byte(initialYAMLContent), 0644); err != nil {
+		t.Fatalf("Failed to write initial temp yaml file: %v", err)
+	}
+
+	// Point the global YAMLFilePath to our temp file for the duration of the test.
+	originalPath := YAMLFilePath
+	YAMLFilePath = tempYamlFile
+	t.Cleanup(func() { YAMLFilePath = originalPath })
+
+	// 3. Load the initial configuration.
+	initialLoadedCfg, err := LoadChainsFromYAML()
+	if err != nil {
+		t.Fatalf("Initial LoadChainsFromYAML() failed: %v", err)
+	}
+
+	// 4. Create the processor with the initial config.
+	processor := &Processor{
+		ActivityStore: make(map[TrackingKey]*BotActivity),
+		ActivityMutex: &sync.RWMutex{},
+		Chains:        initialLoadedCfg.Chains,
+		ChainMutex:    &sync.RWMutex{},
+		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+		Config: &AppConfig{
+			FileDependencies:            initialLoadedCfg.FileDependencies,
+			testOverridePollingInterval: 10 * time.Millisecond,
+		},
+	}
+	initialFileInfo, _ := os.Stat(tempYamlFile)
+	processor.Config.LastModTime = initialFileInfo.ModTime()
+
+	// 5. Start the ChainWatcher in a goroutine.
+	stopWatcher := make(chan struct{})
+	go processor.ChainWatcher(stopWatcher)
+	t.Cleanup(func() { close(stopWatcher) })
+
+	// Give the watcher a moment to start.
+	time.Sleep(processor.Config.testOverridePollingInterval * 2)
+
+	// --- Act ---
+	// 6. Modify ONLY the dependency file.
+	time.Sleep(100 * time.Millisecond) // Ensure modification time is different.
+	if err := os.WriteFile(agentFilePath, []byte("ReloadedBadAgent/2.0"), 0644); err != nil {
+		t.Fatalf("Failed to write modified agent file: %v", err)
+	}
+
+	// 7. Wait for the watcher to detect and apply the changes.
+	time.Sleep(processor.Config.testOverridePollingInterval * 2)
+
+	// --- Assert ---
+	// 8. Check if the processor's internal matchers have been updated.
+	processor.ChainMutex.RLock()
+	defer processor.ChainMutex.RUnlock()
+
+	if len(processor.Chains) != 1 || len(processor.Chains[0].Steps) != 1 {
+		t.Fatal("Processor chains were not reloaded correctly.")
+	}
+
+	// Create log entries to test the old and new rules.
+	entryWithOldAgent := &LogEntry{UserAgent: "InitialBadAgent/1.0"}
+	entryWithNewAgent := &LogEntry{UserAgent: "ReloadedBadAgent/2.0"}
+
+	// The single matcher function should now only match the new agent.
+	matcherFunc := processor.Chains[0].Steps[0].Matchers[0]
+	if matcherFunc(entryWithOldAgent) || !matcherFunc(entryWithNewAgent) {
+		t.Error("The file-based matcher was not updated correctly after the dependency file was reloaded.")
+	}
+}
+
 func TestChainWatcher_ReloadFailure(t *testing.T) {
 	// --- Setup ---
 	// This test involves loading configs which can be noisy.
