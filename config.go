@@ -563,6 +563,9 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}) {
 		case <-stop:
 			p.LogFunc(LevelInfo, "WATCH", "ChainWatcher received stop signal. Shutting down.")
 			return
+		case <-p.testReloadSignal:
+			// This case is for testing only, to trigger an immediate check.
+			p.LogFunc(LevelDebug, "WATCH", "Received test signal for immediate reload check.")
 		case <-time.After(pollingInterval):
 			// Continue with polling
 		}

@@ -900,12 +900,7 @@ chains:
 	processor := &Processor{
 		Chains:     initialLoadedCfg.Chains,
 		ChainMutex: &sync.RWMutex{},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
-			logMutex.Lock()
-			capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
-			logMutex.Unlock()
-		},
-		Config: &AppConfig{testOverridePollingInterval: 10 * time.Millisecond},
+		Config:     &AppConfig{testOverridePollingInterval: 10 * time.Millisecond},
 	}
 	initialFileInfo, _ := os.Stat(tempFile)
 	processor.Config.LastModTime = initialFileInfo.ModTime()
@@ -922,6 +917,7 @@ chains:
 	}
 
 	// 5. Start the ChainWatcher.
+	processor.testReloadSignal = make(chan struct{}, 1) // Re-purpose this for signaling the watcher
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
 	go processor.ChainWatcher(stopWatcher)
@@ -933,7 +929,10 @@ chains:
 		t.Fatalf("Failed to write invalid YAML: %v", err)
 	}
 
-	// 7. Wait for the watcher to log the error.
+	// 7. Force the watcher to check immediately.
+	processor.testReloadSignal <- struct{}{}
+
+	// 8. Wait for the watcher to log the error.
 	select {
 	case <-logReceived:
 		// Error was logged as expected.
