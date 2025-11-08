@@ -86,7 +86,7 @@ This will produce a single executable named `bot-detector`.
 
 ---
 
-### **Log Levels**
+### **Log Levels (in `chains.yaml`)**
 
 The application uses a unified logging system with five discrete levels. The `--log-level` flag controls the minimum severity level that will be displayed in the output.
 
@@ -112,7 +112,6 @@ The application uses a unified logging system with five discrete levels. The `--
 ```bash
 ./bot-detector --dry-run \
 --yaml-path "test_rules.yaml" \
---log-level debug \
 --test-log "large_test_data.log"
 ```
 
