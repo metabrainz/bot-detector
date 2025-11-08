@@ -239,7 +239,7 @@ func compileObjectMatcher(chainName string, stepIndex int, field string, obj map
 }
 
 // LoadChainsFromYAML reads, parses, and pre-compiles regexes for the chains.
-func LoadChainsFromYAML() (*LoadedConfig, error) {
+func LoadChainsFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 	data, err := os.ReadFile(YAMLFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read YAML file %s: %w", YAMLFilePath, err)
@@ -287,12 +287,13 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 	}
 
 	// --- PARSE GLOBAL SETTINGS ---
-	var pollingInterval, cleanupInterval, idleTimeout, outOfOrderTolerance time.Duration
+	var pollingInterval, cleanupInterval, idleTimeout, outOfOrderTolerance, eofPollingDelay time.Duration
 
 	// Set defaults for global settings
 	logLevelStr := DefaultLogLevel
 	pollingIntervalStr := DefaultPollingInterval
 	cleanupIntervalStr := DefaultCleanupInterval
+	eofPollingDelayStr := DefaultEOFPollingDelay
 	idleTimeoutStr := DefaultIdleTimeout
 	outOfOrderToleranceStr := DefaultOutOfOrderTolerance
 
@@ -305,6 +306,9 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 	}
 	if config.CleanupInterval != "" {
 		cleanupIntervalStr = config.CleanupInterval
+	}
+	if config.EOFPollingDelay != "" {
+		eofPollingDelayStr = config.EOFPollingDelay
 	}
 	if config.IdleTimeout != "" {
 		idleTimeoutStr = config.IdleTimeout
@@ -321,6 +325,10 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 	cleanupInterval, err = time.ParseDuration(cleanupIntervalStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid cleanup_interval format: %w", err)
+	}
+	eofPollingDelay, err = time.ParseDuration(eofPollingDelayStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid eof_polling_delay format: %w", err)
 	}
 	idleTimeout, err = time.ParseDuration(idleTimeoutStr)
 	if err != nil {
@@ -527,6 +535,7 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 		BlockTableNameFallback: newFallbackName,
 		Chains:                 newChains,
 		CleanupInterval:        cleanupInterval,
+		EOFPollingDelay:        eofPollingDelay,
 		DurationToTableName:    newDurationTables,
 		FileDependencies:       fileDependencies,
 		HAProxyAddresses:       config.HAProxyAddresses,

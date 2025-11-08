@@ -244,7 +244,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 						restartTailing(0) // No delay, but check for pending signal.
 						break             // Break inner loop to reopen
 					}
-					time.Sleep(EOFPollingDelay) // Use EOFPollingDelay for standard polling
+					time.Sleep(p.Config.EOFPollingDelay) // Use configurable polling delay
 					continue
 				} else {
 					// Read error (non-EOF) is typically a one-off event, but we retry

@@ -383,6 +383,7 @@ func TestLiveLogTailer(t *testing.T) {
 		Config: &AppConfig{
 			// Use very short delays for testing
 			PollingInterval: 10 * time.Millisecond,
+			EOFPollingDelay: 1 * time.Millisecond,
 		},
 	}
 

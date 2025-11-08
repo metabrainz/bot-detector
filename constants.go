@@ -28,6 +28,7 @@ const (
 	DefaultLogLevel            = "warning"
 	DefaultPollingInterval     = "5s"
 	DefaultCleanupInterval     = "1m"
+	DefaultEOFPollingDelay     = "200ms"
 	DefaultIdleTimeout         = "30m"
 	DefaultOutOfOrderTolerance = "5s"
 	DefaultMinPollingInterval  = 1 * time.Second // Minimum safe polling interval to prevent tight loops.

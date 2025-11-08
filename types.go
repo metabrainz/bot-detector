@@ -40,6 +40,7 @@ type AppConfig struct {
 	BlockTableNameFallback string
 	CleanupInterval        time.Duration
 	DurationToTableName    map[time.Duration]string
+	EOFPollingDelay        time.Duration
 	FileDependencies       []string // List of file paths used in `file:` matchers.
 	HAProxyAddresses       []string
 	HAProxyDialTimeout     time.Duration
@@ -59,6 +60,7 @@ type LoadedConfig struct {
 	Chains                 []BehavioralChain
 	CleanupInterval        time.Duration
 	DurationToTableName    map[time.Duration]string
+	EOFPollingDelay        time.Duration
 	FileDependencies       []string
 	HAProxyAddresses       []string
 	HAProxyDialTimeout     time.Duration
@@ -77,6 +79,7 @@ type LoadedConfig struct {
 type ChainConfig struct {
 	Chains               []BehavioralChainYAML `yaml:"chains"`
 	CleanupInterval      string                `yaml:"cleanup_interval"`
+	EOFPollingDelay      string                `yaml:"eof_polling_delay"`
 	DefaultBlockDuration string                `yaml:"default_block_duration"`
 	DurationTables       map[string]string     `yaml:"duration_tables"`
 	HAProxyAddresses     []string              `yaml:"haproxy_addresses"`
