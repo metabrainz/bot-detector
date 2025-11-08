@@ -564,6 +564,15 @@ chains:
 `,
 			expectedError: "invalid min_time_since_last_hit",
 		},
+		{
+			name: "Invalid default_block_duration",
+			yamlContent: `
+version: "1.0"
+default_block_duration: "1x"
+chains: []
+`,
+			expectedError: "invalid block_duration format for default_block_duration",
+		},
 	}...)
 
 	for _, tt := range tests {
