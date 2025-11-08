@@ -130,6 +130,11 @@ func TestLoadChainsFromYAML_Errors(t *testing.T) {
 		expectedError string
 	}{
 		{
+			name:          "File Not Found",
+			yamlContent:   "", // No content, as the file won't be created
+			expectedError: "failed to read YAML file",
+		},
+		{
 			name: "Unsupported Version",
 			yamlContent: `
 version: "0.9"
@@ -262,8 +267,10 @@ chains:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tempDir := t.TempDir()
-			tempFile := filepath.Join(tempDir, "chains.yaml")
-			os.WriteFile(tempFile, []byte(tt.yamlContent), 0644)
+			tempFile := filepath.Join(tempDir, "test_chains.yaml")
+			if tt.yamlContent != "" {
+				os.WriteFile(tempFile, []byte(tt.yamlContent), 0644)
+			}
 
 			originalPath := YAMLFilePath
 			YAMLFilePath = tempFile
