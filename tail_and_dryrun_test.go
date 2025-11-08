@@ -99,6 +99,13 @@ func TestReadLineWithLimit(t *testing.T) {
 			expectedLine:  "line1",
 			expectedError: nil,
 		},
+		{
+			name:          "Line over limit with EOF",
+			input:         "this line is too long and has no newline",
+			limit:         10,
+			expectedLine:  "this line ",
+			expectedError: ErrLineSkipped,
+		},
 	}
 
 	for _, tt := range tests {
@@ -185,6 +192,14 @@ func TestHasFileBeenRotated(t *testing.T) {
 			expected:    true,
 			initialStat: initialStat,
 		},
+		{
+			name: "No Initial Stat",
+			mockStatFunc: func(path string) (os.FileInfo, error) {
+				return &mockFileInfo{size: 512, sys: &syscall.Stat_t{Dev: 1, Ino: 12345}}, nil
+			},
+			expected:    false, // Cannot detect rotation without initial stat
+			initialStat: nil,
+		},
 	}
 
 	for _, tt := range tests {
@@ -242,6 +257,15 @@ line 3`), 0644)
 			},
 			expectedLinesProcessed: 2, // The long line is skipped, but the other two are processed.
 			expectedLogContains:    "Skipped (Length exceeded",
+		},
+		{
+			name:       "Read Error During Processing",
+			logContent: "this is a valid line",
+			setupFunc: func(filePath string) {
+				os.WriteFile(filePath, []byte("this is a valid line"), 0644)
+			},
+			expectedLinesProcessed: 1,
+			expectedLogContains:    "DryRun complete. Processed 1 lines.",
 		},
 	}
 
