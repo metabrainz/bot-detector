@@ -75,15 +75,15 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 
 	// Create the processor
 	processor := &Processor{
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            chains,
-		ChainMutex:        &sync.RWMutex{},
-		DryRun:            false,
-		LogFunc:           LogOutput,
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		Blocker:           mockBlocker, // Inject mock blocker
+		ChainMutex:        &sync.RWMutex{},
+		Chains:            chains,
 		Config:            &AppConfig{},
+		DryRun:            false,
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		LogFunc:           LogOutput,
 	}
 
 	// Get the correct tracking key for the activity store (ip_ua)
@@ -196,15 +196,15 @@ func TestCheckChains_DryRun(t *testing.T) {
 
 	// Create the processor with DryRun=true
 	processor := &Processor{
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            chains,
-		ChainMutex:        &sync.RWMutex{},
-		DryRun:            true,
-		LogFunc:           LogOutput,
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		Blocker:           mockBlocker, // Inject mock blocker
+		ChainMutex:        &sync.RWMutex{},
+		Chains:            chains,
 		Config:            &AppConfig{},
+		DryRun:            true,
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		LogFunc:           LogOutput,
 	}
 
 	// Get the correct tracking key for the activity store (ip-only)
@@ -262,15 +262,15 @@ func TestCheckChains_DryRun_UnknownAction(t *testing.T) {
 	}
 
 	processor := &Processor{
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            chains,
-		ChainMutex:        &sync.RWMutex{},
-		DryRun:            true, // Must be in dry-run mode
-		LogFunc:           logCaptureFunc,
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		Blocker:           &MockBlocker{},
+		ChainMutex:        &sync.RWMutex{},
+		Chains:            chains,
 		Config:            &AppConfig{},
+		DryRun:            true, // Must be in dry-run mode
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		LogFunc:           logCaptureFunc,
 	}
 
 	entry := &LogEntry{
@@ -323,15 +323,15 @@ func TestCheckChains_LiveMode_UnknownAction(t *testing.T) {
 	}
 
 	processor := &Processor{
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            chains,
-		ChainMutex:        &sync.RWMutex{},
-		DryRun:            false, // Must be in live mode
-		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		Blocker:           mockBlocker,
+		ChainMutex:        &sync.RWMutex{},
+		Chains:            chains,
 		Config:            &AppConfig{},
+		DryRun:            false, // Must be in live mode
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 
 	entry := &LogEntry{
@@ -438,15 +438,15 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 	chains := []BehavioralChain{chain}
 
 	processor := &Processor{
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            chains,
-		ChainMutex:        &sync.RWMutex{},
-		DryRun:            false,
-		LogFunc:           LogOutput,
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		Blocker:           &MockBlocker{},
+		ChainMutex:        &sync.RWMutex{},
+		Chains:            chains,
 		Config:            &AppConfig{},
+		DryRun:            false,
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		LogFunc:           LogOutput,
 	}
 
 	trackingKey := GetTrackingKey(&chain, entry)
@@ -515,15 +515,15 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 	chains := []BehavioralChain{chain}
 
 	processor := &Processor{
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            chains,
-		ChainMutex:        &sync.RWMutex{},
-		DryRun:            false,
-		LogFunc:           LogOutput,
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		Blocker:           &MockBlocker{},
+		ChainMutex:        &sync.RWMutex{},
+		Chains:            chains,
 		Config:            &AppConfig{},
+		DryRun:            false,
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		LogFunc:           LogOutput,
 	}
 
 	trackingKey := GetTrackingKey(&chain, entry)
@@ -621,15 +621,15 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 
 	// Create the processor
 	processor := &Processor{
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            chains, // Use the compiled chains
-		ChainMutex:        &sync.RWMutex{},
-		DryRun:            false,
-		LogFunc:           logCaptureFunc,
-		IsWhitelistedFunc: mockIsWhitelisted, // Inject mock whitelisting
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		Blocker:           mockBlocker,
+		ChainMutex:        &sync.RWMutex{},
+		Chains:            chains, // Use the compiled chains
 		Config:            &AppConfig{},
+		DryRun:            false,
+		IsWhitelistedFunc: mockIsWhitelisted, // Inject mock whitelisting
+		LogFunc:           logCaptureFunc,
 	}
 
 	whitelistedKey := GetTrackingKey(&chain, whitelistedEntry)
@@ -721,15 +721,15 @@ func TestCheckChains_LogAction(t *testing.T) {
 
 	// Create the processor
 	processor := &Processor{
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            chains,
-		ChainMutex:        &sync.RWMutex{},
-		DryRun:            false,
-		LogFunc:           LogOutput,
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		Blocker:           mockBlocker,
+		ChainMutex:        &sync.RWMutex{},
+		Chains:            chains,
 		Config:            &AppConfig{},
+		DryRun:            false,
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		LogFunc:           LogOutput,
 	}
 
 	trackingKey := GetTrackingKey(&chain, entry)
@@ -814,15 +814,15 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 
 	// Create the processor
 	processor := &Processor{
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            chains,
-		ChainMutex:        &sync.RWMutex{},
-		DryRun:            false,
-		LogFunc:           LogOutput,
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		Blocker:           mockBlocker,
+		ChainMutex:        &sync.RWMutex{},
+		Chains:            chains,
 		Config:            &AppConfig{},
+		DryRun:            false,
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		LogFunc:           LogOutput,
 	}
 
 	trackingKey := GetTrackingKey(&chain, entry)
@@ -873,14 +873,14 @@ func TestCheckChains_BlockExpiration(t *testing.T) {
 	chains := []BehavioralChain{chain}
 
 	processor := &Processor{
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            chains,
-		ChainMutex:        &sync.RWMutex{},
-		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		Blocker:           &MockBlocker{}, // No-op blocker
+		ChainMutex:        &sync.RWMutex{},
+		Chains:            chains,
 		Config:            &AppConfig{},
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 
 	// 2. Manually create a pre-existing, EXPIRED block state.
@@ -942,14 +942,14 @@ func TestCheckChains_IPVersionMismatch(t *testing.T) {
 	chains[1].Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
 
 	processor := &Processor{
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            chains,
-		ChainMutex:        &sync.RWMutex{},
-		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		Blocker:           &MockBlocker{},
+		ChainMutex:        &sync.RWMutex{},
+		Chains:            chains,
 		Config:            &AppConfig{},
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 
 	// 2. Process an IPv4 log entry.
@@ -992,14 +992,14 @@ func TestCheckChains_IPAndUABlockOptimization(t *testing.T) {
 	chains := []BehavioralChain{chain}
 
 	processor := &Processor{
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            chains,
-		ChainMutex:        &sync.RWMutex{},
-		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		Blocker:           &MockBlocker{},
+		ChainMutex:        &sync.RWMutex{},
+		Chains:            chains,
 		Config:            &AppConfig{},
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 
 	entry := &LogEntry{
@@ -1047,14 +1047,14 @@ func TestCheckChains_TimeRules(t *testing.T) {
 
 	baseProcessor := func() *Processor {
 		return &Processor{
-			ActivityStore:     make(map[TrackingKey]*BotActivity),
 			ActivityMutex:     &sync.RWMutex{},
-			Chains:            chains,
-			ChainMutex:        &sync.RWMutex{},
-			LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
-			IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+			ActivityStore:     make(map[TrackingKey]*BotActivity),
 			Blocker:           &MockBlocker{},
+			ChainMutex:        &sync.RWMutex{},
+			Chains:            chains,
 			Config:            &AppConfig{},
+			IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+			LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 		}
 	}
 
@@ -1146,17 +1146,17 @@ func TestDryRunMode(t *testing.T) {
 
 	// Create a processor (but don't start any background processes like ChainWatcher).
 	processor := &Processor{
-		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ActivityMutex: &sync.RWMutex{},
-		Chains:        loadedCfg.Chains,
+		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ChainMutex:    &sync.RWMutex{},
-		DryRun:        true,                                                                    // Simulate dry-run mode
-		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {}, // Will be replaced
+		Chains:        loadedCfg.Chains,
 		Config: &AppConfig{
 			OutOfOrderTolerance: loadedCfg.OutOfOrderTolerance,
 			MaxTimeSinceLastHit: loadedCfg.MaxTimeSinceLastHit,
 			WhitelistNets:       loadedCfg.WhitelistNets,
 		},
+		DryRun:  true,                                                                    // Simulate dry-run mode
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // Will be replaced
 	}
 	// Set the IsWhitelistedFunc on the *actual* processor instance to avoid nil pointers.
 	processor.IsWhitelistedFunc = processor.IsIPWhitelisted
@@ -1351,11 +1351,13 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 			chains := []BehavioralChain{chain}
 
 			processor := &Processor{
-				ActivityStore: make(map[TrackingKey]*BotActivity), ActivityMutex: &sync.RWMutex{},
-				Chains: chains, ChainMutex: &sync.RWMutex{},
-				LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
-				IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false }, // Explicitly set to no-op for this test
+				ActivityMutex:     &sync.RWMutex{},
+				ActivityStore:     make(map[TrackingKey]*BotActivity),
+				ChainMutex:        &sync.RWMutex{},
+				Chains:            chains,
 				Config:            &AppConfig{OutOfOrderTolerance: tt.tolerance, MaxTimeSinceLastHit: 1 * time.Minute},
+				IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false }, // Explicitly set to no-op for this test
+				LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 			}
 
 			// 1. Process a "newer" entry first to set the LastRequestTime.

@@ -22,17 +22,17 @@ type Blocker interface {
 // Processor holds all necessary dependencies and state for log processing,
 // making it easy to mock/stub external calls and manage state in tests.
 type Processor struct {
-	ActivityStore     map[TrackingKey]*BotActivity
 	ActivityMutex     *sync.RWMutex
-	Chains            []BehavioralChain
-	ChainMutex        *sync.RWMutex
-	DryRun            bool
-	LogFunc           func(level LogLevel, tag string, format string, args ...interface{})
-	IsWhitelistedFunc func(ipInfo IPInfo) bool
-	ProcessLogLine    func(line string, lineNumber int)
+	ActivityStore     map[TrackingKey]*BotActivity
 	Blocker           Blocker
+	ChainMutex        *sync.RWMutex
+	Chains            []BehavioralChain
 	CommandExecutor   func(p *Processor, addr, ip, command string) error // The function that executes the backend command
 	Config            *AppConfig
+	DryRun            bool
+	IsWhitelistedFunc func(ipInfo IPInfo) bool
+	LogFunc           func(level LogLevel, tag string, format string, v ...interface{})
+	ProcessLogLine    func(line string, lineNumber int)
 }
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.

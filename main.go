@@ -48,16 +48,16 @@ func main() {
 
 	// Initialize the Processor instance.
 	p := &Processor{
-		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ActivityMutex: &sync.RWMutex{},
-		Chains:        loadedCfg.Chains,
+		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ChainMutex:    &sync.RWMutex{},
-		DryRun:        DryRun,
-		LogFunc:       LogOutput,
+		Chains:        loadedCfg.Chains,
 		CommandExecutor: func(p *Processor, addr, ip, command string) error {
 			return executeCommandImpl(p, addr, ip, command)
 		},
-		Config: appConfig,
+		Config:  appConfig,
+		DryRun:  DryRun,
+		LogFunc: LogOutput,
 	}
 	// Inject the HAProxyBlocker which depends on the main processor instance.
 	p.Blocker = &HAProxyBlocker{P: p}

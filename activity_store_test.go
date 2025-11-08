@@ -12,16 +12,16 @@ func TestCleanUpIdleActivity(t *testing.T) {
 
 	// Create a processor with specific timeout values for the test.
 	processor := &Processor{
-		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ActivityMutex: &sync.RWMutex{},
-		Chains:        []BehavioralChain{}, // No chains needed for this test
+		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ChainMutex:    &sync.RWMutex{},
-		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+		Chains:        []BehavioralChain{}, // No chains needed for this test
 		Config: &AppConfig{
 			IdleTimeout:         100 * time.Millisecond, // A short general timeout
 			MaxTimeSinceLastHit: 50 * time.Millisecond,  // A shorter time-based rule timeout
 			CleanupInterval:     10 * time.Millisecond,  // A very short cleanup interval for the test
 		},
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 
 	// 2. Create different activity states
@@ -88,9 +88,8 @@ func TestCleanUpIdleActivity_MinTimeSinceLastHit(t *testing.T) {
 	resetGlobalState()
 
 	processor := &Processor{
-		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ActivityMutex: &sync.RWMutex{},
-		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+		ActivityStore: make(map[TrackingKey]*BotActivity),
 		Config: &AppConfig{
 			// A general idle timeout that is very long.
 			IdleTimeout: 1 * time.Hour,
@@ -98,6 +97,7 @@ func TestCleanUpIdleActivity_MinTimeSinceLastHit(t *testing.T) {
 			MaxTimeSinceLastHit: 5 * time.Minute,
 			CleanupInterval:     10 * time.Millisecond,
 		},
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 
 	// 2. Create different activity states

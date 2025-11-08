@@ -177,17 +177,17 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 
 	// Base Processor
 	p := Processor{
-		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ActivityMutex: &sync.RWMutex{},
-		Chains:        nil,
-		ChainMutex:    &sync.RWMutex{},
+		ActivityStore: make(map[TrackingKey]*BotActivity),
 		Blocker:       mockBlocker,
-		LogFunc:       LogOutput,
+		ChainMutex:    &sync.RWMutex{},
+		Chains:        nil,
+		Config:        &AppConfig{},
+		DryRun:        false,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool {
 			return ipInfo.Address == whitelistedIP // Only this IP is whitelisted
 		},
-		Config: &AppConfig{},
-		DryRun: false,
+		LogFunc: LogOutput,
 	}
 	// Assign the real implementation to the function field to avoid a nil pointer panic.
 	// The test will call this function.
@@ -345,15 +345,15 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 	}
 
 	p := Processor{
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            []BehavioralChain{chain},
-		ChainMutex:        &sync.RWMutex{},
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		Blocker:           mockBlocker,
-		LogFunc:           LogOutput,
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		ChainMutex:        &sync.RWMutex{},
+		Chains:            []BehavioralChain{chain},
 		Config:            &AppConfig{},
 		DryRun:            true, // CRITICAL: DryRun is enabled
+		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		LogFunc:           LogOutput,
 	}
 	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(&p, line, lineNumber) }
 

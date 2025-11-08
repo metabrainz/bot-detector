@@ -625,14 +625,14 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 
 		var unblockCalled bool
 		processor := &Processor{
-			ActivityStore: make(map[TrackingKey]*BotActivity),
 			ActivityMutex: &sync.RWMutex{},
+			ActivityStore: make(map[TrackingKey]*BotActivity),
 			ChainMutex:    &sync.RWMutex{},
-			LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
 			Config: &AppConfig{
 				HAProxyAddresses:    []string{"127.0.0.1:9999"},
 				DurationToTableName: map[time.Duration]string{time.Minute: "t1"},
 			},
+			LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
 			// Mock the Blocker to simulate a failure.
 			Blocker: &MockBlocker{
 				UnblockFunc: func(ipInfo IPInfo) error {
@@ -703,12 +703,12 @@ chains:
 
 	// 3. Create the processor with the initial config.
 	processor := &Processor{
-		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ActivityMutex: &sync.RWMutex{},
-		Chains:        initialLoadedCfg.Chains,
+		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ChainMutex:    &sync.RWMutex{},
-		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+		Chains:        initialLoadedCfg.Chains,
 		Config:        &AppConfig{PollingInterval: 10 * time.Millisecond},
+		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 	// Set LastModTime to the actual modification time of the initial file.
 	initialFileInfo, err := os.Stat(tempFile)
@@ -813,15 +813,15 @@ chains:
 
 	// 4. Create the processor with the initial config.
 	processor := &Processor{
-		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ActivityMutex: &sync.RWMutex{},
-		Chains:        initialLoadedCfg.Chains,
+		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ChainMutex:    &sync.RWMutex{},
-		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+		Chains:        initialLoadedCfg.Chains,
 		Config: &AppConfig{
 			FileDependencies: initialLoadedCfg.FileDependencies,
 			PollingInterval:  10 * time.Millisecond,
 		},
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 	initialFileInfo, _ := os.Stat(tempYamlFile)
 	processor.Config.LastModTime = initialFileInfo.ModTime() // Set initial mod time
@@ -912,8 +912,8 @@ chains:
 	var capturedLogs []string
 	var logMutex sync.Mutex
 	processor := &Processor{
-		Chains:     initialLoadedCfg.Chains,
 		ChainMutex: &sync.RWMutex{},
+		Chains:     initialLoadedCfg.Chains,
 		Config:     &AppConfig{PollingInterval: 10 * time.Millisecond},
 	}
 	initialFileInfo, _ := os.Stat(tempFile)
@@ -1011,14 +1011,14 @@ chains:
 	var capturedLogs []string
 	var logMutex sync.Mutex
 	processor := &Processor{
-		Chains:     []BehavioralChain{{Name: "InitialChain"}}, // Simplified initial state
 		ChainMutex: &sync.RWMutex{},
+		Chains:     []BehavioralChain{{Name: "InitialChain"}}, // Simplified initial state
+		Config:     &AppConfig{PollingInterval: 10 * time.Millisecond},
 		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
 			logMutex.Lock()
 			capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
 			logMutex.Unlock()
 		},
-		Config: &AppConfig{PollingInterval: 10 * time.Millisecond},
 	}
 	initialFileInfo, _ := os.Stat(tempFile)
 	processor.Config.LastModTime = initialFileInfo.ModTime()
