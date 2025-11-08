@@ -87,6 +87,11 @@ func TestGetTrackingKey(t *testing.T) {
 		{"Mismatch: ipv6_ua (is IPv4)", "ipv6_ua", baseEntry, TrackingKey{}},
 	}
 
+	// Add a separate test for GetIPVersion to cover the final return path.
+	if GetIPVersion("1.2.3.4.5") != VersionInvalid {
+		t.Error("Expected VersionInvalid for malformed IP string '1.2.3.4.5', but did not get it.")
+	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			chain := &BehavioralChain{MatchKey: tt.matchKey}
