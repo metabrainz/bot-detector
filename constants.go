@@ -31,4 +31,9 @@ const (
 	DefaultIdleTimeout         = "30m"
 	DefaultOutOfOrderTolerance = "5s"
 	DefaultMinPollingInterval  = 1 * time.Second // Minimum safe polling interval to prevent tight loops.
+
+	// Default HAProxy client settings
+	DefaultHAProxyMaxRetries  = 3
+	DefaultHAProxyRetryDelay  = 200 * time.Millisecond
+	DefaultHAProxyDialTimeout = 5 * time.Second
 )

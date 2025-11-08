@@ -148,5 +148,13 @@ haproxy_addresses:
   # 3. Remote HAProxy on rudi (Uses TCP/IP)
   - 10.2.2.30:9999
 
+# --- HAProxy Client Settings (Optional) ---
+# These settings control the behavior of the bot-detector when it communicates
+# with the HAProxy instances listed above.
+haproxy_max_retries: 3
+haproxy_retry_delay: "200ms"
+haproxy_dial_timeout: "5s"
+
+
 # ... chains definitions ...
 ```

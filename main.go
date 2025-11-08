@@ -37,6 +37,9 @@ func main() {
 	appConfig := &AppConfig{
 		WhitelistNets:          loadedCfg.WhitelistNets,
 		HAProxyAddresses:       loadedCfg.HAProxyAddresses,
+		HAProxyMaxRetries:      loadedCfg.HAProxyMaxRetries,
+		HAProxyRetryDelay:      loadedCfg.HAProxyRetryDelay,
+		HAProxyDialTimeout:     loadedCfg.HAProxyDialTimeout,
 		DurationToTableName:    loadedCfg.DurationToTableName,
 		BlockTableNameFallback: loadedCfg.BlockTableNameFallback,
 		LastModTime:            time.Now(),
@@ -59,8 +62,10 @@ func main() {
 		DryRun:        DryRun,
 		LogFunc:       LogOutput,
 		// Blocker will be set below
-		CommandExecutor: executeCommandImpl, // Inject the real implementation
-		Config:          appConfig,
+		CommandExecutor: func(p *Processor, addr, ip, command string) error {
+			return executeCommandImpl(p, addr, ip, command)
+		},
+		Config: appConfig,
 	}
 	// Inject the HAProxyBlocker which depends on the main processor instance.
 	P.Blocker = &HAProxyBlocker{P: P}

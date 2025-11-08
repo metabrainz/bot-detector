@@ -133,6 +133,9 @@ The file is structured as a top-level map containing a single key, chains, which
 | **idle_timeout** | string | Optional. Duration an IP must be inactive before its state is purged. Default: `30m`. |
 | **out_of_order_tolerance** | string | Optional. Maximum duration an out-of-order log entry will be processed. Default: `5s`. |
 | **default_block_duration** | string | Optional. A global block duration to apply to any `block` action chain that does not define its own `block_duration`. Format: Go duration string (e.g., "5m", "1h"). |
+| **haproxy_max_retries** | int | Optional. Number of attempts to send a command to an HAProxy instance. Default: `3`. |
+| **haproxy_retry_delay** | string | Optional. Duration to wait between retry attempts. Default: `200ms`. |
+| **haproxy_dial_timeout** | string | Optional. Timeout for establishing a connection to an HAProxy socket. Default: `5s`. |
 
 ## **BehavioralChain Definition (Top Level)**
 

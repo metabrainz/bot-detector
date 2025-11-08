@@ -347,7 +347,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			mockBlocker := &HAProxyBlocker{P: processor}
 			processor.Blocker = mockBlocker
 			// Mock the underlying executor that the real UnblockIP method will call.
-			processor.CommandExecutor = func(addr, ip, command string) error {
+			processor.CommandExecutor = func(p *Processor, addr, ip, command string) error {
 				commandsReceived = append(commandsReceived, strings.TrimSpace(command))
 				return nil
 			}

@@ -31,7 +31,7 @@ type Processor struct {
 	IsWhitelistedFunc func(ipInfo IPInfo) bool
 	ProcessLogLine    func(line string, lineNumber int)
 	Blocker           Blocker
-	CommandExecutor   CommandExecutor // The function that executes the backend command
+	CommandExecutor   func(p *Processor, addr, ip, command string) error // The function that executes the backend command
 	Config            *AppConfig
 }
 
@@ -39,6 +39,9 @@ type Processor struct {
 type AppConfig struct {
 	WhitelistNets               []*net.IPNet
 	HAProxyAddresses            []string
+	HAProxyMaxRetries           int
+	HAProxyRetryDelay           time.Duration
+	HAProxyDialTimeout          time.Duration
 	DurationToTableName         map[time.Duration]string
 	BlockTableNameFallback      string
 	LastModTime                 time.Time
@@ -56,6 +59,9 @@ type LoadedConfig struct {
 	Chains                 []BehavioralChain
 	WhitelistNets          []*net.IPNet
 	HAProxyAddresses       []string
+	HAProxyMaxRetries      int
+	HAProxyRetryDelay      time.Duration
+	HAProxyDialTimeout     time.Duration
 	DurationToTableName    map[time.Duration]string
 	BlockTableNameFallback string
 	PollingInterval        time.Duration
@@ -97,6 +103,9 @@ type ChainConfig struct {
 	HAProxyAddresses     []string              `yaml:"haproxy_addresses"`
 	DurationTables       map[string]string     `yaml:"duration_tables"`
 	DefaultBlockDuration string                `yaml:"default_block_duration"`
+	HAProxyMaxRetries    int                   `yaml:"haproxy_max_retries"`
+	HAProxyRetryDelay    string                `yaml:"haproxy_retry_delay"`
+	HAProxyDialTimeout   string                `yaml:"haproxy_dial_timeout"`
 }
 
 // --- RUNTIME DATA STRUCTURES ---

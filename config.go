@@ -376,6 +376,34 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 		}
 	}
 
+	// --- PARSE HAPROXY TIMEOUTS ---
+	var haProxyMaxRetries int
+	var haProxyRetryDelay, haProxyDialTimeout time.Duration
+
+	if config.HAProxyMaxRetries > 0 {
+		haProxyMaxRetries = config.HAProxyMaxRetries
+	} else {
+		haProxyMaxRetries = DefaultHAProxyMaxRetries
+	}
+
+	if config.HAProxyRetryDelay != "" {
+		haProxyRetryDelay, err = time.ParseDuration(config.HAProxyRetryDelay)
+		if err != nil {
+			return nil, fmt.Errorf("invalid haproxy_retry_delay: %w", err)
+		}
+	} else {
+		haProxyRetryDelay = DefaultHAProxyRetryDelay
+	}
+
+	if config.HAProxyDialTimeout != "" {
+		haProxyDialTimeout, err = time.ParseDuration(config.HAProxyDialTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("invalid haproxy_dial_timeout: %w", err)
+		}
+	} else {
+		haProxyDialTimeout = DefaultHAProxyDialTimeout
+	}
+
 	// --- PARSE CHAINS ---
 	newChains := make([]BehavioralChain, 0)
 
@@ -495,6 +523,9 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 		Chains:                 newChains,
 		WhitelistNets:          newWhitelistNets,
 		HAProxyAddresses:       config.HAProxyAddresses,
+		HAProxyMaxRetries:      haProxyMaxRetries,
+		HAProxyRetryDelay:      haProxyRetryDelay,
+		HAProxyDialTimeout:     haProxyDialTimeout,
 		DurationToTableName:    newDurationTables,
 		BlockTableNameFallback: newFallbackName,
 		PollingInterval:        pollingInterval,
@@ -580,6 +611,9 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}) {
 			p.Chains = loadedCfg.Chains
 			p.Config.WhitelistNets = loadedCfg.WhitelistNets
 			p.Config.HAProxyAddresses = loadedCfg.HAProxyAddresses
+			p.Config.HAProxyMaxRetries = loadedCfg.HAProxyMaxRetries
+			p.Config.HAProxyRetryDelay = loadedCfg.HAProxyRetryDelay
+			p.Config.HAProxyDialTimeout = loadedCfg.HAProxyDialTimeout
 			p.Config.DurationToTableName = loadedCfg.DurationToTableName
 			p.Config.BlockTableNameFallback = loadedCfg.BlockTableNameFallback
 			p.Config.PollingInterval = loadedCfg.PollingInterval
