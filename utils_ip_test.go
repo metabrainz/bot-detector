@@ -144,3 +144,13 @@ func TestGetIPVersion_Malformed(t *testing.T) {
 		t.Errorf("Expected VersionInvalid for malformed IP string '1.2.3.4.5', but got version %d", version)
 	}
 }
+
+// TestGetIPVersion_NilButNotIPv4 tests the final return path of GetIPVersion.
+func TestGetIPVersion_NilButNotIPv4(t *testing.T) {
+	// net.ParseIP can return a non-nil slice that is not a valid IPv4 or IPv6 address.
+	// For example, an IPv4-mapped IPv6 address that is not 16 bytes.
+	// This test ensures we correctly classify such cases as invalid.
+	if GetIPVersion("::ffff:1.2.3") != VersionInvalid {
+		t.Error("Expected VersionInvalid for a malformed IPv4-mapped IPv6 address string.")
+	}
+}
