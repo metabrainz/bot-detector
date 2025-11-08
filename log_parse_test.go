@@ -9,30 +9,6 @@ import (
 	"time"
 )
 
-// --- Mocking Setup for Blocker Interface ---
-
-// MockBlocker implements the Blocker interface for testing, allowing Block() calls to be intercepted.
-type MockBlocker struct {
-	BlockFunc   func(ipInfo IPInfo, duration time.Duration) error
-	UnblockFunc func(ipInfo IPInfo) error
-}
-
-// Block calls the stored mock function to simulate the blocking action.
-func (m *MockBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
-	if m.BlockFunc != nil {
-		return m.BlockFunc(ipInfo, duration)
-	}
-	return nil
-}
-
-// Unblock calls the stored mock function to simulate the unblocking action.
-func (m *MockBlocker) Unblock(ipInfo IPInfo) error {
-	if m.UnblockFunc != nil {
-		return m.UnblockFunc(ipInfo)
-	}
-	return nil
-}
-
 // --- Test Cases for ParseLogLine ---
 // (No changes to this section, as it passed in the previous step)
 
@@ -197,19 +173,11 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 		MatchKey:      "ip",
 	}
 
-	p := Processor{
-		ActivityMutex:     &sync.RWMutex{},
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
-		Blocker:           mockBlocker,
-		ChainMutex:        &sync.RWMutex{},
-		Chains:            []BehavioralChain{chain},
-		Config:            &AppConfig{},
-		DryRun:            true, // CRITICAL: DryRun is enabled
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
-		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
-		CheckChainsFunc:   func(entry *LogEntry) {}, // Will be replaced below
-	}
-	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(&p, line, lineNumber) }
+	p := newTestProcessor(&AppConfig{}, []BehavioralChain{chain})
+	p.DryRun = true
+	p.Blocker = mockBlocker
+
+	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(p, line, lineNumber) }
 
 	ip := "192.0.2.1"
 	logLine := fmt.Sprintf(`www.example.com %s - userx [06/Nov/2025:09:00:00 +0100] "GET /1 HTTP/1.1" 200 1234 "-" "-"`, ip)
@@ -256,12 +224,10 @@ func TestProcessLogLineInternal_ParseError(t *testing.T) {
 		}
 	}
 
-	p := &Processor{
-		LogFunc: logCaptureFunc,
-		// CheckChainsFunc should not be called if parsing fails.
-		CheckChainsFunc: func(entry *LogEntry) {
-			t.Error("CheckChains was called, but should have been skipped due to a parse error.")
-		},
+	p := newTestProcessor(nil, nil)
+	p.LogFunc = logCaptureFunc
+	p.CheckChainsFunc = func(entry *LogEntry) {
+		t.Error("CheckChains was called, but should have been skipped due to a parse error.")
 	}
 
 	// Act: Process a malformed log line.
@@ -292,12 +258,10 @@ func TestProcessLogLineInternal_SkipLine(t *testing.T) {
 		}
 	}
 
-	p := &Processor{
-		LogFunc: logCaptureFunc,
-		// CheckChainsFunc should not be called if the line is skipped.
-		CheckChainsFunc: func(entry *LogEntry) {
-			t.Error("CheckChains was called, but should have been skipped for a comment line.")
-		},
+	p := newTestProcessor(nil, nil)
+	p.LogFunc = logCaptureFunc
+	p.CheckChainsFunc = func(entry *LogEntry) {
+		t.Error("CheckChains was called, but should have been skipped for a comment line.")
 	}
 
 	// Act: Process a comment line.

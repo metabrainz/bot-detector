@@ -18,19 +18,11 @@ import (
 // This ensures that BlockIP and UnblockIP generate the correct commands for the specified tables and IP version.
 func TestBlockAndUnblockIP_SuccessFlow(t *testing.T) {
 	resetGlobalState()
-	processor := &Processor{
-		ChainMutex: &sync.RWMutex{},
-		Config: &AppConfig{
-			HAProxyAddresses: []string{"127.0.0.1:9999"},
-			DurationToTableName: map[time.Duration]string{
-				10 * time.Minute: "table_10m",
-			},
-			BlockTableNameFallback: "table_long",
-		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
-	}
-	blocker := &HAProxyBlocker{P: processor}
-	processor.Blocker = blocker
+	processor := newTestProcessor(&AppConfig{
+		HAProxyAddresses:       []string{"127.0.0.1:9999"},
+		DurationToTableName:    map[time.Duration]string{10 * time.Minute: "table_10m"},
+		BlockTableNameFallback: "table_long",
+	}, nil)
 
 	var mu sync.Mutex
 	var commandsReceived []string
@@ -52,7 +44,7 @@ func TestBlockAndUnblockIP_SuccessFlow(t *testing.T) {
 	duration := 10 * time.Minute
 
 	// Test BlockIP
-	if err := blocker.Block(ipInfo, duration); err != nil {
+	if err := processor.Blocker.Block(ipInfo, duration); err != nil {
 		t.Fatalf("Block failed unexpectedly: %v", err)
 	}
 
@@ -65,7 +57,7 @@ func TestBlockAndUnblockIP_SuccessFlow(t *testing.T) {
 	mu.Unlock()
 
 	// Test UnblockIP
-	if err := blocker.Unblock(ipInfo); err != nil {
+	if err := processor.Blocker.Unblock(ipInfo); err != nil {
 		t.Fatalf("Unblock failed unexpectedly: %v", err)
 	}
 
@@ -90,20 +82,14 @@ func TestBlockAndUnblockIP_SuccessFlow(t *testing.T) {
 // the command falls back to using the table with the longest configured duration.
 func TestBlockIP_FallbackTable(t *testing.T) {
 	resetGlobalState()
-	processor := &Processor{
-		ChainMutex: &sync.RWMutex{},
-		Config: &AppConfig{
-			HAProxyAddresses: []string{"127.0.0.1:9999"},
-			DurationToTableName: map[time.Duration]string{
-				5 * time.Minute: "table_5m",
-				1 * time.Hour:   "table_1h", // This will be the fallback
-			},
-			BlockTableNameFallback: "table_1h", // Set explicitly as LoadChainsFromYAML would
+	processor := newTestProcessor(&AppConfig{
+		HAProxyAddresses: []string{"127.0.0.1:9999"},
+		DurationToTableName: map[time.Duration]string{
+			5 * time.Minute: "table_5m",
+			1 * time.Hour:   "table_1h",
 		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
-	}
-	blocker := &HAProxyBlocker{P: processor}
-	processor.Blocker = blocker
+		BlockTableNameFallback: "table_1h",
+	}, nil)
 
 	var commandReceived string
 	processor.CommandExecutor = func(p *Processor, addr, ip, command string) error {
@@ -115,7 +101,7 @@ func TestBlockIP_FallbackTable(t *testing.T) {
 	unconfiguredDuration := 30 * time.Minute
 
 	// --- Act ---
-	blocker.Block(ipInfo, unconfiguredDuration)
+	processor.Blocker.Block(ipInfo, unconfiguredDuration)
 
 	// --- Assert ---
 	expectedCommand := "set table table_1h_ipv4 key 192.0.2.5 data.gpc0 1"
@@ -137,17 +123,12 @@ func TestBlockIP_NoTableFound(t *testing.T) {
 		}
 	}
 
-	processor := &Processor{
-		ChainMutex: &sync.RWMutex{},
-		Config: &AppConfig{
-			HAProxyAddresses:    []string{"127.0.0.1:9999"},
-			DurationToTableName: make(map[time.Duration]string), // No tables configured
-			// No BlockTableNameFallback configured
-		},
-		LogFunc: logCaptureFunc,
-	}
-	blocker := &HAProxyBlocker{P: processor}
-	processor.Blocker = blocker
+	processor := newTestProcessor(&AppConfig{
+		HAProxyAddresses:    []string{"127.0.0.1:9999"},
+		DurationToTableName: make(map[time.Duration]string),
+	}, nil)
+	// Override the default logger to capture output for this test.
+	processor.LogFunc = logCaptureFunc
 
 	// The mock executor should fail the test if it's ever called.
 	processor.CommandExecutor = func(p *Processor, addr, ip, command string) error {
@@ -157,7 +138,7 @@ func TestBlockIP_NoTableFound(t *testing.T) {
 	ipInfo := NewIPInfo("192.0.2.10")
 
 	// --- Act ---
-	blocker.Block(ipInfo, 5*time.Minute)
+	processor.Blocker.Block(ipInfo, 5*time.Minute)
 
 	// --- Assert ---
 	expectedLog := "No HAProxy table found"
@@ -173,19 +154,13 @@ func TestUnblockIP_ErrorTolerance_Mocked(t *testing.T) {
 	const workingAddr = "127.0.0.1:9999"
 	const failedAddr = "127.0.0.1:65535"
 
-	processor := &Processor{
-		ChainMutex: &sync.RWMutex{},
-		Config: &AppConfig{
-			HAProxyAddresses: []string{workingAddr, failedAddr},
-			DurationToTableName: map[time.Duration]string{
-				1 * time.Minute: "table_1m",
-			},
-			BlockTableNameFallback: "table_fallback",
+	processor := newTestProcessor(&AppConfig{
+		HAProxyAddresses: []string{workingAddr, failedAddr},
+		DurationToTableName: map[time.Duration]string{
+			1 * time.Minute: "table_1m",
 		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
-	}
-	blocker := &HAProxyBlocker{P: processor}
-	processor.Blocker = blocker
+		BlockTableNameFallback: "table_fallback",
+	}, nil)
 
 	ipInfo := NewIPInfo("2001:db8::1")
 	successfulCmds := 0
@@ -200,7 +175,7 @@ func TestUnblockIP_ErrorTolerance_Mocked(t *testing.T) {
 	}
 
 	// Execute UnblockIP
-	err := blocker.Unblock(ipInfo)
+	err := processor.Blocker.Unblock(ipInfo)
 	// With the error propagation fix, we now EXPECT an error here because one of the instances failed.
 	if err == nil {
 		t.Fatal("UnblockIP was expected to return an error due to a failed instance, but it returned nil.")
@@ -219,17 +194,11 @@ func TestUnblockIP_ErrorTolerance_Mocked(t *testing.T) {
 // TestUnblockIP_NoAddresses tests that the function exits gracefully when no HAProxy addresses are configured.
 func TestUnblockIP_NoAddresses(t *testing.T) {
 	resetGlobalState()
-	processor := &Processor{
-		ChainMutex: &sync.RWMutex{},
-		Config: &AppConfig{
-			HAProxyAddresses:       nil,
-			DurationToTableName:    map[time.Duration]string{time.Minute: "t1"},
-			BlockTableNameFallback: "t_fall",
-		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
-	}
-	blocker := &HAProxyBlocker{P: processor}
-	processor.Blocker = blocker
+	processor := newTestProcessor(&AppConfig{
+		HAProxyAddresses:       nil, // No addresses
+		DurationToTableName:    map[time.Duration]string{time.Minute: "t1"},
+		BlockTableNameFallback: "t_fall",
+	}, nil)
 
 	// The mock executor should fail the test if called.
 	processor.CommandExecutor = func(p *Processor, addr, ip, command string) error {
@@ -237,7 +206,7 @@ func TestUnblockIP_NoAddresses(t *testing.T) {
 		return nil
 	}
 	ipInfo := NewIPInfo("192.0.2.1")
-	err := blocker.Unblock(ipInfo)
+	err := processor.Blocker.Unblock(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error when no addresses were configured: %v", err)
 	}
@@ -246,15 +215,9 @@ func TestUnblockIP_NoAddresses(t *testing.T) {
 // TestUnblockIP_NoTables tests that the function exits gracefully when no HAProxy tables are configured.
 func TestUnblockIP_NoTables(t *testing.T) {
 	resetGlobalState()
-	processor := &Processor{
-		ChainMutex: &sync.RWMutex{},
-		Config: &AppConfig{
-			HAProxyAddresses: []string{"127.0.0.1:9999"},
-		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
-	}
-	blocker := &HAProxyBlocker{P: processor}
-	processor.Blocker = blocker
+	processor := newTestProcessor(&AppConfig{
+		HAProxyAddresses: []string{"127.0.0.1:9999"},
+	}, nil)
 
 	// The mock executor should fail the test if called.
 	processor.CommandExecutor = func(p *Processor, addr, ip, command string) error {
@@ -262,7 +225,7 @@ func TestUnblockIP_NoTables(t *testing.T) {
 		return nil
 	}
 	ipInfo := NewIPInfo("192.0.2.1")
-	err := blocker.Unblock(ipInfo)
+	err := processor.Blocker.Unblock(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error: %v", err)
 	}
@@ -272,16 +235,10 @@ func TestUnblockIP_NoTables(t *testing.T) {
 // and no HAProxy command is attempted.
 func TestBlockIP_InvalidVersion(t *testing.T) {
 	resetGlobalState()
-	processor := &Processor{
-		ChainMutex: &sync.RWMutex{},
-		Config: &AppConfig{
-			HAProxyAddresses:    []string{"127.0.0.1:9999"},
-			DurationToTableName: map[time.Duration]string{time.Minute: "table_1m"},
-		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
-	}
-	blocker := &HAProxyBlocker{P: processor}
-	processor.Blocker = blocker
+	processor := newTestProcessor(&AppConfig{
+		HAProxyAddresses:    []string{"127.0.0.1:9999"},
+		DurationToTableName: map[time.Duration]string{time.Minute: "table_1m"},
+	}, nil)
 
 	// The mock executor should fail the test if called.
 	processor.CommandExecutor = func(p *Processor, addr, ip, command string) error {
@@ -292,7 +249,7 @@ func TestBlockIP_InvalidVersion(t *testing.T) {
 	duration := 1 * time.Minute
 
 	// BlockIP with an invalid IP version (0)
-	err := blocker.Block(ipInfo, duration)
+	err := processor.Blocker.Block(ipInfo, duration)
 	if err != nil {
 		t.Fatalf("BlockIP failed unexpectedly for invalid version: %v", err)
 	}
@@ -302,16 +259,10 @@ func TestBlockIP_InvalidVersion(t *testing.T) {
 // and no HAProxy command is attempted.
 func TestUnblockIP_InvalidVersion(t *testing.T) {
 	resetGlobalState()
-	processor := &Processor{
-		ChainMutex: &sync.RWMutex{},
-		Config: &AppConfig{
-			HAProxyAddresses:    []string{"127.0.0.1:9999"},
-			DurationToTableName: map[time.Duration]string{time.Minute: "table_1m"},
-		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
-	}
-	blocker := &HAProxyBlocker{P: processor}
-	processor.Blocker = blocker
+	processor := newTestProcessor(&AppConfig{
+		HAProxyAddresses:    []string{"127.0.0.1:9999"},
+		DurationToTableName: map[time.Duration]string{time.Minute: "table_1m"},
+	}, nil)
 
 	// The mock executor should fail the test if called.
 	processor.CommandExecutor = func(p *Processor, addr, ip, command string) error {
@@ -321,7 +272,7 @@ func TestUnblockIP_InvalidVersion(t *testing.T) {
 	ipInfo := NewIPInfo("invalid-ip-string")
 
 	// UnblockIP with an invalid IP version (0)
-	err := blocker.Unblock(ipInfo)
+	err := processor.Blocker.Unblock(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error: %v", err)
 	}
@@ -373,14 +324,11 @@ func TestExecuteHAProxyCommandImpl_Success(t *testing.T) {
 	})
 	defer closeFn()
 
-	processor := &Processor{
-		Config: &AppConfig{
-			HAProxyMaxRetries:  1,
-			HAProxyRetryDelay:  1 * time.Millisecond,
-			HAProxyDialTimeout: 100 * time.Millisecond,
-		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
-	}
+	processor := newTestProcessor(&AppConfig{
+		HAProxyMaxRetries:  1,
+		HAProxyRetryDelay:  1 * time.Millisecond,
+		HAProxyDialTimeout: 100 * time.Millisecond,
+	}, nil)
 	err := executeCommandImpl(processor, addr, "192.0.2.1", "set table foo key bar\n")
 	if err != nil {
 		t.Fatalf("Expected success, got error: %v", err)
@@ -399,14 +347,11 @@ func TestExecuteHAProxyCommandImpl_HAProxyError(t *testing.T) {
 	})
 	defer closeFn()
 
-	processor := &Processor{
-		Config: &AppConfig{
-			HAProxyMaxRetries:  1,
-			HAProxyRetryDelay:  1 * time.Millisecond,
-			HAProxyDialTimeout: 100 * time.Millisecond,
-		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
-	}
+	processor := newTestProcessor(&AppConfig{
+		HAProxyMaxRetries:  1,
+		HAProxyRetryDelay:  1 * time.Millisecond,
+		HAProxyDialTimeout: 100 * time.Millisecond,
+	}, nil)
 	err := executeCommandImpl(processor, addr, "192.0.2.1", "set table foo key bar\n")
 	if err == nil {
 		t.Fatal("Expected an HAProxy command execution error, got nil")
@@ -432,14 +377,11 @@ func TestExecuteHAProxyCommandImpl_EOFWithData(t *testing.T) {
 	})
 	defer closeFn()
 
-	processor := &Processor{
-		Config: &AppConfig{
-			HAProxyMaxRetries:  1,
-			HAProxyRetryDelay:  1 * time.Millisecond,
-			HAProxyDialTimeout: 100 * time.Millisecond,
-		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
-	}
+	processor := newTestProcessor(&AppConfig{
+		HAProxyMaxRetries:  1,
+		HAProxyRetryDelay:  1 * time.Millisecond,
+		HAProxyDialTimeout: 100 * time.Millisecond,
+	}, nil)
 	err := executeCommandImpl(processor, addr, "192.0.2.1", "set table foo key bar\n")
 	if err == nil {
 		t.Fatal("Expected an error due to non-empty response with EOF, but got nil")
@@ -455,17 +397,11 @@ func TestExecuteHAProxyCommandImpl_EOFWithData(t *testing.T) {
 // even if it's the only table configured.
 func TestUnblockIP_WithFallbackOnly(t *testing.T) {
 	resetGlobalState()
-	processor := &Processor{
-		ChainMutex: &sync.RWMutex{},
-		Config: &AppConfig{
-			HAProxyAddresses:       []string{"127.0.0.1:9999"},
-			DurationToTableName:    make(map[time.Duration]string), // No main tables
-			BlockTableNameFallback: "fallback_table",               // Only a fallback table
-		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
-	}
-	blocker := &HAProxyBlocker{P: processor}
-	processor.Blocker = blocker
+	processor := newTestProcessor(&AppConfig{
+		HAProxyAddresses:       []string{"127.0.0.1:9999"},
+		DurationToTableName:    make(map[time.Duration]string),
+		BlockTableNameFallback: "fallback_table",
+	}, nil)
 
 	var commandReceived string
 	processor.CommandExecutor = func(p *Processor, addr, ip, command string) error {
@@ -475,7 +411,7 @@ func TestUnblockIP_WithFallbackOnly(t *testing.T) {
 	ipInfo := NewIPInfo("192.0.2.20")
 
 	// --- Act ---
-	err := blocker.Unblock(ipInfo)
+	err := processor.Blocker.Unblock(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error: %v", err)
 	}
@@ -492,14 +428,11 @@ func TestUnblockIP_WithFallbackOnly(t *testing.T) {
 // The test verifies the retry mechanism is used and the final error reflects the connection failure.
 func TestExecuteHAProxyCommandImpl_ConnectError(t *testing.T) {
 	addr := "127.0.0.1:65535"
-	processor := &Processor{
-		Config: &AppConfig{
-			HAProxyMaxRetries:  2,
-			HAProxyRetryDelay:  1 * time.Millisecond,
-			HAProxyDialTimeout: 100 * time.Millisecond,
-		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
-	}
+	processor := newTestProcessor(&AppConfig{
+		HAProxyMaxRetries:  2,
+		HAProxyRetryDelay:  1 * time.Millisecond,
+		HAProxyDialTimeout: 100 * time.Millisecond,
+	}, nil)
 
 	err := executeCommandImpl(processor, addr, "192.0.2.1", "set table foo key bar\n")
 	if err == nil {
@@ -520,14 +453,11 @@ func TestExecuteHAProxyCommandImpl_WriteError(t *testing.T) {
 		conn.Close()
 	})
 	defer closeFn()
-	processor := &Processor{
-		Config: &AppConfig{
-			HAProxyMaxRetries:  2,
-			HAProxyRetryDelay:  1 * time.Millisecond,
-			HAProxyDialTimeout: 100 * time.Millisecond,
-		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
-	}
+	processor := newTestProcessor(&AppConfig{
+		HAProxyMaxRetries:  2,
+		HAProxyRetryDelay:  1 * time.Millisecond,
+		HAProxyDialTimeout: 100 * time.Millisecond,
+	}, nil)
 
 	err := executeCommandImpl(processor, addr, "192.0.2.1", "set table foo key bar\n")
 	if err == nil {
@@ -565,14 +495,11 @@ func TestExecuteHAProxyCommandImpl_MalformedResponse(t *testing.T) {
 	})
 	defer closeFn()
 
-	processor := &Processor{
-		Config: &AppConfig{
-			HAProxyMaxRetries:  1,
-			HAProxyRetryDelay:  1 * time.Millisecond,
-			HAProxyDialTimeout: 100 * time.Millisecond,
-		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
-	}
+	processor := newTestProcessor(&AppConfig{
+		HAProxyMaxRetries:  1,
+		HAProxyRetryDelay:  1 * time.Millisecond,
+		HAProxyDialTimeout: 100 * time.Millisecond,
+	}, nil)
 	// Act: Execute a command (retries are internal to the function)
 	err := executeCommandImpl(processor, addr, "192.0.2.1", "set table foo key bar\n")
 
@@ -614,18 +541,16 @@ func TestExecuteHAProxyCommandImpl_RetryLogging(t *testing.T) {
 	// Capture log output
 	var capturedLog string
 	logReceived := make(chan bool, 1)
-	processor := &Processor{
-		Config: &AppConfig{
-			HAProxyMaxRetries:  2, // Allow at least one retry
-			HAProxyRetryDelay:  1 * time.Millisecond,
-			HAProxyDialTimeout: 100 * time.Millisecond,
-		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
-			if tag == "HAPROXY_RETRY" {
-				capturedLog = fmt.Sprintf(format, args...)
-				logReceived <- true
-			}
-		},
+	processor := newTestProcessor(&AppConfig{
+		HAProxyMaxRetries:  2, // Allow at least one retry
+		HAProxyRetryDelay:  1 * time.Millisecond,
+		HAProxyDialTimeout: 100 * time.Millisecond,
+	}, nil)
+	processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+		if tag == "HAPROXY_RETRY" {
+			capturedLog = fmt.Sprintf(format, args...)
+			logReceived <- true
+		}
 	}
 
 	// --- Act ---
@@ -678,10 +603,9 @@ func TestExecuteHAProxyCommandImpl_UnixSocket(t *testing.T) {
 		_, _ = conn.Write([]byte(" \n")) // Write success response
 	}()
 
-	processor := &Processor{
-		Config:  &AppConfig{HAProxyMaxRetries: 1, HAProxyDialTimeout: 100 * time.Millisecond},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
-	}
+	processor := newTestProcessor(&AppConfig{
+		HAProxyMaxRetries: 1, HAProxyDialTimeout: 100 * time.Millisecond,
+	}, nil)
 	err = executeCommandImpl(processor, socketPath, "192.0.2.1", "set table foo key bar\n")
 	if err != nil {
 		t.Fatalf("Expected success for Unix socket command, got error: %v", err)
