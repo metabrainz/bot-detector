@@ -478,14 +478,14 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 	processor.CheckChains(whitelistedEntry)
 
 	// --- Assertions for Whitelisted IP ---
-	// NOTE: This assertion correctly identifies the bug in checker.go
 	processor.ActivityMutex.RLock()
-	_, exists := processor.ActivityStore[whitelistedKey]
+	activity, exists := processor.ActivityStore[whitelistedKey]
 	processor.ActivityMutex.RUnlock()
 
 	if exists {
-		t.Errorf("Activity state exists for whitelisted IP %s, but should not. (BUG IN CHECKER.GO)", whitelistedIP)
+		t.Errorf("Activity state exists for whitelisted IP %s, but it should have been skipped.", whitelistedIP)
 	}
+
 	if blockCalled {
 		t.Fatal("Blocker was called, but should be skipped for a whitelisted IP.")
 	}
@@ -503,7 +503,7 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 
 	processor.ActivityMutex.RLock()
 	defer processor.ActivityMutex.RUnlock()
-	activity, exists := processor.ActivityStore[nonWhitelistedKey]
+	activity, exists = processor.ActivityStore[nonWhitelistedKey]
 
 	if !exists {
 		t.Error("Activity state for non-whitelisted IP should exist, but did not.")
