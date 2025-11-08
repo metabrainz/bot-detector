@@ -335,69 +335,6 @@ chains: []
 			expectedError: "invalid CIDR",
 		},
 		{
-			name: "Invalid Duration",
-			yamlContent: `
-version: "1.0"
-chains:
-  - name: "Test"
-    action: "block"
-    block_duration: "5p"
-`,
-			expectedError: "invalid block_duration",
-		},
-		{
-			name: "Invalid Duration in DurationTables",
-			yamlContent: `
-version: "1.0"
-duration_tables:
-  "1x": "table_1x"
-`,
-			expectedError: "invalid duration",
-		},
-		{
-			name: "Missing Match Key",
-			yamlContent: `
-version: "1.0"
-chains:
-  - name: "Test"
-    action: "log"
-`,
-			expectedError: "match_key cannot be empty",
-		},
-		{
-			name: "Invalid Max Delay",
-			yamlContent: `
-version: "1.0"
-chains:
-  - name: "Test"
-    match_key: "ip"
-    steps: [ { max_delay: "10x" } ]
-`,
-			expectedError: "invalid max_delay",
-		},
-		{
-			name: "Invalid Min Delay",
-			yamlContent: `
-version: "1.0"
-chains:
-  - name: "Test"
-    match_key: "ip"
-    steps: [ { min_delay: "10x" } ]
-`,
-			expectedError: "invalid min_delay",
-		},
-		{
-			name: "Invalid Min Time Since Last Hit",
-			yamlContent: `
-version: "1.0"
-chains:
-  - name: "Test"
-    match_key: "ip"
-    steps: [ { min_time_since_last_hit: "10x" } ]
-`,
-			expectedError: "invalid min_time_since_last_hit",
-		},
-		{
 			name: "Invalid Regex",
 			yamlContent: `
 version: "1.0"
@@ -409,13 +346,14 @@ chains:
 			expectedError: "invalid regex",
 		},
 		{
-			name: "Invalid Default Block Duration",
+			name: "Missing Match Key",
 			yamlContent: `
 version: "1.0"
-default_block_duration: "1x"
-chains: []
+chains:
+  - name: "Test"
+    action: "log"
 `,
-			expectedError: "invalid block_duration format",
+			expectedError: "match_key cannot be empty",
 		},
 		{
 			name: "Block Action Missing Duration",
@@ -519,6 +457,120 @@ chains:
 					t.Errorf("Expected no error, but got: %v", err)
 				}
 			} else if err == nil || !strings.Contains(err.Error(), tt.expectedError) {
+				t.Errorf("Expected error containing '%s', but got: %v", tt.expectedError, err)
+			}
+		})
+	}
+}
+
+func TestLoadChainsFromYAML_InvalidDurations(t *testing.T) {
+	tests := []struct {
+		name          string
+		yamlContent   string
+		expectedError string
+	}{
+		{
+			name: "Invalid poll_interval",
+			yamlContent: `
+version: "1.0"
+poll_interval: "5x"`,
+			expectedError: "invalid poll_interval format",
+		},
+		{
+			name: "Invalid cleanup_interval",
+			yamlContent: `
+version: "1.0"
+cleanup_interval: "1y"`,
+			expectedError: "invalid cleanup_interval format",
+		},
+		{
+			name: "Invalid idle_timeout",
+			yamlContent: `
+version: "1.0"
+idle_timeout: "30z"`,
+			expectedError: "invalid idle_timeout format",
+		},
+		{
+			name: "Invalid out_of_order_tolerance",
+			yamlContent: `
+version: "1.0"
+out_of_order_tolerance: "bad"`,
+			expectedError: "invalid out_of_order_tolerance format",
+		},
+		{
+			name: "Invalid eof_polling_delay",
+			yamlContent: `
+version: "1.0"
+eof_polling_delay: "200"`,
+			expectedError: "invalid eof_polling_delay format",
+		},
+	}
+	// Add chain-specific duration tests
+	tests = append(tests, []struct {
+		name          string
+		yamlContent   string
+		expectedError string
+	}{
+		{
+			name: "Invalid block_duration in chain",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    action: "block"
+    block_duration: "5p"
+`,
+			expectedError: "invalid block_duration",
+		},
+		{
+			name: "Invalid duration in duration_tables",
+			yamlContent: `
+version: "1.0"
+duration_tables:
+  "1x": "table_1x"
+`,
+			expectedError: "invalid duration",
+		},
+		{
+			name: "Invalid max_delay in step",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    steps: [ { max_delay: "10x" } ]
+`,
+			expectedError: "invalid max_delay",
+		},
+		{
+			name: "Invalid min_delay in step",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    steps: [ { min_delay: "10x" } ]
+`,
+			expectedError: "invalid min_delay",
+		},
+		{
+			name: "Invalid min_time_since_last_hit in step",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    steps: [ { min_time_since_last_hit: "10x" } ]
+`,
+			expectedError: "invalid min_time_since_last_hit",
+		},
+	}...)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupTestYAML(t, tt.yamlContent)
+			_, err := LoadChainsFromYAML()
+			if err == nil || !strings.Contains(err.Error(), tt.expectedError) {
 				t.Errorf("Expected error containing '%s', but got: %v", tt.expectedError, err)
 			}
 		})
