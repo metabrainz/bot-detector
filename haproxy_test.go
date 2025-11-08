@@ -427,6 +427,33 @@ func TestExecuteHAProxyCommandImpl_HAProxyError(t *testing.T) {
 	}
 }
 
+// TestExecuteHAProxyCommandImpl_EOFWithData tests the edge case where the server sends
+// a response without a trailing newline and immediately closes the connection.
+func TestExecuteHAProxyCommandImpl_EOFWithData(t *testing.T) {
+	setTestTimeouts(t)
+	// Start a server that writes a response and then closes the connection,
+	// triggering an io.EOF on the client's ReadString call.
+	_, addr, closeFn := startMockServer(t, func(conn net.Conn) {
+		// Read the command from the client to unblock the write.
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		// Write a response WITHOUT a trailing newline.
+		_, _ = conn.Write([]byte("some data"))
+		// The handler will close the connection upon returning.
+	})
+	defer closeFn()
+
+	err := executeHAProxyCommand(addr, "192.0.2.1", "set table foo key bar\n")
+	if err == nil {
+		t.Fatal("Expected an error due to non-empty response with EOF, but got nil")
+	}
+
+	expectedErrMsg := "HAProxy command execution failed for IP 192.0.2.1 (Response: some data)"
+	if !strings.Contains(err.Error(), expectedErrMsg) {
+		t.Errorf("Error mismatch.\nExpected error containing: %s\nGot: %v", expectedErrMsg, err)
+	}
+}
+
 // TestUnblockIP_WithFallbackOnly verifies that UnblockIP correctly targets the fallback table
 // even if it's the only table configured.
 func TestUnblockIP_WithFallbackOnly(t *testing.T) {
@@ -461,33 +488,6 @@ func TestUnblockIP_WithFallbackOnly(t *testing.T) {
 	if commandReceived != expectedCommand {
 		t.Errorf("Expected command to target fallback table '%s', but got: '%s'",
 			expectedCommand, commandReceived)
-	}
-}
-
-// TestExecuteHAProxyCommandImpl_EOFWithData tests the edge case where the server sends
-// a response without a trailing newline and immediately closes the connection.
-func TestExecuteHAProxyCommandImpl_EOFWithData(t *testing.T) {
-	setTestTimeouts(t)
-	// Start a server that writes a response and then closes the connection,
-	// triggering an io.EOF on the client's ReadString call.
-	_, addr, closeFn := startMockServer(t, func(conn net.Conn) {
-		// Read the command from the client to unblock the write.
-		reader := bufio.NewReader(conn)
-		_, _ = reader.ReadString('\n')
-		// Write a response WITHOUT a trailing newline.
-		_, _ = conn.Write([]byte("some data"))
-		// The handler will close the connection upon returning.
-	})
-	defer closeFn()
-
-	err := executeHAProxyCommand(addr, "192.0.2.1", "set table foo key bar\n")
-	if err == nil {
-		t.Fatal("Expected an error due to non-empty response with EOF, but got nil")
-	}
-
-	expectedErrMsg := "HAProxy command execution failed for IP 192.0.2.1 (Response: some data)"
-	if !strings.Contains(err.Error(), expectedErrMsg) {
-		t.Errorf("Error mismatch.\nExpected error containing: %s\nGot: %v", expectedErrMsg, err)
 	}
 }
 
