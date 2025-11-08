@@ -587,3 +587,64 @@ func TestExecuteHAProxyCommandImpl_MalformedResponse(t *testing.T) {
 		t.Errorf("Error mismatch.\nExpected error containing: %s\nGot: %v", expectedErrMsg, err)
 	}
 }
+
+// TestExecuteHAProxyCommandImpl_RetryLogging verifies that a retry attempt is correctly logged.
+func TestExecuteHAProxyCommandImpl_RetryLogging(t *testing.T) {
+	// --- Setup ---
+	// Use a channel to signal when the server should start listening.
+	startListening := make(chan bool, 1)
+	var listener net.Listener
+	var serverErr error
+
+	// Start a goroutine that will create the listener only after being signaled.
+	go func() {
+		<-startListening // Wait for the signal
+		listener, serverErr = net.Listen("tcp", "127.0.0.1:0")
+		if serverErr != nil {
+			return
+		}
+		// Accept one connection and handle it.
+		conn, _ := listener.Accept()
+		if conn != nil {
+			conn.Close()
+		}
+	}()
+
+	// Capture log output
+	var capturedLog string
+	logReceived := make(chan bool, 1)
+	processor := &Processor{
+		Config: &AppConfig{
+			HAProxyMaxRetries:  2, // Allow at least one retry
+			HAProxyRetryDelay:  1 * time.Millisecond,
+			HAProxyDialTimeout: 100 * time.Millisecond,
+		},
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
+			if tag == "HAPROXY_RETRY" {
+				capturedLog = fmt.Sprintf(format, args...)
+				logReceived <- true
+			}
+		},
+	}
+
+	// --- Act ---
+	// The first connection attempt will fail because the server isn't listening yet.
+	// Then we signal the server to start, so the retry will succeed.
+	startListening <- true
+	// We need the address *after* the listener is created.
+	time.Sleep(20 * time.Millisecond) // Give the server goroutine time to start listening.
+	if serverErr != nil {
+		t.Fatalf("Mock server failed to start: %v", serverErr)
+	}
+	defer listener.Close()
+	addr := listener.Addr().String()
+
+	// This call will trigger the retry logic.
+	executeCommandImpl(processor, addr, "192.0.2.1", "test command\n")
+
+	// --- Assert ---
+	<-logReceived // Wait for the retry log to be captured.
+	if !strings.Contains(capturedLog, "Retrying HAProxy command") {
+		t.Errorf("Expected a 'HAPROXY_RETRY' log message, but got: '%s'", capturedLog)
+	}
+}
