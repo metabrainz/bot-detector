@@ -204,6 +204,53 @@ func TestPreCheckActivity_StillBlocked_OldEntry(t *testing.T) {
 	}
 }
 
+// TestPreCheckActivity_StillBlocked_NewEntry verifies that when an IP is already blocked,
+// and a newer log entry arrives, the LastRequestTime IS updated.
+func TestPreCheckActivity_StillBlocked_NewEntry(t *testing.T) {
+	// 1. Setup
+	resetGlobalState()
+
+	const targetIP = "192.0.2.51"
+	trackingKey := TrackingKey{IPInfo: NewIPInfo(targetIP)}
+	now := time.Now()
+
+	processor := &Processor{
+		ActivityMutex: &sync.RWMutex{},
+		ActivityStore: make(map[TrackingKey]*BotActivity),
+		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+	}
+
+	// 2. Manually create a pre-existing, non-expired block state.
+	// The last request was seen at time 'now'.
+	processor.ActivityStore[trackingKey] = &BotActivity{
+		LastRequestTime: now,
+		BlockedUntil:    now.Add(1 * time.Hour),
+		IsBlocked:       true,
+	}
+
+	// 3. Create a log entry with a timestamp NEWER than the last seen request.
+	newEntryTimestamp := now.Add(10 * time.Second)
+	newEntry := &LogEntry{
+		IPInfo:    NewIPInfo(targetIP),
+		Timestamp: newEntryTimestamp,
+	}
+
+	// --- Act ---
+	processor.ActivityMutex.Lock()
+	_, skip := processor.preCheckActivity(newEntry, trackingKey)
+	processor.ActivityMutex.Unlock()
+
+	// --- Assert ---
+	if !skip {
+		t.Error("Expected skip to be true for an already-blocked IP, but it was false.")
+	}
+
+	if !processor.ActivityStore[trackingKey].LastRequestTime.Equal(newEntryTimestamp) {
+		t.Errorf("Expected LastRequestTime to be updated to %v, but it was %v",
+			newEntryTimestamp, processor.ActivityStore[trackingKey].LastRequestTime)
+	}
+}
+
 // TestCheckChains_DryRun tests that a block is NOT executed when DryRun is true.
 func TestCheckChains_DryRun(t *testing.T) {
 	// 1. Setup Data Structures
