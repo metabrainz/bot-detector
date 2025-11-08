@@ -9,6 +9,9 @@ import (
 	"time"
 )
 
+// osOpen is a variable that holds the os.Open function, allowing it to be mocked in tests.
+var osOpen = os.Open
+
 // ReadLineWithLimit reads a line from the reader up to the given limit (in bytes).
 // If the line exceeds the limit, it returns the partial line and ErrLineSkipped.
 // It correctly handles `\n`, `\r`, and `\r\n` line endings.
@@ -154,18 +157,26 @@ func delayOrShutdown(p *Processor, delay time.Duration, signalCh <-chan os.Signa
 
 // LiveLogTailer continuously tails a log file, handling rotation and truncation.
 func LiveLogTailer(p *Processor, signalCh <-chan os.Signal) {
-	firstRun := true // Flag to control initial seek behavior.
+	var (
+		firstRun = true // Flag to control initial seek behavior.
+		shutdown = false
+	)
 
 	// Inner loop for re-opening the file
 	for {
+		if shutdown {
+			return
+		}
+
 		p.LogFunc(LevelInfo, "TAIL", "Starting log tailer on %s...", LogFilePath)
 
-		file, err := os.Open(LogFilePath)
+		file, err := osOpen(LogFilePath)
 		if err != nil {
 			// File not found on first attempt, wait and retry.
 			p.LogFunc(LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", LogFilePath, err, ErrorRetryDelay)
 			if delayOrShutdown(p, ErrorRetryDelay, signalCh) {
-				return // Shutdown signal received
+				shutdown = true
+				continue // Let the main loop handle the exit.
 			}
 			continue
 		}
@@ -194,8 +205,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal) {
 		// Local function to restart the outer loop after a delay
 		restartTailing := func(delay time.Duration) {
 			if delay > 0 && delayOrShutdown(p, delay, signalCh) {
-				// If a shutdown was triggered during the delay, we need to exit LiveLogTailer completely.
-				// We can't just return from restartTailing, so we'll rely on the main loop's signal check.
+				shutdown = true
 			}
 		}
 
@@ -225,8 +235,8 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal) {
 				if finalErr == io.EOF {
 					// At EOF, check for file rotation before sleeping.
 					if hasFileBeenRotated(p, LogFilePath, initialStat, defaultStatFunc) {
-						file.Close()      // Close the old file handle
-						restartTailing(0) // Restart immediately
+						file.Close()
+						restartTailing(0) // No delay, but check for pending signal.
 						break             // Break inner loop to reopen
 					}
 					time.Sleep(EOFPollingDelay) // Use EOFPollingDelay for standard polling
@@ -234,9 +244,9 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal) {
 				} else {
 					// Read error (non-EOF) is typically a one-off event, but we retry
 					p.LogFunc(LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening in %v.", finalErr, ErrorRetryDelay)
-					file.Close()                    // Close the potentially problematic file handle
-					restartTailing(ErrorRetryDelay) // Wait a bit on read error
-					break                           // Break inner loop to trigger file re-opening
+					file.Close()
+					restartTailing(ErrorRetryDelay)
+					break // Break inner loop to trigger file re-opening
 				}
 			}
 

@@ -646,3 +646,67 @@ func TestLiveLogTailer_InitialOpenErrorAndShutdown(t *testing.T) {
 		t.Error("Expected a graceful shutdown log message, but it was not found.")
 	}
 }
+
+// TestLiveLogTailer_ReadError simulates a read error occurring mid-tail,
+// forcing the tailer to log the error and attempt to reopen the file.
+func TestLiveLogTailer_ReadError(t *testing.T) {
+	// --- Setup: Use a pipe to simulate a file and control read errors ---
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("Failed to create pipe: %v", err)
+	}
+
+	// Redirect os.Open to return our pipe's reader end.
+	originalOsOpen := osOpen
+	osOpen = func(name string) (*os.File, error) {
+		return r, nil
+	}
+	originalLogFilePath := LogFilePath
+	LogFilePath = "/fake/pipe/path" // Path doesn't matter due to the mock.
+	t.Cleanup(func() {
+		osOpen = originalOsOpen
+		LogFilePath = originalLogFilePath
+	})
+
+	var logMutex sync.Mutex
+	var capturedLogs []string
+	processor := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
+			logMutex.Lock()
+			capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
+			logMutex.Unlock()
+		},
+		ProcessLogLine: func(line string, lineNumber int) {},
+		Config: &AppConfig{
+			PollingInterval: 10 * time.Millisecond,
+		},
+	}
+
+	signalCh := make(chan os.Signal, 1)
+	done := make(chan struct{})
+
+	// --- Act ---
+	go func() {
+		LiveLogTailer(processor, signalCh)
+		close(done)
+	}()
+
+	// Wait a moment for the tailer to start and block on reading the empty pipe.
+	time.Sleep(50 * time.Millisecond)
+
+	// Close the writer end first, then the reader end. Closing the reader
+	// will cause the blocked ReadByte() in the tailer to fail immediately.
+	w.Close()
+	r.Close()
+
+	// Wait for the error to be logged, then shut down the tailer.
+	time.Sleep(ErrorRetryDelay + 50*time.Millisecond)
+	signalCh <- syscall.SIGINT
+
+	// --- Assert ---
+	<-done // Wait for the function to exit.
+	logOutput := strings.Join(capturedLogs, "\n")
+	if !strings.Contains(logOutput, "TAIL_ERROR: Read error while tailing log file") {
+		t.Error("Expected a 'Read error while tailing' message, but none was logged.")
+	}
+}
