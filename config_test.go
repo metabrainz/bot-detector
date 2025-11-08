@@ -726,7 +726,6 @@ chains:
 
 	// --- Act ---
 	// 5. Modify the YAML file on disk.
-	time.Sleep(100 * time.Millisecond) // Wait a moment to ensure the modification time is different.
 	modifiedYAMLContent := `
 version: "1.0"
 log_level: "debug" # Changed log level
@@ -739,6 +738,12 @@ chains:
 `
 	if err := os.WriteFile(tempFile, []byte(modifiedYAMLContent), 0644); err != nil {
 		t.Fatalf("Failed to write modified temp yaml file: %v", err)
+	}
+	// Manually advance the file's modification time to guarantee the watcher sees a change.
+	// This is faster and more reliable than time.Sleep().
+	futureTime := time.Now().Add(1 * time.Second)
+	if err := os.Chtimes(tempFile, futureTime, futureTime); err != nil {
+		t.Fatalf("Failed to change file modification time: %v", err)
 	}
 
 	// 6. Force the watcher to check immediately.
@@ -830,9 +835,13 @@ chains:
 
 	// --- Act ---
 	// 6. Modify ONLY the dependency file.
-	time.Sleep(100 * time.Millisecond) // Ensure modification time is different.
 	if err := os.WriteFile(agentFilePath, []byte("ReloadedBadAgent/2.0"), 0644); err != nil {
 		t.Fatalf("Failed to write modified agent file: %v", err)
+	}
+	// Manually advance the dependency file's modification time.
+	futureTime := time.Now().Add(1 * time.Second)
+	if err := os.Chtimes(agentFilePath, futureTime, futureTime); err != nil {
+		t.Fatalf("Failed to change file modification time: %v", err)
 	}
 
 	// 7. Force the watcher to check immediately.
@@ -930,7 +939,6 @@ chains:
 
 	// --- Act ---
 	// 6. Modify the YAML file with INVALID content.
-	time.Sleep(100 * time.Millisecond) // Ensure file modification time is different.
 	// The YAML must be syntactically valid, but logically incorrect (bad regex).
 	// Using a multi-line string is the correct way to format this.
 	invalidYAMLContent := `
@@ -943,6 +951,11 @@ chains:
 `
 	if err := os.WriteFile(tempFile, []byte(invalidYAMLContent), 0644); err != nil {
 		t.Fatalf("Failed to write invalid YAML: %v", err)
+	}
+	// Manually advance the file's modification time.
+	futureTime := time.Now().Add(1 * time.Second)
+	if err := os.Chtimes(tempFile, futureTime, futureTime); err != nil {
+		t.Fatalf("Failed to change file modification time: %v", err)
 	}
 
 	// 7. Force the watcher to perform a check immediately, bypassing the timer.
