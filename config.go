@@ -85,6 +85,9 @@ func compileSingleMatcher(chainName string, stepIndex int, field string, value i
 	case []interface{}:
 		return compileListMatcher(chainName, stepIndex, field, v, fileDeps)
 	case map[string]interface{}:
+		if field != "StatusCode" {
+			return nil, fmt.Errorf("chain '%s', step %d: object matchers (gte, lt, etc.) are only supported for the 'StatusCode' field, not '%s'", chainName, stepIndex+1, field)
+		}
 		return compileObjectMatcher(chainName, stepIndex, field, v)
 	default:
 		return nil, fmt.Errorf("chain '%s', step %d, field '%s': unsupported value type '%T'", chainName, stepIndex+1, field, v)
@@ -180,6 +183,7 @@ func compileListMatcher(chainName string, stepIndex int, field string, values []
 		matcher, err := compileSingleMatcher(chainName, stepIndex, field, item, fileDeps)
 		if err != nil {
 			return nil, err // Error in a sub-matcher
+			return nil, err
 		}
 		subMatchers = append(subMatchers, matcher)
 	}

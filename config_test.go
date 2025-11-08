@@ -472,6 +472,17 @@ chains:
 			expectedError: "unsupported value type 'bool'",
 		},
 		{
+			name: "Invalid Item in List Matcher",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    steps: [ { field_matches: { "Path": ["/good", { "gt": 1 }] } } ]
+`,
+			expectedError: "object matchers (gte, lt, etc.) are only supported for the 'StatusCode' field, not 'Path'",
+		},
+		{
 			name: "File Matcher Not Found (Non-Fatal)",
 			yamlContent: `
 version: "1.0"
