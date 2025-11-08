@@ -389,16 +389,22 @@ func TestLiveLogTailer(t *testing.T) {
 	// --- Act ---
 	signalCh := make(chan os.Signal, 1)
 	done := make(chan struct{})
+	readySignal := make(chan struct{}, 1)
 	// Run LiveLogTailer in a goroutine so we can interact with it.
 	go func() {
-		LiveLogTailer(processor, signalCh)
+		LiveLogTailer(processor, signalCh, readySignal)
 		// When LiveLogTailer exits, close the 'done' channel to signal completion.
 		// This is crucial for the test's final assertion.
 		close(done)
 	}()
 
-	// Give the tailer a moment to start up and seek to the end of the initial file.
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the tailer to signal that it's ready.
+	select {
+	case <-readySignal:
+		// Tailer is ready.
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for tailer to start.")
+	}
 
 	// --- Assert 1: No initial lines should be processed ---
 	logMutex.Lock()
@@ -499,7 +505,7 @@ func TestLiveLogTailer_Shutdown(t *testing.T) {
 	// --- Act ---
 	// Run LiveLogTailer in a goroutine.
 	go func() {
-		LiveLogTailer(processor, signalCh)
+		LiveLogTailer(processor, signalCh, nil)
 		close(done) // Signal that the function has returned.
 	}()
 
@@ -551,7 +557,7 @@ func TestLiveLogTailer_ErrorHandling(t *testing.T) {
 		// Run tailer in a goroutine
 		signalCh := make(chan os.Signal, 1)
 		go func() {
-			LiveLogTailer(processor, signalCh)
+			LiveLogTailer(processor, signalCh, nil)
 		}()
 
 		// Wait for it to attempt opening the file and log an error
@@ -638,15 +644,21 @@ func TestLiveLogTailer_InitialOpenErrorAndShutdown(t *testing.T) {
 
 	signalCh := make(chan os.Signal, 1)
 	done := make(chan struct{})
+	readySignal := make(chan struct{}, 1)
 
 	// --- Act ---
 	go func() {
-		LiveLogTailer(processor, signalCh)
+		LiveLogTailer(processor, signalCh, readySignal)
 		close(done)
 	}()
 
-	// Wait long enough for the first open attempt to fail and log an error.
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the tailer to signal that it's ready (which it will after the failed open attempt).
+	select {
+	case <-readySignal:
+		// Tailer has passed the open attempt.
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for tailer to start.")
+	}
 	signalCh <- syscall.SIGINT // Send shutdown signal
 
 	// --- Assert ---
@@ -705,15 +717,21 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 
 	signalCh := make(chan os.Signal, 1)
 	done := make(chan struct{})
+	readySignal := make(chan struct{}, 1)
 
 	// --- Act ---
 	go func() {
-		LiveLogTailer(processor, signalCh)
+		LiveLogTailer(processor, signalCh, readySignal)
 		close(done)
 	}()
 
-	// Wait a moment for the tailer to start and block on reading the empty pipe.
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the tailer to signal that it has opened the pipe and is ready to read.
+	select {
+	case <-readySignal:
+		// Tailer is ready.
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for tailer to start.")
+	}
 
 	// Close the writer end first, then the reader end. Closing the reader
 	// will cause the blocked ReadByte() in the tailer to fail immediately.

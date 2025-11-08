@@ -94,6 +94,6 @@ func start(p *Processor) {
 		signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
 
 		// LiveLogTailer is the blocking main loop
-		LiveLogTailer(p, signalCh)
+		LiveLogTailer(p, signalCh, nil)
 	}
 }

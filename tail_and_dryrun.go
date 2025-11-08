@@ -156,7 +156,7 @@ func delayOrShutdown(p *Processor, delay time.Duration, signalCh <-chan os.Signa
 }
 
 // LiveLogTailer continuously tails a log file, handling rotation and truncation.
-func LiveLogTailer(p *Processor, signalCh <-chan os.Signal) {
+func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- struct{}) {
 	var (
 		firstRun = true // Flag to control initial seek behavior.
 		shutdown = false
@@ -166,6 +166,11 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal) {
 	for {
 		if shutdown {
 			return
+		}
+
+		// Signal for test synchronization, if the channel is set.
+		if readySignal != nil {
+			readySignal <- struct{}{}
 		}
 
 		p.LogFunc(LevelInfo, "TAIL", "Starting log tailer on %s...", LogFilePath)
