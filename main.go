@@ -57,9 +57,10 @@ func main() {
 		CommandExecutor: func(p *Processor, addr, ip, command string) error {
 			return executeCommandImpl(p, addr, ip, command)
 		},
-		Config:  appConfig,
-		DryRun:  DryRun,
-		LogFunc: LogOutput,
+		Config:   appConfig,
+		DryRun:   DryRun,
+		signalCh: make(chan os.Signal, 1),
+		LogFunc:  LogOutput,
 	}
 	// Inject the HAProxyBlocker which depends on the main processor instance.
 	p.Blocker = &HAProxyBlocker{P: p}
@@ -91,11 +92,9 @@ func start(p *Processor) {
 		go p.ChainWatcher(stopWatcher, nil, nil) // Pass nil for test-only channels
 		go p.CleanUpIdleActivity(stopWatcher)
 
-		// Set up signal handling for graceful shutdown in live mode.
-		signalCh := make(chan os.Signal, 1)
-		signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
+		signal.Notify(p.signalCh, syscall.SIGINT, syscall.SIGTERM) // Listen for OS signals on the processor's channel
 
 		// LiveLogTailer is the blocking main loop
-		LiveLogTailer(p, signalCh, nil)
+		LiveLogTailer(p, p.signalCh, nil) // Pass the processor's channel to the tailer
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"os"
 	"sync"
 	"time"
 )
@@ -31,6 +32,7 @@ type Processor struct {
 	Config            *AppConfig
 	DryRun            bool
 	IsWhitelistedFunc func(ipInfo IPInfo) bool
+	signalCh          chan os.Signal
 	LogFunc           func(level LogLevel, tag string, format string, v ...interface{})
 	ProcessLogLine    func(line string, lineNumber int)
 }

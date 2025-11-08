@@ -83,7 +83,7 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 		Config:            &AppConfig{},
 		DryRun:            false,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
-		LogFunc:           LogOutput,
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 
 	// Get the correct tracking key for the activity store (ip_ua)
@@ -257,7 +257,7 @@ func TestCheckChains_DryRun(t *testing.T) {
 		Config:            &AppConfig{},
 		DryRun:            true,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
-		LogFunc:           LogOutput,
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 
 	// Get the correct tracking key for the activity store (ip-only)
@@ -499,7 +499,7 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 		Config:            &AppConfig{},
 		DryRun:            false,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
-		LogFunc:           LogOutput,
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 
 	trackingKey := GetTrackingKey(&chain, entry)
@@ -574,7 +574,7 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 		Config:            &AppConfig{},
 		DryRun:            false,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
-		LogFunc:           LogOutput,
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 
 	trackingKey := GetTrackingKey(&chain, entry)
@@ -778,7 +778,7 @@ func TestCheckChains_LogAction(t *testing.T) {
 		Config:            &AppConfig{},
 		DryRun:            false,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
-		LogFunc:           LogOutput,
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 
 	trackingKey := GetTrackingKey(&chain, entry)
@@ -869,7 +869,7 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 		Config:            &AppConfig{},
 		DryRun:            false,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
-		LogFunc:           LogOutput,
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 
 	trackingKey := GetTrackingKey(&chain, entry)

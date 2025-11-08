@@ -205,7 +205,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 		Config:            &AppConfig{},
 		DryRun:            true, // CRITICAL: DryRun is enabled
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
-		LogFunc:           LogOutput,
+		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 	}
 	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(&p, line, lineNumber) }
 
