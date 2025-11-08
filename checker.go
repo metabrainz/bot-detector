@@ -229,11 +229,9 @@ func (p *Processor) processChainForEntry(chain *BehavioralChain, entry *LogEntry
 	if state.CurrentStep > 0 {
 		currentActivity.ChainProgress[chain.Name] = state
 	} else {
-		// If CurrentStep is 0 (due to reset or completion) and state exists in the map,
-		// clean it up to save memory.
-		if _, exists := currentActivity.ChainProgress[chain.Name]; exists {
-			delete(currentActivity.ChainProgress, chain.Name)
-		}
+		// If CurrentStep is 0 (due to reset or completion), clean up the state to save memory.
+		// It's safe to call delete even if the key doesn't exist.
+		delete(currentActivity.ChainProgress, chain.Name)
 	}
 }
 

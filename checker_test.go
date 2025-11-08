@@ -137,13 +137,13 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 	// Check final ActivityStore state: IsBlocked should be true and ChainProgress should be cleared
 	processor.ActivityMutex.RLock()
 	ipOnlyKey := TrackingKey{IPInfo: NewIPInfo(targetIP), UA: ""} // Check the IP-only key block optimization
-	activityIPOnly, _ := processor.ActivityStore[ipOnlyKey]
+	activityIPOnly := processor.ActivityStore[ipOnlyKey]
 
 	if !activityIPOnly.IsBlocked {
 		t.Error("Expected IP-only activity state to be IsBlocked=true, but was false.")
 	}
 
-	activityFinal, _ := processor.ActivityStore[trackingKey]
+	activityFinal := processor.ActivityStore[trackingKey]
 	processor.ActivityMutex.RUnlock()
 
 	if len(activityFinal.ChainProgress) != 0 {
@@ -290,7 +290,7 @@ func TestCheckChains_DryRun_UnknownAction(t *testing.T) {
 
 	// Also assert that no block state was created.
 	processor.ActivityMutex.RLock()
-	activity, _ := processor.ActivityStore[GetTrackingKey(&chain, entry)]
+	activity := processor.ActivityStore[GetTrackingKey(&chain, entry)]
 	processor.ActivityMutex.RUnlock()
 	if activity != nil && activity.IsBlocked {
 		t.Error("IsBlocked should be false for an unknown action, but it was true.")
@@ -350,7 +350,7 @@ func TestCheckChains_LiveMode_UnknownAction(t *testing.T) {
 
 	// Also assert that the chain progress was reset and no block state was created.
 	processor.ActivityMutex.RLock()
-	activity, _ := processor.ActivityStore[GetTrackingKey(&chain, entry)]
+	activity := processor.ActivityStore[GetTrackingKey(&chain, entry)]
 	processor.ActivityMutex.RUnlock()
 
 	if activity.IsBlocked {
@@ -456,11 +456,9 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 
 	// Assert 1: State is at step 1
 	processor.ActivityMutex.RLock()
-	activity, _ := processor.ActivityStore[trackingKey]
-	stepState1, _ := activity.ChainProgress[chain.Name]
-
-	if stepState1.CurrentStep != 1 {
-		t.Fatalf("Expected state to be at step 1, got %d", stepState1.CurrentStep)
+	activity := processor.ActivityStore[trackingKey]
+	if activity.ChainProgress[chain.Name].CurrentStep != 1 {
+		t.Fatalf("Expected state to be at step 1, got %d", activity.ChainProgress[chain.Name].CurrentStep)
 	}
 	processor.ActivityMutex.RUnlock() // <-- Release the read lock
 
@@ -474,7 +472,7 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 	// Assert 2: Chain should have been reset, and the second step should be treated as the *first* step
 	// of a new sequence, but it doesn't match step 1, so the chain progress should be cleared.
 	processor.ActivityMutex.RLock()
-	activityFinal, _ := processor.ActivityStore[trackingKey]
+	activityFinal := processor.ActivityStore[trackingKey]
 	processor.ActivityMutex.RUnlock()
 
 	if len(activityFinal.ChainProgress) != 0 {
@@ -533,11 +531,9 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 
 	// Assert 1: State is at step 1
 	processor.ActivityMutex.RLock()
-	activity, _ := processor.ActivityStore[trackingKey]
-	stepState1, _ := activity.ChainProgress[chain.Name]
-
-	if stepState1.CurrentStep != 1 {
-		t.Fatalf("Expected state to be at step 1, got %d", stepState1.CurrentStep)
+	activity := processor.ActivityStore[trackingKey]
+	if activity.ChainProgress[chain.Name].CurrentStep != 1 {
+		t.Fatalf("Expected state to be at step 1, got %d", activity.ChainProgress[chain.Name].CurrentStep)
 	}
 	processor.ActivityMutex.RUnlock() // <-- Release the read lock
 
@@ -550,7 +546,7 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 
 	// Assert 2: Chain should be reset because min delay was not met.
 	processor.ActivityMutex.RLock()
-	activityFinal, _ := processor.ActivityStore[trackingKey]
+	activityFinal := processor.ActivityStore[trackingKey]
 	processor.ActivityMutex.RUnlock()
 
 	if len(activityFinal.ChainProgress) != 0 {
@@ -639,7 +635,8 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 
 	// --- Assertions for Whitelisted IP ---
 	processor.ActivityMutex.RLock()
-	activity, exists := processor.ActivityStore[whitelistedKey]
+	_, exists := processor.ActivityStore[whitelistedKey]
+
 	processor.ActivityMutex.RUnlock()
 
 	if exists {
@@ -663,8 +660,7 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 
 	processor.ActivityMutex.RLock()
 	defer processor.ActivityMutex.RUnlock()
-	activity, exists = processor.ActivityStore[nonWhitelistedKey]
-
+	activity, exists := processor.ActivityStore[nonWhitelistedKey]
 	if !exists {
 		t.Error("Activity state for non-whitelisted IP should exist, but did not.")
 	} else {
@@ -739,8 +735,7 @@ func TestCheckChains_LogAction(t *testing.T) {
 
 	// Assert 1: State is at step 1
 	processor.ActivityMutex.RLock()
-	activity, _ := processor.ActivityStore[trackingKey]
-
+	activity := processor.ActivityStore[trackingKey]
 	if len(activity.ChainProgress) == 0 {
 		t.Fatal("Expected state to exist after step 1, but it was empty.")
 	}
@@ -758,8 +753,7 @@ func TestCheckChains_LogAction(t *testing.T) {
 	}
 
 	processor.ActivityMutex.RLock()
-	activityFinal, _ := processor.ActivityStore[trackingKey]
-	defer processor.ActivityMutex.RUnlock()
+	activityFinal := processor.ActivityStore[trackingKey]
 
 	// For a 'log' action, IsBlocked should be false and ChainProgress should be cleared
 	if activityFinal.IsBlocked {
@@ -842,8 +836,7 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 	}
 
 	processor.ActivityMutex.RLock()
-	activityFinal, _ := processor.ActivityStore[trackingKey]
-	processor.ActivityMutex.RUnlock()
+	activityFinal := processor.ActivityStore[trackingKey]
 
 	// For an 'unknown' action, IsBlocked should be false and ChainProgress should be cleared
 	if activityFinal.IsBlocked {
@@ -1109,10 +1102,8 @@ func TestCheckChains_TimeRules(t *testing.T) {
 			processor.CheckChains(entry)
 
 			processor.ActivityMutex.RLock()
-			activity, _ := processor.ActivityStore[TrackingKey{IPInfo: entry.IPInfo}]
-			_, progressExists := activity.ChainProgress[chain.Name]
-			processor.ActivityMutex.RUnlock()
-
+			activity := processor.ActivityStore[TrackingKey{IPInfo: entry.IPInfo}]
+			progressExists := activity.ChainProgress[chain.Name] != StepState{}
 			if progressExists != tt.shouldChainProgress {
 				t.Errorf("Chain progress existence was %t, but expected %t", progressExists, tt.shouldChainProgress)
 			}
@@ -1270,24 +1261,6 @@ func TestDryRunMode(t *testing.T) {
 	if len(expectedLogs) == 0 {
 		t.Fatal("No EXPECTED LOG entries found in test_access.log.  Test cannot run.")
 	}
-}
-
-func lines(s string) []string {
-	var ls []string
-	sc := bufio.NewScanner(strings.NewReader(s))
-	for sc.Scan() {
-		ls = append(ls, sc.Text())
-	}
-	return ls
-}
-
-func hasLine(multiLine string, match string) bool {
-	for _, line := range lines(multiLine) {
-		if strings.Contains(line, match) {
-			return true
-		}
-	}
-	return false
 }
 
 // TestCheckChains_OutOfOrder verifies that the system correctly handles log entries

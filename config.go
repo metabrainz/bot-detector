@@ -279,7 +279,7 @@ func LoadChainsFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 		// Report an error showing the unsupported version and the list of supported ones.
 		supportedList := strings.Join(SupportedConfigVersions, ", ")
 		return nil, fmt.Errorf(
-			"configuration version mismatch: got '%s'. This application supports: %s. Please update your YAML config file.",
+			"configuration version mismatch: got '%s', this application supports: %s",
 			config.Version,
 			supportedList,
 		)

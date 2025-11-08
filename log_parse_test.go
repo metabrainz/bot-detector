@@ -43,7 +43,7 @@ func TestParseLogLine(t *testing.T) {
 
 	// Correct format: VHost IP - userx [time] "request" status size "referrer" "user-agent"
 	validLogLine := fmt.Sprintf(`www.example.com 192.168.1.1 - userx [06/Nov/2025:09:00:00 +0100] "GET /path/to/resource HTTP/1.1" 200 1234 "%s" "%s"`, validReferrer, validUserAgent)
-	validIPv6LogLine := fmt.Sprintf(`www.example.com 2001:db8::1 - userx [06/Nov/2025:09:00:00 +0100] "GET /path/to/resource HTTP/1.1" 200 1234 "%s" "%s"`, validReferrer, validIPv6UserAgent)
+	validIPv6LogLine := `www.example.com 2001:db8::1 - userx [06/Nov/2025:09:00:00 +0100] "GET /path/to/resource HTTP/1.1" 200 1234 "` + validReferrer + `" "` + validIPv6UserAgent + `"`
 
 	tests := []struct {
 		name        string
@@ -95,7 +95,7 @@ func TestParseLogLine(t *testing.T) {
 		},
 		{
 			name:        "Malformed Timestamp",
-			line:        fmt.Sprintf(`www.example.com 192.168.1.1 - userx [06/Mal/2025:09:00:00 +0100] "GET /path HTTP/1.1" 200 1234 "-" "-"`),
+			line:        `www.example.com 192.168.1.1 - userx [06/Mal/2025:09:00:00 +0100] "GET /path HTTP/1.1" 200 1234 "-" "-"`,
 			expectError: true,
 			expected:    nil,
 		},
