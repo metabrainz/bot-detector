@@ -68,11 +68,11 @@ func ReadLineWithLimit(reader *bufio.Reader, limit int) (string, error) {
 
 // DryRunLogProcessor reads and processes a static log file for testing.
 func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
-	p.LogFunc(LevelInfo, "DRYRUN", "MODE: Reading test logs from %s...", TestLogPath)
+	p.LogFunc(LevelInfo, "DRYRUN", "MODE: Reading logs from %s...", LogFilePath)
 
-	file, err := os.Open(TestLogPath)
+	file, err := osOpenFile(LogFilePath)
 	if err != nil {
-		p.LogFunc(LevelCritical, "FATAL", "Failed to open test log file %s: %v", TestLogPath, err)
+		p.LogFunc(LevelCritical, "FATAL", "Failed to open log file %s: %v", LogFilePath, err)
 		// In a dry-run, a fatal error means we're done.
 		close(done)
 		return

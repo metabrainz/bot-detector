@@ -28,8 +28,8 @@ The application is configured using a YAML file and a few command-line flags.
 
 ```bash
 ./bot-detector \
-    --log-path "/var/log/http/access.log" \
-    --yaml-path "chains.yaml"
+  --log-path "/var/log/http/access.log" \
+  --yaml-path "chains.yaml"
 ```
 
 #### **Dry Run Mode (Testing)**
@@ -37,8 +37,9 @@ The application is configured using a YAML file and a few command-line flags.
 Use `-dry-run` to test your chains against a static log file. This will process the file once and log all match actions without attempting to connect to HAProxy.
 
 ```bash
-# test_access.log contains the log lines you want to test
-./bot-detector --dry-run --test-log "test_access.log" --yaml-path "chains.yaml"
+./bot-detector --dry-run \
+  --log-path "test_access.log" \
+  --yaml-path "chains.yaml"
 ```
 
 ## **Resilience and Logging**
@@ -80,9 +81,8 @@ This will produce a single executable named `bot-detector`.
 | Flag | Default | Description |
 | :--- | :--- | :--- |
 | **`--yaml-path`** | `chains.yaml` | Path to the YAML configuration file. |
-| **`--log-path`** | `/var/log/http/access.log` | Path to the live access log file to tail (ignored in dry-run). |
+| **`--log-path`** | `/var/log/http/access.log` | Path to the access log file to tail (or to read in dry-run mode). |
 | **`--dry-run`** | `false` | If true, runs in test mode, ignoring HAProxy and live logging. |
-| **`--test-log`** | `test_access.log` | Path to a static file containing log lines for dry-run testing. |
 
 ---
 
@@ -111,8 +111,8 @@ The application uses a unified logging system with five discrete levels. The `--
 
 ```bash
 ./bot-detector --dry-run \
+--log-path "large_test_data.log" \
 --yaml-path "test_rules.yaml" \
---test-log "large_test_data.log"
 ```
 
 # **Behavioral Chains Configuration File (chains.yaml)**

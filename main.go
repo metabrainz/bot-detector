@@ -17,6 +17,12 @@ func main() {
 	// Parse CLI flags
 	flag.Parse()
 
+	// Validate that required flags are provided.
+	if LogFilePath == "" || YAMLFilePath == "" {
+		log.Println("[FATAL] Missing required flags.")
+		flag.Usage()
+		os.Exit(1)
+	}
 	// Load initial configuration from YAML.
 	loadedCfg, err := LoadChainsFromYAML()
 	if err != nil {

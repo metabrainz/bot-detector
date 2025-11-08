@@ -247,7 +247,7 @@ line 3`), 0644)
 			name:                   "File Not Found",
 			setupFunc:              func(filePath string) { os.Remove(filePath) },
 			expectedLinesProcessed: 0,
-			expectedLogContains:    "Failed to open test log file",
+			expectedLogContains:    "Failed to open log file",
 		},
 		{
 			name: "File ends without newline",

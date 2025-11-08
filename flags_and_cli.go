@@ -11,16 +11,14 @@ var (
 	LogFilePath  string
 	YAMLFilePath string
 	DryRun       bool
-	TestLogPath  string
 )
 
 // RegisterCLIFlags registers the command-line flags with the global flag set.
 // This function is called by init() and can be called by tests after resetting flag.CommandLine.
 func RegisterCLIFlags(fs *flag.FlagSet) {
-	fs.StringVar(&LogFilePath, "log-path", "/var/log/http/access.log", "Path to the live access log file to tail (ignored in dry-run).")
-	fs.StringVar(&YAMLFilePath, "yaml-path", "chains.yaml", "Path to the YAML configuration file defining behavioral chains.")
-	fs.BoolVar(&DryRun, "dry-run", false, "If true, runs in test mode: skips HAProxy/live logging, ignores cleanup/polling, and uses --test-log.")
-	fs.StringVar(&TestLogPath, "test-log", "test_access.log", "Path to a static file containing log lines for dry-run testing.")
+	fs.StringVar(&LogFilePath, "log-path", "", "Path to the access log file. (Required)")
+	fs.StringVar(&YAMLFilePath, "yaml-path", "", "Path to the YAML configuration file. (Required)")
+	fs.BoolVar(&DryRun, "dry-run", false, "If true, runs in test mode: processes the log file from the beginning and exits.")
 }
 
 func init() {

@@ -15,23 +15,21 @@ docker build -t bot-detector:latest .
 
 #!/bin/bash
 
-HOST_TEST_LOG="./test_access.log"
+HOST_LOG_FILE="./test_access.log"
 HOST_CONFIG_PATH="./chains.yaml"
 
 # Define container paths (these should match the flags)
 CONTAINER_APP_DIR="/home/appuser/bot-detector"
-CONTAINER_TEST_LOG="${CONTAINER_APP_DIR}/test_access.log"
+CONTAINER_LOG_FILE="${CONTAINER_APP_DIR}/access.log"
 CONTAINER_CONFIG_PATH="${CONTAINER_APP_DIR}/chains.yaml"
-
-# NOTE: Dry run mode does not require HAProxy socket or map file mounts.
 
 docker run --rm \
     --name bot-detector-dry-run \
-    -v ${HOST_TEST_LOG}:${CONTAINER_TEST_LOG}:ro \
+    -v ${HOST_LOG_FILE}:${CONTAINER_LOG_FILE}:ro \
     -v ${HOST_CONFIG_PATH}:${CONTAINER_CONFIG_PATH} \
     bot-detector:latest \
     --dry-run \
-    --test-log "${CONTAINER_TEST_LOG}" \
+    --log-path "${CONTAINER_LOG_FILE}" \
     --yaml-path "${CONTAINER_CONFIG_PATH}"
 ```
 

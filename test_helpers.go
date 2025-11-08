@@ -93,9 +93,9 @@ func newDryRunTestHarness(t *testing.T) *dryRunTestHarness {
 	// Create temp file and set global path
 	tempDir := t.TempDir()
 	h.tempLogFile = filepath.Join(tempDir, "test_dryrun.log")
-	originalTestLogPath := TestLogPath
-	TestLogPath = h.tempLogFile
-	t.Cleanup(func() { TestLogPath = originalTestLogPath })
+	originalLogFilePath := LogFilePath
+	LogFilePath = h.tempLogFile
+	t.Cleanup(func() { LogFilePath = originalLogFilePath })
 
 	// Create processor with mock/capture functions
 	h.processor = &Processor{

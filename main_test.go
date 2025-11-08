@@ -23,9 +23,9 @@ func TestStart_DryRun(t *testing.T) {
 	tmpFile.Close()
 
 	// Override the global TestLogPath.
-	originalTestLogPath := TestLogPath
-	TestLogPath = tmpFile.Name()
-	t.Cleanup(func() { TestLogPath = originalTestLogPath })
+	originalLogFilePath := LogFilePath
+	LogFilePath = tmpFile.Name()
+	t.Cleanup(func() { LogFilePath = originalLogFilePath })
 
 	linesProcessed := 0
 	p := &Processor{
@@ -103,8 +103,8 @@ func TestDryRunLogProcessor_FileOpenError(t *testing.T) {
 
 	// Assert: Check that the correct error was logged.
 	logOutput := strings.Join(harness.capturedLogs, "\n")
-	if !strings.Contains(logOutput, "Failed to open test log file") {
-		t.Fatalf("Expected a log message containing 'Failed to open test log file', but got: '%s'", logOutput)
+	if !strings.Contains(logOutput, "Failed to open log file") {
+		t.Fatalf("Expected a log message containing 'Failed to open log file', but got: '%s'", logOutput)
 	}
 }
 

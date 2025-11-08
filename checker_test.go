@@ -1146,6 +1146,11 @@ func TestDryRunMode(t *testing.T) {
 	// --- Setup ---
 	resetGlobalState()
 
+	// Set required flags for this test
+	originalYAMLPath := YAMLFilePath
+	YAMLFilePath = "chains.yaml" // Assume it exists for this test
+	t.Cleanup(func() { YAMLFilePath = originalYAMLPath })
+
 	// The chains.yaml file now references a file matcher. We need to create it.
 	tempDir := t.TempDir()
 	uaFile := filepath.Join(tempDir, "bad_user_agents.txt")
@@ -1185,7 +1190,7 @@ func TestDryRunMode(t *testing.T) {
 	processor.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(processor, line, lineNumber) }
 
 	// 2. Read test_access.log and extract expected log outputs from comments
-	testLogData, err := os.ReadFile(TestLogPath)
+	testLogData, err := os.ReadFile("test_access.log")
 	if err != nil {
 		t.Fatalf("Failed to read test_access.log: %v", err)
 	}
