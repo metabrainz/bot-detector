@@ -40,3 +40,39 @@ func TestFlagUsage(t *testing.T) {
 		t.Errorf("Expected usage output to contain the flag '%s', but it did not.\nGot:\n%s", expectedFlag, actualOutput.String())
 	}
 }
+
+func TestFlagUsageOutput(t *testing.T) {
+	// --- Setup ---
+	// The init() function in flags_and_cli.go sets the global flag.Usage.
+	// To test it, we need to capture the output that it writes to os.Stderr.
+
+	// 1. Keep a copy of the original os.Stderr.
+	originalStderr := os.Stderr
+	// 2. Create a pipe. The writer will replace os.Stderr, and we'll read from the reader.
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	// 3. Ensure we restore os.Stderr and close the pipe when the test is done.
+	t.Cleanup(func() {
+		os.Stderr = originalStderr
+		w.Close()
+		r.Close()
+	})
+
+	// --- Act ---
+	// Call the global Usage function, which was set by init().
+	flag.Usage()
+	w.Close() // Close the writer to signal EOF to the reader.
+
+	// Read the output from the pipe.
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	// --- Assert ---
+	// Check that our custom help text is present.
+	expectedSubstring := "A behavioral bot detection tool"
+	if !strings.Contains(output, expectedSubstring) {
+		t.Errorf("Expected usage output to contain '%s', but it did not.\nGot:\n%s", expectedSubstring, output)
+	}
+}
