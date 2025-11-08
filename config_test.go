@@ -324,6 +324,14 @@ chains: []
 			expectedError: "configuration file is missing the required 'version' field",
 		},
 		{
+			name: "Unsupported Version",
+			yamlContent: `
+version: "0.9"
+chains: []
+`,
+			expectedError: "configuration version mismatch",
+		},
+		{
 			name: "Invalid CIDR",
 			yamlContent: `
 version: "1.0"
