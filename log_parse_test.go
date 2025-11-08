@@ -377,3 +377,40 @@ func TestGetMatchValue_UnknownField(t *testing.T) {
 		t.Errorf("Error mismatch. Expected error '%s', got: %v", expectedErrMsg, err)
 	}
 }
+
+func TestGetMatchValue_Success(t *testing.T) {
+	entry := &LogEntry{
+		IPInfo:     NewIPInfo("192.0.2.1"),
+		Path:       "/test/path",
+		Method:     "GET",
+		Protocol:   "HTTP/1.1",
+		UserAgent:  "TestAgent",
+		Referrer:   "http://example.com",
+		StatusCode: 404,
+	}
+
+	testCases := []struct {
+		fieldName string
+		expected  string
+	}{
+		{"IP", "192.0.2.1"},
+		{"Path", "/test/path"},
+		{"Method", "GET"},
+		{"Protocol", "HTTP/1.1"},
+		{"UserAgent", "TestAgent"},
+		{"Referrer", "http://example.com"},
+		{"StatusCode", "404"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.fieldName, func(t *testing.T) {
+			value, err := GetMatchValue(tc.fieldName, entry)
+			if err != nil {
+				t.Fatalf("Expected no error, but got: %v", err)
+			}
+			if value != tc.expected {
+				t.Errorf("Expected value '%s', but got '%s'", tc.expected, value)
+			}
+		})
+	}
+}
