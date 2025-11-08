@@ -196,20 +196,20 @@ chains:
     steps:
       - max_delay: "5m"
         field_matches:
-          Method: "POST"
+          Method: "^POST$"
           Path: "^/api/login$"
           # Must result in a 401 Unauthorized
           StatusCode: "^401$"
 
       - max_delay: "10s"
         field_matches:
-          Method: "POST"
+          Method: "^POST$"
           Path: "^/api/login$"
           StatusCode: "^401$"
 
       - max_delay: "5s"
         field_matches:
-          Method: "POST"
+          Method: "^POST$"
           Path: "^/api/login$"
           StatusCode: "^401$"
 
@@ -219,7 +219,7 @@ chains:
     steps:
       - max_delay: "5m"
         field_matches:
-          Method: "GET"
+          Method: "^GET$"
           # Request an article page
           Path: "^/article/\\d+$"
           # User agent might be suspicious
@@ -227,13 +227,13 @@ chains:
 
       - max_delay: "1s"
         field_matches:
-          Method: "GET"
+          Method: "^GET$"
           # Request another article page very quickly
           Path: "^/article/\\d+$"
 
       - max_delay: "1s"
         field_matches:
-          Method: "GET"
+          Method: "^GET$"
           # Request a third article page very quickly
           Path: "^/article/\\d+$"
 ```
