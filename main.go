@@ -87,7 +87,7 @@ func start(p *Processor) {
 		defer close(stopWatcher) // Ensure watcher is stopped on main exit
 
 		go p.ChainWatcher(stopWatcher)
-		go p.CleanUpIdleActivity()
+		go p.CleanUpIdleActivity(stopWatcher)
 
 		// LiveLogTailer is the blocking main loop
 		LiveLogTailer(p)
