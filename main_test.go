@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -83,4 +85,41 @@ func TestStart_LiveMode(t *testing.T) {
 	time.Sleep(20 * time.Millisecond) // Give goroutines time to start.
 	p.signalCh <- syscall.SIGINT      // Send shutdown signal.
 	time.Sleep(20 * time.Millisecond) // Allow for graceful shutdown.
+}
+
+// TestDryRunLogProcessor_FileOpenError verifies that DryRunLogProcessor correctly
+// logs an error and exits if the test log file cannot be opened.
+func TestDryRunLogProcessor_FileOpenError(t *testing.T) {
+	resetGlobalState()
+
+	// Point TestLogPath to a file that does not exist.
+	nonExistentFile := "non-existent-test-log.log"
+	originalTestLogPath := TestLogPath
+	TestLogPath = nonExistentFile
+	t.Cleanup(func() { TestLogPath = originalTestLogPath })
+
+	// Capture log output to verify the error is logged.
+	var capturedLog string
+	var logMutex sync.Mutex
+	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
+		logMutex.Lock()
+		defer logMutex.Unlock()
+		if tag == "FATAL" {
+			capturedLog = fmt.Sprintf(format, args...)
+		}
+	}
+
+	p := &Processor{
+		LogFunc: logCaptureFunc,
+	}
+	done := make(chan struct{})
+
+	// Act: Run the processor.
+	go DryRunLogProcessor(p, done)
+	<-done // Wait for it to finish.
+
+	// Assert: Check that the correct error was logged.
+	if !strings.Contains(capturedLog, "Failed to open test log file") {
+		t.Fatalf("Expected a 'FATAL' log message containing 'Failed to open test log file', but got: '%s'", capturedLog)
+	}
 }
