@@ -17,7 +17,7 @@ func main() {
 	// Parse CLI flags
 	flag.Parse()
 
-	// Load initial configuration from YAML. This no longer sets global state.
+	// Load initial configuration from YAML.
 	loadedCfg, err := LoadChainsFromYAML()
 	if err != nil {
 		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
@@ -46,32 +46,27 @@ func main() {
 		MaxTimeSinceLastHit:    loadedCfg.MaxTimeSinceLastHit,
 	}
 
-	// Initialize the global Processor instance after config is loaded.
-	// This centralizes dependency injection for the entire application.
-	// We use the global state variables (ActivityStore, Chains, etc.) to
-	// populate the single Processor instance.
-	processor := &Processor{
+	// Initialize the Processor instance.
+	p := &Processor{
 		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ActivityMutex: &sync.RWMutex{},
 		Chains:        loadedCfg.Chains,
 		ChainMutex:    &sync.RWMutex{},
 		DryRun:        DryRun,
 		LogFunc:       LogOutput,
-		// Blocker will be set below
 		CommandExecutor: func(p *Processor, addr, ip, command string) error {
 			return executeCommandImpl(p, addr, ip, command)
 		},
 		Config: appConfig,
 	}
 	// Inject the HAProxyBlocker which depends on the main processor instance.
-	processor.Blocker = &HAProxyBlocker{P: processor}
-	processor.IsWhitelistedFunc = processor.IsIPWhitelisted // Set the method correctly.
+	p.Blocker = &HAProxyBlocker{P: p}
+	p.IsWhitelistedFunc = p.IsIPWhitelisted // Set the method correctly.
 
-	// Execute the core application logic
 	// Assign the real implementation for ProcessLogLine.
-	processor.ProcessLogLine = processor.processLogLineInternal
+	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(p, line, lineNumber) }
 
-	start(processor)
+	start(p)
 }
 
 // start is the unexported function that contains the main application logic,

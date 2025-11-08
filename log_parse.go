@@ -57,7 +57,7 @@ func ParseLogLine(line string) (*LogEntry, error) {
 	}, nil
 }
 
-func (p *Processor) processLogLineInternal(line string, lineNumber int) {
+func processLogLineInternal(p *Processor, line string, lineNumber int) {
 	// 1. Parse the line
 	entry, err := ParseLogLine(line)
 

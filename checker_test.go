@@ -1162,7 +1162,7 @@ func TestDryRunMode(t *testing.T) {
 	processor.IsWhitelistedFunc = processor.IsIPWhitelisted
 	// Set the ProcessLogLine func on the processor instance to avoid nil pointers.
 	// This is the function that will be called by DryRunLogProcessor.
-	processor.ProcessLogLine = processor.processLogLineInternal
+	processor.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(processor, line, lineNumber) }
 
 	// 2. Read test_access.log and extract expected log outputs from comments
 	testLogPath := TestLogPath

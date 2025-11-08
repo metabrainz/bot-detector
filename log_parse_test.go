@@ -191,7 +191,7 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 	}
 	// Assign the real implementation to the function field to avoid a nil pointer panic.
 	// The test will call this function.
-	p.ProcessLogLine = p.processLogLineInternal
+	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(&p, line, lineNumber) }
 
 	// Helper function to create a valid log line
 	createLine := func(ip string) string {
@@ -355,7 +355,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 		Config:            &AppConfig{},
 		DryRun:            true, // CRITICAL: DryRun is enabled
 	}
-	p.ProcessLogLine = p.processLogLineInternal
+	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(&p, line, lineNumber) }
 
 	ip := "192.0.2.1"
 	logLine := fmt.Sprintf(`www.example.com %s - userx [06/Nov/2025:09:00:00 +0100] "GET /1 HTTP/1.1" 200 1234 "-" "-"`, ip)
