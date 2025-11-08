@@ -73,6 +73,7 @@ func TestStart_LiveMode(t *testing.T) {
 		Config: &AppConfig{
 			CleanupInterval: 10 * time.Millisecond,
 			PollingInterval: 10 * time.Millisecond,
+			StatFunc:        defaultStatFunc, // Initialize StatFunc to prevent nil pointer panic.
 		},
 		DryRun:   false, // Ensure live mode.
 		signalCh: make(chan os.Signal, 1),

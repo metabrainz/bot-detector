@@ -195,8 +195,10 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			p.LogFunc(LevelDebug, "TAIL", "Initial file state: Size=%d, Inode=%d, Device=%d", initialStat.Size(), initialSysStat.Ino, initialSysStat.Dev)
 		} else {
 			p.LogFunc(LevelWarning, "TAIL_WARN", "Failed to get initial file stat: %v. Rotation detection may be impaired.", statErr)
+			// If we can't stat the file, the handle is likely bad. Close it and restart the loop.
+			file.Close()
+			continue
 		}
-		// We proceed even if statErr is not nil. hasFileBeenRotated will handle it.
 
 		// On the very first run, seek to the end of the file to ignore old content.
 		// On subsequent runs (after rotation), we want to read the new file from the beginning.
@@ -241,10 +243,13 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 
 				if finalErr == io.EOF {
 					// At EOF, check for file rotation before sleeping.
-					if hasFileBeenRotated(p, LogFilePath, initialStat, defaultStatFunc) {
+					if hasFileBeenRotated(p, LogFilePath, initialStat, p.Config.StatFunc) {
+						// If hasFileBeenRotated failed because of a stat error, it's safer to add a small delay
+						// before retrying to avoid a tight loop if the file is genuinely gone.
+						// The restartTailing function handles the delay and shutdown check.
 						file.Close()
-						restartTailing(0) // No delay, but check for pending signal.
-						break             // Break inner loop to reopen
+						restartTailing(FileOpenRetryDelay) // Use a small delay to prevent tight loops.
+						break                              // Break inner loop to reopen
 					}
 					time.Sleep(p.Config.EOFPollingDelay) // Use configurable polling delay
 					continue

@@ -54,6 +54,7 @@ type AppConfig struct {
 	MaxTimeSinceLastHit    time.Duration // The longest min_time_since_last_hit duration across all chains.
 	OutOfOrderTolerance    time.Duration // Max duration an out-of-order log entry will be processed.
 	PollingInterval        time.Duration
+	StatFunc               func(string) (os.FileInfo, error) // Mockable stat function for testing.
 	WhitelistNets          []*net.IPNet
 }
 
@@ -74,6 +75,7 @@ type LoadedConfig struct {
 	MaxTimeSinceLastHit    time.Duration
 	OutOfOrderTolerance    time.Duration
 	PollingInterval        time.Duration
+	StatFunc               func(string) (os.FileInfo, error)
 	WhitelistNets          []*net.IPNet
 }
 

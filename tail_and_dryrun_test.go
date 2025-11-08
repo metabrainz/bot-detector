@@ -354,6 +354,7 @@ type tailerTestHarness struct {
 	processedLines []string
 	logMutex       sync.Mutex
 	lineProcessed  chan string
+	fileRotated    chan struct{} // New channel to signal rotation
 }
 
 // newTailerTestHarness creates and initializes a test harness for LiveLogTailer.
@@ -366,6 +367,7 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 		doneCh:        make(chan struct{}),
 		readyCh:       make(chan struct{}, 1),
 		lineProcessed: make(chan string, 10), // Buffered to prevent blocking
+		fileRotated:   make(chan struct{}, 1),
 	}
 
 	// Create temp file and set global path
@@ -380,7 +382,12 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
 			h.logMutex.Lock()
 			defer h.logMutex.Unlock()
-			h.capturedLogs = append(h.capturedLogs, fmt.Sprintf(tag+": "+format, args...))
+			logLine := fmt.Sprintf(tag+": "+format, args...)
+			h.capturedLogs = append(h.capturedLogs, logLine)
+			// If the tailer logs that it's reopening due to rotation, signal the channel.
+			if tag == "TAIL" && strings.Contains(logLine, "Detected log file rotation") {
+				h.fileRotated <- struct{}{}
+			}
 		},
 		ProcessLogLine: func(line string, lineNumber int) {
 			h.logMutex.Lock()
@@ -389,6 +396,11 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 			h.lineProcessed <- line
 		},
 		Config: config,
+	}
+
+	// Ensure StatFunc is never nil to prevent panics in hasFileBeenRotated.
+	if h.processor.Config.StatFunc == nil {
+		h.processor.Config.StatFunc = defaultStatFunc
 	}
 
 	return h
@@ -482,6 +494,14 @@ func TestLiveLogTailer(t *testing.T) {
 	// Create a new file with the original name
 	if err := os.WriteFile(harness.tempLogFile, []byte("rotated line\n"), 0644); err != nil {
 		t.Fatalf("Failed to create new log file after rotation: %v", err)
+	}
+
+	// Wait for the tailer to detect the rotation and be ready for the new file.
+	select {
+	case <-harness.fileRotated:
+		// Rotation was detected.
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for tailer to detect file rotation.")
 	}
 
 	// Wait for the tailer to process the line from the new file.
@@ -649,7 +669,7 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 
 	// Wait for the tailer to log the read error. We can poll the captured logs.
 	// This is a bit racy, but simpler than adding more channels to the harness for this one case.
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond) // Increased sleep to ensure error is logged.
 
 	harness.stop()
 
@@ -657,5 +677,101 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 	logOutput := strings.Join(harness.capturedLogs, "\n")
 	if !strings.Contains(logOutput, "TAIL_ERROR: Read error while tailing log file") {
 		t.Error("Expected a 'Read error while tailing' message, but none was logged.")
+	}
+}
+
+// TestLiveLogTailer_ShutdownDuringRetryDelay verifies that if a shutdown signal
+// is received while the tailer is in its file-open retry delay loop, it shuts
+// down immediately without attempting another file open.
+func TestLiveLogTailer_ShutdownDuringRetryDelay(t *testing.T) {
+	// --- Setup ---
+	harness := newTailerTestHarness(t, &AppConfig{
+		// Use a long delay to ensure we can send a signal during it.
+		PollingInterval: 100 * time.Millisecond,
+	})
+
+	// Ensure the file does not exist to force the retry loop.
+	os.Remove(harness.tempLogFile)
+
+	// Override the LogFunc to count how many times "Failed to open" is logged.
+	openFailCount := 0
+	harness.processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+		harness.logMutex.Lock()
+		defer harness.logMutex.Unlock()
+		if tag == "TAIL_ERROR" && strings.Contains(format, "Failed to open log file") {
+			openFailCount++
+		}
+		harness.capturedLogs = append(harness.capturedLogs, fmt.Sprintf(tag+": "+format, args...))
+	}
+
+	// --- Act ---
+	go func() {
+		LiveLogTailer(harness.processor, harness.signalCh, nil)
+		close(harness.doneCh)
+	}()
+
+	// Wait a moment to ensure the first open attempt has failed.
+	time.Sleep(50 * time.Millisecond)
+	// Send the shutdown signal. This should interrupt the ErrorRetryDelay.
+	harness.stop()
+
+	// --- Assert ---
+	if openFailCount > 1 {
+		t.Errorf("Expected only one 'Failed to open' attempt, but got %d. The tailer did not shut down immediately.", openFailCount)
+	}
+}
+
+// TestLiveLogTailer_StatError verifies that if stat fails during an EOF check,
+// the tailer assumes rotation and attempts to reopen the file.
+func TestLiveLogTailer_StatError(t *testing.T) {
+	// --- Setup ---
+	harness := newTailerTestHarness(t, &AppConfig{
+		PollingInterval: 10 * time.Millisecond,
+		EOFPollingDelay: 1 * time.Millisecond,
+	})
+
+	// Override LogFunc to capture logs for this specific test.
+	var capturedLogs []string
+	var logMutex sync.Mutex
+	statErrorLogged := make(chan struct{}, 1)
+
+	harness.processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+		logMutex.Lock()
+		defer logMutex.Unlock()
+		logLine := fmt.Sprintf(tag+": "+format, args...)
+		capturedLogs = append(capturedLogs, logLine)
+		if tag == "TAIL_ERROR" && strings.Contains(logLine, "Failed to stat log path during EOF check") {
+			// Use a non-blocking send in case the channel is already full.
+			select {
+			case statErrorLogged <- struct{}{}:
+			default:
+			}
+		}
+	}
+
+	// Create an empty file for the tailer to open successfully.
+	if err := os.WriteFile(harness.tempLogFile, []byte(""), 0644); err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+
+	// --- Act ---
+	harness.start()
+	defer harness.stop()
+
+	// After the tailer starts, inject a stat function that will fail.
+	// This simulates the file disappearing *after* it was successfully opened.
+	harness.processor.Config.StatFunc = func(s string) (os.FileInfo, error) {
+		return nil, os.ErrNotExist
+	}
+
+	// The tailer will open the file, read EOF, then call hasFileBeenRotated,
+	// which will use our failing mock and log the error.
+
+	// --- Assert ---
+	select {
+	case <-statErrorLogged:
+		// Success: The expected error was logged.
+	case <-time.After(1 * time.Second):
+		t.Fatalf("Timed out waiting for the stat error to be logged. Logs:\n%s", strings.Join(capturedLogs, "\n"))
 	}
 }
