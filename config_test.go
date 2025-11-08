@@ -577,3 +577,63 @@ chains:
 		t.Errorf("Processor chains were modified despite reload failure. Expected 'InitialChain', got: %+v", processor.Chains)
 	}
 }
+
+func TestChainWatcher_StatError(t *testing.T) {
+	// --- Setup ---
+	// 1. Create a temporary YAML file.
+	initialYAMLContent := `
+version: "1.0"
+chains:
+  - name: "InitialChain"
+    match_key: "ip"
+    action: "log"
+    steps: [{field_matches: {Path: "/initial"}}]
+`
+	tempDir := t.TempDir()
+	tempFile := filepath.Join(tempDir, "chains.yaml")
+	if err := os.WriteFile(tempFile, []byte(initialYAMLContent), 0644); err != nil {
+		t.Fatalf("Failed to write initial temp yaml file: %v", err)
+	}
+
+	originalPath := YAMLFilePath
+	YAMLFilePath = tempFile
+	t.Cleanup(func() { YAMLFilePath = originalPath })
+
+	// 2. Create the processor with a log capturer.
+	var capturedLogs []string
+	var logMutex sync.Mutex
+	processor := &Processor{
+		Chains:     []BehavioralChain{{Name: "InitialChain"}}, // Simplified initial state
+		ChainMutex: &sync.RWMutex{},
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
+			logMutex.Lock()
+			capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
+			logMutex.Unlock()
+		},
+		Config: &AppConfig{testOverridePollingInterval: 10 * time.Millisecond},
+	}
+	initialFileInfo, _ := os.Stat(tempFile)
+	processor.Config.LastModTime = initialFileInfo.ModTime()
+
+	// 3. Start the ChainWatcher.
+	stopWatcher := make(chan struct{})
+	go processor.ChainWatcher(stopWatcher)
+	t.Cleanup(func() { close(stopWatcher) })
+
+	// --- Act ---
+	// 4. Delete the YAML file to trigger a stat error on the next poll.
+	time.Sleep(50 * time.Millisecond) // Ensure at least one successful poll happens first.
+	if err := os.Remove(tempFile); err != nil {
+		t.Fatalf("Failed to remove temp file: %v", err)
+	}
+
+	// 5. Wait for the watcher to attempt the reload and fail.
+	time.Sleep(processor.Config.testOverridePollingInterval * 2)
+
+	// --- Assert ---
+	// 6. Check that an error was logged.
+	logOutput := strings.Join(capturedLogs, "\n")
+	if !strings.Contains(logOutput, "WATCH_ERROR: Failed to stat file") {
+		t.Errorf("Expected a 'WATCH_ERROR' log message, but none was found. Logs:\n%s", logOutput)
+	}
+}
