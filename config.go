@@ -63,30 +63,37 @@ func (p *Processor) logConfigurationSummary() {
 	p.ChainMutex.RLock()
 	config := p.Config
 	logRegex := p.LogRegex
+	currentLogLevel := CurrentLogLevel.String()
 	p.ChainMutex.RUnlock()
 
-	// Use a strings.Builder for efficient string concatenation into a single line.
 	var summary strings.Builder
 	summary.WriteString("Loaded configuration: ")
 
-	fmt.Fprintf(&summary, "log_level=%s ", CurrentLogLevel.String())
-	fmt.Fprintf(&summary, "timestamp_format='%s' ", config.TimestampFormat)
+	// Handle special cases first
+	fmt.Fprintf(&summary, "log_level=%s ", currentLogLevel)
+
+	// Use reflection to iterate over tagged fields in AppConfig
+	val := reflect.ValueOf(*config)
+	typ := val.Type()
+
+	for i := 0; i < val.NumField(); i++ {
+		field := typ.Field(i)
+		tag := field.Tag.Get("summary")
+		if tag == "" {
+			continue // Skip fields without the summary tag
+		}
+
+		value := val.Field(i).Interface()
+		fmt.Fprintf(&summary, "%s=%v ", tag, value)
+	}
+
 	if logRegex != nil {
 		fmt.Fprintf(&summary, "log_format_regex=custom ")
 	} else {
 		fmt.Fprintf(&summary, "log_format_regex=default ")
 	}
-	fmt.Fprintf(&summary, "poll_interval=%v ", config.PollingInterval)
-	fmt.Fprintf(&summary, "eof_polling_delay=%v ", config.EOFPollingDelay)
-	fmt.Fprintf(&summary, "cleanup_interval=%v ", config.CleanupInterval)
-	fmt.Fprintf(&summary, "idle_timeout=%v ", config.IdleTimeout)
-	fmt.Fprintf(&summary, "out_of_order_tolerance=%v ", config.OutOfOrderTolerance)
-	fmt.Fprintf(&summary, "haproxy_addresses=%v ", config.HAProxyAddresses)
-	fmt.Fprintf(&summary, "haproxy_max_retries=%d ", config.HAProxyMaxRetries)
-	fmt.Fprintf(&summary, "haproxy_retry_delay=%v ", config.HAProxyRetryDelay)
-	fmt.Fprintf(&summary, "haproxy_dial_timeout=%v", config.HAProxyDialTimeout)
 
-	p.LogFunc(LevelInfo, "CONFIG", summary.String())
+	p.LogFunc(LevelInfo, "CONFIG", strings.TrimSpace(summary.String()))
 }
 
 // logChainDetails logs details for a given list of chains, one per line.

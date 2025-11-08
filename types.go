@@ -42,21 +42,21 @@ type Processor struct {
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
 type AppConfig struct {
-	BlockTableNameFallback string                            `config:"compare"`
-	CleanupInterval        time.Duration                     `config:"compare"`
-	DurationToTableName    map[time.Duration]string          `config:"compare"`
-	EOFPollingDelay        time.Duration                     `config:"compare"`
+	BlockTableNameFallback string                            `config:"compare" summary:"block_table_name_fallback"`
+	CleanupInterval        time.Duration                     `config:"compare" summary:"cleanup_interval"`
+	DurationToTableName    map[time.Duration]string          `config:"compare" summary:"duration_tables"`
+	EOFPollingDelay        time.Duration                     `config:"compare" summary:"eof_polling_delay"`
 	FileDependencies       []string                          // List of file paths used in `file:` matchers.
-	HAProxyAddresses       []string                          `config:"compare"`
-	HAProxyDialTimeout     time.Duration                     `config:"compare"`
-	HAProxyMaxRetries      int                               `config:"compare"`
-	HAProxyRetryDelay      time.Duration                     `config:"compare"`
-	IdleTimeout            time.Duration                     `config:"compare"`
+	HAProxyAddresses       []string                          `config:"compare" summary:"haproxy_addresses"`
+	HAProxyDialTimeout     time.Duration                     `config:"compare" summary:"haproxy_dial_timeout"`
+	HAProxyMaxRetries      int                               `config:"compare" summary:"haproxy_max_retries"`
+	HAProxyRetryDelay      time.Duration                     `config:"compare" summary:"haproxy_retry_delay"`
+	IdleTimeout            time.Duration                     `config:"compare" summary:"idle_timeout"`
 	LastModTime            time.Time                         // Not compared
-	MaxTimeSinceLastHit    time.Duration                     `config:"compare"`
-	OutOfOrderTolerance    time.Duration                     `config:"compare"`
-	PollingInterval        time.Duration                     `config:"compare"`
-	TimestampFormat        string                            `config:"compare"`
+	MaxTimeSinceLastHit    time.Duration                     `config:"compare" summary:"max_time_since_last_hit"`
+	OutOfOrderTolerance    time.Duration                     `config:"compare" summary:"out_of_order_tolerance"`
+	PollingInterval        time.Duration                     `config:"compare" summary:"poll_interval"`
+	TimestampFormat        string                            `config:"compare" summary:"timestamp_format"`
 	eofCheckSignal         chan struct{}                     // Test-only
 	StatFunc               func(string) (os.FileInfo, error) // Mockable
 	WhitelistNets          []*net.IPNet                      `config:"compare"`
