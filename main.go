@@ -30,10 +30,6 @@ func main() {
 
 	SetLogLevel(loadedCfg.LogLevel)
 
-	if len(loadedCfg.DurationToTableName) == 0 {
-		LogOutput(LevelWarning, "CONFIG", "No HAProxy duration tables configured. All block attempts will be skipped.")
-	}
-
 	// Create the config struct from the loaded data.
 	appConfig := &AppConfig{
 		BlockTableNameFallback: loadedCfg.BlockTableNameFallback,
@@ -77,6 +73,11 @@ func main() {
 
 	// Assign the real implementation for ProcessLogLine.
 	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(p, line, lineNumber) }
+
+	// Log the initial configuration summary.
+	p.logConfigurationSummary()
+	// At startup, log details for all loaded chains.
+	p.logChainDetails(p.Chains, "Loaded chains")
 
 	start(p)
 }

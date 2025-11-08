@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -54,6 +55,115 @@ func (p *Processor) CheckAndRemoveWhitelistedBlocks() {
 	if unblockedCount > 0 {
 		p.LogFunc(LevelInfo, "WHITELIST_CLEANUP", "Finished Whitelist cleanup. Unblocked %d IPs.", unblockedCount)
 	}
+}
+
+// logConfigurationSummary logs the key-value pairs of the current application configuration.
+// This is useful for visibility on startup and after a configuration reload.
+func (p *Processor) logConfigurationSummary() {
+	p.ChainMutex.RLock()
+	config := p.Config
+	logRegex := p.LogRegex
+	p.ChainMutex.RUnlock()
+
+	// Use a strings.Builder for efficient string concatenation into a single line.
+	var summary strings.Builder
+	summary.WriteString("Loaded configuration: ")
+
+	fmt.Fprintf(&summary, "log_level=%s ", CurrentLogLevel.String())
+	fmt.Fprintf(&summary, "timestamp_format='%s' ", config.TimestampFormat)
+	if logRegex != nil {
+		fmt.Fprintf(&summary, "log_format_regex=custom ")
+	} else {
+		fmt.Fprintf(&summary, "log_format_regex=default ")
+	}
+	fmt.Fprintf(&summary, "poll_interval=%v ", config.PollingInterval)
+	fmt.Fprintf(&summary, "eof_polling_delay=%v ", config.EOFPollingDelay)
+	fmt.Fprintf(&summary, "cleanup_interval=%v ", config.CleanupInterval)
+	fmt.Fprintf(&summary, "idle_timeout=%v ", config.IdleTimeout)
+	fmt.Fprintf(&summary, "out_of_order_tolerance=%v ", config.OutOfOrderTolerance)
+	fmt.Fprintf(&summary, "haproxy_addresses=%v ", config.HAProxyAddresses)
+	fmt.Fprintf(&summary, "haproxy_max_retries=%d ", config.HAProxyMaxRetries)
+	fmt.Fprintf(&summary, "haproxy_retry_delay=%v ", config.HAProxyRetryDelay)
+	fmt.Fprintf(&summary, "haproxy_dial_timeout=%v", config.HAProxyDialTimeout)
+
+	p.LogFunc(LevelInfo, "CONFIG", summary.String())
+}
+
+// logChainDetails logs details for a given list of chains, one per line.
+func (p *Processor) logChainDetails(chains []BehavioralChain, header string) {
+	p.LogFunc(LevelInfo, "CONFIG", "%s (%d total)", header, len(chains))
+	for _, chain := range chains {
+		details := fmt.Sprintf("Name: '%s', Action: %s, Steps: %d, MatchKey: %s", chain.Name, chain.Action, len(chain.Steps), chain.MatchKey)
+		// Always show block duration for clarity, indicating if it's a default.
+		if chain.UsesDefaultBlockDuration {
+			details += fmt.Sprintf(", BlockDuration: default(%v)", chain.BlockDuration)
+		} else if chain.BlockDuration > 0 {
+			details += fmt.Sprintf(", BlockDuration: %v", chain.BlockDuration)
+		}
+		p.LogFunc(LevelInfo, "CONFIG", "  - %s", details)
+	}
+}
+
+// areChainsSemanticallyEqual compares two BehavioralChain structs for logical equality,
+// ignoring non-comparable fields like function pointers (Matchers).
+func areChainsSemanticallyEqual(a, b BehavioralChain) bool {
+	// Compare simple fields first.
+	if a.Name != b.Name || a.Action != b.Action ||
+		a.BlockDuration != b.BlockDuration || a.MatchKey != b.MatchKey ||
+		a.UsesDefaultBlockDuration != b.UsesDefaultBlockDuration { // Check if default usage has changed
+		return false
+	}
+
+	// Compare steps.
+	if len(a.Steps) != len(b.Steps) {
+		return false
+	}
+
+	// The most reliable way to check for changes is to compare the original YAML step definitions.
+	// This correctly detects changes in field_matches, which is not possible with the compiled StepDef.
+	return reflect.DeepEqual(a.StepsYAML, b.StepsYAML)
+}
+
+// compareConfigsByTag uses reflection to compare fields of two config structs
+// that are marked with the `config:"compare"` tag. It returns true if any
+// of the tagged fields have different values.
+func compareConfigsByTag(oldCfg AppConfig, newCfg LoadedConfig) bool {
+	newVal := reflect.ValueOf(newCfg)
+	oldVal := reflect.ValueOf(oldCfg)
+	newType := newVal.Type()
+
+	for i := 0; i < newVal.NumField(); i++ {
+		field := newType.Field(i)
+		tag := field.Tag.Get("config")
+
+		// Only compare fields that have the "compare" tag.
+		if tag != "compare" {
+			continue
+		}
+
+		fieldName := field.Name
+		newFieldValue := newVal.FieldByName(fieldName)
+		oldFieldValue := oldVal.FieldByName(fieldName)
+
+		if !oldFieldValue.IsValid() {
+			// This should not happen if AppConfig and LoadedConfig are kept in sync.
+			continue
+		}
+
+		// Use DeepEqual for slices and maps, otherwise compare interfaces.
+		// Note: LogLevel is a special case handled outside this function.
+		if newFieldValue.Kind() == reflect.Slice || newFieldValue.Kind() == reflect.Map {
+			if !reflect.DeepEqual(newFieldValue.Interface(), oldFieldValue.Interface()) {
+				return true // Found a difference
+			}
+		} else {
+			if newFieldValue.Interface() != oldFieldValue.Interface() {
+				return true // Found a difference
+			}
+		}
+	}
+
+	return false // No differences found in tagged fields.
 }
 
 // --- New Matcher Compilation Logic ---
@@ -464,6 +574,7 @@ func LoadChainsFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 
 	for _, yamlChain := range config.Chains {
 		var blockDuration time.Duration
+		usesDefault := false
 		if yamlChain.BlockDuration != "" {
 			var err error
 			blockDuration, err = time.ParseDuration(yamlChain.BlockDuration)
@@ -471,8 +582,11 @@ func LoadChainsFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 				return nil, fmt.Errorf("chain '%s': invalid block_duration format: %w", yamlChain.Name, err)
 			}
 		} else {
-			// If the chain's duration is not set, apply the pre-parsed default.
+			// If the chain's duration is not set, it will use the default.
+			// We assign it here so that logging and comparison are accurate.
 			blockDuration = defaultBlockDuration
+			// Mark that the default is being used, regardless of the action.
+			usesDefault = true
 		}
 
 		// 4. Enforce that 'block' actions must have a non-zero duration.
@@ -486,10 +600,12 @@ func LoadChainsFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 		}
 
 		runtimeChain := BehavioralChain{
-			Name:          yamlChain.Name,
-			Action:        yamlChain.Action,
-			BlockDuration: blockDuration,
-			MatchKey:      yamlChain.MatchKey,
+			Name:                     yamlChain.Name,
+			Action:                   yamlChain.Action,
+			BlockDuration:            blockDuration,
+			UsesDefaultBlockDuration: usesDefault,
+			MatchKey:                 yamlChain.MatchKey,
+			StepsYAML:                yamlChain.Steps, // Store the original YAML steps for comparison
 		}
 
 		// 3. Process Steps
@@ -519,13 +635,6 @@ func LoadChainsFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 					return nil, fmt.Errorf("chain '%s', step %d: invalid min_time_since_last_hit: %w", yamlChain.Name, runtimeStep.Order, err)
 				}
 			}
-
-			// DIAGNOSTIC LOG: Check the loaded durations for all steps.
-			// This is useful for debugging duration parsing.
-			LogOutput(LevelDebug, "CONFIG", "Chain '%s', Step %d: max_delay (raw: '%s', loaded: %v); min_delay (raw: '%s', loaded: %v)",
-				yamlChain.Name, runtimeStep.Order,
-				yamlStep.MaxDelay, runtimeStep.MaxDelayDuration,
-				yamlStep.MinDelay, runtimeStep.MinDelayDuration)
 
 			// Compile the new flexible matchers
 			runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, &fileDependencies)
@@ -652,6 +761,14 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}, forceCheckSignal <-chan s
 					defer func() { reloadDoneSignal <- struct{}{} }()
 				}
 
+				p.ChainMutex.RLock()
+				oldChains := p.Chains
+				// Create a shallow copy of the config to compare against after the reload.
+				// If we just did `oldConfig := p.Config`, we'd have a pointer to the same struct,
+				// and our comparison would be against the already-updated values.
+				oldConfig := *p.Config
+				oldLogRegex := p.LogRegex
+				p.ChainMutex.RUnlock()
 				// LoadChainsFromYAML now returns parsed data, not modifying global state.
 				loadedCfg, err := LoadChainsFromYAML()
 				if err != nil {
@@ -681,7 +798,52 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}, forceCheckSignal <-chan s
 				p.Config.LastModTime = time.Now() // Use time.Now() to avoid race conditions with fast edits
 				p.ChainMutex.Unlock()
 
-				// Cleanup any blocked IPs (This function still uses global state)
+				// --- Compare and log general config changes ---
+				// Compare tagged fields using reflection, and handle special cases manually.
+				configChanged := compareConfigsByTag(oldConfig, *loadedCfg) ||
+					loadedCfg.LogLevel != CurrentLogLevel.String() ||
+					(oldLogRegex != nil) != (loadedCfg.LogFormatRegex != nil)
+
+				if configChanged {
+					p.LogFunc(LevelInfo, "CONFIG", "General configuration settings have been updated.")
+					p.logConfigurationSummary()
+				}
+
+				// --- Compare and log chain differences ---
+				oldChainsMap := make(map[string]BehavioralChain)
+				for _, chain := range oldChains {
+					oldChainsMap[chain.Name] = chain
+				}
+				newChainsMap := make(map[string]BehavioralChain)
+				for _, chain := range loadedCfg.Chains {
+					newChainsMap[chain.Name] = chain
+				}
+
+				var added, removed, modified []BehavioralChain
+				for name, newChain := range newChainsMap {
+					if oldChain, exists := oldChainsMap[name]; !exists {
+						added = append(added, newChain)
+					} else if !areChainsSemanticallyEqual(oldChain, newChain) {
+						modified = append(modified, newChain)
+					}
+				}
+				for name, oldChain := range oldChainsMap {
+					if _, exists := newChainsMap[name]; !exists {
+						removed = append(removed, oldChain)
+					}
+				}
+
+				if len(added) > 0 {
+					p.logChainDetails(added, "Added chains:")
+				}
+				if len(modified) > 0 {
+					p.logChainDetails(modified, "Modified chains:")
+				}
+				if len(removed) > 0 {
+					p.logChainDetails(removed, "Removed chains:")
+				}
+
+				// Unblock any IPs that are now whitelisted.
 				p.CheckAndRemoveWhitelistedBlocks()
 			}()
 		}

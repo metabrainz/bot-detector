@@ -42,47 +42,47 @@ type Processor struct {
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
 type AppConfig struct {
-	BlockTableNameFallback string
-	CleanupInterval        time.Duration
-	DurationToTableName    map[time.Duration]string
-	EOFPollingDelay        time.Duration
-	FileDependencies       []string // List of file paths used in `file:` matchers.
-	HAProxyAddresses       []string
-	HAProxyDialTimeout     time.Duration
-	HAProxyMaxRetries      int
-	HAProxyRetryDelay      time.Duration
-	IdleTimeout            time.Duration
-	LastModTime            time.Time
-	MaxTimeSinceLastHit    time.Duration // The longest min_time_since_last_hit duration across all chains.
-	OutOfOrderTolerance    time.Duration // Max duration an out-of-order log entry will be processed.
-	PollingInterval        time.Duration
-	TimestampFormat        string                            // The format for parsing timestamps from log lines.
-	eofCheckSignal         chan struct{}                     // Test-only: signals when the tailer is about to check for rotation at EOF.
-	StatFunc               func(string) (os.FileInfo, error) // Mockable stat function for testing.
-	WhitelistNets          []*net.IPNet
+	BlockTableNameFallback string                            `config:"compare"`
+	CleanupInterval        time.Duration                     `config:"compare"`
+	DurationToTableName    map[time.Duration]string          `config:"compare"`
+	EOFPollingDelay        time.Duration                     `config:"compare"`
+	FileDependencies       []string                          // List of file paths used in `file:` matchers.
+	HAProxyAddresses       []string                          `config:"compare"`
+	HAProxyDialTimeout     time.Duration                     `config:"compare"`
+	HAProxyMaxRetries      int                               `config:"compare"`
+	HAProxyRetryDelay      time.Duration                     `config:"compare"`
+	IdleTimeout            time.Duration                     `config:"compare"`
+	LastModTime            time.Time                         // Not compared
+	MaxTimeSinceLastHit    time.Duration                     `config:"compare"`
+	OutOfOrderTolerance    time.Duration                     `config:"compare"`
+	PollingInterval        time.Duration                     `config:"compare"`
+	TimestampFormat        string                            `config:"compare"`
+	eofCheckSignal         chan struct{}                     // Test-only
+	StatFunc               func(string) (os.FileInfo, error) // Mockable
+	WhitelistNets          []*net.IPNet                      `config:"compare"`
 }
 
 // LoadedConfig encapsulates all configuration data loaded from the YAML file.
 type LoadedConfig struct {
-	BlockTableNameFallback string
-	Chains                 []BehavioralChain
-	CleanupInterval        time.Duration
-	DurationToTableName    map[time.Duration]string
-	EOFPollingDelay        time.Duration
-	FileDependencies       []string
-	HAProxyAddresses       []string
-	HAProxyDialTimeout     time.Duration
-	HAProxyMaxRetries      int
-	HAProxyRetryDelay      time.Duration
-	IdleTimeout            time.Duration
-	LogLevel               string
-	LogFormatRegex         *regexp.Regexp
-	MaxTimeSinceLastHit    time.Duration
-	OutOfOrderTolerance    time.Duration
-	PollingInterval        time.Duration
-	TimestampFormat        string
+	BlockTableNameFallback string                   `config:"compare"`
+	Chains                 []BehavioralChain        // Not compared here
+	CleanupInterval        time.Duration            `config:"compare"`
+	DurationToTableName    map[time.Duration]string `config:"compare"`
+	EOFPollingDelay        time.Duration            `config:"compare"`
+	FileDependencies       []string                 // Not compared
+	HAProxyAddresses       []string                 `config:"compare"`
+	HAProxyDialTimeout     time.Duration            `config:"compare"`
+	HAProxyMaxRetries      int                      `config:"compare"`
+	HAProxyRetryDelay      time.Duration            `config:"compare"`
+	IdleTimeout            time.Duration            `config:"compare"`
+	LogLevel               string                   `config:"compare"`
+	LogFormatRegex         *regexp.Regexp           // Not compared here
+	MaxTimeSinceLastHit    time.Duration            `config:"compare"`
+	OutOfOrderTolerance    time.Duration            `config:"compare"`
+	PollingInterval        time.Duration            `config:"compare"`
+	TimestampFormat        string                   `config:"compare"`
 	StatFunc               func(string) (os.FileInfo, error)
-	WhitelistNets          []*net.IPNet
+	WhitelistNets          []*net.IPNet `config:"compare"`
 }
 
 // --- YAML DATA STRUCTURES ---
@@ -145,11 +145,13 @@ type StepDef struct {
 }
 
 type BehavioralChain struct {
-	Name          string
-	Action        string
-	BlockDuration time.Duration
-	MatchKey      string // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
-	Steps         []StepDef
+	Name                     string
+	Action                   string
+	BlockDuration            time.Duration
+	UsesDefaultBlockDuration bool          // True if the chain is using the global default_block_duration.
+	MatchKey                 string        // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
+	StepsYAML                []StepDefYAML // Store original YAML for accurate comparison
+	Steps                    []StepDef
 }
 
 type StepState struct {

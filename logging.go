@@ -25,6 +25,24 @@ var LogLevelMap = map[string]LogLevel{
 	"debug":    LevelDebug,
 }
 
+// String returns the string representation of a LogLevel.
+func (l LogLevel) String() string {
+	switch l {
+	case LevelCritical:
+		return "critical"
+	case LevelError:
+		return "error"
+	case LevelWarning:
+		return "warning"
+	case LevelInfo:
+		return "info"
+	case LevelDebug:
+		return "debug"
+	default:
+		return "unknown"
+	}
+}
+
 // LogOutput is a variable holding the current logging function.
 // This allows it to be replaced with a mock during testing.
 var LogOutput func(level LogLevel, prefix string, format string, v ...interface{})
