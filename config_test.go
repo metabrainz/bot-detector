@@ -222,6 +222,42 @@ chains:
 	}
 }
 
+func TestLoadChainsFromYAML_IntMatcherFallback(t *testing.T) {
+	// This test specifically targets the non-StatusCode path in compileIntMatcher.
+	// We use a field that is not an integer (Method) to ensure the fallback logic
+	// of converting a string value to an integer is tested.
+	// --- Setup ---
+	yamlContent := `
+version: "1.0"
+chains:
+  - name: "IntFallbackChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          Method: 123 # Using an integer value on a string field
+`
+	setupTestYAML(t, yamlContent)
+
+	// --- Act ---
+	loadedCfg, err := LoadChainsFromYAML()
+	if err != nil {
+		t.Fatalf("LoadChainsFromYAML() failed: %v", err)
+	}
+
+	// --- Assert ---
+	if len(loadedCfg.Chains) != 1 || len(loadedCfg.Chains[0].Steps[0].Matchers) != 1 {
+		t.Fatal("Failed to load or compile the int matcher fallback chain.")
+	}
+
+	matcher := loadedCfg.Chains[0].Steps[0].Matchers[0]
+
+	// This entry should NOT match because "GET" != "123"
+	if matcher(&LogEntry{Method: "GET"}) {
+		t.Error("Matcher incorrectly matched 'GET' with integer 123.")
+	}
+}
+
 func TestLoadChainsFromYAML_Errors(t *testing.T) {
 	tests := []struct {
 		name          string
