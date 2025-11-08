@@ -42,9 +42,10 @@ type Processor struct {
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
 type AppConfig struct {
-	BlockTableNameFallback string                            `config:"compare" summary:"block_table_name_fallback"`
+	BlockTableNameFallback string                            `config:"compare"` // This is derived, but comparing is harmless and simple.
 	CleanupInterval        time.Duration                     `config:"compare" summary:"cleanup_interval"`
 	DurationToTableName    map[time.Duration]string          `config:"compare" summary:"duration_tables"`
+	DefaultBlockDuration   time.Duration                     `config:"compare" summary:"default_block_duration"`
 	EOFPollingDelay        time.Duration                     `config:"compare" summary:"eof_polling_delay"`
 	FileDependencies       []string                          // List of file paths used in `file:` matchers.
 	HAProxyAddresses       []string                          `config:"compare" summary:"haproxy_addresses"`
@@ -56,7 +57,7 @@ type AppConfig struct {
 	MaxTimeSinceLastHit    time.Duration                     `config:"compare" summary:"max_time_since_last_hit"`
 	OutOfOrderTolerance    time.Duration                     `config:"compare" summary:"out_of_order_tolerance"`
 	PollingInterval        time.Duration                     `config:"compare" summary:"poll_interval"`
-	TimestampFormat        string                            `config:"compare" summary:"timestamp_format"`
+	TimestampFormat        string                            `config:"compare"`
 	eofCheckSignal         chan struct{}                     // Test-only
 	StatFunc               func(string) (os.FileInfo, error) // Mockable
 	WhitelistNets          []*net.IPNet                      `config:"compare"`
@@ -67,6 +68,7 @@ type LoadedConfig struct {
 	BlockTableNameFallback string                   `config:"compare"`
 	Chains                 []BehavioralChain        // Not compared here
 	CleanupInterval        time.Duration            `config:"compare"`
+	DefaultBlockDuration   time.Duration            `config:"compare"`
 	DurationToTableName    map[time.Duration]string `config:"compare"`
 	EOFPollingDelay        time.Duration            `config:"compare"`
 	FileDependencies       []string                 // Not compared

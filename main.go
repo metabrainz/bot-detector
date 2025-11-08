@@ -34,6 +34,7 @@ func main() {
 	appConfig := &AppConfig{
 		BlockTableNameFallback: loadedCfg.BlockTableNameFallback,
 		CleanupInterval:        loadedCfg.CleanupInterval,
+		DefaultBlockDuration:   loadedCfg.DefaultBlockDuration,
 		DurationToTableName:    loadedCfg.DurationToTableName,
 		EOFPollingDelay:        loadedCfg.EOFPollingDelay,
 		FileDependencies:       loadedCfg.FileDependencies,

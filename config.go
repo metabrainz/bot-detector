@@ -66,34 +66,35 @@ func (p *Processor) logConfigurationSummary() {
 	currentLogLevel := CurrentLogLevel.String()
 	p.ChainMutex.RUnlock()
 
-	var summary strings.Builder
-	summary.WriteString("Loaded configuration: ")
+	p.LogFunc(LevelInfo, "CONFIG", "Loaded configuration:")
 
 	// Handle special cases first
-	fmt.Fprintf(&summary, "log_level=%s ", currentLogLevel)
+	p.LogFunc(LevelInfo, "CONFIG", "  - log_level: %s", currentLogLevel)
 
 	// Use reflection to iterate over tagged fields in AppConfig
 	val := reflect.ValueOf(*config)
 	typ := val.Type()
 
 	for i := 0; i < val.NumField(); i++ {
-		field := typ.Field(i)
-		tag := field.Tag.Get("summary")
+		structField := typ.Field(i)
+		tag := structField.Tag.Get("summary")
 		if tag == "" {
 			continue // Skip fields without the summary tag
 		}
 
-		value := val.Field(i).Interface()
-		fmt.Fprintf(&summary, "%s=%v ", tag, value)
+		fieldValue := val.Field(i).Interface()
+		p.LogFunc(LevelInfo, "CONFIG", "  - %s: %v", tag, fieldValue)
 	}
 
+	// Only show timestamp format if it's not the default.
+	if config.TimestampFormat != AccessLogTimeFormat {
+		p.LogFunc(LevelInfo, "CONFIG", "  - timestamp_format: custom")
+	}
+
+	// Only show log format regex if it's custom.
 	if logRegex != nil {
-		fmt.Fprintf(&summary, "log_format_regex=custom ")
-	} else {
-		fmt.Fprintf(&summary, "log_format_regex=default ")
+		p.LogFunc(LevelInfo, "CONFIG", "  - log_format_regex: custom")
 	}
-
-	p.LogFunc(LevelInfo, "CONFIG", strings.TrimSpace(summary.String()))
 }
 
 // logChainDetails logs details for a given list of chains, one per line.
@@ -680,6 +681,7 @@ func LoadChainsFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 	return &LoadedConfig{
 		BlockTableNameFallback: newFallbackName,
 		Chains:                 newChains,
+		DefaultBlockDuration:   defaultBlockDuration,
 		CleanupInterval:        cleanupInterval,
 		EOFPollingDelay:        eofPollingDelay,
 		DurationToTableName:    newDurationTables,
@@ -793,6 +795,7 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}, forceCheckSignal <-chan s
 				p.Config.HAProxyDialTimeout = loadedCfg.HAProxyDialTimeout
 				p.Config.DurationToTableName = loadedCfg.DurationToTableName
 				p.Config.BlockTableNameFallback = loadedCfg.BlockTableNameFallback
+				p.Config.DefaultBlockDuration = loadedCfg.DefaultBlockDuration
 				p.Config.PollingInterval = loadedCfg.PollingInterval
 				p.Config.CleanupInterval = loadedCfg.CleanupInterval
 				p.Config.IdleTimeout = loadedCfg.IdleTimeout
