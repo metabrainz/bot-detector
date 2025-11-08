@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestReadLineWithLimit(t *testing.T) {
@@ -110,6 +112,91 @@ func TestReadLineWithLimit(t *testing.T) {
 
 			if !errors.Is(err, tt.expectedError) {
 				t.Errorf("Expected error '%v', got '%v'", tt.expectedError, err)
+			}
+		})
+	}
+}
+
+// --- Mocks for testing hasFileBeenRotated ---
+
+// mockFileInfo implements os.FileInfo for testing purposes.
+type mockFileInfo struct {
+	size int64
+	sys  interface{}
+}
+
+func (m *mockFileInfo) Name() string       { return "mock.log" }
+func (m *mockFileInfo) Size() int64        { return m.size }
+func (m *mockFileInfo) Mode() os.FileMode  { return 0644 }
+func (m *mockFileInfo) ModTime() time.Time { return time.Now() }
+func (m *mockFileInfo) IsDir() bool        { return false }
+func (m *mockFileInfo) Sys() interface{}   { return m.sys }
+
+func TestHasFileBeenRotated(t *testing.T) {
+	// --- Setup ---
+	processor := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
+	}
+
+	// Initial file state
+	initialStat := &mockFileInfo{
+		size: 1024,
+		sys: &syscall.Stat_t{
+			Dev: 1,
+			Ino: 12345,
+		},
+	}
+
+	tests := []struct {
+		name         string
+		mockStatFunc func(path string) (os.FileInfo, error) // Mocks os.Stat
+		expected     bool
+		initialStat  os.FileInfo
+	}{
+		{
+			name: "No Rotation or Truncation",
+			mockStatFunc: func(path string) (os.FileInfo, error) {
+				return &mockFileInfo{size: 2048, sys: &syscall.Stat_t{Dev: 1, Ino: 12345}}, nil
+			},
+			expected:    false,
+			initialStat: initialStat,
+		},
+		{
+			name: "File Rotated (Inode Changed)",
+			mockStatFunc: func(path string) (os.FileInfo, error) {
+				return &mockFileInfo{size: 512, sys: &syscall.Stat_t{Dev: 1, Ino: 67890}}, nil
+			},
+			expected:    true,
+			initialStat: initialStat,
+		},
+		{
+			name: "File Truncated (Size Decreased)",
+			mockStatFunc: func(path string) (os.FileInfo, error) {
+				return &mockFileInfo{size: 512, sys: &syscall.Stat_t{Dev: 1, Ino: 12345}}, nil
+			},
+			expected:    true,
+			initialStat: initialStat,
+		},
+		{
+			name: "Stat Fails",
+			mockStatFunc: func(path string) (os.FileInfo, error) {
+				return nil, os.ErrNotExist
+			},
+			expected:    true,
+			initialStat: initialStat,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// --- Act ---
+			// We can't directly mock os.Stat, so we pass the result of our mock function.
+			// The logic inside hasFileBeenRotated is what we're testing.
+			result := hasFileBeenRotated(processor, "dummy/path", tt.initialStat, tt.mockStatFunc)
+
+			// --- Assert ---
+			if result != tt.expected {
+				t.Errorf("Expected hasFileBeenRotated to return %v, but got %v", tt.expected, result)
 			}
 		})
 	}

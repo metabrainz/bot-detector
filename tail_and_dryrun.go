@@ -108,13 +108,13 @@ endLoop:
 
 // hasFileBeenRotated checks if the log file has been rotated or truncated.
 // It returns true if the file should be reopened, false otherwise.
-func hasFileBeenRotated(p *Processor, filePath string, initialStat os.FileInfo) bool {
+func hasFileBeenRotated(p *Processor, filePath string, initialStat os.FileInfo, statFunc func(string) (os.FileInfo, error)) bool {
 	if initialStat == nil {
 		// If we couldn't get initial stats, we can't detect rotation.
 		return false
 	}
 
-	currentStat, err := os.Stat(filePath)
+	currentStat, err := statFunc(filePath)
 	if err != nil {
 		p.LogFunc(LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Assuming rotation.", err)
 		return true // If we can't stat the file, it might be gone. Reopen.
@@ -135,6 +135,10 @@ func hasFileBeenRotated(p *Processor, filePath string, initialStat os.FileInfo) 
 	}
 
 	return false
+}
+
+func defaultStatFunc(path string) (os.FileInfo, error) {
+	return os.Stat(path)
 }
 
 // delayOrShutdown waits for a specified duration but will return early if a shutdown
@@ -220,7 +224,7 @@ func LiveLogTailer(p *Processor) {
 
 				if finalErr == io.EOF {
 					// At EOF, check for file rotation before sleeping.
-					if hasFileBeenRotated(p, LogFilePath, initialStat) {
+					if hasFileBeenRotated(p, LogFilePath, initialStat, defaultStatFunc) {
 						file.Close()      // Close the old file handle
 						restartTailing(0) // Restart immediately
 						break             // Break inner loop to reopen
