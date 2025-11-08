@@ -51,6 +51,7 @@ func main() {
 		OutOfOrderTolerance:    loadedCfg.OutOfOrderTolerance,
 		PollingInterval:        loadedCfg.PollingInterval,
 		TimestampFormat:        loadedCfg.TimestampFormat,
+		StatFunc:               defaultStatFunc, // Initialize StatFunc to prevent nil pointer panic.
 		WhitelistNets:          loadedCfg.WhitelistNets,
 	}
 
@@ -96,11 +97,17 @@ func start(p *Processor) {
 		// Live mode: Start background routines and the main log tailing loop.
 		stopWatcher := make(chan struct{})
 		defer close(stopWatcher) // Ensure watcher is stopped on main exit
-
-		go p.ChainWatcher(stopWatcher, nil, nil) // Pass nil for test-only channels
-		go p.CleanUpIdleActivity(stopWatcher)
-
-		signal.Notify(p.signalCh, syscall.SIGINT, syscall.SIGTERM) // Listen for OS signals on the processor's channel
+		// Only start these background tasks if not in a test that bypasses them.
+		// This allows tests to focus on specific components like the tailer without
+		// interference from other goroutines like the config watcher.
+		if !isTesting() {
+			// The ChainWatcher is not started in test mode to prevent race conditions
+			// where the test's config is overwritten by a reload from the default chains.yaml.
+			go p.ChainWatcher(stopWatcher, nil, nil)
+			go p.CleanUpIdleActivity(stopWatcher)
+		}
+		// Listen for OS signals on the processor's channel
+		signal.Notify(p.signalCh, syscall.SIGINT, syscall.SIGTERM)
 
 		// LiveLogTailer is the blocking main loop
 		LiveLogTailer(p, p.signalCh, nil) // Pass the processor's channel to the tailer

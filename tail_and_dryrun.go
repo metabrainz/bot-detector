@@ -189,10 +189,6 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 				shutdown = true
 			}
 		}
-		// Signal for test synchronization, if the channel is set.
-		if readySignal != nil {
-			readySignal <- struct{}{}
-		}
 
 		p.LogFunc(LevelInfo, "TAIL", "Starting log tailer on %s...", LogFilePath)
 
@@ -217,6 +213,9 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			// If we can't stat the file, the handle is likely bad. Close it and restart the loop.
 			file.Close()
 			restartTailing(ErrorRetryDelay) // Add a delay to prevent a tight loop on repeated stat failures.
+			if shutdown {
+				continue // Let the main loop handle the exit, consistent with other error paths.
+			}
 			continue
 		}
 
@@ -227,6 +226,12 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			firstRun = false
 		}
 		reader := bufio.NewReader(file)
+
+		// Signal for test synchronization, if the channel is set.
+		// This is done AFTER the initial seek to ensure the tailer is truly ready.
+		if readySignal != nil {
+			readySignal <- struct{}{}
+		}
 
 		lineNumber := 0
 		lineLimit := MaxLogLineSize
@@ -256,6 +261,11 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 
 				if finalErr == io.EOF {
 					// At EOF, check for file rotation before sleeping.
+					// For testing: signal that we are about to perform the check.
+					if p.Config.eofCheckSignal != nil {
+						p.Config.eofCheckSignal <- struct{}{}
+					}
+
 					if hasFileBeenRotated(p, LogFilePath, initialStat, p.Config.StatFunc) {
 						// If hasFileBeenRotated failed because of a stat error, it's safer to add a small delay
 						// before retrying to avoid a tight loop if the file is genuinely gone.

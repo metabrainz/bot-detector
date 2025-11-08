@@ -57,6 +57,7 @@ type AppConfig struct {
 	OutOfOrderTolerance    time.Duration // Max duration an out-of-order log entry will be processed.
 	PollingInterval        time.Duration
 	TimestampFormat        string                            // The format for parsing timestamps from log lines.
+	eofCheckSignal         chan struct{}                     // Test-only: signals when the tailer is about to check for rotation at EOF.
 	StatFunc               func(string) (os.FileInfo, error) // Mockable stat function for testing.
 	WhitelistNets          []*net.IPNet
 }

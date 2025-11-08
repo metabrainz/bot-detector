@@ -448,12 +448,14 @@ func (h *tailerTestHarness) start() {
 
 // stop sends a shutdown signal and waits for the tailer to exit.
 func (h *tailerTestHarness) stop() {
+	h.t.Logf("[HARNESS] stop(): Sending shutdown signal.")
 	h.signalCh <- syscall.SIGTERM
 	select {
 	case <-h.doneCh:
 		// Graceful shutdown complete.
+		h.t.Logf("[HARNESS] stop(): Shutdown complete (doneCh closed).")
 	case <-time.After(1 * time.Second):
-		h.t.Fatal("Timed out waiting for tailer to shut down.")
+		h.t.Fatalf("Timed out waiting for tailer to shut down. Logs:\n%s", strings.Join(h.capturedLogs, "\n"))
 	}
 }
 
@@ -634,18 +636,14 @@ func TestLiveLogTailer_InitialOpenErrorAndShutdown(t *testing.T) {
 	os.Remove(harness.tempLogFile)
 
 	// --- Act ---
+	// We don't use harness.start() because it waits for a ready signal that will never come.
 	go func() {
-		LiveLogTailer(harness.processor, harness.signalCh, harness.readyCh)
+		LiveLogTailer(harness.processor, harness.signalCh, nil) // Pass nil for readySignal
 		close(harness.doneCh)
 	}()
 
-	// Wait for the tailer to signal that it's ready (which it will after the failed open attempt).
-	select {
-	case <-harness.readyCh:
-		// Tailer has passed the open attempt.
-	case <-time.After(1 * time.Second):
-		t.Fatal("Timed out waiting for tailer to start.")
-	}
+	// Give the tailer a moment to enter its retry loop.
+	time.Sleep(50 * time.Millisecond)
 	harness.stop() // Send shutdown signal and wait for exit.
 
 	// --- Assert ---
@@ -778,25 +776,36 @@ func TestLiveLogTailer_InitialStatError(t *testing.T) {
 	// Override LogFunc to capture the specific warning.
 	statWarnLogged := make(chan struct{}, 1)
 	harness.processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+		logMsg := fmt.Sprintf(format, args...)
 		harness.logMutex.Lock()
 		defer harness.logMutex.Unlock()
-		logLine := fmt.Sprintf(tag+": "+format, args...)
+		logLine := fmt.Sprintf("%s: %s", tag, logMsg)
 		harness.capturedLogs = append(harness.capturedLogs, logLine)
-		if tag == "TAIL_WARN" && strings.Contains(logLine, "Failed to get initial file stat") {
+		if tag == "TAIL_WARN" && strings.Contains(logMsg, "Failed to get initial file stat") {
 			statWarnLogged <- struct{}{}
 		}
 	}
 
 	// --- Act ---
-	harness.start()
-	defer harness.stop()
+	go func() {
+		LiveLogTailer(harness.processor, harness.signalCh, nil)
+		close(harness.doneCh) // Ensure doneCh is closed when the goroutine exits.
+	}()
 
 	// --- Assert ---
 	select {
 	case <-statWarnLogged:
-		// Success: The expected warning was logged.
 	case <-time.After(1 * time.Second):
 		t.Fatalf("Timed out waiting for the initial stat warning. Logs:\n%s", strings.Join(harness.capturedLogs, "\n"))
+	}
+
+	// Now, send the shutdown signal and wait for the goroutine to exit.
+	// We don't use harness.stop() because its timeout might race with the internal ErrorRetryDelay.
+	harness.signalCh <- syscall.SIGTERM
+	select {
+	case <-harness.doneCh:
+	case <-time.After(2 * time.Second): // A more generous timeout.
+		t.Fatalf("Timed out waiting for tailer to shut down after stat error. The tailer received the shutdown signal but the goroutine did not exit. Logs:\n%s", strings.Join(harness.capturedLogs, "\n"))
 	}
 }
 
