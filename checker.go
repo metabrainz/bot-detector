@@ -33,12 +33,6 @@ func GetMatchValue(fieldName string, entry *LogEntry) (string, error) {
 // It returns the relevant BotActivity and a boolean indicating if further processing should be skipped.
 // The caller is responsible for locking/unlocking the ActivityMutex.
 func (p *Processor) preCheckActivity(entry *LogEntry, trackingKey TrackingKey) (*BotActivity, bool) {
-	// 1. Check whitelisting immediately.
-	if p.IsWhitelistedFunc(entry.IPInfo) {
-		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IPInfo.Address)
-		return nil, true // Skip processing
-	}
-
 	// 2. Get or create activity and check for existing blocks.
 	activity := GetOrCreateActivityUnsafe(p.ActivityStore, trackingKey)
 
@@ -245,6 +239,12 @@ func (p *Processor) processChainForEntry(chain *BehavioralChain, entry *LogEntry
 
 // CheckChains is refactored as a method on Processor.
 func (p *Processor) CheckChains(entry *LogEntry) {
+
+	// Immediately skip processing if the IP is whitelisted.
+	if p.IsWhitelistedFunc(entry.IPInfo) {
+		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IPInfo.Address)
+		return
+	}
 
 	// Determine the most specific tracking key required by any matching chain.
 	// This ensures we use the correct BotActivity store for the request.
