@@ -14,16 +14,7 @@ type IPVersion byte
 // Blocker defines the interface for external IP blocking services (e.g., HAProxy).
 type Blocker interface {
 	Block(ipInfo IPInfo, duration time.Duration) error
-}
-
-// GlobalBlocker is a concrete implementation of Blocker that uses the original
-// global BlockIP function, ensuring backward compatibility.
-// NOTE: BlockIP must be declared globally in the package scope for this to compile.
-type GlobalBlocker struct{}
-
-// Block calls the original global BlockIP function.
-func (h *GlobalBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
-	return P.BlockIP(ipInfo, duration)
+	Unblock(ipInfo IPInfo) error
 }
 
 // --- DEPENDENCY CONTAINER ---

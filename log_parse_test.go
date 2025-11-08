@@ -11,13 +11,22 @@ import (
 
 // MockBlocker implements the Blocker interface for testing, allowing Block() calls to be intercepted.
 type MockBlocker struct {
-	BlockFunc func(ipInfo IPInfo, duration time.Duration) error
+	BlockFunc   func(ipInfo IPInfo, duration time.Duration) error
+	UnblockFunc func(ipInfo IPInfo) error
 }
 
 // Block calls the stored mock function to simulate the blocking action.
 func (m *MockBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 	if m.BlockFunc != nil {
 		return m.BlockFunc(ipInfo, duration)
+	}
+	return nil
+}
+
+// Unblock calls the stored mock function to simulate the unblocking action.
+func (m *MockBlocker) Unblock(ipInfo IPInfo) error {
+	if m.UnblockFunc != nil {
+		return m.UnblockFunc(ipInfo)
 	}
 	return nil
 }

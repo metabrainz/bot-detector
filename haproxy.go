@@ -15,6 +15,22 @@ import (
 // This allows the real network logic to be easily mocked for unit testing.
 type CommandExecutor func(addr, ip, command string) error
 
+// HAProxyBlocker is a concrete implementation of the Blocker interface that interacts with HAProxy.
+type HAProxyBlocker struct {
+	// A reference to the main processor to access config, logging, and the executor.
+	P *Processor
+}
+
+// Block delegates the call to the original BlockIP method on the Processor.
+func (b *HAProxyBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
+	return b.P.BlockIP(ipInfo, duration)
+}
+
+// Unblock delegates the call to the original UnblockIP method on the Processor.
+func (b *HAProxyBlocker) Unblock(ipInfo IPInfo) error {
+	return b.P.UnblockIP(ipInfo)
+}
+
 // These variables define the retry and timeout behavior for HAProxy commands.
 // They are package-level so they can be overridden in tests.
 var (

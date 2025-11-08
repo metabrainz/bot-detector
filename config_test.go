@@ -324,6 +324,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			resetGlobalState()
 			t.Cleanup(resetGlobalState)
 
+			var commandsReceived []string
 			// Create a processor instance for the test.
 			processor := &Processor{
 				ActivityStore: make(map[TrackingKey]*BotActivity),
@@ -338,9 +339,14 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 				LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
 					// For this test, we only care about the WHITELIST_UNBLOCK log.
 				},
+				// Set the Blocker to a mock that delegates to the original UnblockIP method,
+				// which in turn uses the mocked CommandExecutor below.
+				Blocker: &HAProxyBlocker{P: &Processor{}}, // Temporary processor for delegation
 			}
-
-			var commandsReceived []string
+			// Now, set up the mock blocker correctly.
+			mockBlocker := &HAProxyBlocker{P: processor}
+			processor.Blocker = mockBlocker
+			// Mock the underlying executor that the real UnblockIP method will call.
 			processor.CommandExecutor = func(addr, ip, command string) error {
 				commandsReceived = append(commandsReceived, strings.TrimSpace(command))
 				return nil
@@ -400,6 +406,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 		resetGlobalState()
 		t.Cleanup(resetGlobalState)
 
+		var unblockCalled bool
 		processor := &Processor{
 			ActivityStore: make(map[TrackingKey]*BotActivity),
 			ActivityMutex: &sync.RWMutex{},
@@ -409,9 +416,12 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 				HAProxyAddresses:    []string{"127.0.0.1:9999"},
 				DurationToTableName: map[time.Duration]string{time.Minute: "t1"},
 			},
-			// Mock the UnblockIP function to return an error by mocking the executor.
-			CommandExecutor: func(addr, ip, command string) error {
-				return fmt.Errorf("simulated HAProxy failure")
+			// Mock the Blocker to simulate a failure.
+			Blocker: &MockBlocker{
+				UnblockFunc: func(ipInfo IPInfo) error {
+					unblockCalled = true
+					return fmt.Errorf("simulated HAProxy failure")
+				},
 			},
 		}
 
@@ -432,6 +442,9 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 		// The IP should remain blocked in memory because the HAProxy command failed.
 		if !processor.ActivityStore[trackingKey].IsBlocked {
 			t.Error("Expected IsBlocked to remain true after a failed unblock attempt, but it was set to false.")
+		}
+		if !unblockCalled {
+			t.Error("Expected the mock Blocker.Unblock method to be called, but it was not.")
 		}
 	})
 }

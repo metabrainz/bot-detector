@@ -445,7 +445,7 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 		DryRun:            false,
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
-		Blocker:           &GlobalBlocker{},
+		Blocker:           &MockBlocker{},
 		Config:            &AppConfig{},
 	}
 
@@ -522,7 +522,7 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 		DryRun:            false,
 		LogFunc:           LogOutput,
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
-		Blocker:           &GlobalBlocker{},
+		Blocker:           &MockBlocker{},
 		Config:            &AppConfig{},
 	}
 

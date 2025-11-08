@@ -52,16 +52,18 @@ func main() {
 	// We use the global state variables (ActivityStore, Chains, etc.) to
 	// populate the single Processor instance.
 	P = &Processor{
-		ActivityStore:   make(map[TrackingKey]*BotActivity),
-		ActivityMutex:   &sync.RWMutex{},
-		Chains:          loadedCfg.Chains,
-		ChainMutex:      &sync.RWMutex{},
-		DryRun:          DryRun,
-		LogFunc:         LogOutput,
-		Blocker:         &GlobalBlocker{},
+		ActivityStore: make(map[TrackingKey]*BotActivity),
+		ActivityMutex: &sync.RWMutex{},
+		Chains:        loadedCfg.Chains,
+		ChainMutex:    &sync.RWMutex{},
+		DryRun:        DryRun,
+		LogFunc:       LogOutput,
+		// Blocker will be set below
 		CommandExecutor: executeCommandImpl, // Inject the real implementation
 		Config:          appConfig,
 	}
+	// Inject the HAProxyBlocker which depends on the main processor instance.
+	P.Blocker = &HAProxyBlocker{P: P}
 	P.IsWhitelistedFunc = P.IsIPWhitelisted // Set the method correctly.
 	// Switch to the DryRun store/mutex if running in dry-run mode
 	if DryRun {

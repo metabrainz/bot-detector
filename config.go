@@ -39,7 +39,7 @@ func (p *Processor) CheckAndRemoveWhitelistedBlocks() {
 		activity := activityPtr
 		if activity.IsBlocked && IsIPWhitelistedInList(trackingKey.IPInfo, currentWhitelist) {
 			// IP is blocked AND now whitelisted -> unblock
-			if err := p.UnblockIP(trackingKey.IPInfo); err != nil {
+			if err := p.Blocker.Unblock(trackingKey.IPInfo); err != nil {
 				// Log is handled inside UnblockIP
 			} else {
 				// Successful unblock
