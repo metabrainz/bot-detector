@@ -1184,6 +1184,31 @@ func TestDryRunMode(t *testing.T) {
 	}
 }
 
+func TestMatchStepFields_UnknownField(t *testing.T) {
+	// 1. Setup
+	// Create a step definition with a field that does not exist in LogEntry.
+	step := &StepDef{
+		FieldMatches: map[string]string{
+			"UnknownField": "some_value",
+		},
+		// CompiledRegexes are not needed for this test as it should fail before regex matching.
+	}
+
+	// Create a dummy log entry.
+	entry := &LogEntry{
+		Path: "/test",
+	}
+
+	// --- Act ---
+	// Call the function under test.
+	result := matchStepFields(step, entry)
+
+	// --- Assert ---
+	if result != false {
+		t.Error("Expected matchStepFields to return false for an unknown field, but it returned true.")
+	}
+}
+
 func lines(s string) []string {
 	var ls []string
 	sc := bufio.NewScanner(strings.NewReader(s))
