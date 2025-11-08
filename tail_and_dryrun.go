@@ -70,6 +70,7 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 
 	reader := bufio.NewReader(file)
 	lineNumber := 0
+	processedCount := 0
 	lineLimit := MaxLogLineSize
 
 	for {
@@ -81,7 +82,8 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 		case errors.Is(readErr, io.EOF):
 			// If we read a line and got EOF, process it and then exit the loop.
 			if len(line) > 0 {
-				p.ProcessLogLine(line, lineNumber) // Use the function field
+				p.ProcessLogLine(line, lineNumber)
+				processedCount++
 			}
 			goto endLoop // Use goto to break out of the outer for loop.
 		case errors.Is(readErr, ErrLineSkipped):
@@ -99,12 +101,12 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 		}
 
 		// 3. Process the line
-		p.ProcessLogLine(line, lineNumber) // Use the function field
+		p.ProcessLogLine(line, lineNumber)
+		processedCount++
 	}
 
 endLoop:
-	// Decrement lineNumber by 1 for the final count, as the loop breaks after the EOF read attempt.
-	p.LogFunc(LevelInfo, "DRYRUN", "DryRun complete. Processed %d lines.", lineNumber-1)
+	p.LogFunc(LevelInfo, "DRYRUN", "DryRun complete. Processed %d lines.", processedCount)
 	close(done)
 }
 
