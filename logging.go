@@ -25,8 +25,15 @@ var LogLevelMap = map[string]LogLevel{
 	"debug":    LevelDebug,
 }
 
-// LogOutput checks the level against the configured CurrentLogLevel and prints the message if appropriate.
-func LogOutput(level LogLevel, prefix string, format string, v ...interface{}) {
+// LogOutput is a variable holding the current logging function.
+// This allows it to be replaced with a mock during testing.
+var LogOutput func(level LogLevel, prefix string, format string, v ...interface{})
+
+func init() {
+	LogOutput = logOutputInternal // Assign the real implementation at startup.
+}
+
+func logOutputInternal(level LogLevel, prefix string, format string, v ...interface{}) {
 	if level <= CurrentLogLevel {
 		log.Printf("[%s] "+format, append([]interface{}{prefix}, v...)...)
 	}
