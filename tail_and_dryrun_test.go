@@ -343,3 +343,95 @@ func TestDelayOrShutdown(t *testing.T) {
 		})
 	}
 }
+
+func TestLiveLogTailer(t *testing.T) {
+	// --- Setup ---
+	tempDir := t.TempDir()
+	tempLogFile := filepath.Join(tempDir, "live_test.log")
+
+	// Point the global LogFilePath to our temp file for the duration of the test.
+	originalLogFilePath := LogFilePath
+	LogFilePath = tempLogFile
+	t.Cleanup(func() { LogFilePath = originalLogFilePath })
+
+	// Create the initial log file with some content.
+	if err := os.WriteFile(tempLogFile, []byte("initial line\n"), 0644); err != nil {
+		t.Fatalf("Failed to create initial log file: %v", err)
+	}
+
+	// --- Mocks and Captures ---
+	var processedLines []string
+	var logMutex sync.Mutex
+	mockProcessLogLine := func(line string, lineNumber int) {
+		logMutex.Lock()
+		processedLines = append(processedLines, line)
+		logMutex.Unlock()
+	}
+
+	processor := &Processor{
+		LogFunc:        func(level LogLevel, tag string, format string, args ...interface{}) {},
+		ProcessLogLine: mockProcessLogLine,
+		Config: &AppConfig{
+			// Use very short delays for testing
+			PollingInterval: 10 * time.Millisecond,
+		},
+	}
+
+	// --- Act ---
+	// Run LiveLogTailer in a goroutine so we can interact with it.
+	go LiveLogTailer(processor)
+
+	// Give the tailer a moment to start up and seek to the end of the initial file.
+	time.Sleep(50 * time.Millisecond)
+
+	// --- Assert 1: No initial lines should be processed ---
+	logMutex.Lock()
+	if len(processedLines) > 0 {
+		t.Fatalf("Expected 0 lines to be processed initially, but got %d", len(processedLines))
+	}
+	logMutex.Unlock()
+
+	// --- Act 2: Append a new line to the file ---
+	f, err := os.OpenFile(tempLogFile, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("Failed to open log file for appending: %v", err)
+	}
+	if _, err := f.WriteString("new line 1\n"); err != nil {
+		t.Fatalf("Failed to write to log file: %v", err)
+	}
+	f.Close()
+
+	// Wait for the tailer to process the new line.
+	time.Sleep(EOFPollingDelay * 2)
+
+	// --- Assert 2: The new line should be processed ---
+	logMutex.Lock()
+	if len(processedLines) != 1 || processedLines[0] != "new line 1" {
+		t.Errorf("Expected 'new line 1' to be processed, but got: %v", processedLines)
+	}
+	processedLines = nil // Reset for next assertion
+	logMutex.Unlock()
+
+	// --- Act 3: Simulate log rotation ---
+	if err := os.Rename(tempLogFile, tempLogFile+".rotated"); err != nil {
+		t.Fatalf("Failed to simulate log rotation (rename): %v", err)
+	}
+	// Create a new file with the original name
+	if err := os.WriteFile(tempLogFile, []byte("rotated line\n"), 0644); err != nil {
+		t.Fatalf("Failed to create new log file after rotation: %v", err)
+	}
+
+	// Wait for the tailer to detect rotation and process the line in the new file.
+	time.Sleep(EOFPollingDelay * 2)
+
+	// --- Assert 3: The line from the new file should be processed ---
+	logMutex.Lock()
+	if len(processedLines) != 1 || processedLines[0] != "rotated line" {
+		t.Errorf("Expected 'rotated line' to be processed after rotation, but got: %v", processedLines)
+	}
+	logMutex.Unlock()
+
+	// --- Cleanup: Send shutdown signal ---
+	// This is implicitly tested by the fact that the test can complete.
+	// A real shutdown test would be more complex, but this covers the main loop.
+}

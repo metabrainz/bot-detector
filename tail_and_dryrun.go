@@ -159,6 +159,8 @@ func LiveLogTailer(p *Processor) {
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
 
+	firstRun := true // Flag to control initial seek behavior.
+
 	// Inner loop for re-opening the file
 	for {
 		p.LogFunc(LevelInfo, "TAIL", "Starting log tailer on %s...", LogFilePath)
@@ -183,9 +185,12 @@ func LiveLogTailer(p *Processor) {
 		}
 		// We proceed even if statErr is not nil. hasFileBeenRotated will handle it.
 
-		// Seek to the end of the file if not the first run.
-		// Assuming for a persistent tailer, we start at the end if the file already exists.
-		file.Seek(0, io.SeekEnd)
+		// On the very first run, seek to the end of the file to ignore old content.
+		// On subsequent runs (after rotation), we want to read the new file from the beginning.
+		if firstRun {
+			file.Seek(0, io.SeekEnd)
+			firstRun = false
+		}
 		reader := bufio.NewReader(file)
 
 		lineNumber := 0
