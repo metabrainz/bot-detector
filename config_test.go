@@ -573,6 +573,20 @@ chains: []
 `,
 			expectedError: "invalid block_duration format for default_block_duration",
 		},
+		{
+			name: "Invalid haproxy_retry_delay",
+			yamlContent: `
+version: "1.0"
+haproxy_retry_delay: "bad"`,
+			expectedError: "invalid haproxy_retry_delay",
+		},
+		{
+			name: "Invalid haproxy_dial_timeout",
+			yamlContent: `
+version: "1.0"
+haproxy_dial_timeout: "1y"`,
+			expectedError: "invalid haproxy_dial_timeout",
+		},
 	}...)
 
 	for _, tt := range tests {
