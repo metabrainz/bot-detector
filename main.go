@@ -65,6 +65,7 @@ func main() {
 	// Inject the HAProxyBlocker which depends on the main processor instance.
 	p.Blocker = &HAProxyBlocker{P: p}
 	p.IsWhitelistedFunc = p.IsIPWhitelisted // Set the method correctly.
+	p.CheckChainsFunc = p.CheckChains       // Assign the real method to the function field.
 
 	// Assign the real implementation for ProcessLogLine.
 	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(p, line, lineNumber) }

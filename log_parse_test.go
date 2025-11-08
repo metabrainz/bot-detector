@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -206,12 +207,16 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 		DryRun:            true, // CRITICAL: DryRun is enabled
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
 		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
+		CheckChainsFunc:   func(entry *LogEntry) {}, // Will be replaced below
 	}
 	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(&p, line, lineNumber) }
 
 	ip := "192.0.2.1"
 	logLine := fmt.Sprintf(`www.example.com %s - userx [06/Nov/2025:09:00:00 +0100] "GET /1 HTTP/1.1" 200 1234 "-" "-"`, ip)
 	key := TrackingKey{IPInfo: NewIPInfo(ip)}
+
+	// Set the CheckChainsFunc to the real method on the processor instance.
+	p.CheckChainsFunc = p.CheckChains
 
 	// 1. Process the line
 	p.ProcessLogLine(logLine, 1)
@@ -231,6 +236,38 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 
 	if dryRunActivity.BlockedUntil.IsZero() {
 		t.Error("Expected BlockedUntil time to be set in DryRun store, but it was zero.")
+	}
+}
+
+// TestProcessLogLineInternal_ParseError verifies that when processLogLineInternal
+// receives a line that cannot be parsed, it logs the error and does not proceed.
+func TestProcessLogLineInternal_ParseError(t *testing.T) {
+	resetGlobalState()
+
+	var logMutex sync.Mutex
+	var capturedLog string
+	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
+		logMutex.Lock()
+		defer logMutex.Unlock()
+		if tag == "PARSE_FAIL" {
+			capturedLog = fmt.Sprintf(format, args...)
+		}
+	}
+
+	p := &Processor{
+		LogFunc: logCaptureFunc,
+		// CheckChainsFunc should not be called if parsing fails.
+		CheckChainsFunc: func(entry *LogEntry) {
+			t.Error("CheckChains was called, but should have been skipped due to a parse error.")
+		},
+	}
+
+	// Act: Process a malformed log line.
+	malformedLine := "this is not a valid log line"
+	processLogLineInternal(p, malformedLine, 123)
+
+	if !strings.Contains(capturedLog, "Parsing failed") {
+		t.Errorf("Expected a 'PARSE_FAIL' log message, but it was not captured. Got: '%s'", capturedLog)
 	}
 }
 

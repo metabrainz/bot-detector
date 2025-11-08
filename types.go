@@ -32,6 +32,7 @@ type Processor struct {
 	Config            *AppConfig
 	DryRun            bool
 	IsWhitelistedFunc func(ipInfo IPInfo) bool
+	CheckChainsFunc   func(entry *LogEntry)
 	signalCh          chan os.Signal
 	LogFunc           func(level LogLevel, tag string, format string, v ...interface{})
 	ProcessLogLine    func(line string, lineNumber int)

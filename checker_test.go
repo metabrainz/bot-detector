@@ -1205,6 +1205,8 @@ func TestDryRunMode(t *testing.T) {
 	}
 	// Set the IsWhitelistedFunc on the *actual* processor instance to avoid nil pointers.
 	processor.IsWhitelistedFunc = processor.IsIPWhitelisted
+	// Set the CheckChainsFunc on the processor instance to avoid nil pointers.
+	processor.CheckChainsFunc = processor.CheckChains
 	// Set the ProcessLogLine func on the processor instance to avoid nil pointers.
 	// This is the function that will be called by DryRunLogProcessor.
 	processor.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(processor, line, lineNumber) }

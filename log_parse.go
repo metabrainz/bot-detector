@@ -74,5 +74,5 @@ func processLogLineInternal(p *Processor, line string, lineNumber int) {
 	}
 
 	// 3. If not blocked, process the log line through all behavioral chains
-	p.CheckChains(entry)
+	p.CheckChainsFunc(entry)
 }
