@@ -232,6 +232,19 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 			assertIsBlocked:  true,
 		},
 		{
+			name: "Skip - Already Blocked (Not Expired)",
+			line: createLine(baseIP),
+			setup: func(p *Processor) {
+				key := TrackingKey{IPInfo: NewIPInfo(baseIP)}
+				p.ActivityStore[key] = &BotActivity{
+					IsBlocked:    true,
+					BlockedUntil: time.Now().Add(time.Hour),
+				}
+			},
+			assertBlockCount: 0,
+			assertIsBlocked:  true,
+		},
+		{
 			name: "Process - Blocked but Expired (Should clear block state)",
 			line: createLine(baseIP),
 			setup: func(p *Processor) {
