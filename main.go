@@ -52,14 +52,15 @@ func main() {
 	// We use the global state variables (ActivityStore, Chains, etc.) to
 	// populate the single Processor instance.
 	P = &Processor{
-		ActivityStore: make(map[TrackingKey]*BotActivity),
-		ActivityMutex: &sync.RWMutex{},
-		Chains:        loadedCfg.Chains,
-		ChainMutex:    &sync.RWMutex{},
-		DryRun:        DryRun,
-		LogFunc:       LogOutput,
-		Blocker:       &GlobalBlocker{},
-		Config:        appConfig,
+		ActivityStore:   make(map[TrackingKey]*BotActivity),
+		ActivityMutex:   &sync.RWMutex{},
+		Chains:          loadedCfg.Chains,
+		ChainMutex:      &sync.RWMutex{},
+		DryRun:          DryRun,
+		LogFunc:         LogOutput,
+		Blocker:         &GlobalBlocker{},
+		CommandExecutor: executeCommandImpl, // Inject the real implementation
+		Config:          appConfig,
 	}
 	P.IsWhitelistedFunc = P.IsIPWhitelisted // Set the method correctly.
 	// Switch to the DryRun store/mutex if running in dry-run mode

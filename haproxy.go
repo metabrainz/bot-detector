@@ -11,14 +11,9 @@ import (
 	"time"
 )
 
-// HAProxyExecutor defines the function signature for executing a single HAProxy command.
+// CommandExecutor defines the function signature for executing a single backend command.
 // This allows the real network logic to be easily mocked for unit testing.
-type HAProxyExecutor func(addr, ip, command string) error
-
-// haproxyCommandExecutor is a package-level variable that holds the current
-// implementation of the HAProxy command execution function. It is initialized
-// to the real implementation.
-var haproxyCommandExecutor HAProxyExecutor = executeHAProxyCommandImpl
+type CommandExecutor func(addr, ip, command string) error
 
 // These variables define the retry and timeout behavior for HAProxy commands.
 // They are package-level so they can be overridden in tests.
@@ -28,15 +23,9 @@ var (
 	dialTimeout = 5 * time.Second
 )
 
-// executeHAProxyCommand is the public-facing wrapper that calls the current executor implementation.
-// In tests, this calls the mock function.
-func executeHAProxyCommand(addr, ip, command string) error {
-	return haproxyCommandExecutor(addr, ip, command)
-}
-
-// executeHAProxyCommandImpl connects to a single HAProxy instance over TCP/Unix and executes the command.
+// executeCommandImpl connects to a single HAProxy instance over TCP/Unix and executes the command.
 // This contains the original networking logic.
-func executeHAProxyCommandImpl(addr, ip, command string) error {
+func executeCommandImpl(addr, ip, command string) error {
 	// Determine network type: "unix" for local socket, "tcp" otherwise
 	network := "tcp"
 	if strings.Contains(addr, "/") { // Simple check for a file path
@@ -131,7 +120,7 @@ func (p *Processor) executeHAProxyCommandsConcurrently(ip string, targets map[st
 			go func(addr, command string) {
 				defer wg.Done()
 
-				if err := executeHAProxyCommand(addr, ip, command); err != nil {
+				if err := p.CommandExecutor(addr, ip, command); err != nil {
 					errs <- err
 					// Log the error immediately at LevelError
 					p.LogFunc(LevelError, "HAPROXY_FAIL", "HAProxy command failed on instance %s for IP %s (Table %s): %v", addr, ip, tableName, err)

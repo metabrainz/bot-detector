@@ -40,6 +40,7 @@ type Processor struct {
 	IsWhitelistedFunc func(ipInfo IPInfo) bool
 	ProcessLogLine    func(line string, lineNumber int)
 	Blocker           Blocker
+	CommandExecutor   CommandExecutor // The function that executes the backend command
 	Config            *AppConfig
 }
 

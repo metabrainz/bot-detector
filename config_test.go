@@ -341,11 +341,10 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			}
 
 			var commandsReceived []string
-			mockExecutor := func(addr, ip, command string) error {
+			processor.CommandExecutor = func(addr, ip, command string) error {
 				commandsReceived = append(commandsReceived, strings.TrimSpace(command))
 				return nil
 			}
-			setupMockExecutor(t, mockExecutor)
 
 			// 2. Define the IP that is currently blocked but will be whitelisted.
 			trackingKey := TrackingKey{IPInfo: NewIPInfo(tt.blockedIP)}
@@ -401,13 +400,6 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 		resetGlobalState()
 		t.Cleanup(resetGlobalState)
 
-		// Mock the UnblockIP function to return an error.
-		// We need to do this by mocking the underlying executor.
-		mockExecutor := func(addr, ip, command string) error {
-			return fmt.Errorf("simulated HAProxy failure")
-		}
-		setupMockExecutor(t, mockExecutor)
-
 		processor := &Processor{
 			ActivityStore: make(map[TrackingKey]*BotActivity),
 			ActivityMutex: &sync.RWMutex{},
@@ -416,6 +408,10 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			Config: &AppConfig{
 				HAProxyAddresses:    []string{"127.0.0.1:9999"},
 				DurationToTableName: map[time.Duration]string{time.Minute: "t1"},
+			},
+			// Mock the UnblockIP function to return an error by mocking the executor.
+			CommandExecutor: func(addr, ip, command string) error {
+				return fmt.Errorf("simulated HAProxy failure")
 			},
 		}
 

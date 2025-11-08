@@ -11,18 +11,6 @@ import (
 	"time"
 )
 
-// --- Test Utilities for HAProxy Mocking ---
-
-// setupMockExecutor replaces the global haproxyCommandExecutor with a mock function
-// and restores the original function when the test completes, ensuring test isolation.
-func setupMockExecutor(t *testing.T, mock HAProxyExecutor) {
-	originalExecutor := haproxyCommandExecutor
-	haproxyCommandExecutor = mock
-	t.Cleanup(func() {
-		haproxyCommandExecutor = originalExecutor
-	})
-}
-
 // setTestTimeouts sets aggressive timeout/retry settings for tests
 // that rely on the real network implementation and restores the original values using t.Cleanup.
 func setTestTimeouts(t *testing.T) {
@@ -30,8 +18,7 @@ func setTestTimeouts(t *testing.T) {
 	originalRetryDelay := retryDelay
 	originalDialTimeout := dialTimeout
 
-	// Set very short, aggressive settings for testing
-	maxRetries = 1 // Only 1 attempt to fail fast
+	maxRetries = 1
 	retryDelay = 1 * time.Millisecond
 	dialTimeout = 100 * time.Millisecond
 
@@ -69,13 +56,12 @@ func TestBlockAndUnblockIP_SuccessFlow(t *testing.T) {
 		"clear table table_long_ipv4 key 192.0.2.1": {},
 	}
 
-	mockExecutor := func(addr, ip, command string) error {
+	processor.CommandExecutor = func(addr, ip, command string) error {
 		mu.Lock()
 		commandsReceived = append(commandsReceived, strings.TrimSpace(command))
 		mu.Unlock()
 		return nil
 	}
-	setupMockExecutor(t, mockExecutor)
 
 	ipInfo := NewIPInfo("192.0.2.1")
 	duration := 10 * time.Minute
@@ -133,12 +119,10 @@ func TestBlockIP_FallbackTable(t *testing.T) {
 	}
 
 	var commandReceived string
-	mockExecutor := func(addr, ip, command string) error {
+	processor.CommandExecutor = func(addr, ip, command string) error {
 		commandReceived = strings.TrimSpace(command)
 		return nil
 	}
-	setupMockExecutor(t, mockExecutor)
-
 	ipInfo := NewIPInfo("192.0.2.5")
 	// Use a duration that is NOT in the map.
 	unconfiguredDuration := 30 * time.Minute
@@ -177,12 +161,10 @@ func TestBlockIP_NoTableFound(t *testing.T) {
 	}
 
 	// The mock executor should fail the test if it's ever called.
-	mockExecutor := func(addr, ip, command string) error {
+	processor.CommandExecutor = func(addr, ip, command string) error {
 		t.Fatal("HAProxy executor was called when no table was found.")
 		return nil
 	}
-	setupMockExecutor(t, mockExecutor)
-
 	ipInfo := NewIPInfo("192.0.2.10")
 
 	// --- Act ---
@@ -217,15 +199,14 @@ func TestUnblockIP_ErrorTolerance_Mocked(t *testing.T) {
 	ipInfo := NewIPInfo("2001:db8::1")
 	successfulCmds := 0
 
-	// Mock executor simulates success on 'workingAddr' and a connection failure on 'failedAddr'.
-	mockExecutor := func(addr, ip, command string) error {
+	// The executor simulates success on 'workingAddr' and a connection failure on 'failedAddr'.
+	processor.CommandExecutor = func(addr, ip, command string) error {
 		if addr == workingAddr {
 			successfulCmds++
 			return nil
 		}
 		return fmt.Errorf("failed to connect to HAProxy instance %s: %w", addr, errors.New("dial tcp: connection refused"))
 	}
-	setupMockExecutor(t, mockExecutor)
 
 	// Execute UnblockIP
 	err := processor.UnblockIP(ipInfo)
@@ -258,12 +239,10 @@ func TestUnblockIP_NoAddresses(t *testing.T) {
 	}
 
 	// The mock executor should fail the test if called.
-	mockExecutor := func(addr, ip, command string) error {
+	processor.CommandExecutor = func(addr, ip, command string) error {
 		t.Fatal("HAProxy executor was called when addresses were empty")
 		return nil
 	}
-	setupMockExecutor(t, mockExecutor)
-
 	ipInfo := NewIPInfo("192.0.2.1")
 	err := processor.UnblockIP(ipInfo)
 	if err != nil {
@@ -283,12 +262,10 @@ func TestUnblockIP_NoTables(t *testing.T) {
 	}
 
 	// The mock executor should fail the test if called.
-	mockExecutor := func(addr, ip, command string) error {
+	processor.CommandExecutor = func(addr, ip, command string) error {
 		t.Fatal("HAProxy executor was called when no tables were configured")
 		return nil
 	}
-	setupMockExecutor(t, mockExecutor)
-
 	ipInfo := NewIPInfo("192.0.2.1")
 	err := processor.UnblockIP(ipInfo)
 	if err != nil {
@@ -310,12 +287,10 @@ func TestBlockIP_InvalidVersion(t *testing.T) {
 	}
 
 	// The mock executor should fail the test if called.
-	mockExecutor := func(addr, ip, command string) error {
+	processor.CommandExecutor = func(addr, ip, command string) error {
 		t.Fatal("HAProxy executor was called when IP version was invalid")
 		return nil
 	}
-	setupMockExecutor(t, mockExecutor)
-
 	ipInfo := NewIPInfo("invalid-ip-string")
 	duration := 1 * time.Minute
 
@@ -340,12 +315,10 @@ func TestUnblockIP_InvalidVersion(t *testing.T) {
 	}
 
 	// The mock executor should fail the test if called.
-	mockExecutor := func(addr, ip, command string) error {
+	processor.CommandExecutor = func(addr, ip, command string) error {
 		t.Fatal("HAProxy executor was called when IP version was invalid")
 		return nil
 	}
-	setupMockExecutor(t, mockExecutor)
-
 	ipInfo := NewIPInfo("invalid-ip-string")
 
 	// UnblockIP with an invalid IP version (0)
@@ -402,7 +375,7 @@ func TestExecuteHAProxyCommandImpl_Success(t *testing.T) {
 	})
 	defer closeFn()
 
-	err := executeHAProxyCommand(addr, "192.0.2.1", "set table foo key bar\n")
+	err := executeCommandImpl(addr, "192.0.2.1", "set table foo key bar\n")
 	if err != nil {
 		t.Fatalf("Expected success, got error: %v", err)
 	}
@@ -421,7 +394,7 @@ func TestExecuteHAProxyCommandImpl_HAProxyError(t *testing.T) {
 	})
 	defer closeFn()
 
-	err := executeHAProxyCommand(addr, "192.0.2.1", "set table foo key bar\n")
+	err := executeCommandImpl(addr, "192.0.2.1", "set table foo key bar\n")
 	if err == nil {
 		t.Fatal("Expected an HAProxy command execution error, got nil")
 	}
@@ -447,7 +420,7 @@ func TestExecuteHAProxyCommandImpl_EOFWithData(t *testing.T) {
 	})
 	defer closeFn()
 
-	err := executeHAProxyCommand(addr, "192.0.2.1", "set table foo key bar\n")
+	err := executeCommandImpl(addr, "192.0.2.1", "set table foo key bar\n")
 	if err == nil {
 		t.Fatal("Expected an error due to non-empty response with EOF, but got nil")
 	}
@@ -473,12 +446,10 @@ func TestUnblockIP_WithFallbackOnly(t *testing.T) {
 	}
 
 	var commandReceived string
-	mockExecutor := func(addr, ip, command string) error {
+	processor.CommandExecutor = func(addr, ip, command string) error {
 		commandReceived = strings.TrimSpace(command)
 		return nil
 	}
-	setupMockExecutor(t, mockExecutor)
-
 	ipInfo := NewIPInfo("192.0.2.20")
 
 	// --- Act ---
@@ -503,7 +474,7 @@ func TestExecuteHAProxyCommandImpl_ConnectError(t *testing.T) {
 	addr := "127.0.0.1:65535"
 
 	// The function will retry maxRetries times, returning the last connection error.
-	err := executeHAProxyCommand(addr, "192.0.2.1", "set table foo key bar\n")
+	err := executeCommandImpl(addr, "192.0.2.1", "set table foo key bar\n")
 	if err == nil {
 		t.Fatal("Expected a connection error after retries, got nil")
 	}
@@ -525,7 +496,7 @@ func TestExecuteHAProxyCommandImpl_WriteError(t *testing.T) {
 	defer closeFn()
 
 	// The function will retry maxRetries times.
-	err := executeHAProxyCommand(addr, "192.0.2.1", "set table foo key bar\n")
+	err := executeCommandImpl(addr, "192.0.2.1", "set table foo key bar\n")
 	if err == nil {
 		t.Fatal("Expected an error after retries, got nil")
 	}
@@ -562,13 +533,8 @@ func TestExecuteHAProxyCommandImpl_MalformedResponse(t *testing.T) {
 	})
 	defer closeFn()
 
-	// Use the real implementation for this test
-	originalExecutor := haproxyCommandExecutor
-	haproxyCommandExecutor = executeHAProxyCommandImpl
-	defer func() { haproxyCommandExecutor = originalExecutor }()
-
 	// Act: Execute a command (retries are internal to the function)
-	err := executeHAProxyCommand(addr, "192.0.2.1", "set table foo key bar\n")
+	err := executeCommandImpl(addr, "192.0.2.1", "set table foo key bar\n")
 
 	// Assert: It should detect the non-success/non-error response and report a failure
 	// that includes the malformed response string.
