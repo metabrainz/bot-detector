@@ -431,11 +431,17 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 			{Order: 1, FieldMatches: map[string]string{"Path": "^/step/one$"}},
 		},
 	}
-	chains := []BehavioralChain{chain}
+	logChain := BehavioralChain{
+		Name:     "WhitelistLogChain",
+		MatchKey: "ip",
+		Action:   "log", // This chain only logs
+		Steps:    []StepDef{{Order: 1, FieldMatches: map[string]string{"Path": "^/log/step$"}}},
+	}
+	chains := []BehavioralChain{chain, logChain} // Include both chains
 
 	// *** FIX: Compile regexes after chain definition ***
 	compileChainRegexes(t, chains)
-	// *************************************************
+	// **************************************************
 
 	// Log entry template for whitelisted IP
 	whitelistedEntry := &LogEntry{
@@ -459,14 +465,23 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 		},
 	}
 
+	// Capture log output
+	var capturedLogs []string
+	var logMutex sync.Mutex
+	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
+		logMutex.Lock()
+		capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
+		logMutex.Unlock()
+	}
+
 	// Create the processor
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            chains,
+		Chains:            chains, // Use the compiled chains
 		ChainMutex:        &sync.RWMutex{},
 		DryRun:            false,
-		LogFunc:           LogOutput,
+		LogFunc:           logCaptureFunc,
 		IsWhitelistedFunc: mockIsWhitelisted, // Inject mock whitelisting
 		Blocker:           mockBlocker,
 		Config:            &AppConfig{},
@@ -475,7 +490,7 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 	whitelistedKey := GetTrackingKey(&chain, whitelistedEntry)
 
 	// --- ACT: Process the whitelisted request ---
-	processor.CheckChains(whitelistedEntry)
+	processor.CheckChains(whitelistedEntry) // Process the 'block' action chain
 
 	// --- Assertions for Whitelisted IP ---
 	processor.ActivityMutex.RLock()
