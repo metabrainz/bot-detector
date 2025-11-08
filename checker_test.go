@@ -1073,6 +1073,9 @@ func TestDryRunMode(t *testing.T) {
 	}
 	// Set the IsWhitelistedFunc on the *actual* processor instance to avoid nil pointers.
 	processor.IsWhitelistedFunc = processor.IsIPWhitelisted
+	// Set the ProcessLogLine func on the processor instance to avoid nil pointers.
+	// This is the function that will be called by DryRunLogProcessor.
+	processor.ProcessLogLine = processor.processLogLineInternal
 
 	// 2. Read test_access.log and extract expected log outputs from comments
 	testLogPath := TestLogPath
@@ -1145,8 +1148,7 @@ func TestDryRunMode(t *testing.T) {
 		}
 
 		if !found {
-			// --- CONCISE FAILURE REPORTING ---
-			// 1. Find the relevant context block from test_access.log.
+			// Find the relevant context block from the test log file for context.
 			contextMarker := "# ======================"
 			logLines := strings.Split(string(testLogData), "\n")
 			contextStart := 0

@@ -79,7 +79,7 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 		case errors.Is(readErr, io.EOF):
 			// If we read a line and got EOF, process it and then exit the loop.
 			if len(line) > 0 {
-				p.ProcessLogLine(line, lineNumber)
+				p.ProcessLogLine(line, lineNumber) // Use the function field
 			}
 			goto endLoop // Use goto to break out of the outer for loop.
 		case errors.Is(readErr, ErrLineSkipped):
@@ -90,8 +90,14 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 			continue
 		}
 
+		// Skip comments and empty lines before processing.
+		if len(line) == 0 || line[0] == '#' {
+			p.LogFunc(LevelDebug, "DRYRUN_SKIP", "Line %d: Skipped (Comment/Empty).", lineNumber)
+			continue
+		}
+
 		// 3. Process the line
-		p.ProcessLogLine(line, lineNumber)
+		p.ProcessLogLine(line, lineNumber) // Use the function field
 	}
 
 endLoop:
@@ -231,7 +237,7 @@ func LiveLogTailer(p *Processor) {
 			}
 
 			// 3. Process the line
-			p.ProcessLogLine(line, lineNumber)
+			p.ProcessLogLine(line, lineNumber) // Use the function field
 		}
 	}
 }

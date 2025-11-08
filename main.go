@@ -66,6 +66,9 @@ func main() {
 	}
 
 	// Execute the core application logic
+	// Assign the real implementation for ProcessLogLine.
+	P.ProcessLogLine = P.processLogLineInternal
+
 	start(P)
 }
 

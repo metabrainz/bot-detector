@@ -39,6 +39,7 @@ type Processor struct {
 	DryRun            bool
 	LogFunc           func(level LogLevel, tag string, format string, args ...interface{})
 	IsWhitelistedFunc func(ipInfo IPInfo) bool
+	ProcessLogLine    func(line string, lineNumber int)
 	Blocker           Blocker
 	Config            *AppConfig
 }

@@ -62,8 +62,7 @@ func ParseLogLine(line string) (*LogEntry, error) {
 	}, nil
 }
 
-// ProcessLogLine is the main entry point for processing a single log line.
-func (p *Processor) ProcessLogLine(line string, lineNumber int) {
+func (p *Processor) processLogLineInternal(line string, lineNumber int) {
 	// 1. Parse the line
 	entry, err := ParseLogLine(line)
 
@@ -76,7 +75,8 @@ func (p *Processor) ProcessLogLine(line string, lineNumber int) {
 		p.LogFunc(logLevel, "PARSE_FAIL", "Line %d: Parsing failed: %v", lineNumber, err)
 		return
 	}
-	// Skip comments and empty lines
+
+	// Skip comments and empty lines. ParseLogLine returns (nil, nil) for these.
 	if entry == nil {
 		p.LogFunc(LevelDebug, "SKIP", "Line %d: Skipped (Comment/Empty).", lineNumber)
 		return
