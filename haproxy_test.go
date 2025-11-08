@@ -245,6 +245,14 @@ func TestBlockIP_InvalidVersion(t *testing.T) {
 		t.Fatal("HAProxy executor was called when IP version was invalid")
 		return nil
 	}
+
+	// Capture log output to verify the error is logged.
+	var capturedLog string
+	processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+		if tag == "SKIP_BLOCK" {
+			capturedLog = fmt.Sprintf(format, args...)
+		}
+	}
 	ipInfo := NewIPInfo("invalid-ip-string")
 	duration := 1 * time.Minute
 
@@ -252,6 +260,10 @@ func TestBlockIP_InvalidVersion(t *testing.T) {
 	err := processor.Blocker.Block(ipInfo, duration)
 	if err != nil {
 		t.Fatalf("BlockIP failed unexpectedly for invalid version: %v", err)
+	}
+	expectedLog := "cannot block IP invalid-ip-string: invalid IP version"
+	if !strings.Contains(capturedLog, expectedLog) {
+		t.Errorf("Expected log message to contain '%s', but got: '%s'", expectedLog, capturedLog)
 	}
 }
 
@@ -269,12 +281,24 @@ func TestUnblockIP_InvalidVersion(t *testing.T) {
 		t.Fatal("HAProxy executor was called when IP version was invalid")
 		return nil
 	}
+
+	// Capture log output to verify the error is logged.
+	var capturedLog string
+	processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+		if tag == "SKIP_UNBLOCK" {
+			capturedLog = fmt.Sprintf(format, args...)
+		}
+	}
 	ipInfo := NewIPInfo("invalid-ip-string")
 
 	// UnblockIP with an invalid IP version (0)
 	err := processor.Blocker.Unblock(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error: %v", err)
+	}
+	expectedLog := "Cannot unblock IP invalid-ip-string: unrecognized IP version"
+	if !strings.Contains(capturedLog, expectedLog) {
+		t.Errorf("Expected log message to contain '%s', but got: '%s'", expectedLog, capturedLog)
 	}
 }
 
