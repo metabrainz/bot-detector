@@ -80,6 +80,32 @@ func TestCleanUpIdleActivity(t *testing.T) {
 	}
 }
 
+// TestCleanUpIdleActivity_ImmediateShutdown verifies that the cleanup goroutine
+// exits immediately if a stop signal is received before the first tick.
+func TestCleanUpIdleActivity_ImmediateShutdown(t *testing.T) {
+	// 1. Setup
+	resetGlobalState()
+
+	processor := &Processor{
+		Config: &AppConfig{
+			// Use a long interval so the tick won't fire during the test.
+			CleanupInterval: 1 * time.Second,
+		},
+	}
+
+	stopChan := make(chan struct{})
+	doneChan := make(chan struct{})
+
+	// --- Act ---
+	go func() {
+		processor.CleanUpIdleActivity(stopChan)
+		close(doneChan) // Signal that the goroutine has exited.
+	}()
+
+	close(stopChan) // Immediately send the stop signal.
+	<-doneChan      // Wait for the goroutine to finish. This will hang if the stop signal is not handled correctly.
+}
+
 func TestCleanUpIdleActivity_MinTimeSinceLastHit(t *testing.T) {
 	// This test specifically validates the cleanup logic for IPs that are no longer
 	// relevant for `min_time_since_last_hit` rules.
