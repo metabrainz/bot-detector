@@ -271,6 +271,38 @@ func TestProcessLogLineInternal_ParseError(t *testing.T) {
 	}
 }
 
+// TestProcessLogLineInternal_SkipLine verifies that when processLogLineInternal
+// receives a comment or empty line, it logs the skip and does not proceed.
+func TestProcessLogLineInternal_SkipLine(t *testing.T) {
+	resetGlobalState()
+
+	var logMutex sync.Mutex
+	var capturedLog string
+	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
+		logMutex.Lock()
+		defer logMutex.Unlock()
+		if tag == "SKIP" {
+			capturedLog = fmt.Sprintf(format, args...)
+		}
+	}
+
+	p := &Processor{
+		LogFunc: logCaptureFunc,
+		// CheckChainsFunc should not be called if the line is skipped.
+		CheckChainsFunc: func(entry *LogEntry) {
+			t.Error("CheckChains was called, but should have been skipped for a comment line.")
+		},
+	}
+
+	// Act: Process a comment line.
+	commentLine := "# This is a comment and should be skipped"
+	processLogLineInternal(p, commentLine, 456)
+
+	if !strings.Contains(capturedLog, "Skipped (Comment/Empty)") {
+		t.Errorf("Expected a 'SKIP' log message, but it was not captured. Got: '%s'", capturedLog)
+	}
+}
+
 // TestGetMatchValue_UnknownField tests that trying to extract a value for a field not in LogEntry
 // returns an error, ensuring validation on match fields.
 func TestGetMatchValue_UnknownField(t *testing.T) {
