@@ -245,12 +245,14 @@ func TestProcessLogLineInternal_ParseError(t *testing.T) {
 	resetGlobalState()
 
 	var logMutex sync.Mutex
-	var capturedLog string
+	var capturedMessage string
+	var capturedLevel LogLevel
 	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
 		logMutex.Lock()
 		defer logMutex.Unlock()
 		if tag == "PARSE_FAIL" {
-			capturedLog = fmt.Sprintf(format, args...)
+			capturedMessage = fmt.Sprintf(format, args...)
+			capturedLevel = level
 		}
 	}
 
@@ -266,8 +268,12 @@ func TestProcessLogLineInternal_ParseError(t *testing.T) {
 	malformedLine := "this is not a valid log line"
 	processLogLineInternal(p, malformedLine, 123)
 
-	if !strings.Contains(capturedLog, "Parsing failed") {
-		t.Errorf("Expected a 'PARSE_FAIL' log message, but it was not captured. Got: '%s'", capturedLog)
+	if !strings.Contains(capturedMessage, "Parsing failed") {
+		t.Errorf("Expected a 'PARSE_FAIL' log message, but it was not captured. Got: '%s'", capturedMessage)
+	}
+
+	if capturedLevel != LevelDebug {
+		t.Errorf("Expected log level for parse failure during testing to be LevelDebug, but got %v", capturedLevel)
 	}
 }
 

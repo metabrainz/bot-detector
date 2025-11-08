@@ -1,10 +1,19 @@
 package main
 
-import "flag"
+import (
+	"os"
+	"strings"
+)
 
 // isTesting returns true if the code is running as part of a "go test" command.
-// It works by checking for the presence of the "test.v" flag, which is
-// automatically added by the Go testing framework.
+// It works by checking for the presence of the "-test.v" or "-test.run" arguments,
+// which are automatically added by the Go testing framework. This is more robust
+// than `flag.Lookup` when the global flag set is manipulated during tests.
 func isTesting() bool {
-	return flag.Lookup("test.v") != nil
+	for _, arg := range os.Args {
+		if strings.HasPrefix(arg, "-test.") {
+			return true
+		}
+	}
+	return false
 }

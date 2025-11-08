@@ -4,6 +4,7 @@ import (
 	"flag"
 	"io"
 	"log"
+	"testing"
 )
 
 // muteGlobalLogger redirects the output of the standard logger to discard,
@@ -19,5 +20,8 @@ func resetGlobalState() {
 
 	// Reset the global flag set to clear any flags parsed in other tests.
 	flag.CommandLine = flag.NewFlagSet("test", flag.ContinueOnError)
-	RegisterCLIFlags(flag.CommandLine) // Re-register flags on the new, clean set.
+	// Re-register application-specific flags.
+	RegisterCLIFlags(flag.CommandLine)
+	// Re-register the standard testing flags. This is crucial for `isTesting()` to work.
+	testing.Init()
 }
