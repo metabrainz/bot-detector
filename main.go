@@ -19,7 +19,6 @@ func main() {
 
 	// Validate that required flags are provided.
 	if LogFilePath == "" || YAMLFilePath == "" {
-		log.Println("[FATAL] Missing required flags.")
 		flag.Usage()
 		os.Exit(1)
 	}
