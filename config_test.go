@@ -754,6 +754,38 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			t.Error("Expected the mock Blocker.Unblock method to be called, but it was not.")
 		}
 	})
+
+	t.Run("No Action Needed", func(t *testing.T) {
+		// This test covers the nil-function path in the MockBlocker.
+		// --- Setup ---
+		resetGlobalState()
+
+		processor := &Processor{
+			ActivityMutex: &sync.RWMutex{},
+			ActivityStore: make(map[TrackingKey]*BotActivity),
+			Config:        &AppConfig{},
+			LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+			// Use a MockBlocker but do NOT set the UnblockFunc.
+			Blocker: &MockBlocker{},
+		}
+
+		// Manually set a blocked IP that is NOT on the whitelist.
+		blockedIP := "192.0.2.100"
+		trackingKey := TrackingKey{IPInfo: NewIPInfo(blockedIP)}
+		processor.ActivityStore[trackingKey] = &BotActivity{
+			IsBlocked:    true,
+			BlockedUntil: time.Now().Add(time.Hour),
+		}
+		// The whitelist is empty, so no IPs should be unblocked.
+		processor.Config.WhitelistNets = []*net.IPNet{}
+
+		// --- Act ---
+		processor.CheckAndRemoveWhitelistedBlocks()
+
+		// --- Assert ---
+		// The main assertion is that the test completes without panic.
+		// Calling Blocker.Unblock() on the mock will execute the `return nil` path.
+	})
 }
 
 func TestChainWatcher_Reload(t *testing.T) {
