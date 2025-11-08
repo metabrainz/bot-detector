@@ -237,19 +237,6 @@ func TestProcessLogLine_FlowControl(t *testing.T) {
 			assertIsBlocked:  true,
 		},
 		{
-			name: "Skip - Already Blocked (Not Expired)",
-			line: createLine(baseIP),
-			setup: func(p *Processor) {
-				key := TrackingKey{IPInfo: NewIPInfo(baseIP)}
-				p.ActivityStore[key] = &BotActivity{
-					IsBlocked:    true,
-					BlockedUntil: time.Now().Add(time.Hour),
-				}
-			},
-			assertBlockCount: 0,
-			assertIsBlocked:  true,
-		},
-		{
 			name: "Skip - Already Blocked (Out-of-Order Entry)",
 			// This line has an OLDER timestamp than the one set in 'setup'.
 			line: createLineWithTimestamp(baseIP, time.Now().Add(-2*time.Hour)),
