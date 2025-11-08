@@ -459,3 +459,71 @@ chains:
 		t.Errorf("Expected log level to be updated to 'debug', but it was not.")
 	}
 }
+
+func TestChainWatcher_ReloadFailure(t *testing.T) {
+	// --- Setup ---
+	// 1. Create a temporary YAML file with initial valid content.
+	initialYAMLContent := `
+version: "1.0"
+chains:
+  - name: "InitialChain"
+    match_key: "ip"
+    action: "log"
+    steps: [{field_matches: {Path: "/initial"}}]
+`
+	tempDir := t.TempDir()
+	tempFile := filepath.Join(tempDir, "chains.yaml")
+	if err := os.WriteFile(tempFile, []byte(initialYAMLContent), 0644); err != nil {
+		t.Fatalf("Failed to write initial temp yaml file: %v", err)
+	}
+
+	originalPath := YAMLFilePath
+	YAMLFilePath = tempFile
+	t.Cleanup(func() { YAMLFilePath = originalPath })
+
+	// 2. Load the initial configuration.
+	initialLoadedCfg, err := LoadChainsFromYAML()
+	if err != nil {
+		t.Fatalf("Initial LoadChainsFromYAML() failed: %v", err)
+	}
+
+	// 3. Create the processor with the initial config and a log capturer.
+	var capturedLogs []string
+	var logMutex sync.Mutex
+	processor := &Processor{
+		Chains:     initialLoadedCfg.Chains,
+		ChainMutex: &sync.RWMutex{},
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
+			logMutex.Lock()
+			capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
+			logMutex.Unlock()
+		},
+		Config: &AppConfig{testOverridePollingInterval: 10 * time.Millisecond},
+	}
+	initialFileInfo, _ := os.Stat(tempFile)
+	processor.Config.LastModTime = initialFileInfo.ModTime()
+
+	// 4. Start the ChainWatcher.
+	stopWatcher := make(chan struct{})
+	go processor.ChainWatcher(stopWatcher)
+	t.Cleanup(func() { close(stopWatcher) })
+
+	// --- Act ---
+	// 5. Modify the YAML file with INVALID content.
+	time.Sleep(100 * time.Millisecond)
+	invalidYAMLContent := `version: "1.0"\nchains: [ { name: "Invalid", steps: [ { field_matches: { "Path": "*invalid-regex" } } ] } ]`
+	os.WriteFile(tempFile, []byte(invalidYAMLContent), 0644)
+
+	// 6. Wait for the watcher to attempt the reload.
+	time.Sleep(processor.Config.testOverridePollingInterval * 2)
+
+	// --- Assert ---
+	// 7. Check that an error was logged and the original config is still active.
+	logOutput := strings.Join(capturedLogs, "\n")
+	if !strings.Contains(logOutput, "LOAD_ERROR: Failed to reload chains") {
+		t.Errorf("Expected a 'LOAD_ERROR' log message, but none was found. Logs:\n%s", logOutput)
+	}
+	if len(processor.Chains) != 1 || processor.Chains[0].Name != "InitialChain" {
+		t.Errorf("Processor chains were modified despite reload failure. Expected 'InitialChain', got: %+v", processor.Chains)
+	}
+}
