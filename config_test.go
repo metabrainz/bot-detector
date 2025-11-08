@@ -721,7 +721,8 @@ chains:
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
 	// 4. Start the ChainWatcher with the test signal channel.
-	processor.testReloadSignal = make(chan struct{}, 1)
+	processor.testForceCheckSignal = make(chan struct{}) // Not used in this test
+	processor.testReloadDoneSignal = make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) }) // Ensure watcher stops when test finishes.
 	go processor.ChainWatcher(stopWatcher)
@@ -745,7 +746,7 @@ chains:
 
 	// 6. Wait for the reload signal from the watcher.
 	select {
-	case <-processor.testReloadSignal:
+	case <-processor.testReloadDoneSignal:
 		// Reload completed successfully.
 	case <-time.After(1 * time.Second):
 		t.Fatal("Timed out waiting for configuration reload.")
@@ -821,7 +822,8 @@ chains:
 	processor.Config.LastModTime = initialFileInfo.ModTime() // Set initial mod time
 
 	// 5. Start the ChainWatcher with the test signal channel.
-	processor.testReloadSignal = make(chan struct{}, 1)
+	processor.testForceCheckSignal = make(chan struct{}) // Not used in this test
+	processor.testReloadDoneSignal = make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	go processor.ChainWatcher(stopWatcher)
 	t.Cleanup(func() { close(stopWatcher) })
@@ -835,7 +837,7 @@ chains:
 
 	// 7. Wait for the reload signal from the watcher.
 	select {
-	case <-processor.testReloadSignal:
+	case <-processor.testReloadDoneSignal:
 		// Reload completed successfully.
 	case <-time.After(1 * time.Second):
 		t.Fatal("Timed out waiting for configuration reload.")
@@ -917,27 +919,48 @@ chains:
 	}
 
 	// 5. Start the ChainWatcher.
-	processor.testReloadSignal = make(chan struct{}, 1) // Re-purpose this for signaling the watcher
+	processor.testForceCheckSignal = make(chan struct{}, 1)
+	processor.testReloadDoneSignal = make(chan struct{}, 1) // We wait on this one
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
 	go processor.ChainWatcher(stopWatcher)
 
 	// --- Act ---
 	// 6. Modify the YAML file with INVALID content.
-	invalidYAMLContent := `version: "1.0"\nchains: [ { name: "Invalid", steps: [ { field_matches: { "Path": "*invalid-regex" } } ] } ]`
+	time.Sleep(100 * time.Millisecond) // Ensure file modification time is different.
+	// The YAML must be syntactically valid, but logically incorrect (bad regex).
+	// Using a multi-line string is the correct way to format this.
+	invalidYAMLContent := `
+version: "1.0"
+chains:
+  - name: "InvalidRegexChain"
+    match_key: "ip"
+    action: "log"
+    steps: [{field_matches: {Path: "regex:("}}]
+`
 	if err := os.WriteFile(tempFile, []byte(invalidYAMLContent), 0644); err != nil {
 		t.Fatalf("Failed to write invalid YAML: %v", err)
 	}
 
-	// 7. Force the watcher to check immediately.
-	processor.testReloadSignal <- struct{}{}
+	// 7. Force the watcher to perform a check immediately, bypassing the timer.
+	processor.testForceCheckSignal <- struct{}{}
 
-	// 8. Wait for the watcher to log the error.
+	// 8. Wait for the watcher to log the error. This is now deterministic because
+	// we triggered the check manually.
 	select {
 	case <-logReceived:
-		// Error was logged as expected.
+		// The LOAD_ERROR was logged as expected.
 	case <-time.After(1 * time.Second):
 		t.Fatal("Timed out waiting for LOAD_ERROR log message.")
+	}
+
+	// 9. Check that the error was logged.
+	// The fact that we received a signal on logReceived is sufficient proof.
+	// We can add a redundant check on the captured logs for extra safety.
+	logMutex.Lock()
+	defer logMutex.Unlock()
+	if len(capturedLogs) == 0 || !strings.Contains(capturedLogs[len(capturedLogs)-1], "LOAD_ERROR") {
+		t.Errorf("Expected a 'LOAD_ERROR' log message, but none was found. Logs: %v", capturedLogs)
 	}
 }
 

@@ -22,18 +22,19 @@ type Blocker interface {
 // Processor holds all necessary dependencies and state for log processing,
 // making it easy to mock/stub external calls and manage state in tests.
 type Processor struct {
-	ActivityStore     map[TrackingKey]*BotActivity
-	ActivityMutex     *sync.RWMutex
-	Chains            []BehavioralChain
-	ChainMutex        *sync.RWMutex
-	DryRun            bool
-	LogFunc           func(level LogLevel, tag string, format string, args ...interface{})
-	IsWhitelistedFunc func(ipInfo IPInfo) bool
-	ProcessLogLine    func(line string, lineNumber int)
-	Blocker           Blocker
-	CommandExecutor   func(p *Processor, addr, ip, command string) error // The function that executes the backend command
-	Config            *AppConfig
-	testReloadSignal  chan struct{} // Unexported channel for test synchronization
+	ActivityStore        map[TrackingKey]*BotActivity
+	ActivityMutex        *sync.RWMutex
+	Chains               []BehavioralChain
+	ChainMutex           *sync.RWMutex
+	DryRun               bool
+	LogFunc              func(level LogLevel, tag string, format string, args ...interface{})
+	IsWhitelistedFunc    func(ipInfo IPInfo) bool
+	ProcessLogLine       func(line string, lineNumber int)
+	Blocker              Blocker
+	CommandExecutor      func(p *Processor, addr, ip, command string) error // The function that executes the backend command
+	Config               *AppConfig
+	testForceCheckSignal chan struct{} // Test-only: Signals the watcher to run a check now.
+	testReloadDoneSignal chan struct{} // Test-only: The watcher signals when a reload cycle is complete.
 }
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.

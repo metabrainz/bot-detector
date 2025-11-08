@@ -548,26 +548,31 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}) {
 		return
 	}
 
-	// Enforce a minimum polling interval to prevent a tight loop on a zero-value duration.
-	var pollingInterval time.Duration
+	// Determine the polling interval. Use the test override if available.
+	pollingInterval := p.Config.PollingInterval
 	if p.Config.testOverridePollingInterval > 0 {
-		pollingInterval = p.Config.testOverridePollingInterval // Use test override if set
-	} else if p.Config.PollingInterval < 1*time.Second {
-		// In production, enforce a minimum safe interval.
-		pollingInterval = 5 * time.Second // Default to a safe interval.
+		pollingInterval = p.Config.testOverridePollingInterval
+	}
+
+	// Enforce a minimum safe interval in production.
+	if p.Config.testOverridePollingInterval == 0 && pollingInterval < DefaultMinPollingInterval {
+		pollingInterval = DefaultMinPollingInterval
 	}
 
 	p.LogFunc(LevelDebug, "WATCH", "Starting ChainWatcher, polling every %v", pollingInterval)
+	timer := time.NewTicker(pollingInterval)
+	defer timer.Stop()
+
 	for {
 		select {
 		case <-stop:
 			p.LogFunc(LevelInfo, "WATCH", "ChainWatcher received stop signal. Shutting down.")
 			return
-		case <-p.testReloadSignal:
+		case <-p.testForceCheckSignal:
 			// This case is for testing only, to trigger an immediate check.
 			p.LogFunc(LevelDebug, "WATCH", "Received test signal for immediate reload check.")
-		case <-time.After(pollingInterval):
-			// Continue with polling
+		case <-timer.C:
+			// Timer fired, continue with polling.
 		}
 
 		isChanged := false
@@ -605,41 +610,42 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}) {
 
 		if isChanged {
 			p.LogFunc(LevelInfo, "WATCH", "Detected change in '%s'. Attempting reload...", changedFile)
+			func() { // Use an anonymous function to scope the defer correctly.
+				// Defer the test signal to ensure it's sent whether the reload succeeds or fails.
+				if p.testReloadDoneSignal != nil {
+					defer func() { p.testReloadDoneSignal <- struct{}{} }()
+				}
 
-			// LoadChainsFromYAML now returns parsed data, not modifying global state.
-			loadedCfg, err := LoadChainsFromYAML()
-			if err != nil {
-				p.LogFunc(LevelError, "LOAD_ERROR", "Failed to reload chains: %v", err)
-				continue
-			}
+				// LoadChainsFromYAML now returns parsed data, not modifying global state.
+				loadedCfg, err := LoadChainsFromYAML()
+				if err != nil {
+					p.LogFunc(LevelError, "LOAD_ERROR", "Failed to reload chains: %v", err)
+					return // The deferred signal will still fire.
+				}
 
-			// Update the processor's state with the new config.
-			p.ChainMutex.Lock()
-			p.Chains = loadedCfg.Chains
-			p.Config.WhitelistNets = loadedCfg.WhitelistNets
-			p.Config.HAProxyAddresses = loadedCfg.HAProxyAddresses
-			p.Config.HAProxyMaxRetries = loadedCfg.HAProxyMaxRetries
-			p.Config.HAProxyRetryDelay = loadedCfg.HAProxyRetryDelay
-			p.Config.HAProxyDialTimeout = loadedCfg.HAProxyDialTimeout
-			p.Config.DurationToTableName = loadedCfg.DurationToTableName
-			p.Config.BlockTableNameFallback = loadedCfg.BlockTableNameFallback
-			p.Config.PollingInterval = loadedCfg.PollingInterval
-			p.Config.CleanupInterval = loadedCfg.CleanupInterval
-			p.Config.IdleTimeout = loadedCfg.IdleTimeout
-			p.Config.OutOfOrderTolerance = loadedCfg.OutOfOrderTolerance
-			SetLogLevel(loadedCfg.LogLevel) // Update log level dynamically
-			p.Config.MaxTimeSinceLastHit = loadedCfg.MaxTimeSinceLastHit
-			p.Config.FileDependencies = loadedCfg.FileDependencies
-			p.Config.LastModTime = time.Now() // Use time.Now() to avoid race conditions with fast edits
-			p.ChainMutex.Unlock()
+				// Update the processor's state with the new config.
+				p.ChainMutex.Lock()
+				p.Chains = loadedCfg.Chains
+				p.Config.WhitelistNets = loadedCfg.WhitelistNets
+				p.Config.HAProxyAddresses = loadedCfg.HAProxyAddresses
+				p.Config.HAProxyMaxRetries = loadedCfg.HAProxyMaxRetries
+				p.Config.HAProxyRetryDelay = loadedCfg.HAProxyRetryDelay
+				p.Config.HAProxyDialTimeout = loadedCfg.HAProxyDialTimeout
+				p.Config.DurationToTableName = loadedCfg.DurationToTableName
+				p.Config.BlockTableNameFallback = loadedCfg.BlockTableNameFallback
+				p.Config.PollingInterval = loadedCfg.PollingInterval
+				p.Config.CleanupInterval = loadedCfg.CleanupInterval
+				p.Config.IdleTimeout = loadedCfg.IdleTimeout
+				p.Config.OutOfOrderTolerance = loadedCfg.OutOfOrderTolerance
+				SetLogLevel(loadedCfg.LogLevel) // Update log level dynamically
+				p.Config.MaxTimeSinceLastHit = loadedCfg.MaxTimeSinceLastHit
+				p.Config.FileDependencies = loadedCfg.FileDependencies
+				p.Config.LastModTime = time.Now() // Use time.Now() to avoid race conditions with fast edits
+				p.ChainMutex.Unlock()
 
-			// Cleanup any blocked IPs (This function still uses global state)
-			p.CheckAndRemoveWhitelistedBlocks()
-
-			// Signal for test synchronization, if the channel is set.
-			if p.testReloadSignal != nil {
-				p.testReloadSignal <- struct{}{}
-			}
+				// Cleanup any blocked IPs (This function still uses global state)
+				p.CheckAndRemoveWhitelistedBlocks()
+			}()
 		}
 	}
 }
