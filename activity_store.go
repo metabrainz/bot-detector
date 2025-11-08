@@ -37,8 +37,24 @@ func (p *Processor) CleanUpIdleActivity(stop <-chan struct{}) {
 		for key, activityPtr := range p.ActivityStore {
 			// Use a new variable to avoid loop variable capture issues.
 			activity := activityPtr
-			// Only consider cleanup for IPs that are not currently blocked and not in the middle of a chain.
-			if !activity.IsBlocked && len(activity.ChainProgress) == 0 {
+
+			// Skip any IP that is currently blocked.
+			if activity.IsBlocked {
+				continue
+			}
+
+			// Check if any chain progress is still active (not timed out).
+			hasActiveChain := false
+			for _, state := range activity.ChainProgress {
+				// A chain is considered active if its last match is recent enough.
+				// We can approximate this by checking against the general idle timeout.
+				if now.Sub(state.LastMatchTime) < p.Config.IdleTimeout {
+					hasActiveChain = true
+					break
+				}
+			}
+
+			if !hasActiveChain {
 				timeSinceLastHit := now.Sub(activity.LastRequestTime)
 				// Condition 1: General idle timeout.
 				isIdle := timeSinceLastHit > p.Config.IdleTimeout
@@ -51,6 +67,7 @@ func (p *Processor) CleanUpIdleActivity(stop <-chan struct{}) {
 				}
 			}
 		}
+
 		p.ActivityMutex.Unlock()
 		if cleanedCount > 0 {
 			p.LogFunc(LevelDebug, "CLEANUP", "Cleaned up %d idle/useless IP states.", cleanedCount)
