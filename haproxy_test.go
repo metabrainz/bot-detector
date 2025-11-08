@@ -153,6 +153,48 @@ func TestBlockIP_FallbackTable(t *testing.T) {
 	}
 }
 
+// TestBlockIP_NoTableFound verifies that if no table matches the duration and no fallback is set,
+// the block is skipped and a warning is logged.
+func TestBlockIP_NoTableFound(t *testing.T) {
+	resetGlobalState()
+
+	// Capture log output
+	var capturedLog string
+	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
+		if tag == "SKIP_BLOCK" {
+			capturedLog = fmt.Sprintf(format, args...)
+		}
+	}
+
+	processor := &Processor{
+		LogFunc: logCaptureFunc,
+		Config: &AppConfig{
+			HAProxyAddresses:    []string{"127.0.0.1:9999"},
+			DurationToTableName: make(map[time.Duration]string), // No tables configured
+			// No BlockTableNameFallback configured
+		},
+		ChainMutex: &sync.RWMutex{},
+	}
+
+	// The mock executor should fail the test if it's ever called.
+	mockExecutor := func(addr, ip, command string) error {
+		t.Fatal("HAProxy executor was called when no table was found.")
+		return nil
+	}
+	setupMockExecutor(t, mockExecutor)
+
+	ipInfo := NewIPInfo("192.0.2.10")
+
+	// --- Act ---
+	processor.BlockIP(ipInfo, 5*time.Minute)
+
+	// --- Assert ---
+	expectedLog := "No HAProxy table found"
+	if !strings.Contains(capturedLog, expectedLog) {
+		t.Errorf("Expected a 'SKIP_BLOCK' log containing '%s', but got: '%s'", expectedLog, capturedLog)
+	}
+}
+
 // TestUnblockIP_ErrorTolerance_Mocked ensures that an execution error on one HAProxy instance
 // does not prevent the unblock attempt on other configured instances/tables.
 func TestUnblockIP_ErrorTolerance_Mocked(t *testing.T) {
