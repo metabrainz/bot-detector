@@ -1,10 +1,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +55,145 @@ func (p *Processor) CheckAndRemoveWhitelistedBlocks() {
 	}
 }
 
+// --- New Matcher Compilation Logic ---
+
+// fieldMatcher is a function type that represents a compiled matching rule.
+// It takes a LogEntry and returns true if the entry satisfies the rule.
+type fieldMatcher func(entry *LogEntry) bool
+
+// compileMatchers parses the raw `field_matches` interface from YAML into a slice of efficient matcher functions.
+func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}) ([]fieldMatcher, error) {
+	var matchers []fieldMatcher
+	for field, value := range fieldMatches {
+		matcher, err := compileSingleMatcher(chainName, stepIndex, field, value)
+		if err != nil {
+			return nil, err // Propagate error up
+		}
+		matchers = append(matchers, matcher)
+	}
+	return matchers, nil
+}
+
+// compileSingleMatcher is a large switch that handles the different value "shapes" (string, int, list, map).
+func compileSingleMatcher(chainName string, stepIndex int, field string, value interface{}) (fieldMatcher, error) {
+	switch v := value.(type) {
+	case string:
+		return compileStringMatcher(chainName, stepIndex, field, v)
+	case int:
+		return compileIntMatcher(field, v), nil
+	case []interface{}:
+		return compileListMatcher(chainName, stepIndex, field, v)
+	case map[string]interface{}:
+		return compileObjectMatcher(chainName, stepIndex, field, v)
+	default:
+		return nil, fmt.Errorf("chain '%s', step %d, field '%s': unsupported value type '%T'", chainName, stepIndex+1, field, v)
+	}
+}
+
+// compileStringMatcher handles string values, which can be exact, regex, glob, or status code patterns.
+func compileStringMatcher(chainName string, stepIndex int, field, value string) (fieldMatcher, error) {
+	if strings.HasPrefix(value, "regex:") {
+		pattern := strings.TrimPrefix(value, "regex:")
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("chain '%s', step %d, field '%s': invalid regex '%s': %w", chainName, stepIndex+1, field, pattern, err)
+		}
+		return func(entry *LogEntry) bool {
+			fieldVal, _ := GetMatchValue(field, entry)
+			return re.MatchString(fieldVal)
+		}, nil
+	}
+
+	// Special handling for status code patterns like "4XX"
+	if field == "StatusCode" && strings.HasSuffix(strings.ToUpper(value), "XX") {
+		prefix := value[0:1] // "4" from "4XX"
+		return func(entry *LogEntry) bool {
+			return strings.HasPrefix(strconv.Itoa(entry.StatusCode), prefix)
+		}, nil
+	}
+
+	// Default for string is exact match
+	return func(entry *LogEntry) bool {
+		fieldVal, _ := GetMatchValue(field, entry)
+		return fieldVal == value
+	}, nil
+}
+
+// compileIntMatcher handles exact integer matches.
+func compileIntMatcher(field string, value int) fieldMatcher {
+	return func(entry *LogEntry) bool {
+		// This is optimized for StatusCode, the only integer field.
+		if field == "StatusCode" {
+			return entry.StatusCode == value
+		}
+		// Fallback for other potential future integer fields
+		fieldValStr, _ := GetMatchValue(field, entry)
+		fieldValInt, _ := strconv.Atoi(fieldValStr)
+		return fieldValInt == value
+	}
+}
+
+// compileListMatcher handles lists, creating an OR condition over its items.
+func compileListMatcher(chainName string, stepIndex int, field string, values []interface{}) (fieldMatcher, error) {
+	var subMatchers []fieldMatcher
+	for _, item := range values {
+		matcher, err := compileSingleMatcher(chainName, stepIndex, field, item)
+		if err != nil {
+			return nil, err // Error in a sub-matcher
+		}
+		subMatchers = append(subMatchers, matcher)
+	}
+
+	return func(entry *LogEntry) bool {
+		for _, matcher := range subMatchers {
+			if matcher(entry) {
+				return true // OR logic: one match is enough
+			}
+		}
+		return false
+	}, nil
+}
+
+// compileObjectMatcher handles map values, creating an AND condition for numeric ranges.
+func compileObjectMatcher(chainName string, stepIndex int, field string, obj map[string]interface{}) (fieldMatcher, error) {
+	var subMatchers []fieldMatcher
+
+	for key, val := range obj {
+		num, ok := val.(int)
+		if !ok {
+			return nil, fmt.Errorf("chain '%s', step %d, field '%s': value for '%s' must be an integer, got %T", chainName, stepIndex+1, field, key, val)
+		}
+
+		var matcher fieldMatcher
+		switch key {
+		case "gt":
+			matcher = func(entry *LogEntry) bool { return entry.StatusCode > num }
+		case "gte":
+			matcher = func(entry *LogEntry) bool { return entry.StatusCode >= num }
+		case "lt":
+			matcher = func(entry *LogEntry) bool { return entry.StatusCode < num }
+		case "lte":
+			matcher = func(entry *LogEntry) bool { return entry.StatusCode <= num }
+		default:
+			return nil, fmt.Errorf("chain '%s', step %d, field '%s': unknown operator '%s' in object matcher", chainName, stepIndex+1, field, key)
+		}
+		subMatchers = append(subMatchers, matcher)
+	}
+
+	if len(subMatchers) == 0 {
+		return nil, errors.New("object matcher must not be empty")
+	}
+
+	return func(entry *LogEntry) bool {
+		for _, matcher := range subMatchers {
+			if !matcher(entry) {
+				return false // AND logic: one failure means total failure
+			}
+		}
+		return true
+	}, nil
+}
+
 // LoadChainsFromYAML reads, parses, and pre-compiles regexes for the chains.
 func LoadChainsFromYAML() (*LoadedConfig, error) {
 	data, err := os.ReadFile(YAMLFilePath)
@@ -76,18 +217,18 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 	}
 	// ---------------------------------------------------------------------------------
 
-	// Define the expected version for this application code.
+	// Define the supported versions for this application code.
 	if config.Version == "" {
 		// Enforce that the 'version' field must be present.
 		return nil, fmt.Errorf("configuration file is missing the required 'version' field")
 	}
 
-	// 1. Check if the version is supported.
+	// Check if the version is supported.
 	isSupported := false
 	for _, v := range SupportedConfigVersions {
 		if config.Version == v {
 			isSupported = true
-			break
+			break // Found a supported version
 		}
 	}
 
@@ -95,7 +236,7 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 		// Report an error showing the unsupported version and the list of supported ones.
 		supportedList := strings.Join(SupportedConfigVersions, ", ")
 		return nil, fmt.Errorf(
-			"configuration version mismatch: got '%s'. This version of the application supports: %s. Please update your YAML config file.",
+			"configuration version mismatch: got '%s'. This application supports: %s. Please update your YAML config file.",
 			config.Version,
 			supportedList,
 		)
@@ -241,9 +382,9 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 		// 3. Process Steps
 		for i, yamlStep := range yamlChain.Steps {
 			runtimeStep := StepDef{
-				Order:           i + 1,
-				FieldMatches:    yamlStep.FieldMatches,
-				CompiledRegexes: make(map[string]*regexp.Regexp),
+				Order: i + 1,
+				// FieldMatches is no longer stored directly in the runtime step.
+				// It's compiled into Matchers.
 			}
 
 			// Parse delays
@@ -273,12 +414,10 @@ func LoadChainsFromYAML() (*LoadedConfig, error) {
 				yamlStep.MaxDelay, runtimeStep.MaxDelayDuration,
 				yamlStep.MinDelay, runtimeStep.MinDelayDuration)
 
-			for field, regexStr := range yamlStep.FieldMatches {
-				re, err := regexp.Compile(regexStr)
-				if err != nil {
-					return nil, fmt.Errorf("chain '%s', step %d, field '%s': failed to compile regex '%s': %w", yamlChain.Name, runtimeStep.Order, field, regexStr, err)
-				}
-				runtimeStep.CompiledRegexes[field] = re
+			// Compile the new flexible matchers
+			runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches)
+			if err != nil {
+				return nil, err // Error from compilation
 			}
 			runtimeChain.Steps = append(runtimeChain.Steps, runtimeStep)
 		}

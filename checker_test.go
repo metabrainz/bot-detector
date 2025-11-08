@@ -5,38 +5,11 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
-
-// MockBlocker and its methods are defined in log_parse_test.go for the 'main' package,
-// so they are not redefined here to avoid the redeclaration and duplicate method errors.
-
-// --- HELPER FUNCTION: Compile Regexes for Test Chains ---
-
-// compileChainRegexes takes a slice of chains and compiles all string patterns
-// in StepDef.FieldMatches into StepDef.CompiledRegexes, failing the test on error.
-func compileChainRegexes(t *testing.T, chains []BehavioralChain) {
-	for i := range chains {
-		chain := &chains[i]
-		for j := range chain.Steps {
-			step := &chain.Steps[j]
-			step.CompiledRegexes = make(map[string]*regexp.Regexp)
-			for field, regexStr := range step.FieldMatches {
-				// The YAML config expects a full regular expression, so we compile it as-is.
-				re, err := regexp.Compile(regexStr)
-				if err != nil {
-					t.Fatalf("Failed to compile regex for chain '%s', step %d, field '%s' ('%s'): %v",
-						chain.Name, step.Order, field, regexStr, err)
-				}
-				step.CompiledRegexes[field] = re
-			}
-		}
-	}
-}
 
 // --- Test Case for CheckChains --
 
@@ -62,28 +35,26 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 		MatchKey:      "ip_ua",
 		Action:        "block",
 		BlockDuration: blockDuration,
-		Steps: []StepDef{
-			{
-				Order: 1,
-				FieldMatches: map[string]string{
-					"Path": "^/step/one$", // Full regex for exact path match
-				},
-				MaxDelayDuration: 5 * time.Second,
-			},
-			{
-				Order: 2,
-				FieldMatches: map[string]string{
-					"Path": "^/step/two$", // Full regex for exact path match
-				},
-				MaxDelayDuration: 5 * time.Second,
-			},
+	}
+
+	// Manually compile matchers for this test case
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one")
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two")
+
+	chain.Steps = []StepDef{
+		{
+			Order:            1,
+			Matchers:         []fieldMatcher{matcher1},
+			MaxDelayDuration: 5 * time.Second,
+		},
+		{
+			Order:            2,
+			Matchers:         []fieldMatcher{matcher2},
+			MaxDelayDuration: 5 * time.Second,
 		},
 	}
-	chains := []BehavioralChain{chain}
 
-	// *** FIX: Compile regexes after chain definition ***
-	compileChainRegexes(t, chains)
-	// *************************************************
+	chains := []BehavioralChain{chain}
 
 	// Setup a mock blocker to intercept the block call
 	var blockCalled bool
@@ -201,16 +172,17 @@ func TestCheckChains_DryRun(t *testing.T) {
 		MatchKey:      "ip", // Use ip-only for simplicity
 		Action:        "block",
 		BlockDuration: blockDuration,
-		Steps: []StepDef{
-			{Order: 1, FieldMatches: map[string]string{"Path": "^/step/one$"}, MaxDelayDuration: 5 * time.Second},
-			{Order: 2, FieldMatches: map[string]string{"Path": "^/step/two$"}, MaxDelayDuration: 5 * time.Second},
-		},
 	}
-	chains := []BehavioralChain{chain}
 
-	// *** FIX: Compile regexes after chain definition ***
-	compileChainRegexes(t, chains)
-	// *************************************************
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one")
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two")
+
+	chain.Steps = []StepDef{
+		{Order: 1, Matchers: []fieldMatcher{matcher1}, MaxDelayDuration: 5 * time.Second},
+		{Order: 2, Matchers: []fieldMatcher{matcher2}, MaxDelayDuration: 5 * time.Second},
+	}
+
+	chains := []BehavioralChain{chain}
 
 	// Setup a mock blocker to intercept the block call
 	var blockCalled bool
@@ -271,9 +243,11 @@ func TestCheckChains_DryRun_UnknownAction(t *testing.T) {
 		Name:     "UnknownActionChain",
 		MatchKey: "ip",
 		Action:   "throttle", // An unrecognized action
-		Steps:    []StepDef{{Order: 1, FieldMatches: map[string]string{"Path": "/test"}}},
 	}
-	compileChainRegexes(t, []BehavioralChain{chain})
+	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/test")
+	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
+
+	chains := []BehavioralChain{chain}
 
 	// Capture log output
 	var capturedLog string
@@ -289,7 +263,7 @@ func TestCheckChains_DryRun_UnknownAction(t *testing.T) {
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            []BehavioralChain{chain},
+		Chains:            chains,
 		ChainMutex:        &sync.RWMutex{},
 		DryRun:            true, // Must be in dry-run mode
 		LogFunc:           logCaptureFunc,
@@ -332,9 +306,11 @@ func TestCheckChains_LiveMode_UnknownAction(t *testing.T) {
 		Name:     "LiveUnknownActionChain",
 		MatchKey: "ip",
 		Action:   "throttle", // An unrecognized action
-		Steps:    []StepDef{{Order: 1, FieldMatches: map[string]string{"Path": "/test"}}},
 	}
-	compileChainRegexes(t, []BehavioralChain{chain})
+	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/test")
+	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
+
+	chains := []BehavioralChain{chain}
 
 	// Setup a mock blocker to ensure it's not called
 	var blockCalled bool
@@ -348,7 +324,7 @@ func TestCheckChains_LiveMode_UnknownAction(t *testing.T) {
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            []BehavioralChain{chain},
+		Chains:            chains,
 		ChainMutex:        &sync.RWMutex{},
 		DryRun:            false, // Must be in live mode
 		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
@@ -448,16 +424,17 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 		Name:     "DelayTestChain",
 		MatchKey: "ip",
 		Action:   "log", // Don't block, just log for simplicity
-		Steps: []StepDef{
-			{Order: 1, FieldMatches: map[string]string{"Path": "^/step/one$"}, MaxDelayDuration: 5 * time.Second},
-			{Order: 2, FieldMatches: map[string]string{"Path": "^/step/two$"}, MaxDelayDuration: 5 * time.Second},
-		},
 	}
-	chains := []BehavioralChain{chain}
 
-	// *** FIX: Compile regexes after chain definition ***
-	compileChainRegexes(t, chains)
-	// *************************************************
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one")
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two")
+
+	chain.Steps = []StepDef{
+		{Order: 1, Matchers: []fieldMatcher{matcher1}, MaxDelayDuration: 5 * time.Second},
+		{Order: 2, Matchers: []fieldMatcher{matcher2}, MaxDelayDuration: 5 * time.Second},
+	}
+
+	chains := []BehavioralChain{chain}
 
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
@@ -524,16 +501,17 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 		Name:     "MinDelayTestChain",
 		MatchKey: "ip",
 		Action:   "log",
-		Steps: []StepDef{
-			{Order: 1, FieldMatches: map[string]string{"Path": "^/step/one$"}, MaxDelayDuration: 5 * time.Second},
-			{Order: 2, FieldMatches: map[string]string{"Path": "^/step/two$"}, MinDelayDuration: 500 * time.Millisecond},
-		},
 	}
-	chains := []BehavioralChain{chain}
 
-	// *** FIX: Compile regexes after chain definition ***
-	compileChainRegexes(t, chains)
-	// *************************************************
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one")
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two")
+
+	chain.Steps = []StepDef{
+		{Order: 1, Matchers: []fieldMatcher{matcher1}, MaxDelayDuration: 5 * time.Second},
+		{Order: 2, Matchers: []fieldMatcher{matcher2}, MinDelayDuration: 500 * time.Millisecond},
+	}
+
+	chains := []BehavioralChain{chain}
 
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
@@ -594,21 +572,20 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 		MatchKey:      "ip",
 		Action:        "block",
 		BlockDuration: blockDuration,
-		Steps: []StepDef{
-			{Order: 1, FieldMatches: map[string]string{"Path": "^/step/one$"}},
-		},
 	}
 	logChain := BehavioralChain{
 		Name:     "WhitelistLogChain",
 		MatchKey: "ip",
 		Action:   "log", // This chain only logs
-		Steps:    []StepDef{{Order: 1, FieldMatches: map[string]string{"Path": "^/log/step$"}}},
 	}
-	chains := []BehavioralChain{chain, logChain} // Include both chains
 
-	// *** FIX: Compile regexes after chain definition ***
-	compileChainRegexes(t, chains)
-	// **************************************************
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one")
+	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher1}}}
+
+	matcher2, _ := compileStringMatcher(logChain.Name, 0, "Path", "/log/step")
+	logChain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher2}}}
+
+	chains := []BehavioralChain{chain, logChain} // Include both chains
 
 	// Log entry template for whitelisted IP
 	whitelistedEntry := &LogEntry{
@@ -720,16 +697,17 @@ func TestCheckChains_LogAction(t *testing.T) {
 		MatchKey:      "ip",
 		Action:        "log", // ACTION: log
 		BlockDuration: 0,
-		Steps: []StepDef{
-			{Order: 1, FieldMatches: map[string]string{"Path": "^/step/one$"}, MaxDelayDuration: 5 * time.Second},
-			{Order: 2, FieldMatches: map[string]string{"Path": "^/step/two$"}, MaxDelayDuration: 5 * time.Second},
-		},
 	}
-	chains := []BehavioralChain{chain}
 
-	// *** FIX: Compile regexes after chain definition ***
-	compileChainRegexes(t, chains)
-	// *************************************************
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one")
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two")
+
+	chain.Steps = []StepDef{
+		{Order: 1, Matchers: []fieldMatcher{matcher1}, MaxDelayDuration: 5 * time.Second},
+		{Order: 2, Matchers: []fieldMatcher{matcher2}, MaxDelayDuration: 5 * time.Second},
+	}
+
+	chains := []BehavioralChain{chain}
 
 	// Setup a mock blocker to ensure it's not called
 	var blockCalled bool
@@ -812,16 +790,17 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 		MatchKey:      "ip",
 		Action:        "unknown", // ACTION: unknown
 		BlockDuration: blockDuration,
-		Steps: []StepDef{
-			{Order: 1, FieldMatches: map[string]string{"Path": "^/step/one$"}, MaxDelayDuration: 5 * time.Second},
-			{Order: 2, FieldMatches: map[string]string{"Path": "^/step/two$"}, MaxDelayDuration: 5 * time.Second},
-		},
 	}
-	chains := []BehavioralChain{chain}
 
-	// *** FIX: Compile regexes after chain definition ***
-	compileChainRegexes(t, chains)
-	// *************************************************
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one")
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two")
+
+	chain.Steps = []StepDef{
+		{Order: 1, Matchers: []fieldMatcher{matcher1}, MaxDelayDuration: 5 * time.Second},
+		{Order: 2, Matchers: []fieldMatcher{matcher2}, MaxDelayDuration: 5 * time.Second},
+	}
+
+	chains := []BehavioralChain{chain}
 
 	// Setup a mock blocker to ensure it's not called
 	var blockCalled bool
@@ -886,16 +865,16 @@ func TestCheckChains_BlockExpiration(t *testing.T) {
 		MatchKey:      "ip",
 		Action:        "block",
 		BlockDuration: 1 * time.Minute,
-		Steps: []StepDef{
-			{Order: 1, FieldMatches: map[string]string{"Path": "^/test$"}},
-		},
 	}
-	compileChainRegexes(t, []BehavioralChain{chain})
+	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/test")
+	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
+
+	chains := []BehavioralChain{chain}
 
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            []BehavioralChain{chain},
+		Chains:            chains,
 		ChainMutex:        &sync.RWMutex{},
 		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
@@ -950,16 +929,16 @@ func TestCheckChains_IPVersionMismatch(t *testing.T) {
 			Name:     "IPv4-Only-Chain",
 			MatchKey: "ipv4",
 			Action:   "log",
-			Steps:    []StepDef{{Order: 1, FieldMatches: map[string]string{"Path": "/test"}}},
 		},
 		{
 			Name:     "IPv6-Only-Chain",
 			MatchKey: "ipv6",
 			Action:   "log",
-			Steps:    []StepDef{{Order: 1, FieldMatches: map[string]string{"Path": "/test"}}},
 		},
 	}
-	compileChainRegexes(t, chains)
+	matcher, _ := compileStringMatcher("any", 0, "Path", "/test")
+	chains[0].Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
+	chains[1].Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
 
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
@@ -1006,14 +985,15 @@ func TestCheckChains_IPAndUABlockOptimization(t *testing.T) {
 		MatchKey:      "ip_ua",
 		Action:        "block",
 		BlockDuration: 5 * time.Minute,
-		Steps:         []StepDef{{Order: 1, FieldMatches: map[string]string{"Path": "/trigger"}}},
 	}
-	compileChainRegexes(t, []BehavioralChain{chain})
+	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/trigger")
+	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
+	chains := []BehavioralChain{chain}
 
 	processor := &Processor{
 		ActivityStore:     make(map[TrackingKey]*BotActivity),
 		ActivityMutex:     &sync.RWMutex{},
-		Chains:            []BehavioralChain{chain},
+		Chains:            chains,
 		ChainMutex:        &sync.RWMutex{},
 		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
@@ -1054,24 +1034,21 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		Name:     "TimeRuleTestChain",
 		MatchKey: "ip",
 		Action:   "log",
-		Steps: []StepDef{
-			{
-				Order:               1,
-				MinTimeSinceLastHit: 2 * time.Second, // Must have seen this IP within the last 2s
-				FieldMatches:        map[string]string{"Path": "/step1"},
-			}, {
-				Order:        2,
-				FieldMatches: map[string]string{"Path": "/step2"}, // Add a second step to prevent immediate completion
-			},
-		},
 	}
-	compileChainRegexes(t, []BehavioralChain{chain})
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step1")
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step2")
+	chain.Steps = []StepDef{
+		{Order: 1, MinTimeSinceLastHit: 2 * time.Second, Matchers: []fieldMatcher{matcher1}},
+		{Order: 2, Matchers: []fieldMatcher{matcher2}},
+	}
+
+	chains := []BehavioralChain{chain}
 
 	baseProcessor := func() *Processor {
 		return &Processor{
 			ActivityStore:     make(map[TrackingKey]*BotActivity),
 			ActivityMutex:     &sync.RWMutex{},
-			Chains:            []BehavioralChain{chain},
+			Chains:            chains,
 			ChainMutex:        &sync.RWMutex{},
 			LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 			IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
@@ -1141,91 +1118,6 @@ func TestCheckChains_TimeRules(t *testing.T) {
 	}
 }
 
-// TestCleanup_MinTimeSinceLastHit verifies that the cleanup routine correctly removes IPs
-// that are no longer useful for `min_time_since_last_hit` checks, even if they are not yet
-// past the main `IdleTimeout`.
-func TestCleanup_MinTimeSinceLastHit(t *testing.T) {
-	// 1. Setup
-	resetGlobalState()
-
-	// Create a processor with specific timeout values for the test.
-	processor := &Processor{
-		ActivityStore: make(map[TrackingKey]*BotActivity),
-		ActivityMutex: &sync.RWMutex{},
-		Chains:        []BehavioralChain{}, // No chains needed for this test
-		ChainMutex:    &sync.RWMutex{},
-		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
-		Config: &AppConfig{
-			IdleTimeout:         30 * time.Minute, // A long general timeout
-			MaxTimeSinceLastHit: 5 * time.Second,  // A short min_time_since_last_hit timeout
-			CleanupInterval:     100 * time.Millisecond,
-		},
-	}
-
-	// Start the cleanup routine in a goroutine.
-	// The test will stop it via the done channel.
-	done := make(chan struct{})
-	go func() {
-		// We need to mock the ticker behavior for a single run.
-		processor.ActivityMutex.Lock()
-		now := time.Now()
-		cleanedCount := 0
-		for key, activity := range processor.ActivityStore {
-			if !activity.IsBlocked && len(activity.ChainProgress) == 0 {
-				timeSinceLastHit := now.Sub(activity.LastRequestTime)
-				isIdle := timeSinceLastHit > processor.Config.IdleTimeout
-				isUselessForTimeRule := processor.Config.MaxTimeSinceLastHit > 0 && timeSinceLastHit > processor.Config.MaxTimeSinceLastHit
-
-				if isIdle || isUselessForTimeRule {
-					delete(processor.ActivityStore, key)
-					cleanedCount++
-				}
-			}
-		}
-		processor.ActivityMutex.Unlock()
-		close(done)
-	}()
-
-	// 2. Create different activity states
-	now := time.Now()
-	keyUseless := TrackingKey{IPInfo: NewIPInfo("192.0.2.1")}     // Will be older than MaxTimeSinceLastHit
-	keyStillUseful := TrackingKey{IPInfo: NewIPInfo("192.0.2.2")} // Will be recent
-	keyIdle := TrackingKey{IPInfo: NewIPInfo("192.0.2.3")}        // Will be older than IdleTimeout
-
-	processor.ActivityMutex.Lock()
-	processor.ActivityStore[keyUseless] = &BotActivity{
-		LastRequestTime: now.Add(-10 * time.Second), // 10s ago > 5s MaxTimeSinceLastHit
-		ChainProgress:   make(map[string]StepState),
-	}
-	processor.ActivityStore[keyStillUseful] = &BotActivity{
-		LastRequestTime: now.Add(-1 * time.Second), // 1s ago < 5s MaxTimeSinceLastHit
-		ChainProgress:   make(map[string]StepState),
-	}
-	processor.ActivityStore[keyIdle] = &BotActivity{
-		LastRequestTime: now.Add(-31 * time.Minute), // 31m ago > 30m IdleTimeout
-		ChainProgress:   make(map[string]StepState),
-	}
-	processor.ActivityMutex.Unlock()
-
-	// --- Act ---
-	// Wait for the cleanup goroutine to finish its single run.
-	<-done
-
-	// --- Assert ---
-	processor.ActivityMutex.RLock()
-	defer processor.ActivityMutex.RUnlock()
-
-	if _, exists := processor.ActivityStore[keyUseless]; exists {
-		t.Error("Expected 'useless' key to be cleaned up by MaxTimeSinceLastHit, but it still exists.")
-	}
-	if _, exists := processor.ActivityStore[keyIdle]; exists {
-		t.Error("Expected 'idle' key to be cleaned up by IdleTimeout, but it still exists.")
-	}
-	if _, exists := processor.ActivityStore[keyStillUseful]; !exists {
-		t.Error("Expected 'still useful' key to remain, but it was cleaned up.")
-	}
-}
-
 // TestDryRunMode simulates the entire dry-run process using chains.yaml and test_access.log,
 // and verifies the log output against the expected log messages extracted from comments
 // in test_access.log.
@@ -1238,6 +1130,7 @@ func TestDryRunMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadChainsFromYAML() failed: %v", err)
 	}
+	SetLogLevel(loadedCfg.LogLevel)
 
 	// Create a processor (but don't start any background processes like ChainWatcher).
 	processor := &Processor{
@@ -1366,31 +1259,6 @@ func TestDryRunMode(t *testing.T) {
 	}
 }
 
-func TestMatchStepFields_UnknownField(t *testing.T) {
-	// 1. Setup
-	// Create a step definition with a field that does not exist in LogEntry.
-	step := &StepDef{
-		FieldMatches: map[string]string{
-			"UnknownField": "some_value",
-		},
-		// CompiledRegexes are not needed for this test as it should fail before regex matching.
-	}
-
-	// Create a dummy log entry.
-	entry := &LogEntry{
-		Path: "/test",
-	}
-
-	// --- Act ---
-	// Call the function under test.
-	result := matchStepFields(step, entry)
-
-	// --- Assert ---
-	if result != false {
-		t.Error("Expected matchStepFields to return false for an unknown field, but it returned true.")
-	}
-}
-
 func lines(s string) []string {
 	var ls []string
 	sc := bufio.NewScanner(strings.NewReader(s))
@@ -1461,16 +1329,18 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 				Name:     "SimpleChain",
 				MatchKey: "ip",
 				Action:   "log",
-				Steps: []StepDef{
-					{Order: 1, FieldMatches: map[string]string{"Path": "/step1"}},
-					{Order: 2, FieldMatches: map[string]string{"Path": "/step2"}}, // Add a second step to prevent immediate completion
-				},
 			}
-			compileChainRegexes(t, []BehavioralChain{chain})
+			matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step1")
+			matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step2")
+			chain.Steps = []StepDef{
+				{Order: 1, Matchers: []fieldMatcher{matcher1}},
+				{Order: 2, Matchers: []fieldMatcher{matcher2}},
+			}
+			chains := []BehavioralChain{chain}
 
 			processor := &Processor{
 				ActivityStore: make(map[TrackingKey]*BotActivity), ActivityMutex: &sync.RWMutex{},
-				Chains: []BehavioralChain{chain}, ChainMutex: &sync.RWMutex{},
+				Chains: chains, ChainMutex: &sync.RWMutex{},
 				LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
 				IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false }, // Explicitly set to no-op for this test
 				Config:            &AppConfig{OutOfOrderTolerance: tt.tolerance, MaxTimeSinceLastHit: 1 * time.Minute},

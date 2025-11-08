@@ -154,7 +154,7 @@ Each step in the steps array defines a specific log entry characteristic that mu
 
 | Field | Type | Required | Description |
 | :---- | :---- | :---- | :---- |
-| **field_matches** | map\[string\]string | Yes | A set of key-value pairs where the key is a field from the log line (e.g., **Method**, **StatusCode**, **Path**, **UserAgent**) and the value is a **Go Regular Expression** that must match the corresponding log entry field. |
+| **field_matches** | map | Yes | A set of key-value pairs defining the conditions for the step to match. See the `field_matches` section below for details on the powerful new syntax. |
 | **max_delay** | string | No | **(Steps 2+)** The maximum allowed time between the previous step and this one. If exceeded, the chain resets. Ignored on the first step. Format: Go duration string (e.g., "10s", "1m"). |
 | **min_delay**	| string | No | **(Steps 2+)** The minimum required time between the *previous successful step in this chain* and the current step. If not met, the chain resets. Ignored on the first step. Format: Go duration string (e.g., "10s", "1m"). |
 | **min_time_since_last_hit** | string | No | **(First Step Only)** The first step will only match if the time since the *last overall request* from the same tracking key (IP or IP+UA) is **greater than** this duration. If the last request was too recent, or if the IP has never been seen before, the step will not match. This is useful for detecting "sleepy" bots that have long periods of inactivity between requests, helping to distinguish them from normal user traffic. Format: Go duration string (e.g., "30m", "12h"). |
@@ -169,6 +169,66 @@ Each step in the steps array defines a specific log entry characteristic that mu
 | **StatusCode** | `int` | The HTTP response status code (e.g., `200`, `404`). |
 | **Referrer** | `string` | The full HTTP Referer header value. Use a regular expression to match specific parts, such as the path (e.g., `^https?://[^/]+/login$`). |
 | **UserAgent** | `string` | The HTTP User-Agent header value. |
+
+### **Advanced `field_matches` Syntax**
+
+The `field_matches` block supports a flexible syntax for defining match conditions, making your rules both powerful and easy to read.
+
+#### **1. Simple Values (Shorthand)**
+
+The simplest match is a direct value. The parser intelligently determines the match type.
+
+*   **Exact String Match (Default for strings):**
+    ```yaml
+    Method: "POST"
+    ```
+*   **Exact Integer Match (Default for numbers):**
+    ```yaml
+    StatusCode: 404
+    ```
+
+#### **2. Prefixed String Matchers**
+
+For more complex string matching, use a prefix.
+
+*   **Regular Expression:**
+    ```yaml
+    UserAgent: "regex:(?i)(bot|crawler|python)"
+    ```
+*   **Status Code Pattern:** A special shorthand for matching status code classes.
+    ```yaml
+    StatusCode: "4XX" # Matches 400-499
+    ```
+
+#### **3. List of Values (OR Condition)**
+
+Provide a list to match if the field's value is **any of** the items in the list. You can mix match types within a list.
+
+```yaml
+field_matches:
+  Method: ["POST", "PUT"]
+  StatusCode: [401, 403, "5XX"] # Matches 401, 403, or any 5xx code
+  Path:
+    - "/login"
+    - "regex:^/reset-password/\\w+$"
+```
+
+#### **4. Object for Numeric Ranges (AND Condition)**
+
+Use an object to define numeric ranges. This is especially useful for `StatusCode`. All conditions in the object must be met.
+
+*   `gt`: greater than
+*   `gte`: greater than or equal to
+*   `lt`: less than
+*   `lte`: less than or equal to
+
+```yaml
+field_matches:
+  # Matches any status code from 401 to 499 (inclusive)
+  StatusCode:
+    gte: 401
+    lt: 500
+```
 
 ---
 
@@ -196,22 +256,22 @@ chains:
     steps:
       - max_delay: "5m"
         field_matches:
-          Method: "^POST$"
-          Path: "^/api/login$"
+          Method: "POST"
+          Path: "/api/login"
           # Must result in a 401 Unauthorized
-          StatusCode: "^401$"
+          StatusCode: 401
 
       - max_delay: "10s"
         field_matches:
-          Method: "^POST$"
-          Path: "^/api/login$"
-          StatusCode: "^401$"
+          Method: "POST"
+          Path: "/api/login"
+          StatusCode: 401
 
       - max_delay: "5s"
         field_matches:
-          Method: "^POST$"
-          Path: "^/api/login$"
-          StatusCode: "^401$"
+          Method: "POST"
+          Path: "/api/login"
+          StatusCode: 401
 
   # 2. CHAIN: Content Scraper (Log Only)
   - name: Content-Scraper-Fast
@@ -219,21 +279,21 @@ chains:
     steps:
       - max_delay: "5m"
         field_matches:
-          Method: "^GET$"
+          Method: "GET"
           # Request an article page
-          Path: "^/article/\\d+$"
+          Path: "regex:^/article/\\d+$"
           # User agent might be suspicious
-          UserAgent: "(?i)(curl|wget|python-requests)"
+          UserAgent: "regex:(?i)(curl|wget|python-requests)"
 
       - max_delay: "1s"
         field_matches:
-          Method: "^GET$"
+          Method: "GET"
           # Request another article page very quickly
-          Path: "^/article/\\d+$"
+          Path: "regex:^/article/\\d+$"
 
       - max_delay: "1s"
         field_matches:
-          Method: "^GET$"
+          Method: "GET"
           # Request a third article page very quickly
-          Path: "^/article/\\d+$"
+          Path: "regex:^/article/\\d+$"
 ```

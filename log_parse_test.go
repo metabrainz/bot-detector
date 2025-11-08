@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"regexp"
 	"sync"
 	"testing"
 	"time"
@@ -325,22 +324,15 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 	}
 
 	// Setup a simple chain that will match and call 'block'
+	matcher, _ := compileStringMatcher("dryrun_chain", 0, "Path", "/1")
 	chain := BehavioralChain{
 		Name: "dryrun_chain",
 		Steps: []StepDef{
-			{Order: 1, FieldMatches: map[string]string{"Path": "/1"}},
+			{Order: 1, Matchers: []fieldMatcher{matcher}},
 		},
 		Action:        "block",
 		BlockDuration: time.Minute,
 		MatchKey:      "ip",
-	}
-
-	// Pre-compile the regexes for the step (needed by CheckChains)
-	for i := range chain.Steps {
-		chain.Steps[i].CompiledRegexes = make(map[string]*regexp.Regexp)
-		for field, pattern := range chain.Steps[i].FieldMatches {
-			chain.Steps[i].CompiledRegexes[field] = regexp.MustCompile(pattern)
-		}
 	}
 
 	p := Processor{

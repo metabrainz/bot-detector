@@ -1,4 +1,4 @@
-version: "1.0"
+version: "1.0" # Stays 1.0 as we can make this change backward-compatible in logic
 log_level: "debug" # Set to debug for maximum visibility during dry-run testing
 out_of_order_tolerance: "5s" # Required for Test Case 5
 whitelist_cidrs:
@@ -10,8 +10,8 @@ chains:
     action: "log"
     match_key: "ip"
     steps:
-      - field_matches: { Path: "^/log/step1$" }
-      - field_matches: { Path: "^/log/step2$" }
+      - field_matches: { Path: "/log/step1" } # Default is exact match
+      - field_matches: { Path: "/log/step2" }
 
   # --- 2. Simple Block Chain (10.0.0.2) ---
   - name: "SimpleBlockChain"
@@ -19,28 +19,28 @@ chains:
     block_duration: "1h"
     match_key: "ip"
     steps:
-      - field_matches: { Path: "^/block/step1$" }
-      - field_matches: { Path: "^/block/step2$" }
+      - field_matches: { Path: "/block/step1" }
+      - field_matches: { Path: "/block/step2" }
 
   # --- 3. Out-of-Order Chain (10.0.0.3) ---
   - name: "OutOfOrderChain"
     action: "log"
     match_key: "ip"
     steps:
-      - field_matches: { Path: "^/order/start$" }
-      - field_matches: { Path: "^/order/end$" }
+      - field_matches: { Path: "regex:^/order/start$" }
+      - field_matches: { Path: "/order/end" }
 
   # --- 4. IPv6 User-Agent Change Detection (2001:db8::4) ---
   - name: "IPv6-UA-Change-Detection"
     action: "log"
     match_key: "ipv6" # Track by IPv6, steps will check UserAgent
     steps:
-      - field_matches:
-          Path: "^/ua/probe$"
-          UserAgent: "^Mozilla/5\\.0 \\(UA1\\)$"
-      - field_matches:
-          Path: "^/ua/attack$"
-          UserAgent: "^Mozilla/5\\.0 \\(UA2\\)$"
+      - field_matches: # Using explicit regex for clarity
+          Path: "regex:^/ua/probe$"
+          UserAgent: "regex:^Mozilla/5\\.0 \\(UA1\\)$"
+      - field_matches: # Using exact match for path
+          Path: "/ua/attack"
+          UserAgent: "regex:^Mozilla/5\\.0 \\(UA2\\)$"
         max_delay: "5s" # Must occur within 5 seconds of the first step
 
   # --- 5. IP+UA with Common Referrer (10.0.0.5) - SUCCESS (LOG) ---
@@ -51,15 +51,15 @@ chains:
     match_key: "ip" # Track by IP, allowing UA to change between steps
     steps:
       - field_matches:
-          Path: "^/ua-ref/step1$"
-          UserAgent: "^Consistent_UA_\\d+\\.\\d+$" # Match Consistent_UA_X.Y
-          Referrer: "^https://common.ref/page$"
-          StatusCode: "^200$"
+          Path: "/ua-ref/step1"
+          UserAgent: "regex:^Consistent_UA_\\d+\\.\\d+$" # Match Consistent_UA_X.Y
+          Referrer: "https://common.ref/page"
+          StatusCode: 200 # Integer match
       - field_matches:
-          Path: "^/ua-ref/step2$"
-          UserAgent: "^Consistent_UA_\\d+\\.\\d+$" # Match Consistent_UA_X.Y
-          Referrer: "^https://common.ref/page$"
-          StatusCode: "^5\\d{2}$" # Require an HTTP 5xx error
+          Path: "/ua-ref/step2"
+          UserAgent: "regex:^Consistent_UA_\\d+\\.\\d+$" # Match Consistent_UA_X.Y
+          Referrer: "https://common.ref/page"
+          StatusCode: "5XX" # Use new status code pattern
         max_delay: "10s"
 
   # --- 6. Sleepy Bot Detection (min_time_since_last_hit) ---
@@ -69,4 +69,4 @@ chains:
     steps:
       - min_time_since_last_hit: "15s"
         field_matches:
-          Path: "^/sleepy/probe$"
+          Path: "/sleepy/probe"

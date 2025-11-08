@@ -239,9 +239,9 @@ version: "1.0"
 chains:
   - name: "Test"
     match_key: "ip"
-    steps: [ { field_matches: { "Path": "/(" } } ]
+    steps: [ { field_matches: { "Path": "regex:/(" } } ]
 `,
-			expectedError: "failed to compile regex",
+			expectedError: "invalid regex",
 		},
 		{
 			name: "Invalid Default Block Duration",

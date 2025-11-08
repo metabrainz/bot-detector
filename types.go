@@ -2,7 +2,6 @@ package main
 
 import (
 	"net"
-	"regexp"
 	"sync"
 	"time"
 )
@@ -78,10 +77,10 @@ type LoadedConfig struct {
 
 type StepDefYAML struct {
 	Order               int
-	FieldMatches        map[string]string `yaml:"field_matches"`
-	MaxDelay            string            `yaml:"max_delay"`
-	MinDelay            string            `yaml:"min_delay"`
-	MinTimeSinceLastHit string            `yaml:"min_time_since_last_hit"` // Renamed from first_hit_since
+	FieldMatches        map[string]interface{} `yaml:"field_matches"`
+	MaxDelay            string                 `yaml:"max_delay"`
+	MinDelay            string                 `yaml:"min_delay"`
+	MinTimeSinceLastHit string                 `yaml:"min_time_since_last_hit"`
 }
 
 type BehavioralChainYAML struct {
@@ -121,11 +120,10 @@ type LogEntry struct {
 
 type StepDef struct {
 	Order               int
-	FieldMatches        map[string]string
 	MaxDelayDuration    time.Duration
 	MinDelayDuration    time.Duration
-	MinTimeSinceLastHit time.Duration             // Renamed from FirstHitSinceDuration
-	CompiledRegexes     map[string]*regexp.Regexp // Pre-compiled regexes for performance.
+	MinTimeSinceLastHit time.Duration
+	Matchers            []fieldMatcher // Pre-compiled matcher functions for performance.
 }
 
 type BehavioralChain struct {

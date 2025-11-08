@@ -145,22 +145,15 @@ func (p *Processor) handleChainCompletion(chain *BehavioralChain, entry *LogEntr
 	}
 }
 
-// matchStepFields checks if the fields of a log entry match the compiled regexes of a step.
+// matchStepFields checks if the fields of a log entry match the compiled matchers of a step.
 // It returns true if all fields match, false otherwise.
 func matchStepFields(step *StepDef, entry *LogEntry) bool {
-	for fieldName := range step.FieldMatches {
-		matchValue, err := GetMatchValue(fieldName, entry)
-		if err != nil {
-			// If the field is unknown or cannot be extracted, it's not a match.
-			// This should ideally be caught during config loading, but acts as a safeguard.
-			return false
-		}
-		// Check if the compiled regex matches the extracted value.
-		if !step.CompiledRegexes[fieldName].MatchString(matchValue) {
+	// Iterate over the pre-compiled matcher functions.
+	for _, matcher := range step.Matchers {
+		if !matcher(entry) {
 			return false
 		}
 	}
-	// All field matches passed.
 	return true
 }
 
