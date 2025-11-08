@@ -222,6 +222,36 @@ chains:
 	}
 }
 
+func TestLoadChainsFromYAML_ObjectMatcher_OtherOperators(t *testing.T) {
+	// This test covers the 'gt' and 'lte' operators not covered by the main object matcher test.
+	yamlContent := `
+version: "1.0"
+chains:
+  - name: "StatusCodeRangeChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          StatusCode:
+            gt: 400
+            lte: 404
+`
+	setupTestYAML(t, yamlContent)
+	loadedCfg, err := LoadChainsFromYAML()
+	if err != nil {
+		t.Fatalf("LoadChainsFromYAML() failed: %v", err)
+	}
+	matcher := loadedCfg.Chains[0].Steps[0].Matchers[0]
+
+	// Test cases
+	if !matcher(&LogEntry{StatusCode: 404}) { // 404 <= 404 -> true
+		t.Error("Matcher failed for lte boundary")
+	}
+	if matcher(&LogEntry{StatusCode: 400}) { // 400 > 400 -> false
+		t.Error("Matcher failed for gt boundary")
+	}
+}
+
 func TestLoadChainsFromYAML_IntMatcherFallback(t *testing.T) {
 	// This test specifically targets the non-StatusCode path in compileIntMatcher.
 	// We use a field that is not an integer (Method) to ensure the fallback logic
@@ -396,6 +426,39 @@ chains:
     action: "block" # No block_duration and no default
 `,
 			expectedError: "block_duration is missing or zero",
+		},
+		{
+			name: "Object Matcher with Non-Integer Value",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    steps: [ { field_matches: { "StatusCode": { gte: "400" } } } ]
+`,
+			expectedError: "value for 'gte' must be an integer",
+		},
+		{
+			name: "Object Matcher with Unknown Operator",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    steps: [ { field_matches: { "StatusCode": { eq: 400 } } } ]
+`,
+			expectedError: "unknown operator 'eq' in object matcher",
+		},
+		{
+			name: "Object Matcher with Empty Object",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    steps: [ { field_matches: { "StatusCode": {} } } ]
+`,
+			expectedError: "object matcher must not be empty",
 		},
 		{
 			name: "File Matcher Not Found (Non-Fatal)",
