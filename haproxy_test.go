@@ -46,6 +46,8 @@ func TestBlockAndUnblockIP_SuccessFlow(t *testing.T) {
 		},
 		ChainMutex: &sync.RWMutex{},
 	}
+	blocker := &HAProxyBlocker{P: processor}
+	processor.Blocker = blocker
 
 	var mu sync.Mutex
 	var commandsReceived []string
@@ -67,8 +69,8 @@ func TestBlockAndUnblockIP_SuccessFlow(t *testing.T) {
 	duration := 10 * time.Minute
 
 	// Test BlockIP
-	if err := processor.BlockIP(ipInfo, duration); err != nil {
-		t.Fatalf("BlockIP failed unexpectedly: %v", err)
+	if err := blocker.Block(ipInfo, duration); err != nil {
+		t.Fatalf("Block failed unexpectedly: %v", err)
 	}
 
 	// Assertions for BlockIP
@@ -80,8 +82,8 @@ func TestBlockAndUnblockIP_SuccessFlow(t *testing.T) {
 	mu.Unlock()
 
 	// Test UnblockIP
-	if err := processor.UnblockIP(ipInfo); err != nil {
-		t.Fatalf("UnblockIP failed unexpectedly: %v", err)
+	if err := blocker.Unblock(ipInfo); err != nil {
+		t.Fatalf("Unblock failed unexpectedly: %v", err)
 	}
 
 	// Assertions for UnblockIP
@@ -117,6 +119,8 @@ func TestBlockIP_FallbackTable(t *testing.T) {
 		},
 		ChainMutex: &sync.RWMutex{},
 	}
+	blocker := &HAProxyBlocker{P: processor}
+	processor.Blocker = blocker
 
 	var commandReceived string
 	processor.CommandExecutor = func(addr, ip, command string) error {
@@ -128,7 +132,7 @@ func TestBlockIP_FallbackTable(t *testing.T) {
 	unconfiguredDuration := 30 * time.Minute
 
 	// --- Act ---
-	processor.BlockIP(ipInfo, unconfiguredDuration)
+	blocker.Block(ipInfo, unconfiguredDuration)
 
 	// --- Assert ---
 	expectedCommand := "set table table_1h_ipv4 key 192.0.2.5 data.gpc0 1"
@@ -159,6 +163,8 @@ func TestBlockIP_NoTableFound(t *testing.T) {
 		},
 		ChainMutex: &sync.RWMutex{},
 	}
+	blocker := &HAProxyBlocker{P: processor}
+	processor.Blocker = blocker
 
 	// The mock executor should fail the test if it's ever called.
 	processor.CommandExecutor = func(addr, ip, command string) error {
@@ -168,7 +174,7 @@ func TestBlockIP_NoTableFound(t *testing.T) {
 	ipInfo := NewIPInfo("192.0.2.10")
 
 	// --- Act ---
-	processor.BlockIP(ipInfo, 5*time.Minute)
+	blocker.Block(ipInfo, 5*time.Minute)
 
 	// --- Assert ---
 	expectedLog := "No HAProxy table found"
@@ -195,6 +201,8 @@ func TestUnblockIP_ErrorTolerance_Mocked(t *testing.T) {
 		},
 		ChainMutex: &sync.RWMutex{},
 	}
+	blocker := &HAProxyBlocker{P: processor}
+	processor.Blocker = blocker
 
 	ipInfo := NewIPInfo("2001:db8::1")
 	successfulCmds := 0
@@ -209,7 +217,7 @@ func TestUnblockIP_ErrorTolerance_Mocked(t *testing.T) {
 	}
 
 	// Execute UnblockIP
-	err := processor.UnblockIP(ipInfo)
+	err := blocker.Unblock(ipInfo)
 	// With the error propagation fix, we now EXPECT an error here because one of the instances failed.
 	if err == nil {
 		t.Fatal("UnblockIP was expected to return an error due to a failed instance, but it returned nil.")
@@ -237,6 +245,8 @@ func TestUnblockIP_NoAddresses(t *testing.T) {
 		},
 		ChainMutex: &sync.RWMutex{},
 	}
+	blocker := &HAProxyBlocker{P: processor}
+	processor.Blocker = blocker
 
 	// The mock executor should fail the test if called.
 	processor.CommandExecutor = func(addr, ip, command string) error {
@@ -244,7 +254,7 @@ func TestUnblockIP_NoAddresses(t *testing.T) {
 		return nil
 	}
 	ipInfo := NewIPInfo("192.0.2.1")
-	err := processor.UnblockIP(ipInfo)
+	err := blocker.Unblock(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error when no addresses were configured: %v", err)
 	}
@@ -260,6 +270,8 @@ func TestUnblockIP_NoTables(t *testing.T) {
 		},
 		ChainMutex: &sync.RWMutex{},
 	}
+	blocker := &HAProxyBlocker{P: processor}
+	processor.Blocker = blocker
 
 	// The mock executor should fail the test if called.
 	processor.CommandExecutor = func(addr, ip, command string) error {
@@ -267,7 +279,7 @@ func TestUnblockIP_NoTables(t *testing.T) {
 		return nil
 	}
 	ipInfo := NewIPInfo("192.0.2.1")
-	err := processor.UnblockIP(ipInfo)
+	err := blocker.Unblock(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error: %v", err)
 	}
@@ -285,6 +297,8 @@ func TestBlockIP_InvalidVersion(t *testing.T) {
 		},
 		ChainMutex: &sync.RWMutex{},
 	}
+	blocker := &HAProxyBlocker{P: processor}
+	processor.Blocker = blocker
 
 	// The mock executor should fail the test if called.
 	processor.CommandExecutor = func(addr, ip, command string) error {
@@ -295,7 +309,7 @@ func TestBlockIP_InvalidVersion(t *testing.T) {
 	duration := 1 * time.Minute
 
 	// BlockIP with an invalid IP version (0)
-	err := processor.BlockIP(ipInfo, duration)
+	err := blocker.Block(ipInfo, duration)
 	if err != nil {
 		t.Fatalf("BlockIP failed unexpectedly for invalid version: %v", err)
 	}
@@ -313,6 +327,8 @@ func TestUnblockIP_InvalidVersion(t *testing.T) {
 		},
 		ChainMutex: &sync.RWMutex{},
 	}
+	blocker := &HAProxyBlocker{P: processor}
+	processor.Blocker = blocker
 
 	// The mock executor should fail the test if called.
 	processor.CommandExecutor = func(addr, ip, command string) error {
@@ -322,7 +338,7 @@ func TestUnblockIP_InvalidVersion(t *testing.T) {
 	ipInfo := NewIPInfo("invalid-ip-string")
 
 	// UnblockIP with an invalid IP version (0)
-	err := processor.UnblockIP(ipInfo)
+	err := blocker.Unblock(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error: %v", err)
 	}
@@ -444,6 +460,8 @@ func TestUnblockIP_WithFallbackOnly(t *testing.T) {
 		},
 		ChainMutex: &sync.RWMutex{},
 	}
+	blocker := &HAProxyBlocker{P: processor}
+	processor.Blocker = blocker
 
 	var commandReceived string
 	processor.CommandExecutor = func(addr, ip, command string) error {
@@ -453,7 +471,7 @@ func TestUnblockIP_WithFallbackOnly(t *testing.T) {
 	ipInfo := NewIPInfo("192.0.2.20")
 
 	// --- Act ---
-	err := processor.UnblockIP(ipInfo)
+	err := blocker.Unblock(ipInfo)
 	if err != nil {
 		t.Fatalf("UnblockIP returned an unexpected error: %v", err)
 	}
