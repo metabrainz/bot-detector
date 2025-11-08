@@ -427,6 +427,43 @@ func TestExecuteHAProxyCommandImpl_HAProxyError(t *testing.T) {
 	}
 }
 
+// TestUnblockIP_WithFallbackOnly verifies that UnblockIP correctly targets the fallback table
+// even if it's the only table configured.
+func TestUnblockIP_WithFallbackOnly(t *testing.T) {
+	resetGlobalState()
+	processor := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
+		Config: &AppConfig{
+			HAProxyAddresses:       []string{"127.0.0.1:9999"},
+			DurationToTableName:    make(map[time.Duration]string), // No main tables
+			BlockTableNameFallback: "fallback_table",               // Only a fallback table
+		},
+		ChainMutex: &sync.RWMutex{},
+	}
+
+	var commandReceived string
+	mockExecutor := func(addr, ip, command string) error {
+		commandReceived = strings.TrimSpace(command)
+		return nil
+	}
+	setupMockExecutor(t, mockExecutor)
+
+	ipInfo := NewIPInfo("192.0.2.20")
+
+	// --- Act ---
+	err := processor.UnblockIP(ipInfo)
+	if err != nil {
+		t.Fatalf("UnblockIP returned an unexpected error: %v", err)
+	}
+
+	// --- Assert ---
+	expectedCommand := "clear table fallback_table_ipv4 key 192.0.2.20"
+	if commandReceived != expectedCommand {
+		t.Errorf("Expected command to target fallback table '%s', but got: '%s'",
+			expectedCommand, commandReceived)
+	}
+}
+
 // TestExecuteHAProxyCommandImpl_EOFWithData tests the edge case where the server sends
 // a response without a trailing newline and immediately closes the connection.
 func TestExecuteHAProxyCommandImpl_EOFWithData(t *testing.T) {
