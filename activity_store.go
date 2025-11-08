@@ -33,7 +33,9 @@ func (p *Processor) CleanUpIdleActivity() {
 		p.ActivityMutex.Lock()
 		now := time.Now()
 		cleanedCount := 0
-		for key, activity := range p.ActivityStore {
+		for key, activityPtr := range p.ActivityStore {
+			// Use a new variable to avoid loop variable capture issues.
+			activity := activityPtr
 			// Only consider cleanup for IPs that are not currently blocked and not in the middle of a chain.
 			if !activity.IsBlocked && len(activity.ChainProgress) == 0 {
 				timeSinceLastHit := now.Sub(activity.LastRequestTime)
