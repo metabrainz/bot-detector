@@ -383,8 +383,13 @@ func TestLiveLogTailer(t *testing.T) {
 	}
 
 	// --- Act ---
+	signalCh := make(chan os.Signal, 1)
+	done := make(chan struct{})
 	// Run LiveLogTailer in a goroutine so we can interact with it.
-	go LiveLogTailer(processor)
+	go func() {
+		LiveLogTailer(processor, signalCh)
+		close(done)
+	}()
 
 	// Give the tailer a moment to start up and seek to the end of the initial file.
 	time.Sleep(50 * time.Millisecond)
@@ -437,8 +442,64 @@ func TestLiveLogTailer(t *testing.T) {
 	logMutex.Unlock()
 
 	// --- Cleanup: Send shutdown signal ---
-	// This is implicitly tested by the fact that the test can complete.
-	// A real shutdown test would be more complex, but this covers the main loop.
+	// Stop the tailer to ensure a clean exit and prevent race conditions.
+	signalCh <- syscall.SIGTERM
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Error("LiveLogTailer did not shut down gracefully after test completion.")
+	}
+}
+
+func TestLiveLogTailer_Shutdown(t *testing.T) {
+	// --- Setup ---
+	tempDir := t.TempDir()
+	tempLogFile := filepath.Join(tempDir, "shutdown_test.log")
+
+	originalLogFilePath := LogFilePath
+	LogFilePath = tempLogFile
+	t.Cleanup(func() { LogFilePath = originalLogFilePath })
+
+	// Create a log file for the tailer to open.
+	if err := os.WriteFile(tempLogFile, []byte("line\n"), 0644); err != nil {
+		t.Fatalf("Failed to create log file: %v", err)
+	}
+
+	var logMutex sync.Mutex
+	var capturedLogs []string
+	processor := &Processor{
+		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
+			logMutex.Lock()
+			capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
+			logMutex.Unlock()
+		},
+		ProcessLogLine: func(line string, lineNumber int) {},
+		Config: &AppConfig{
+			PollingInterval: 10 * time.Millisecond,
+		},
+	}
+
+	signalCh := make(chan os.Signal, 1)
+	done := make(chan struct{})
+
+	// --- Act ---
+	// Run LiveLogTailer in a goroutine.
+	go func() {
+		LiveLogTailer(processor, signalCh)
+		close(done) // Signal that the function has returned.
+	}()
+
+	// Send a shutdown signal.
+	signalCh <- syscall.SIGTERM
+
+	// --- Assert ---
+	// Wait for the LiveLogTailer to exit gracefully. If it doesn't, this will time out.
+	select {
+	case <-done:
+		// Success! The function returned.
+	case <-time.After(1 * time.Second):
+		t.Fatal("LiveLogTailer did not shut down within the time limit.")
+	}
 }
 
 // TestLiveLogTailer_ErrorHandling covers the error paths for the live tailer.
@@ -474,7 +535,10 @@ func TestLiveLogTailer_ErrorHandling(t *testing.T) {
 		os.Remove(tempLogFile)
 
 		// Run tailer in a goroutine
-		go LiveLogTailer(processor)
+		signalCh := make(chan os.Signal, 1)
+		go func() {
+			LiveLogTailer(processor, signalCh)
+		}()
 
 		// Wait for it to attempt opening the file and log an error
 		time.Sleep(50 * time.Millisecond)

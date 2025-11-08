@@ -5,7 +5,10 @@ package main
 import (
 	"flag"
 	"log"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -92,7 +95,11 @@ func start(p *Processor) {
 		go p.ChainWatcher(stopWatcher)
 		go p.CleanUpIdleActivity(stopWatcher)
 
+		// Set up signal handling for graceful shutdown in live mode.
+		signalCh := make(chan os.Signal, 1)
+		signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
+
 		// LiveLogTailer is the blocking main loop
-		LiveLogTailer(p)
+		LiveLogTailer(p, signalCh)
 	}
 }

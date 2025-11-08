@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/signal"
 	"syscall"
 	"time"
 )
@@ -154,11 +153,7 @@ func delayOrShutdown(p *Processor, delay time.Duration, signalCh <-chan os.Signa
 }
 
 // LiveLogTailer continuously tails a log file, handling rotation and truncation.
-func LiveLogTailer(p *Processor) {
-	// Signal handling for graceful shutdown
-	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
-
+func LiveLogTailer(p *Processor, signalCh <-chan os.Signal) {
 	firstRun := true // Flag to control initial seek behavior.
 
 	// Inner loop for re-opening the file
