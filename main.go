@@ -66,11 +66,6 @@ func main() {
 	// Inject the HAProxyBlocker which depends on the main processor instance.
 	processor.Blocker = &HAProxyBlocker{P: processor}
 	processor.IsWhitelistedFunc = processor.IsIPWhitelisted // Set the method correctly.
-	// Switch to the DryRun store/mutex if running in dry-run mode
-	if DryRun {
-		processor.ActivityStore = make(map[TrackingKey]*BotActivity)
-		// The mutex is the same, just the store is different.
-	}
 
 	// Execute the core application logic
 	// Assign the real implementation for ProcessLogLine.
