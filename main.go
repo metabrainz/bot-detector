@@ -12,10 +12,6 @@ import (
 	"time"
 )
 
-// P is the global application Processor instance holding all state and dependencies.
-// All core logic will be called via this instance.
-var P *Processor
-
 // main is the application entry point.
 func main() {
 	// Parse CLI flags
@@ -54,7 +50,7 @@ func main() {
 	// This centralizes dependency injection for the entire application.
 	// We use the global state variables (ActivityStore, Chains, etc.) to
 	// populate the single Processor instance.
-	P = &Processor{
+	processor := &Processor{
 		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ActivityMutex: &sync.RWMutex{},
 		Chains:        loadedCfg.Chains,
@@ -68,19 +64,19 @@ func main() {
 		Config: appConfig,
 	}
 	// Inject the HAProxyBlocker which depends on the main processor instance.
-	P.Blocker = &HAProxyBlocker{P: P}
-	P.IsWhitelistedFunc = P.IsIPWhitelisted // Set the method correctly.
+	processor.Blocker = &HAProxyBlocker{P: processor}
+	processor.IsWhitelistedFunc = processor.IsIPWhitelisted // Set the method correctly.
 	// Switch to the DryRun store/mutex if running in dry-run mode
 	if DryRun {
-		P.ActivityStore = make(map[TrackingKey]*BotActivity)
+		processor.ActivityStore = make(map[TrackingKey]*BotActivity)
 		// The mutex is the same, just the store is different.
 	}
 
 	// Execute the core application logic
 	// Assign the real implementation for ProcessLogLine.
-	P.ProcessLogLine = P.processLogLineInternal
+	processor.ProcessLogLine = processor.processLogLineInternal
 
-	start(P)
+	start(processor)
 }
 
 // start is the unexported function that contains the main application logic,
