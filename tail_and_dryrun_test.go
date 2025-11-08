@@ -250,6 +250,30 @@ line 3`), 0644)
 			expectedLogContains:    "Failed to open test log file",
 		},
 		{
+			name: "File ends without newline",
+			setupFunc: func(filePath string) {
+				os.WriteFile(filePath, []byte("line 1\nline 2"), 0644)
+			},
+			expectedLinesProcessed: 2,
+			expectedLogContains:    "DryRun complete. Processed 2 lines.",
+		},
+		{
+			name: "Empty line in middle of file",
+			setupFunc: func(filePath string) {
+				os.WriteFile(filePath, []byte("line 1\n\nline 3"), 0644)
+			},
+			expectedLinesProcessed: 2,
+			expectedLogContains:    "Skipped (Comment/Empty)",
+		},
+		{
+			name: "Comment line in middle of file",
+			setupFunc: func(filePath string) {
+				os.WriteFile(filePath, []byte("line 1\n# comment\nline 3"), 0644)
+			},
+			expectedLinesProcessed: 2,
+			expectedLogContains:    "Skipped (Comment/Empty)",
+		},
+		{
 			name:       "Line Exceeds Limit",
 			logContent: "this is a normal line\n" + strings.Repeat("a", MaxLogLineSize+1) + "\nthis is another normal line",
 			setupFunc: func(filePath string) {
@@ -644,14 +668,14 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 	}
 
 	// Redirect os.Open to return our pipe's reader end.
-	originalOsOpen := osOpen
-	osOpen = func(name string) (*os.File, error) {
+	originalOsOpenFile := osOpenFile
+	osOpenFile = func(name string) (fileHandle, error) {
 		return r, nil
 	}
 	originalLogFilePath := LogFilePath
 	LogFilePath = "/fake/pipe/path" // Path doesn't matter due to the mock.
 	t.Cleanup(func() {
-		osOpen = originalOsOpen
+		osOpenFile = originalOsOpenFile
 		LogFilePath = originalLogFilePath
 	})
 
@@ -721,6 +745,66 @@ func TestLiveLogTailer_ShutdownDuringRetryDelay(t *testing.T) {
 	}
 }
 
+// statErrorHandle is a wrapper around os.File that forces the Stat() method to fail.
+type statErrorHandle struct {
+	*os.File
+}
+
+// Stat overrides the embedded os.File's Stat method to always return an error.
+func (f *statErrorHandle) Stat() (os.FileInfo, error) {
+	return nil, errors.New("simulated stat error")
+}
+
+// TestLiveLogTailer_InitialStatError verifies that if the initial file.Stat() call
+// fails after a successful open, the tailer logs a warning and retries.
+func TestLiveLogTailer_InitialStatError(t *testing.T) {
+	// --- Setup ---
+	// Mock osOpenFile to return a file handle whose Stat() method is guaranteed to fail.
+	originalOsOpenFile := osOpenFile
+	osOpenFile = func(name string) (fileHandle, error) {
+		// Open a real file (dev/null is perfect) to get a valid *os.File handle.
+		f, err := os.Open(os.DevNull)
+		if err != nil {
+			t.Fatalf("Failed to open os.DevNull: %v", err)
+		}
+		return &statErrorFile{f}, nil // Wrap it in our struct that forces Stat() to fail.
+	}
+	t.Cleanup(func() { osOpenFile = originalOsOpenFile })
+
+	harness := newTailerTestHarness(t, &AppConfig{
+		PollingInterval: 10 * time.Millisecond,
+	})
+
+	// Override LogFunc to capture the specific warning.
+	statWarnLogged := make(chan struct{}, 1)
+	harness.processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+		harness.logMutex.Lock()
+		defer harness.logMutex.Unlock()
+		logLine := fmt.Sprintf(tag+": "+format, args...)
+		harness.capturedLogs = append(harness.capturedLogs, logLine)
+		if tag == "TAIL_WARN" && strings.Contains(logLine, "Failed to get initial file stat") {
+			statWarnLogged <- struct{}{}
+		}
+	}
+
+	// --- Act ---
+	harness.start()
+	defer harness.stop()
+
+	// --- Assert ---
+	select {
+	case <-statWarnLogged:
+		// Success: The expected warning was logged.
+	case <-time.After(1 * time.Second):
+		t.Fatalf("Timed out waiting for the initial stat warning. Logs:\n%s", strings.Join(harness.capturedLogs, "\n"))
+	}
+}
+
+// statErrorFile is a wrapper around os.File that forces the Stat() method to fail.
+type statErrorFile struct {
+	*os.File
+}
+
 // TestLiveLogTailer_StatError verifies that if stat fails during an EOF check,
 // the tailer assumes rotation and attempts to reopen the file.
 func TestLiveLogTailer_StatError(t *testing.T) {
@@ -774,4 +858,9 @@ func TestLiveLogTailer_StatError(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatalf("Timed out waiting for the stat error to be logged. Logs:\n%s", strings.Join(capturedLogs, "\n"))
 	}
+}
+
+// Stat overrides the embedded os.File's Stat method to always return an error.
+func (f *statErrorFile) Stat() (os.FileInfo, error) {
+	return nil, errors.New("simulated stat error")
 }

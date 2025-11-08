@@ -9,8 +9,19 @@ import (
 	"time"
 )
 
-// osOpen is a variable that holds the os.Open function, allowing it to be mocked in tests.
-var osOpen = os.Open
+// fileOpener defines the function signature for opening a file, returning our interface.
+type fileOpener func(name string) (fileHandle, error)
+
+var osOpenFile fileOpener = func(name string) (fileHandle, error) {
+	return os.Open(name)
+}
+
+// fileHandle defines the interface for file operations needed by the tailer.
+type fileHandle interface {
+	io.ReadSeeker
+	io.Closer
+	Stat() (os.FileInfo, error)
+}
 
 // ReadLineWithLimit reads a line from the reader up to the given limit (in bytes).
 // If the line exceeds the limit, it returns the partial line and ErrLineSkipped.
@@ -166,10 +177,18 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 
 	// Inner loop for re-opening the file
 	for {
+		var file fileHandle
 		if shutdown {
 			return
 		}
 
+		// Local function to restart the outer loop after a delay.
+		// It's defined here to capture 'shutdown' in its closure.
+		restartTailing := func(delay time.Duration) {
+			if delay > 0 && delayOrShutdown(p, delay, signalCh) {
+				shutdown = true
+			}
+		}
 		// Signal for test synchronization, if the channel is set.
 		if readySignal != nil {
 			readySignal <- struct{}{}
@@ -177,7 +196,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 
 		p.LogFunc(LevelInfo, "TAIL", "Starting log tailer on %s...", LogFilePath)
 
-		file, err := osOpen(LogFilePath)
+		file, err := osOpenFile(LogFilePath)
 		if err != nil {
 			// File not found on first attempt, wait and retry.
 			p.LogFunc(LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", LogFilePath, err, ErrorRetryDelay)
@@ -197,6 +216,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			p.LogFunc(LevelWarning, "TAIL_WARN", "Failed to get initial file stat: %v. Rotation detection may be impaired.", statErr)
 			// If we can't stat the file, the handle is likely bad. Close it and restart the loop.
 			file.Close()
+			restartTailing(ErrorRetryDelay) // Add a delay to prevent a tight loop on repeated stat failures.
 			continue
 		}
 
@@ -210,13 +230,6 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 
 		lineNumber := 0
 		lineLimit := MaxLogLineSize
-
-		// Local function to restart the outer loop after a delay
-		restartTailing := func(delay time.Duration) {
-			if delay > 0 && delayOrShutdown(p, delay, signalCh) {
-				shutdown = true
-			}
-		}
 
 		// Inner loop for reading new lines
 		for {
