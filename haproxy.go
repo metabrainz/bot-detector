@@ -98,13 +98,12 @@ func executeHAProxyCommandImpl(addr, ip, command string) error {
 
 // executeHAProxyCommandsConcurrently handles the concurrent execution of multiple commands
 // (map[table_name]map[haproxy_addr]command) against HAProxy instances.
-// This abstracts away the concurrency and error reporting logic.
-func (p *Processor) executeHAProxyCommandsConcurrently(ip string, targets map[string]map[string]string) {
+func (p *Processor) executeHAProxyCommandsConcurrently(ip string, targets map[string]map[string]string) error {
 	addresses := p.Config.HAProxyAddresses
 
 	if len(addresses) == 0 {
 		p.LogFunc(LevelWarning, "SKIP_COMMAND", "HAProxy addresses list is empty. Skipping command for IP %s.", ip)
-		return
+		return nil
 	}
 
 	// Calculate total number of goroutines required
@@ -114,7 +113,7 @@ func (p *Processor) executeHAProxyCommandsConcurrently(ip string, targets map[st
 	}
 
 	if totalGoroutines == 0 {
-		return // Nothing to execute
+		return nil // Nothing to execute
 	}
 
 	var wg sync.WaitGroup
@@ -147,9 +146,11 @@ func (p *Processor) executeHAProxyCommandsConcurrently(ip string, targets map[st
 	close(errs)
 
 	// Final Error Check (Logging only)
-	if len(errs) > 0 {
+	if numErrs := len(errs); numErrs > 0 {
 		p.LogFunc(LevelWarning, "HAPROXY_WARN", "One or more HAProxy instances failed to process command for IP %s. Total failures: %d", ip, len(errs))
+		return fmt.Errorf("%d HAProxy commands failed for IP %s", numErrs, ip)
 	}
+	return nil
 }
 
 // BlockIP adds an IP to the appropriate HAProxy stick table/map with a key set to '1' (blocked).
@@ -199,9 +200,7 @@ func (p *Processor) BlockIP(ipInfo IPInfo, duration time.Duration) error {
 	}
 
 	// 4. Execute concurrently
-	p.executeHAProxyCommandsConcurrently(ipInfo.Address, targets)
-
-	return nil // Error logging is handled inside the concurrent executor
+	return p.executeHAProxyCommandsConcurrently(ipInfo.Address, targets)
 }
 
 // UnblockIP removes an IP from all configured HAProxy stick tables/maps.
@@ -257,7 +256,5 @@ func (p *Processor) UnblockIP(ipInfo IPInfo) error {
 	}
 
 	// 3. Execute concurrently
-	p.executeHAProxyCommandsConcurrently(ipInfo.Address, targets)
-
-	return nil // Error logging is handled inside the concurrent executor
+	return p.executeHAProxyCommandsConcurrently(ipInfo.Address, targets)
 }
