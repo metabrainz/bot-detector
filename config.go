@@ -183,7 +183,6 @@ func compileListMatcher(chainName string, stepIndex int, field string, values []
 		matcher, err := compileSingleMatcher(chainName, stepIndex, field, item, fileDeps)
 		if err != nil {
 			return nil, err // Error in a sub-matcher
-			return nil, err
 		}
 		subMatchers = append(subMatchers, matcher)
 	}
