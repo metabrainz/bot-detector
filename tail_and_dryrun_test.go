@@ -287,18 +287,16 @@ func TestDelayOrShutdown(t *testing.T) {
 
 // tailerTestHarness encapsulates the common setup and teardown for LiveLogTailer tests.
 type tailerTestHarness struct {
-	t               *testing.T
-	processor       *Processor
-	tempLogFile     string
-	signalCh        chan os.Signal
-	doneCh          chan struct{}
-	readyCh         chan struct{}
-	capturedLogs    []string
-	processedLines  []string
-	logMutex        sync.Mutex
-	lineProcessed   chan string
-	fileRotated     chan struct{} // New channel to signal rotation
-	readErrorLogged chan struct{} // New channel to signal a read error
+	t              *testing.T
+	processor      *Processor
+	tempLogFile    string
+	signalCh       chan os.Signal
+	doneCh         chan struct{}
+	readyCh        chan struct{}
+	capturedLogs   []string
+	processedLines []string
+	logMutex       sync.Mutex
+	lineProcessed  chan string
 }
 
 // newTailerTestHarness creates and initializes a test harness for LiveLogTailer.
@@ -306,13 +304,11 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 	t.Helper()
 
 	h := &tailerTestHarness{
-		t:               t,
-		signalCh:        make(chan os.Signal, 1),
-		doneCh:          make(chan struct{}),
-		readyCh:         make(chan struct{}, 1),
-		lineProcessed:   make(chan string, 10), // Buffered to prevent blocking
-		fileRotated:     make(chan struct{}, 1),
-		readErrorLogged: make(chan struct{}, 1),
+		t:             t,
+		signalCh:      make(chan os.Signal, 1),
+		doneCh:        make(chan struct{}),
+		readyCh:       make(chan struct{}, 1),
+		lineProcessed: make(chan string, 10), // Buffered to prevent blocking
 	}
 
 	// Create temp file and set global path
@@ -329,17 +325,6 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 			defer h.logMutex.Unlock() //nolint:gocritic
 			logLine := fmt.Sprintf(tag+": "+format, args...)
 			h.capturedLogs = append(h.capturedLogs, logLine)
-			// If the tailer logs that it's reopening due to rotation, signal the channel.
-			if tag == "TAIL" && strings.Contains(logLine, "Detected log file rotation") {
-				h.fileRotated <- struct{}{}
-			}
-			// If the tailer logs a read error, signal the channel.
-			if tag == "TAIL_ERROR" && strings.Contains(logLine, "Read error while tailing") {
-				select {
-				case h.readErrorLogged <- struct{}{}:
-				default:
-				}
-			}
 		},
 		ProcessLogLine: func(line string, lineNumber int) {
 			h.logMutex.Lock()
@@ -403,6 +388,22 @@ func TestDryRunLogProcessor(t *testing.T) {
 			expectedLogContains:    "DryRun complete. Processed 3 lines.",
 		},
 		{
+			name: "Empty line in middle of file",
+			setupFunc: func(filePath string) {
+				os.WriteFile(filePath, []byte("line 1\n\nline 3"), 0644)
+			},
+			expectedLinesProcessed: 2,
+			expectedLogContains:    "Skipped (Comment/Empty)",
+		},
+		{
+			name: "Comment line in middle of file",
+			setupFunc: func(filePath string) {
+				os.WriteFile(filePath, []byte("line 1\n# comment\nline 3"), 0644)
+			},
+			expectedLinesProcessed: 2,
+			expectedLogContains:    "Skipped (Comment/Empty)",
+		},
+		{
 			name:                   "File Not Found",
 			setupFunc:              func(filePath string) { os.Remove(filePath) },
 			expectedLinesProcessed: 0,
@@ -437,6 +438,11 @@ func TestDryRunLogProcessor(t *testing.T) {
 
 			if len(harness.processedLines) != tt.expectedLinesProcessed {
 				t.Errorf("Expected %d lines to be processed, but got %d", tt.expectedLinesProcessed, len(harness.processedLines))
+			}
+
+			logOutput := strings.Join(harness.capturedLogs, "\n")
+			if !strings.Contains(logOutput, tt.expectedLogContains) {
+				t.Errorf("Expected log output to contain '%s', but it did not.\nFull Log:\n%s", tt.expectedLogContains, logOutput)
 			}
 		})
 	}
@@ -505,12 +511,23 @@ func TestLiveLogTailer(t *testing.T) {
 		t.Fatalf("Failed to create new log file after rotation: %v", err)
 	}
 
+	// Override LogFunc to signal when rotation is detected.
+	fileRotated := make(chan struct{}, 1)
+	originalLogFunc := harness.processor.LogFunc
+	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		originalLogFunc(level, tag, format, args...) // Call original to preserve logging
+		if tag == "TAIL" && strings.Contains(fmt.Sprintf(format, args...), "Detected log file rotation") {
+			fileRotated <- struct{}{}
+		}
+	}
+
 	// Wait for the tailer to detect the rotation and be ready for the new file.
 	select {
-	case <-harness.fileRotated:
+	case <-fileRotated:
 		// Rotation was detected.
 	case <-time.After(1 * time.Second):
-		t.Fatal("Timed out waiting for tailer to detect file rotation.")
+		logOutput := strings.Join(harness.capturedLogs, "\n")
+		t.Fatalf("Timed out waiting for tailer to detect file rotation. Logs:\n%s", logOutput)
 	}
 
 	// Wait for the tailer to process the line from the new file.
@@ -679,6 +696,19 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 		StatFunc: func(s string) (os.FileInfo, error) { return mockInfo, nil },
 	})
 
+	// Override LogFunc to signal when the read error is logged.
+	readErrorLogged := make(chan struct{}, 1)
+	originalLogFunc := harness.processor.LogFunc
+	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		originalLogFunc(level, tag, format, args...)
+		if tag == "TAIL_ERROR" && strings.Contains(fmt.Sprintf(format, args...), "Read error while tailing") {
+			select {
+			case readErrorLogged <- struct{}{}:
+			default:
+			}
+		}
+	}
+
 	// --- Act ---
 	harness.start()
 
@@ -703,7 +733,7 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 
 	// Wait for the tailer to log the read error. This is now deterministic.
 	select {
-	case <-harness.readErrorLogged:
+	case <-readErrorLogged:
 		// The error was logged as expected.
 	case <-time.After(1 * time.Second):
 		t.Fatalf("Timed out waiting for the read error to be logged. Logs:\n%s", strings.Join(harness.capturedLogs, "\n"))
