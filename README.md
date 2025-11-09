@@ -137,6 +137,20 @@ The file is structured as a top-level map containing a single key, chains, which
 | **haproxy_retry_delay** | string | Optional. Duration to wait between retry attempts. Default: `200ms`. |
 | **haproxy_dial_timeout** | string | Optional. Timeout for establishing a connection to an HAProxy socket. Default: `5s`. |
 
+#### A Note on Durations
+
+All duration fields in the configuration (e.g., `idle_timeout`, `block_duration`, `max_delay`) are parsed as Go duration strings (extended to day and week for convenience). This format is a sequence of decimal numbers, each with a unit suffix.
+
+The valid time units are:
+* `ms` (millisecond)
+* `s` (second)
+* `m` (minute)
+* `h` (hour)
+* `d` (day, equivalent to `24h`)
+* `w` (week, equivalent to `168h`)
+
+Units can be combined in descending order of magnitude (e.g., `"1w2d3h4m5s"`).
+
 #### Default Log Format Example
 
 If `log_format_regex` is not specified, the application expects lines to follow this format:

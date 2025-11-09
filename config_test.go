@@ -12,6 +12,63 @@ import (
 	"time"
 )
 
+func TestParseDuration(t *testing.T) {
+	tests := []struct {
+		name        string
+		durationStr string
+		expected    time.Duration
+		expectError bool
+	}{
+		// Standard Go durations
+		{"Standard seconds", "10s", 10 * time.Second, false},
+		{"Standard minutes and hours", "1h30m", 1*time.Hour + 30*time.Minute, false},
+		{"Standard milliseconds", "200ms", 200 * time.Millisecond, false},
+
+		// Day ('d') unit
+		{"Single day", "1d", 24 * time.Hour, false},
+		{"Multiple days", "7d", 7 * 24 * time.Hour, false},
+		{"Decimal day", "1.5d", 36 * time.Hour, false},
+
+		// Week ('w') unit
+		{"Single week", "1w", 7 * 24 * time.Hour, false},
+		{"Multiple weeks", "2w", 2 * 7 * 24 * time.Hour, false},
+		{"Decimal week", "0.5w", 84 * time.Hour, false},
+
+		// Combined units
+		{"Week and day", "1w2d", (7*24 + 2*24) * time.Hour, false},
+		{"Day and hour", "1d12h", 36 * time.Hour, false},
+		{"Complex combination", "1w1d1h1m1s", (168+24+1)*time.Hour + 1*time.Minute + 1*time.Second, false},
+		{"Hour and day (reversed)", "12h1d", 36 * time.Hour, false},
+
+		// Edge cases and invalid formats
+		{"No unit", "300", 0, true},
+		{"Unknown unit", "1y", 0, true},
+		{"Invalid combo", "1d1w", 0, true}, // Go parser doesn't like this order
+		{"No number", "d", 0, true},
+		{"Invalid number", "1.d", 0, true},
+		{"Empty string", "", 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseDuration(tt.durationStr)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("parseDuration() was expected to return an error for input '%s', but it did not", tt.durationStr)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("parseDuration() returned an unexpected error for input '%s': %v", tt.durationStr, err)
+				}
+				if got != tt.expected {
+					t.Errorf("parseDuration() for input '%s' got %v, want %v", tt.durationStr, got, tt.expected)
+				}
+			}
+		})
+	}
+}
+
 func TestLoadConfigFromYAML_Success(t *testing.T) {
 	// --- Setup ---
 	// Create a temporary valid YAML file
