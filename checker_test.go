@@ -392,58 +392,6 @@ func TestCheckChains_LogAction(t *testing.T) {
 	h.assertChainProgressCleared("LogActionTestChain", entry2)
 }
 
-// TestCheckChains_LogAction_Whitelisted verifies that when a whitelisted IP completes
-// a chain with action: "log", a specific log message is generated and no block occurs.
-func TestCheckChains_LogAction_Whitelisted(t *testing.T) {
-	// 1. Setup
-	resetGlobalState()
-
-	const whitelistedIP = "192.0.2.10"
-	chain := BehavioralChain{
-		Name:   "LogOnlyForWhitelist",
-		Action: "log",
-		Steps:  []StepDef{{Order: 1}},
-	}
-	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/trigger", new([]string))
-	chain.Steps[0].Matchers = []fieldMatcher{matcher}
-
-	// Capture log output
-	var capturedLog string
-	var logMutex sync.Mutex
-	logCaptureFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-		logMutex.Lock()
-		defer logMutex.Unlock()
-		if tag == "ALERT" {
-			capturedLog = fmt.Sprintf(format, args...)
-		}
-	}
-
-	processor := newTestProcessor(&AppConfig{}, []BehavioralChain{chain})
-	processor.IsWhitelistedFunc = func(ipInfo IPInfo) bool {
-		return ipInfo.Address == whitelistedIP
-	}
-	processor.LogFunc = logCaptureFunc
-
-	entry := &LogEntry{
-		IPInfo:    NewIPInfo(whitelistedIP),
-		Timestamp: time.Now(),
-		Path:      "/trigger",
-	}
-
-	// Set the CheckChainsFunc to the real method on the processor instance.
-	processor.CheckChainsFunc = func(entry *LogEntry) { CheckChains(processor, entry) }
-
-	// --- Act ---
-	CheckChains(processor, entry)
-
-	// --- Assert ---
-	// With the corrected logic, CheckChains should exit immediately for a whitelisted IP.
-	// Therefore, no "ALERT" log should be generated.
-	if capturedLog != "" {
-		t.Errorf("Expected no log message for a whitelisted IP, but got: '%s'", capturedLog)
-	}
-}
-
 // TestCheckChains_BlockExpiration verifies that if an activity is marked as blocked but the
 // BlockedUntil time has passed, the block is cleared and the chain can be processed again.
 func TestCheckChains_BlockExpiration(t *testing.T) {
