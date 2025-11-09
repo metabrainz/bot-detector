@@ -737,7 +737,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			processor := &Processor{
 				ActivityStore: make(map[TrackingKey]*BotActivity),
 				ActivityMutex: &sync.RWMutex{},
-				ChainMutex:    &sync.RWMutex{},
+				ConfigMutex:   &sync.RWMutex{},
 				Config: &AppConfig{
 					// This config is needed for the p.UnblockIP call to work.
 					HAProxyAddresses:    []string{"127.0.0.1:9999"},
@@ -818,7 +818,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 		processor := &Processor{
 			ActivityMutex: &sync.RWMutex{},
 			ActivityStore: make(map[TrackingKey]*BotActivity),
-			ChainMutex:    &sync.RWMutex{},
+			ConfigMutex:   &sync.RWMutex{},
 			Config: &AppConfig{
 				HAProxyAddresses:    []string{"127.0.0.1:9999"},
 				DurationToTableName: map[time.Duration]string{time.Minute: "t1"},
@@ -928,7 +928,7 @@ chains:
 	processor := &Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[TrackingKey]*BotActivity),
-		ChainMutex:    &sync.RWMutex{},
+		ConfigMutex:   &sync.RWMutex{},
 		Chains:        initialLoadedCfg.Chains,
 		Config:        &AppConfig{PollingInterval: 10 * time.Millisecond},
 		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
@@ -981,8 +981,8 @@ chains:
 
 	// --- Assert ---
 	// 8. Check if the processor's state has been updated.
-	processor.ChainMutex.RLock()
-	defer processor.ChainMutex.RUnlock()
+	processor.ConfigMutex.RLock()
+	defer processor.ConfigMutex.RUnlock()
 
 	if len(processor.Chains) != 1 || processor.Chains[0].Name != "ReloadedChain" {
 		t.Errorf("Expected chain to be 'ReloadedChain', but got: %+v", processor.Chains)
@@ -1037,7 +1037,7 @@ chains:
 	processor := &Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[TrackingKey]*BotActivity),
-		ChainMutex:    &sync.RWMutex{},
+		ConfigMutex:   &sync.RWMutex{},
 		Chains:        initialLoadedCfg.Chains,
 		Config: &AppConfig{
 			FileDependencies: initialLoadedCfg.FileDependencies,
@@ -1078,8 +1078,8 @@ chains:
 
 	// --- Assert ---
 	// 9. Check if the processor's internal matchers have been updated.
-	processor.ChainMutex.RLock()
-	defer processor.ChainMutex.RUnlock()
+	processor.ConfigMutex.RLock()
+	defer processor.ConfigMutex.RUnlock()
 
 	if len(processor.Chains) != 1 || len(processor.Chains[0].Steps) != 1 {
 		t.Fatal("Processor chains were not reloaded correctly.")
@@ -1133,9 +1133,9 @@ chains:
 	var capturedLogs []string
 	var logMutex sync.Mutex
 	processor := &Processor{
-		ChainMutex: &sync.RWMutex{},
-		Chains:     initialLoadedCfg.Chains,
-		Config:     &AppConfig{PollingInterval: 10 * time.Millisecond},
+		ConfigMutex: &sync.RWMutex{},
+		Chains:      initialLoadedCfg.Chains,
+		Config:      &AppConfig{PollingInterval: 10 * time.Millisecond},
 	}
 	initialFileInfo, _ := os.Stat(tempFile)
 	processor.Config.LastModTime = initialFileInfo.ModTime()
@@ -1232,9 +1232,9 @@ chains:
 	var capturedLogs []string
 	var logMutex sync.Mutex
 	processor := &Processor{
-		ChainMutex: &sync.RWMutex{},
-		Chains:     []BehavioralChain{{Name: "InitialChain"}}, // Simplified initial state
-		Config:     &AppConfig{PollingInterval: 10 * time.Millisecond},
+		ConfigMutex: &sync.RWMutex{},
+		Chains:      []BehavioralChain{{Name: "InitialChain"}}, // Simplified initial state
+		Config:      &AppConfig{PollingInterval: 10 * time.Millisecond},
 		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
 			logMutex.Lock()
 			capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))

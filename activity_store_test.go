@@ -14,7 +14,7 @@ func TestCleanUpIdleActivity(t *testing.T) {
 	processor := &Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[TrackingKey]*BotActivity),
-		ChainMutex:    &sync.RWMutex{},
+		ConfigMutex:   &sync.RWMutex{},
 		Chains:        []BehavioralChain{}, // No chains needed for this test
 		Config: &AppConfig{
 			CleanupInterval:     10 * time.Millisecond,  // A very short cleanup interval for the test

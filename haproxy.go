@@ -30,13 +30,13 @@ func (b *HAProxyBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 	}
 
 	// 1. Determine table name for the given duration (using DurationToTableName)
-	p.ChainMutex.RLock()
+	p.ConfigMutex.RLock()
 	baseTableName, found := p.Config.DurationToTableName[duration]
 	if !found {
 		// If duration not found, use the fallback table
 		baseTableName = p.Config.BlockTableNameFallback
 	}
-	p.ChainMutex.RUnlock()
+	p.ConfigMutex.RUnlock()
 
 	if baseTableName == "" {
 		p.LogFunc(LevelWarning, "SKIP_BLOCK", "No HAProxy table found for block duration %v. Skipping block attempt for IP %s.", duration, ipInfo.Address)
@@ -94,7 +94,7 @@ func (b *HAProxyBlocker) Unblock(ipInfo IPInfo) error {
 	}
 
 	// 1. Determine all tables/maps to delete from
-	p.ChainMutex.RLock()
+	p.ConfigMutex.RLock()
 	baseTables := make(map[string]struct{})
 	for _, baseName := range p.Config.DurationToTableName {
 		baseTables[baseName] = struct{}{}
@@ -107,7 +107,7 @@ func (b *HAProxyBlocker) Unblock(ipInfo IPInfo) error {
 	targets := make(map[string]map[string]string)
 
 	addresses := p.Config.HAProxyAddresses
-	p.ChainMutex.RUnlock()
+	p.ConfigMutex.RUnlock()
 
 	// We only clear the tables matching the IP's version
 	for baseName := range baseTables {

@@ -1173,7 +1173,7 @@ func TestDryRunMode(t *testing.T) {
 	processor := &Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[TrackingKey]*BotActivity),
-		ChainMutex:    &sync.RWMutex{},
+		ConfigMutex:   &sync.RWMutex{},
 		Chains:        loadedCfg.Chains,
 		Config: &AppConfig{
 			OutOfOrderTolerance: loadedCfg.OutOfOrderTolerance,

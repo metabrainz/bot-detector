@@ -28,7 +28,7 @@ func CheckAndRemoveWhitelistedBlocks(p *Processor) {
 	p.ActivityMutex.Lock()
 	defer p.ActivityMutex.Unlock()
 
-	// Get the latest whitelist state (protected by ChainMutex)
+	// Get the latest whitelist state (protected by ConfigMutex)
 	currentWhitelist := p.Config.WhitelistNets
 
 	unblockedCount := 0
@@ -60,11 +60,11 @@ func CheckAndRemoveWhitelistedBlocks(p *Processor) {
 // logConfigurationSummary logs the key-value pairs of the current application configuration.
 // This is useful for visibility on startup and after a configuration reload.
 func logConfigurationSummary(p *Processor) {
-	p.ChainMutex.RLock()
+	p.ConfigMutex.RLock()
 	config := p.Config
 	logRegex := p.LogRegex
 	currentLogLevel := CurrentLogLevel.String()
-	p.ChainMutex.RUnlock()
+	p.ConfigMutex.RUnlock()
 
 	p.LogFunc(LevelInfo, "CONFIG", "Loaded configuration:")
 
@@ -739,7 +739,7 @@ func ChainWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan st
 			continue
 		}
 
-		p.ChainMutex.RLock()
+		p.ConfigMutex.RLock()
 		if fileInfo.ModTime().After(p.Config.LastModTime) {
 			isChanged = true
 			changedFile = YAMLFilePath
@@ -760,7 +760,7 @@ func ChainWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan st
 				}
 			}
 		}
-		p.ChainMutex.RUnlock()
+		p.ConfigMutex.RUnlock()
 
 		if isChanged {
 			p.LogFunc(LevelInfo, "WATCH", "Detected change in '%s'. Attempting reload...", changedFile)
@@ -770,14 +770,14 @@ func ChainWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan st
 					defer func() { reloadDoneSignal <- struct{}{} }()
 				}
 
-				p.ChainMutex.RLock()
+				p.ConfigMutex.RLock()
 				oldChains := p.Chains
 				// Create a shallow copy of the config to compare against after the reload.
 				// If we just did `oldConfig := p.Config`, we'd have a pointer to the same struct,
 				// and our comparison would be against the already-updated values.
 				oldConfig := *p.Config //nolint:govet
 				oldLogRegex := p.LogRegex
-				p.ChainMutex.RUnlock()
+				p.ConfigMutex.RUnlock()
 				// LoadChainsFromYAML now returns parsed data, not modifying global state.
 				loadedCfg, err := LoadConfigFromYAML()
 				if err != nil {
@@ -786,7 +786,7 @@ func ChainWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan st
 				}
 
 				// Update the processor's state with the new config.
-				p.ChainMutex.Lock()
+				p.ConfigMutex.Lock()
 				p.Chains = loadedCfg.Chains
 				p.Config.WhitelistNets = loadedCfg.WhitelistNets
 				p.Config.HAProxyAddresses = loadedCfg.HAProxyAddresses
@@ -806,7 +806,7 @@ func ChainWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan st
 				p.Config.MaxTimeSinceLastHit = loadedCfg.MaxTimeSinceLastHit
 				p.Config.FileDependencies = loadedCfg.FileDependencies
 				p.Config.LastModTime = time.Now() // Use time.Now() to avoid race conditions with fast edits
-				p.ChainMutex.Unlock()
+				p.ConfigMutex.Unlock()
 
 				// --- Compare and log general config changes ---
 				// Compare tagged fields using reflection, and handle special cases manually.

@@ -56,7 +56,7 @@ func main() {
 	p := &Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[TrackingKey]*BotActivity),
-		ChainMutex:    &sync.RWMutex{},
+		ConfigMutex:   &sync.RWMutex{},
 		Chains:        loadedCfg.Chains,
 		CommandExecutor: func(p *Processor, addr, ip, command string) error {
 			return executeCommandImpl(p, addr, ip, command)

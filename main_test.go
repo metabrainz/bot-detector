@@ -32,7 +32,7 @@ func TestStart_DryRun(t *testing.T) {
 	p := &Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[TrackingKey]*BotActivity),
-		ChainMutex:    &sync.RWMutex{},
+		ConfigMutex:   &sync.RWMutex{},
 		Chains:        []BehavioralChain{},
 		Config:        &AppConfig{},
 		DryRun:        true, // Enable dry-run mode.
@@ -96,7 +96,7 @@ func TestStart_LiveMode(t *testing.T) {
 	p := &Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[TrackingKey]*BotActivity),
-		ChainMutex:    &sync.RWMutex{},
+		ConfigMutex:   &sync.RWMutex{},
 		Chains:        []BehavioralChain{},
 		Config: &AppConfig{
 			CleanupInterval: 10 * time.Millisecond,

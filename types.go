@@ -27,7 +27,7 @@ type Processor struct {
 	ActivityMutex     *sync.RWMutex
 	ActivityStore     map[TrackingKey]*BotActivity
 	Blocker           Blocker
-	ChainMutex        *sync.RWMutex
+	ConfigMutex       *sync.RWMutex
 	Chains            []BehavioralChain
 	CommandExecutor   func(p *Processor, addr, ip, command string) error // The function that executes the backend command
 	Config            *AppConfig

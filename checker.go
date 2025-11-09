@@ -245,7 +245,7 @@ func CheckChains(p *Processor, entry *LogEntry) {
 
 	// Determine the most specific tracking key required by any applicable chain.
 	primaryKeySpecificity := 0 // 0=none, 1=ip, 2=ip_ua
-	p.ChainMutex.RLock()
+	p.ConfigMutex.RLock()
 	chains := p.Chains
 	for _, chain := range chains {
 		if GetTrackingKey(&chain, entry).IPInfo.Address != "" { // Does this chain apply to this entry?
@@ -257,7 +257,7 @@ func CheckChains(p *Processor, entry *LogEntry) {
 			}
 		}
 	}
-	p.ChainMutex.RUnlock()
+	p.ConfigMutex.RUnlock()
 
 	trackingKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
 	if primaryKeySpecificity == 2 {

@@ -78,9 +78,9 @@ func IsIPWhitelisted(p *Processor, ipInfo IPInfo) bool {
 	if ip == nil {
 		return false
 	}
-	// Note: WhitelistNets is protected by ChainMutex because it's populated during config reload.
-	p.ChainMutex.RLock()
-	defer p.ChainMutex.RUnlock()
+	// Note: WhitelistNets is protected by ConfigMutex because it's populated during config reload.
+	p.ConfigMutex.RLock()
+	defer p.ConfigMutex.RUnlock()
 
 	for _, ipNet := range p.Config.WhitelistNets {
 		if ipNet.Contains(ip) {

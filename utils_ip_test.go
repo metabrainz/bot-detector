@@ -16,7 +16,7 @@ func TestIsIPWhitelisted(t *testing.T) {
 
 	// Set the global WhitelistNets
 	processor := &Processor{
-		ChainMutex: &sync.RWMutex{},
+		ConfigMutex: &sync.RWMutex{},
 		Config: &AppConfig{
 			WhitelistNets: []*net.IPNet{netV4, netV6},
 		},
