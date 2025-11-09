@@ -13,59 +13,62 @@ import (
 	"time"
 )
 
-// --- Test Case for CheckChains --
-
-// TestCheckChains_SuccessfulBlock tests a multi-step chain that successfully triggers a block.
-func TestCheckChains_SuccessfulBlock(t *testing.T) {
-	// --- Setup ---
-	const targetIP = "192.0.2.1"
-	const blockDuration = 10 * time.Minute
-
-	h := newCheckerTestHarness(t, nil)
-
-	// Define and add a two-step chain to the harness
-	h.addChain(BehavioralChain{
-		Name:          "TwoStepPathBlocker",
-		MatchKey:      "ip_ua",
-		Action:        "block",
-		BlockDuration: blockDuration,
-		StepsYAML: []StepDefYAML{
-			{FieldMatches: map[string]interface{}{"Path": "/step/one"}, MaxDelay: "5s"},
-			{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MaxDelay: "5s"},
-		},
-	})
-
-	// --- STEP 1: Process the first request --
-	entry1 := &LogEntry{IPInfo: NewIPInfo(targetIP), UserAgent: "TestAgent", Timestamp: time.Now(), Path: "/step/one"}
-	h.processEntry(entry1)
-
-	// Assert 1: No block should be called, and the state should be at step 1
-	if h.blockCalled {
-		t.Fatal("Blocker was called after step 1, but it should only be called after step 2.")
+// TestCheckChains_BlockAction tests a multi-step chain that successfully triggers a block,
+// verifying behavior in both live and dry-run modes.
+func TestCheckChains_BlockAction(t *testing.T) {
+	tests := []struct {
+		name            string
+		dryRun          bool
+		expectBlockCall bool
+	}{
+		{name: "Live Mode", dryRun: false, expectBlockCall: true},
+		{name: "Dry Run Mode", dryRun: true, expectBlockCall: false},
 	}
 
-	h.assertChainProgress("TwoStepPathBlocker", entry1, 1)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// --- Setup ---
+			const targetIP = "192.0.2.1"
+			const blockDuration = 10 * time.Minute
 
-	// --- STEP 2: Process the second request (the attack completion) --
+			h := newCheckerTestHarness(t, nil)
+			h.processor.DryRun = tt.dryRun
 
-	entry2 := &LogEntry{IPInfo: NewIPInfo(targetIP), UserAgent: "TestAgent", Timestamp: entry1.Timestamp.Add(2 * time.Second), Path: "/step/two"}
-	h.processEntry(entry2)
+			h.addChain(BehavioralChain{
+				Name:          "TwoStepBlocker",
+				MatchKey:      "ip_ua",
+				Action:        "block",
+				BlockDuration: blockDuration,
+				StepsYAML: []StepDefYAML{
+					{FieldMatches: map[string]interface{}{"Path": "/step/one"}},
+					{FieldMatches: map[string]interface{}{"Path": "/step/two"}},
+				},
+			})
 
-	// Assert 2: Block was called, and activity state is updated
-	if !h.blockCalled {
-		t.Fatal("Expected Blocker to be called after completing the chain, but it was not.")
+			// --- Act ---
+			entry1 := &LogEntry{IPInfo: NewIPInfo(targetIP), UserAgent: "TestAgent", Timestamp: time.Now(), Path: "/step/one"}
+			h.processEntry(entry1)
+			h.assertChainProgress("TwoStepBlocker", entry1, 1)
+
+			entry2 := &LogEntry{IPInfo: NewIPInfo(targetIP), UserAgent: "TestAgent", Timestamp: entry1.Timestamp.Add(2 * time.Second), Path: "/step/two"}
+			h.processEntry(entry2)
+
+			// --- Assert ---
+			if h.blockCalled != tt.expectBlockCall {
+				t.Fatalf("Expected blockCalled to be %t, but got %t", tt.expectBlockCall, h.blockCalled)
+			}
+
+			if tt.expectBlockCall {
+				if h.blockCallArgs.ipInfo.Address != targetIP || h.blockCallArgs.duration != blockDuration {
+					t.Errorf("Blocker called with incorrect args. Got IP %s, Duration %v", h.blockCallArgs.ipInfo.Address, h.blockCallArgs.duration)
+				}
+			}
+
+			// In-memory state should be updated regardless of mode.
+			h.assertBlocked(entry2, true)
+			h.assertChainProgressCleared("TwoStepBlocker", entry2)
+		})
 	}
-
-	if h.blockCallArgs.ipInfo.Address != targetIP {
-		t.Errorf("Blocker called with incorrect IP. Got %s, want %s", h.blockCallArgs.ipInfo.Address, targetIP)
-	}
-	if h.blockCallArgs.duration != blockDuration {
-		t.Errorf("Blocker called with incorrect duration. Got %v, want %v", h.blockCallArgs.duration, blockDuration)
-	}
-
-	// Check final ActivityStore state: IsBlocked should be true and ChainProgress should be cleared
-	h.assertBlocked(entry2, true)
-	h.assertChainProgressCleared("TwoStepPathBlocker", entry2)
 }
 
 // TestPreCheckActivity_StillBlocked verifies that when an IP is already blocked,
@@ -123,42 +126,6 @@ func TestPreCheckActivity_StillBlocked(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestCheckChains_DryRun tests that a block is NOT executed when DryRun is true.
-func TestCheckChains_DryRun(t *testing.T) {
-	// --- Setup ---
-	const targetIP = "192.0.2.1"
-	const blockDuration = 10 * time.Minute
-
-	h := newCheckerTestHarness(t, nil)
-	h.processor.DryRun = true
-
-	h.addChain(BehavioralChain{
-		Name:          "DryRunChain",
-		MatchKey:      "ip",
-		Action:        "block",
-		BlockDuration: blockDuration,
-		StepsYAML: []StepDefYAML{
-			{FieldMatches: map[string]interface{}{"Path": "/step/one"}, MaxDelay: "5s"},
-			{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MaxDelay: "5s"},
-		},
-	})
-
-	// --- Act ---
-	entry1 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: time.Now(), Path: "/step/one"}
-	h.processEntry(entry1)
-
-	entry2 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: entry1.Timestamp.Add(2 * time.Second), Path: "/step/two"}
-	h.processEntry(entry2)
-
-	// --- Assert ---
-	if h.blockCalled {
-		t.Fatal("Blocker was called, but should be skipped in DryRun mode.")
-	}
-
-	// The in-memory block should still happen in the activity store, even in dry-run.
-	h.assertBlocked(entry2, true)
 }
 
 // TestCheckChains_UnknownAction tests that an unrecognized action is handled gracefully in both live and dry-run modes.
