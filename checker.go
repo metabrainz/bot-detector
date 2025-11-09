@@ -32,7 +32,7 @@ func GetMatchValue(fieldName string, entry *LogEntry) (string, error) {
 // preCheckActivity performs initial checks on an IP/key before processing against chains.
 // It returns the relevant BotActivity and a boolean indicating if further processing should be skipped.
 // The caller is responsible for locking/unlocking the ActivityMutex.
-func (p *Processor) preCheckActivity(entry *LogEntry, trackingKey TrackingKey) (*BotActivity, bool) {
+func preCheckActivity(p *Processor, entry *LogEntry, trackingKey TrackingKey) (*BotActivity, bool) {
 	// 2. Get or create activity and check for existing blocks.
 	activity := GetOrCreateActivityUnsafe(p.ActivityStore, trackingKey)
 
@@ -59,7 +59,7 @@ func (p *Processor) preCheckActivity(entry *LogEntry, trackingKey TrackingKey) (
 // It returns true if the entry should be skipped, false otherwise.
 // It also updates the LastRequestTime of the activity if the entry is in-order and newer.
 // The caller is responsible for holding the ActivityMutex.
-func (p *Processor) handleOutOfOrderEntry(entry *LogEntry, currentActivity *BotActivity) (skip bool) {
+func handleOutOfOrderEntry(p *Processor, entry *LogEntry, currentActivity *BotActivity) (skip bool) {
 	previousRequestTime := currentActivity.LastRequestTime
 	// If the entry is in order or it's the first time we've seen this key, process it.
 	if previousRequestTime.IsZero() || !entry.Timestamp.Before(previousRequestTime) {
@@ -84,7 +84,7 @@ func (p *Processor) handleOutOfOrderEntry(entry *LogEntry, currentActivity *BotA
 // handleChainCompletion takes action when a chain is completed (log, block, etc.).
 // It updates the activity state and returns true if the chain was completed.
 // The caller is responsible for holding the ActivityMutex.
-func (p *Processor) handleChainCompletion(chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity) {
+func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity) {
 	// --- 1. Log the completion event ---
 	logLevel := LevelCritical
 	if isTesting() {
@@ -92,7 +92,7 @@ func (p *Processor) handleChainCompletion(chain *BehavioralChain, entry *LogEntr
 	}
 
 	if p.DryRun {
-		p.logDryRunCompletion(chain, entry)
+		logDryRunCompletion(p, chain, entry)
 	} else {
 		// In live mode, log the action taken.
 		switch chain.Action {
@@ -105,7 +105,7 @@ func (p *Processor) handleChainCompletion(chain *BehavioralChain, entry *LogEntr
 
 	// --- 2. Perform the action ---
 	if chain.Action == "block" {
-		p.executeBlock(entry, chain)
+		executeBlock(p, entry, chain)
 		// Update the in-memory state to reflect the block for both live and dry runs.
 		ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
 		ipActivity := GetOrCreateActivityUnsafe(p.ActivityStore, ipOnlyKey)
@@ -118,7 +118,7 @@ func (p *Processor) handleChainCompletion(chain *BehavioralChain, entry *LogEntr
 }
 
 // executeBlock calls the external blocker unless in DryRun mode.
-func (p *Processor) executeBlock(entry *LogEntry, chain *BehavioralChain) {
+func executeBlock(p *Processor, entry *LogEntry, chain *BehavioralChain) {
 	if p.DryRun {
 		return
 	}
@@ -128,7 +128,7 @@ func (p *Processor) executeBlock(entry *LogEntry, chain *BehavioralChain) {
 }
 
 // logDryRunCompletion handles logging for completed chains in dry-run mode.
-func (p *Processor) logDryRunCompletion(chain *BehavioralChain, entry *LogEntry) {
+func logDryRunCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry) {
 	switch chain.Action {
 	case "block":
 		p.LogFunc(LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
@@ -154,7 +154,7 @@ func matchStepFields(step *StepDef, entry *LogEntry) bool {
 // processChainForEntry evaluates a single log entry against a single behavioral chain.
 // It manages state transitions (advancing, resetting) and triggers completion handling.
 // The caller is responsible for holding the ActivityMutex.
-func (p *Processor) processChainForEntry(chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity, previousRequestTime time.Time) {
+func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity, previousRequestTime time.Time) {
 	// If GetTrackingKey returns an empty key, it's a mismatch for this chain (e.g., wrong IP version).
 	if GetTrackingKey(chain, entry).IPInfo.Address == "" {
 		return
@@ -214,7 +214,7 @@ func (p *Processor) processChainForEntry(chain *BehavioralChain, entry *LogEntry
 
 		// --- CHECK FOR CHAIN COMPLETION ---
 		if state.CurrentStep == len(chain.Steps) {
-			p.handleChainCompletion(chain, entry, currentActivity)
+			handleChainCompletion(p, chain, entry, currentActivity)
 			state.CurrentStep = 0 // Reset state after action is taken.
 		}
 
@@ -236,7 +236,7 @@ func (p *Processor) processChainForEntry(chain *BehavioralChain, entry *LogEntry
 }
 
 // CheckChains is refactored as a method on Processor.
-func (p *Processor) CheckChains(entry *LogEntry) {
+func CheckChains(p *Processor, entry *LogEntry) {
 	// Immediately skip processing if the IP is whitelisted. This is the primary guard.
 	if p.IsWhitelistedFunc(entry.IPInfo) {
 		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IPInfo.Address)
@@ -269,7 +269,7 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 	defer p.ActivityMutex.Unlock()
 
 	// Perform pre-checks for whitelisting and existing blocks.
-	currentActivity, skip := p.preCheckActivity(entry, trackingKey)
+	currentActivity, skip := preCheckActivity(p, entry, trackingKey)
 	if skip {
 		// If preCheckActivity returns a skip, the lock is still held,
 		// so we can just return. The defer will unlock.
@@ -278,7 +278,7 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 
 	// Handle out-of-order log entries and update LastRequestTime.
 	// This function will return true if the entry should be skipped.
-	if p.handleOutOfOrderEntry(entry, currentActivity) {
+	if handleOutOfOrderEntry(p, entry, currentActivity) {
 		return
 	}
 
@@ -298,7 +298,7 @@ func (p *Processor) CheckChains(entry *LogEntry) {
 
 	// 2. Iterate over all configured chains.
 	for _, chain := range chains {
-		p.processChainForEntry(&chain, entry, currentActivity, previousRequestTime)
+		processChainForEntry(p, &chain, entry, currentActivity, previousRequestTime)
 	}
 
 }

@@ -134,7 +134,7 @@ func TestParseLogLine(t *testing.T) {
 			p := &Processor{
 				Config: &AppConfig{TimestampFormat: AccessLogTimeFormat},
 			}
-			entry, err := p.ParseLogLine(tt.line)
+			entry, err := ParseLogLine(p, tt.line)
 
 			if tt.expectError {
 				if err == nil {
@@ -172,11 +172,11 @@ func TestParseLogLine_CustomRegex(t *testing.T) {
 	}
 
 	// 4. Act: Parse the log line using the processor with the custom regex.
-	entry, err := p.ParseLogLine(customLogLine)
+	entry, err := ParseLogLine(p, customLogLine)
 
 	// 5. Assert: The parsing should succeed and the data should be correct.
 	if err != nil {
-		t.Fatalf("p.ParseLogLine with custom regex failed unexpectedly: %v", err)
+		t.Fatalf("ParseLogLine with custom regex failed unexpectedly: %v", err)
 	}
 
 	expectedTime, _ := time.Parse(AccessLogTimeFormat, "10/Nov/2025:13:55:36 +0000")
@@ -199,7 +199,7 @@ func TestParseLogLine_CustomRegex(t *testing.T) {
 	defaultProcessor := &Processor{
 		Config: &AppConfig{TimestampFormat: AccessLogTimeFormat},
 	}
-	_, defaultErr := defaultProcessor.ParseLogLine(customLogLine)
+	_, defaultErr := ParseLogLine(defaultProcessor, customLogLine)
 	if defaultErr == nil {
 		t.Error("Expected the default parser to fail on the custom log line, but it succeeded.")
 	}
@@ -248,7 +248,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 	key := TrackingKey{IPInfo: NewIPInfo(ip)}
 
 	// Set the CheckChainsFunc to the real method on the processor instance.
-	p.CheckChainsFunc = p.CheckChains
+	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
 
 	// 1. Process the line
 	p.ProcessLogLine(logLine, 1)

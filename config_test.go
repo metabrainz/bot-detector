@@ -643,7 +643,7 @@ chains: []
 	}
 	logLine := `example.com 192.0.2.1 - - [01/Jan/2025:12:00:00 +0000] "GET /path HTTP/1.1" 200 123 "http://a.real.referrer" "TestAgent/1.0"`
 
-	entry, err := p.ParseLogLine(logLine)
+	entry, err := ParseLogLine(p, logLine)
 	if err != nil {
 		t.Fatalf("ParseLogLine failed with a valid regex missing an optional group: %v", err)
 	}
@@ -702,7 +702,7 @@ chains: []
 	}
 	logLine := `192.0.2.1 [2025-01-01T12:00:00Z] /test`
 
-	entry, err := p.ParseLogLine(logLine)
+	entry, err := ParseLogLine(p, logLine)
 	if err != nil {
 		t.Fatalf("ParseLogLine failed with a custom timestamp format: %v", err)
 	}

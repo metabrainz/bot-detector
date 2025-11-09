@@ -69,8 +69,8 @@ func main() {
 	}
 	// Inject the HAProxyBlocker which depends on the main processor instance.
 	p.Blocker = &HAProxyBlocker{P: p}
-	p.IsWhitelistedFunc = p.IsIPWhitelisted // Set the method correctly.
-	p.CheckChainsFunc = p.CheckChains       // Assign the real method to the function field.
+	p.IsWhitelistedFunc = func(ipInfo IPInfo) bool { return IsIPWhitelisted(p, ipInfo) } // Set the method correctly.
+	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }                  // Assign the real method to the function field.
 
 	// Assign the real implementation for ProcessLogLine.
 	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(p, line, lineNumber) }
@@ -106,7 +106,7 @@ func start(p *Processor) {
 			// The ChainWatcher is not started in test mode to prevent race conditions
 			// where the test's config is overwritten by a reload from the default chains.yaml.
 			go ChainWatcher(p, stopWatcher, nil, nil)
-			go p.CleanUpIdleActivity(stopWatcher)
+			go CleanUpIdleActivity(p, stopWatcher)
 		}
 		// Listen for OS signals on the processor's channel
 		signal.Notify(p.signalCh, syscall.SIGINT, syscall.SIGTERM)

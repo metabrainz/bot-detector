@@ -51,7 +51,7 @@ func TestCleanUpIdleActivity(t *testing.T) {
 	// --- Act ---
 	// Start the cleanup routine and let it run for a few cycles
 	stopChan := make(chan struct{})
-	go processor.CleanUpIdleActivity(stopChan)
+	go CleanUpIdleActivity(processor, stopChan)
 
 	// Wait long enough for the ticker to fire at least once.
 	time.Sleep(processor.Config.CleanupInterval * 2)
@@ -98,7 +98,7 @@ func TestCleanUpIdleActivity_ImmediateShutdown(t *testing.T) {
 
 	// --- Act ---
 	go func() {
-		processor.CleanUpIdleActivity(stopChan)
+		CleanUpIdleActivity(processor, stopChan)
 		close(doneChan) // Signal that the goroutine has exited.
 	}()
 
@@ -140,7 +140,7 @@ func TestCleanUpIdleActivity_MinTimeSinceLastHit(t *testing.T) {
 
 	// --- Act ---
 	stopChan := make(chan struct{})
-	go processor.CleanUpIdleActivity(stopChan)
+	go CleanUpIdleActivity(processor, stopChan)
 
 	// Wait long enough for the ticker to fire at least once.
 	time.Sleep(processor.Config.CleanupInterval * 2)

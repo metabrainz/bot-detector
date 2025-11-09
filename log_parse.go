@@ -25,7 +25,7 @@ func getMatch(name string, matches []string, regex *regexp.Regexp) string {
 	return matches[idx]
 }
 
-func (p *Processor) ParseLogLine(line string) (*LogEntry, error) {
+func ParseLogLine(p *Processor, line string) (*LogEntry, error) {
 	if len(line) == 0 || line[0] == '#' {
 		return nil, nil
 	}
@@ -70,7 +70,7 @@ func (p *Processor) ParseLogLine(line string) (*LogEntry, error) {
 
 func processLogLineInternal(p *Processor, line string, lineNumber int) {
 	// 1. Parse the line
-	entry, err := p.ParseLogLine(line)
+	entry, err := ParseLogLine(p, line)
 
 	if err != nil {
 		// Downgrade parse failures to debug during testing, as they are expected in some tests.

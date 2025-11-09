@@ -22,7 +22,7 @@ func TestIsIPWhitelisted(t *testing.T) {
 		},
 	}
 	// Assign the method to the func field for this test instance.
-	processor.IsWhitelistedFunc = processor.IsIPWhitelisted
+	processor.IsWhitelistedFunc = func(ipInfo IPInfo) bool { return IsIPWhitelisted(processor, ipInfo) }
 
 	tests := []struct {
 		name     string

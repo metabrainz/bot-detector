@@ -70,7 +70,7 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 	// Create a real HAProxyBlocker and link it to the processor.
 	blocker := &HAProxyBlocker{P: p}
 	p.Blocker = blocker
-	p.CheckChainsFunc = p.CheckChains
+	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
 	return p
 }
 

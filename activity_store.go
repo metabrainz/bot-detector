@@ -18,7 +18,7 @@ func GetOrCreateActivityUnsafe(store map[TrackingKey]*BotActivity, trackingKey T
 // CleanUpIdleActivity periodically iterates through the ActivityStore and removes entries
 // for IPs that have been inactive for longer than the configured IdleTimeout or have become
 // irrelevant for `min_time_since_last_hit` checks. It listens on the `stop` channel to exit gracefully.
-func (p *Processor) CleanUpIdleActivity(stop <-chan struct{}) {
+func CleanUpIdleActivity(p *Processor, stop <-chan struct{}) {
 	cleanupInterval := p.Config.CleanupInterval
 
 	// Create a ticker that fires at the specified interval.

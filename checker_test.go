@@ -83,7 +83,7 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 	// --- STEP 1: Process the first request --
 
 	// Act 1: Process entry for /step/one
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// Assert 1: No block should be called, and the state should be at step 1
 	if blockCalled {
@@ -111,7 +111,7 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 	entry.Path = "/step/two"
 
 	// Act 2: Process entry for /step/two
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// Assert 2: Block was called, and activity state is updated
 	if !blockCalled {
@@ -172,7 +172,7 @@ func TestPreCheckActivity_StillBlocked_OldEntry(t *testing.T) {
 	// The preCheckActivity function is not exported, so we call CheckChains,
 	// which calls it internally. We lock the mutex to inspect the result.
 	processor.ActivityMutex.Lock()
-	_, skip := processor.preCheckActivity(oldEntry, trackingKey)
+	_, skip := preCheckActivity(processor, oldEntry, trackingKey)
 	processor.ActivityMutex.Unlock()
 
 	// --- Assert ---
@@ -220,7 +220,7 @@ func TestPreCheckActivity_StillBlocked_NewEntry(t *testing.T) {
 
 	// --- Act ---
 	processor.ActivityMutex.Lock()
-	_, skip := processor.preCheckActivity(newEntry, trackingKey)
+	_, skip := preCheckActivity(processor, newEntry, trackingKey)
 	processor.ActivityMutex.Unlock()
 
 	// --- Assert ---
@@ -286,10 +286,10 @@ func TestCheckChains_DryRun(t *testing.T) {
 	trackingKey := GetTrackingKey(&chain, entry)
 
 	// --- STEP 1 & 2: Process both steps (which should trigger a "block" in dry run) --
-	processor.CheckChains(entry) // Step 1
+	CheckChains(processor, entry) // Step 1
 	entry.Timestamp = entry.Timestamp.Add(2 * time.Second)
 	entry.Path = "/step/two"
-	processor.CheckChains(entry) // Step 2 (completion)
+	CheckChains(processor, entry) // Step 2 (completion)
 
 	// Assertions
 	if blockCalled {
@@ -347,7 +347,7 @@ func TestCheckChains_DryRun_UnknownAction(t *testing.T) {
 	}
 
 	// --- Act ---
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// --- Assert ---
 	expectedLogSubstring := "UNKNOWN_ACTION!"
@@ -400,7 +400,7 @@ func TestCheckChains_LiveMode_UnknownAction(t *testing.T) {
 	}
 
 	// --- Act ---
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// --- Assert ---
 	if blockCalled {
@@ -448,7 +448,7 @@ func TestProcessChainForEntry_AlreadyCompleted(t *testing.T) {
 	// --- Act ---
 	// Call the function under test. This should hit the 'if nextStepIndex >= len(chain.Steps)'
 	// branch and immediately break.
-	processor.processChainForEntry(&chain, entry, activity, time.Time{})
+	processChainForEntry(processor, &chain, entry, activity, time.Time{})
 
 	// --- Assert ---
 	// The state should remain unchanged.
@@ -499,7 +499,7 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 	trackingKey := GetTrackingKey(&chain, entry)
 
 	// --- STEP 1: Process the first request ---
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// Assert 1: State is at step 1
 	processor.ActivityMutex.RLock()
@@ -514,7 +514,7 @@ func TestCheckChains_MaxDelayExceeded(t *testing.T) {
 	entry.Timestamp = entry.Timestamp.Add(6 * time.Second) // > 5 seconds delay
 	entry.Path = "/step/two"
 
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// Assert 2: Chain should have been reset, and the second step should be treated as the *first* step
 	// of a new sequence, but it doesn't match step 1, so the chain progress should be cleared.
@@ -564,7 +564,7 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 	trackingKey := GetTrackingKey(&chain, entry)
 
 	// --- STEP 1: Process the first request ---
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// Assert 1: State is at step 1
 	processor.ActivityMutex.RLock()
@@ -579,7 +579,7 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 	entry.Timestamp = entry.Timestamp.Add(100 * time.Millisecond) // < 500ms delay
 	entry.Path = "/step/two"
 
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// Assert 2: Chain should be reset because min delay was not met.
 	processor.ActivityMutex.RLock()
@@ -661,7 +661,7 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 	whitelistedKey := GetTrackingKey(&chain, whitelistedEntry)
 
 	// --- ACT: Process the whitelisted request ---
-	processor.CheckChains(whitelistedEntry) // Process the 'block' action chain
+	CheckChains(processor, whitelistedEntry) // Process the 'block' action chain
 
 	// --- Assertions for Whitelisted IP (should be skipped) ---
 	var activity *BotActivity
@@ -686,8 +686,8 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 	}
 
 	// --- ACT: Process the non-whitelisted request ---
-	processor.CheckChainsFunc = processor.CheckChains // Set the real method for this part
-	processor.CheckChains(nonWhitelistedEntry)
+	processor.CheckChainsFunc = func(entry *LogEntry) { CheckChains(processor, entry) } // Set the real method for this part
+	CheckChains(processor, nonWhitelistedEntry)
 	nonWhitelistedKey := GetTrackingKey(&chain, nonWhitelistedEntry)
 
 	processor.ActivityMutex.RLock()
@@ -754,7 +754,7 @@ func TestCheckChains_LogAction(t *testing.T) {
 	trackingKey := GetTrackingKey(&chain, entry)
 
 	// --- STEP 1: Process the first request ---
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// Assert 1: State is at step 1
 	processor.ActivityMutex.RLock()
@@ -768,7 +768,7 @@ func TestCheckChains_LogAction(t *testing.T) {
 	entry.Timestamp = entry.Timestamp.Add(2 * time.Second)
 	entry.Path = "/step/two"
 
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// Assert 2: Block was NOT called, but ChainProgress should be cleared
 	if blockCalled {
@@ -826,10 +826,10 @@ func TestCheckChains_LogAction_Whitelisted(t *testing.T) {
 	}
 
 	// Set the CheckChainsFunc to the real method on the processor instance.
-	processor.CheckChainsFunc = processor.CheckChains
+	processor.CheckChainsFunc = func(entry *LogEntry) { CheckChains(processor, entry) }
 
 	// --- Act ---
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// --- Assert ---
 	// With the corrected logic, CheckChains should exit immediately for a whitelisted IP.
@@ -888,13 +888,13 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 	trackingKey := GetTrackingKey(&chain, entry)
 
 	// --- STEP 1: Process the first request ---
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// --- STEP 2: Process the second request (completion) ---
 	entry.Timestamp = entry.Timestamp.Add(2 * time.Second)
 	entry.Path = "/step/two"
 
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// Assert 2: Block was NOT called, and ChainProgress should be cleared
 	if blockCalled {
@@ -949,7 +949,7 @@ func TestCheckChains_BlockExpiration(t *testing.T) {
 	}
 
 	// --- Act ---
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// --- Assert ---
 	processor.ActivityMutex.RLock()
@@ -999,7 +999,7 @@ func TestCheckChains_IPVersionMismatch(t *testing.T) {
 		Timestamp: time.Now(),
 		Path:      "/test",
 	}
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// 3. Assert the state.
 	processor.ActivityMutex.RLock()
@@ -1041,7 +1041,7 @@ func TestCheckChains_IPAndUABlockOptimization(t *testing.T) {
 	}
 
 	// --- Act ---
-	processor.CheckChains(entry)
+	CheckChains(processor, entry)
 
 	// --- Assert ---
 	processor.ActivityMutex.RLock()
@@ -1127,7 +1127,7 @@ func TestCheckChains_TimeRules(t *testing.T) {
 				Timestamp: now,      // The current request always happens at our fixed "now".
 				Path:      "/step1", // This will match the first step
 			}
-			processor.CheckChains(entry)
+			CheckChains(processor, entry)
 
 			processor.ActivityMutex.RLock()
 			activity := processor.ActivityStore[TrackingKey{IPInfo: entry.IPInfo}]
@@ -1185,9 +1185,9 @@ func TestDryRunMode(t *testing.T) {
 		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // Will be replaced
 	}
 	// Set the IsWhitelistedFunc on the *actual* processor instance to avoid nil pointers.
-	processor.IsWhitelistedFunc = processor.IsIPWhitelisted
+	processor.IsWhitelistedFunc = func(ipInfo IPInfo) bool { return IsIPWhitelisted(processor, ipInfo) }
 	// Set the CheckChainsFunc on the processor instance to avoid nil pointers.
-	processor.CheckChainsFunc = processor.CheckChains
+	processor.CheckChainsFunc = func(entry *LogEntry) { CheckChains(processor, entry) } // This line was correct, but included for context
 	processor.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(processor, line, lineNumber) }
 
 	// 2. Read test_access.log and extract expected log outputs from comments
@@ -1359,11 +1359,11 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 
 			// 1. Process a "newer" entry first to set the LastRequestTime.
 			newerEntry := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: now, Path: "/other-path"}
-			processor.CheckChains(newerEntry)
+			CheckChains(processor, newerEntry)
 
 			// 2. Process the out-of-order entry.
 			outOfOrderEntry := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: now.Add(-tt.outOfOrderOffset), Path: "/step1"}
-			processor.CheckChains(outOfOrderEntry)
+			CheckChains(processor, outOfOrderEntry)
 
 			// 3. Assert the outcome.
 			processor.ActivityMutex.RLock()
