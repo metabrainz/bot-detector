@@ -210,6 +210,11 @@ The simplest match is a direct value. The parser intelligently determines the ma
 
 For more complex string matching, use a prefix.
 
+*   **Exact String (Explicit):** Use `exact:` to force a literal string match for a value that could be misinterpreted as another prefix type. This is useful for rare edge cases.
+    ```yaml
+    Path: "exact:file:not-a-real-path" # Matches the literal string "file:not-a-real-path"
+    ```
+
 *   **Regular Expression:**
     ```yaml
     UserAgent: "regex:(?i)(bot|crawler|python)"

@@ -235,7 +235,19 @@ func readLinesFromFile(path string) ([]string, error) {
 
 // compileStringMatcher handles string values, which can be exact, regex, glob, or status code patterns.
 func compileStringMatcher(chainName string, stepIndex int, field, value string, fileDeps *[]string) (fieldMatcher, error) {
-	if strings.HasPrefix(value, "file:") {
+	if strings.HasPrefix(value, "exact:") {
+		literalValue := strings.TrimPrefix(value, "exact:")
+		return func(entry *LogEntry) bool {
+			fieldVal, _ := GetMatchValue(field, entry)
+			return fieldVal == literalValue
+		}, nil
+	}
+
+	// If the value is exactly "file:" or "regex:", treat it as a literal string match.
+	// This is more intuitive than requiring "exact:file:".
+	if value == "file:" || value == "regex:" {
+		// Fall through to the default exact string match at the end of the function.
+	} else if strings.HasPrefix(value, "file:") {
 		filePath := strings.TrimPrefix(value, "file:")
 		*fileDeps = append(*fileDeps, filePath) // Track file for watching
 		lines, err := readLinesFromFile(filePath)
@@ -252,9 +264,7 @@ func compileStringMatcher(chainName string, stepIndex int, field, value string, 
 			interfaceSlice[i] = v
 		}
 		return compileListMatcher(chainName, stepIndex, field, interfaceSlice, fileDeps)
-	}
-
-	if strings.HasPrefix(value, "regex:") {
+	} else if strings.HasPrefix(value, "regex:") {
 		pattern := strings.TrimPrefix(value, "regex:")
 		re, err := regexp.Compile(pattern)
 		if err != nil {

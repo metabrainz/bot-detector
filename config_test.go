@@ -329,6 +329,101 @@ chains:
 	}
 }
 
+func TestLoadConfigFromYAML_StringMatcher_Prefixes(t *testing.T) {
+	tests := []struct {
+		name        string
+		yamlContent string
+		testCases   map[string]struct {
+			entry    *LogEntry
+			expected bool
+		}
+	}{
+		{
+			name: "exact prefix to match literal 'regex:'",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          Path: "exact:regex:"`,
+			testCases: map[string]struct {
+				entry    *LogEntry
+				expected bool
+			}{
+				"Matches literal 'regex:'": {entry: &LogEntry{Path: "regex:"}, expected: true},
+				"Does not match other":     {entry: &LogEntry{Path: "/path"}, expected: false},
+			},
+		},
+		{
+			name: "literal 'regex:' without prefix",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          Path: "regex:"`,
+			testCases: map[string]struct {
+				entry    *LogEntry
+				expected bool
+			}{
+				"Matches literal 'regex:'": {entry: &LogEntry{Path: "regex:"}, expected: true},
+				"Does not match other":     {entry: &LogEntry{Path: "/path"}, expected: false},
+			},
+		},
+		{
+			name: "literal 'file:' without prefix",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          Path: "file:"`,
+			testCases: map[string]struct {
+				entry    *LogEntry
+				expected bool
+			}{
+				"Matches literal 'file:'": {entry: &LogEntry{Path: "file:"}, expected: true},
+				"Does not match other":    {entry: &LogEntry{Path: "/path"}, expected: false},
+			},
+		},
+		{
+			name: "normal regex still works",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          Path: "regex:^/test"`,
+			testCases: map[string]struct {
+				entry    *LogEntry
+				expected bool
+			}{
+				"Matches regex":          {entry: &LogEntry{Path: "/test/path"}, expected: true},
+				"Does not match":         {entry: &LogEntry{Path: "/other"}, expected: false},
+				"Does not match literal": {entry: &LogEntry{Path: "regex:^/test"}, expected: false},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runMatcherTest(t, tt.yamlContent, tt.testCases)
+		})
+	}
+}
+
 func TestLoadConfigFromYAML_IntMatcherFallback(t *testing.T) {
 	// This test specifically targets the non-StatusCode path in compileIntMatcher.
 	// We use a field that is not an integer (Method) to ensure the fallback logic
@@ -1362,5 +1457,27 @@ chains:
 	logMutex.Unlock()
 	if !strings.Contains(logOutput, "WATCH_ERROR: Failed to stat file") {
 		t.Errorf("Expected a 'WATCH_ERROR' log message, but none was found. Logs:\n%s", logOutput)
+	}
+}
+
+// runMatcherTest is a helper to reduce boilerplate in matcher tests.
+func runMatcherTest(t *testing.T, yamlContent string, testCases map[string]struct {
+	entry    *LogEntry
+	expected bool
+}) {
+	t.Helper()
+	setupTestYAML(t, yamlContent)
+	loadedCfg, err := LoadConfigFromYAML()
+	if err != nil {
+		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
+	}
+	matcher := loadedCfg.Chains[0].Steps[0].Matchers[0]
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			if got := matcher(tc.entry); got != tc.expected {
+				t.Errorf("Matcher returned %v, expected %v for entry path '%s'", got, tc.expected, tc.entry.Path)
+			}
+		})
 	}
 }
