@@ -1,8 +1,8 @@
 # HaProxy setup
 
-Setting up HAProxy for Bot Detector
+This document details how to configure HAProxy to work with the bot-detector.
 
-The key to this setup is that the bot detector uses a unified list of HAProxy targets defined in chains.yaml, and its internal logic automatically chooses between the faster **Unix Domain Socket (UDS)** for the local HAProxy and **TCP/IP** for the remote one.
+The key to this setup is that the bot detector uses a unified list of HAProxy targets defined in config.yaml, and its internal logic automatically chooses between the faster **Unix Domain Socket (UDS)** for the local HAProxy and **TCP/IP** for the remote one.
 
 ---
 
@@ -65,10 +65,12 @@ defaults
 	errorfile 503 /etc/haproxy/errors/503.http
 	errorfile 504 /etc/haproxy/errors/504.http
 
-# define pseudo backends, as only one stick table can be defined per backend/frontend
-# and we define one per duration+ip version (because each stick table can only contain ipv4 or ipv6 addresses
-# depending on their type
-# gpc0 will contain 1 if the IP is blocked
+# Stick tables are defined in "pseudo" backends. This is a standard HAProxy practice.
+# - A separate backend is needed for each unique combination of IP version (IPv4/IPv6) and expiration time.
+# - The bot-detector automatically appends "_ipv4" or "_ipv6" to the base table names defined in chains.yaml.
+# - `store gpc0` instructs HAProxy to store the General Purpose Counter 0 for each entry.
+#   The bot-detector sets this counter to 1 to signify a block.
+# - `peers mypeers` enables synchronization of stick table contents across multiple HAProxy nodes.
 backend table_1h_ipv4
 	stick-table type ip size 2m expire 1h store gpc0 peers mypeers
 
@@ -85,13 +87,16 @@ frontend fe_main
   # Listen on both ipv4 & ipv6 (this depends on your setup)
   bind :::80 v4v6
 
-  # declare one acl per stick table matching src and checking gpc0 > 0
+  # Declare one ACL per stick table.
+  # `src_get_gpc0(...)` fetches the value of the gpc0 counter for the client's source IP.
+  # The ACL is true if the counter is greater than 0 (i.e., the IP is marked as blocked).
   acl blocked_1h_ipv4 src_get_gpc0(table_1h_ipv4) gt 0
   acl blocked_1h_ipv6 src_get_gpc0(table_1h_ipv6) gt 0
   acl blocked_5m_ipv4 src_get_gpc0(table_5m_ipv4) gt 0
   acl blocked_5m_ipv6 src_get_gpc0(table_5m_ipv6) gt 0
   
-  #tcp-request connection reject if blocked_1h
+  # For layer 4 blocking (faster, but less informative to the client), you could use:
+  # tcp-request connection reject if blocked_1h_ipv4 or blocked_5m_ipv4 or blocked_1h_ipv6 or blocked_5m_ipv6
   
   # here we return a 429 on http request if the client src IP was blocked
   http-request deny deny_status 429 if blocked_1h_ipv4 or blocked_5m_ipv4 or blocked_1h_ipv6 or blocked_5m_ipv6
@@ -117,15 +122,12 @@ Content-Type: text/plain
 
 ---
 
-## **2\. Bot Detector Configuration (chains.yaml)**
+## **2\. Bot Detector Configuration (config.yaml)**
 
-This file is the **master list** of all targets and must be **identical** on both hosts. The haproxy\_addresses list specifies every endpoint the bot detector must communicate with.
-
-YAML
+The bot-detector's YAML configuration file is the **master list** of all targets and should be kept consistent across your cluster. The `haproxy_addresses` list specifies every endpoint the bot detector must communicate with.
 
 ```yaml
-# chains.yaml
-
+# Example config.yaml
 version: "1.0" # This version field is mandatory
 # ... other config ...
 

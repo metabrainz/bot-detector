@@ -2,22 +2,35 @@
 
 Bot-Detector is a high-performance Go application designed to monitor live access logs, identify malicious or anomalous behavior using configurable behavioral chains, and dynamically block offending IP addresses via the HAProxy Runtime API.
 
+## How It Works
+
+The application operates in a continuous loop:
+
+1.  **Tails a log file** (like an HAProxy or Nginx access log) in real-time.
+2.  **Parses each new log line** against a configurable regex format defined in the config file.
+3.  **Checks the entry** against a series of behavioral chains defined in the YAML configuration file.
+4.  **Tracks the state** of each IP address (or IP+User-Agent) as it progresses through these chains.
+5.  **Executes an action** (e.g., `block` or `log`) via the HAProxy Runtime API when a chain is completed.
+6.  **Manages state** by cleaning up idle or irrelevant IP tracking data to conserve memory.
+
 ## **Features**
 
-* **Real-Time Behavioral Analysis:** Uses flexible YAML configurations to detect sequential patterns (e.g., initial probe, specific request, failed login).
-* **HAProxy Integration:** Executes immediate IP blocking via the HAProxy Runtime Socket.
-* **High Resilience:** Automatically handles HAProxy socket unavailability by switching the action from block to log for the duration of the outage (**Passive Monitoring Mode**).
-* **Log Rotation Safe:** Continuously tails live log files, automatically detecting and re-opening the file after log rotation events (e.g., logrotate).
-* **Graceful Shutdown:** Implements signal handlers (SIGINT, SIGTERM) for safe, controlled process termination.
-* **Dry Run Mode:** Allows testing behavioral chains against static log files without affecting a live HAProxy instance.
-* **Memory Optimization:** Automatically purges state for IPs that are no longer relevant for time-based rules, minimizing memory footprint.
+*   **Real-Time Behavioral Analysis:** Uses flexible YAML configurations to detect sequential patterns.
+*   **HAProxy Integration:** Executes immediate IP blocking via the HAProxy Runtime API (TCP or Unix Socket).
+*   **High Resilience:** Handles HAProxy instance unavailability by logging the failure and continuing operation.
+*   **Configuration Hot-Reload:** Automatically detects and applies changes to the YAML configuration file and its file dependencies without a restart.
+*   **Log Rotation Safe:** Continuously tails log files, automatically re-opening the file after log rotation events.
+*   **Graceful Shutdown:** Implements signal handlers (SIGINT, SIGTERM) for safe, controlled process termination.
+*   **Dry Run Mode:** Allows testing behavioral chains against static log files without affecting a live HAProxy instance.
+*   **Memory Optimization:** Automatically purges state for IPs that are no longer relevant, minimizing memory footprint.
 
 ## **Setup and Usage**
 
 ### **Step 1: HAProxy Configuration (CRITICAL)**
 
-The bot-detector writes IP block information via HAProxy runtime API and use stick tables, but **HAProxy must be configured to read it and act on it**.
-See details in [HaproxySetup.md](HaproxySetup.md)
+The bot-detector only sends block commands to HAProxy; it does not configure HAProxy itself. For blocking to work, you must configure your HAProxy instance with the necessary **stick tables and ACLs** to act on the information sent by this application.
+
+This is a critical prerequisite. See [HaproxySetup.md](docs/HaproxySetup.md) for a detailed guide and example configuration.
 
 
 ### **Step 2: Running the Bot-Detector**
@@ -26,51 +39,51 @@ The application is configured using a YAML file and a few command-line flags.
 
 #### **Production Mode (Live Tailing)**
 
-```bash
+```sh
 ./bot-detector \
   --log-path "/var/log/http/access.log" \
-  --yaml-path "chains.yaml"
+  --yaml-path "config.yaml"
 ```
 
 #### **Dry Run Mode (Testing)**
 
-Use `-dry-run` to test your chains against a static log file. This will process the file once and log all match actions without attempting to connect to HAProxy.
+Use `-dry-run` to test your chains against a static log file. This will process the file once and log all match actions without attempting to connect to HAProxy (even if chain action is block).
 
-```bash
+```sh
 ./bot-detector --dry-run \
   --log-path "test_access.log" \
-  --yaml-path "chains.yaml"
+  --yaml-path "config.yaml"
 ```
 
 ## **Resilience and Logging**
 
-### **Passive Monitoring Mode (HAProxy Fail-Safe)**
+### **HAProxy Fail-Safe**
 
-If an HAProxy is unavailable during a block attempt (e.g., HAProxy is restarting or down), the program will immediately log the connection error and **downgrade the action to log** for that event. It will continue attempting the block for subsequent events.
+If an HAProxy instance is unavailable during a block or unblock attempt (e.g., it is restarting or down), the program will log the connection error and continue its operation. The command will be attempted on other configured HAProxy instances, and the application will continue to process logs and attempt future blocks. It does not enter a persistent "passive mode"; it simply reports the failure for that specific event.
 
-### **Log Rotation Handling**
+### **Log Rotation**
 
 The bot-detector monitors the unique file identifier (inode) of the log file. If the file is renamed or truncated (as happens during logrotate), the application detects the change, closes the old handle, and re-opens the new log file to ensure continuous log processing.
 
-## ⚙️ Building the Application
+## **Building the Application**
 
 To compile the source code, you must first initialize the Go module and fetch the external dependencies (specifically `gopkg.in/yaml.v3`).
 
 1. **Initialize the Go Module:**
 
-```bash
+```sh
 go mod init bot_detector
 ```
 
 2. **Fetch Dependencies:**
 
-```bash
+```sh
 go mod tidy
 ```
 
 3. **Build the Executable:**
 
-```bash
+```sh
 go build -o bot-detector .
 ```
 
@@ -80,13 +93,13 @@ This will produce a single executable named `bot-detector`.
 
 | Flag | Default | Description |
 | :--- | :--- | :--- |
-| **`--yaml-path`** | `chains.yaml` | Path to the YAML configuration file. |
-| **`--log-path`** | `/var/log/http/access.log` | Path to the access log file to tail (or to read in dry-run mode). |
-| **`--dry-run`** | `false` | If true, runs in test mode, ignoring HAProxy and live logging. |
+| **`--yaml-path`** | (none) | **Required.** Path to the YAML configuration file. |
+| **`--log-path`** | (none) | **Required.** Path to the access log file to tail (or to read in dry-run mode). |
+| **`--dry-run`** | `false` | Optional. If true, runs in test mode, ignoring HAProxy and live logging. |
 
 ---
 
-### **Log Levels (in `chains.yaml`)**
+### **Log Levels (in the YAML config file)**
 
 The application uses a unified logging system with five discrete levels. The `--log-level` flag controls the minimum severity level that will be displayed in the output.
 
@@ -97,23 +110,6 @@ The application uses a unified logging system with five discrete levels. The `--
 | **`warning`** | **2** (Default) | Includes non-critical operational issues that should be reviewed (e.g., failed timestamp parsing, malformed URL referrers). |
 | **`info`** | **3** | Includes major application lifecycle events (e.g., configuration **LOAD**, **DRYRUN** start/completion, tailing start). |
 | **`debug`** | **4** (Lowest) | The most verbose level. Includes high-volume internal logic like individual step **MATCH**. |
-
-
-**Example Command (Recommended for Production):**
-
-```bash
-./bot-detector \
---log-path "/var/log/nginx/access.log" \
---yaml-path "test_rules.yaml" \
-```
-
-**Example Command (Testing Rules):**
-
-```bash
-./bot-detector --dry-run \
---log-path "large_test_data.log" \
---yaml-path "test_rules.yaml" \
-```
 
 # **Behavioral Chains Configuration File (chains.yaml)**
 
@@ -132,11 +128,21 @@ The file is structured as a top-level map containing a single key, chains, which
 | **idle_timeout** | string | Optional. Duration an IP must be inactive before its state is purged. Default: `30m`. |
 | **out_of_order_tolerance** | string | Optional. Maximum duration an out-of-order log entry will be processed. Default: `5s`. |
 | **timestamp_format** | string | Optional. The time format layout string (per Go's `time.Parse` syntax) for parsing timestamps. Default: `02/Jan/2006:15:04:05 -0700`. |
-| **log_format_regex** | string | Optional. A Go-compatible regex to parse log lines. **Required capture groups:** `IP`, `Timestamp`. **Optional groups:** `Method`, `Path`, `StatusCode`, `Referrer`, `UserAgent`. If an optional group is omitted, its value will be treated as empty. |
+| **log_format_regex** | string | Optional. A Go-compatible regex to parse log lines. **Required capture groups:** `IP`, `Timestamp`. **Optional groups:** `Method`, `Path`, `StatusCode`, `Referrer`, `UserAgent`. If an optional group is omitted, its value will be treated as empty. If not provided, the application defaults to a regex that expects a **virtual-host-prefixed combined log format**. |
 | **default_block_duration** | string | Optional. A global block duration to apply to any `block` action chain that does not define its own `block_duration`. Format: Go duration string (e.g., "5m", "1h"). |
 | **haproxy_max_retries** | int | Optional. Number of attempts to send a command to an HAProxy instance. Default: `3`. |
+| **haproxy_addresses** | array of string | A list of all HAProxy control endpoints (TCP `host:port` or Unix socket paths) across the cluster. |
 | **haproxy_retry_delay** | string | Optional. Duration to wait between retry attempts. Default: `200ms`. |
 | **haproxy_dial_timeout** | string | Optional. Timeout for establishing a connection to an HAProxy socket. Default: `5s`. |
+
+#### Default Log Format Example
+
+If `log_format_regex` is not specified, the application expects lines to follow this format:
+
+`vhost ip - user [timestamp] "method path protocol" status size "referrer" "user-agent"`
+
+Example:
+`www.example.com 192.168.1.1 - - [02/Jan/2006:15:04:05 -0700] "GET /path HTTP/1.1" 200 1234 "http://referrer.com" "MyBrowser/1.0"`
 
 ## **BehavioralChain Definition (Top Level)**
 
@@ -147,7 +153,8 @@ Each item in the chains array must conform to the following structure:
 | **name** | string | Yes | A unique, descriptive name for the chain (e.g., API-Abuse-Low-Agent). |
 | **steps** | array of object | Yes | The sequential list of steps that define the malicious pattern. |
 | **action** | string | Yes | The action to take when the chain is successfully completed by an IP. **Must be one of:** `block` or `log`. |
-| **block_duration** | string | No | The duration for which the IP should be blocked if action is block. Format: Go duration string (e.g., "5m", "1h", "30m", "1h30m"). **Required if action is block**. |
+| **block_duration** | string | No | The duration for which the IP should be blocked if action is block. Format: Go duration string (e.g., "5m", "1h", "30m", "1h30m"). |
+| **match_key** | string | Yes | The key to track activity against. `ip` tracks by IP address only. `ip_ua` tracks by the combination of IP address and User-Agent string. |
 
 ## **Step Definition**
 
@@ -168,14 +175,14 @@ Each step in the steps array defines a specific log entry characteristic that mu
 | **Method** | `string` | The HTTP request method (e.g., `GET`, `POST`). |
 | **Path** | `string` | The requested URL path. |
 | **StatusCode** | `int` | The HTTP response status code (e.g., `200`, `404`). |
-| **Referrer** | `string` | The full HTTP Referer header value. Use a regular expression to match specific parts, such as the path (e.g., `^https?://[^/]+/login$`). |
+| **Referrer** | `string` | The full HTTP Referer header value. |
 | **UserAgent** | `string` | The HTTP User-Agent header value. |
 
 ### **Advanced `field_matches` Syntax**
 
 The `field_matches` block supports a flexible syntax for defining match conditions, making your rules both powerful and easy to read.
 
-#### **1. Simple Values (Shorthand)**
+#### **Simple Values (Shorthand)**
 
 The simplest match is a direct value. The parser intelligently determines the match type.
 
@@ -188,7 +195,7 @@ The simplest match is a direct value. The parser intelligently determines the ma
     StatusCode: 404
     ```
 
-#### **2. Prefixed String Matchers**
+#### **Prefixed String Matchers**
 
 For more complex string matching, use a prefix.
 
@@ -208,7 +215,7 @@ For more complex string matching, use a prefix.
     StatusCode: "4XX" # Matches 400-499
     ```
 
-#### **3. List of Values (OR Condition)**
+#### **List of Values (OR Condition)**
 
 Provide a list to match if the field's value is **any of** the items in the list. You can mix match types within a list.
 
@@ -222,7 +229,7 @@ field_matches:
     - "regex:^/reset-password/\\w+$"
 ```
 
-#### **4. Object for Numeric Ranges (AND Condition)**
+#### **Object for Numeric Ranges (AND Condition)**
 
 Use an object to define numeric ranges. This is especially useful for `StatusCode`. All conditions in the object must be met.
 
@@ -239,7 +246,6 @@ field_matches:
     lt: 500
 ```
 
----
 
 ## **Memory Management and State Cleanup**
 
@@ -250,12 +256,10 @@ The bot-detector holds the state of IPs in memory. To prevent memory from growin
 2.  **`min_time_since_last_hit` Optimization:** If your configuration uses `min_time_since_last_hit` rules, the application performs a more aggressive cleanup. It calculates the longest `min_time_since_last_hit` duration across all your chains. If an IP's last request is older than this duration, and it's not in the middle of a chain, its state is purged immediately, even if it hasn't reached the main `idle-timeout`. This ensures that memory is not wasted on IPs that can no longer trigger a time-based rule. If no chains use this rule, this optimization is disabled.
 
 
----
 
 ## **Example chains.yaml**
 
 This example defines two chains: one for logging suspicious scanning and one for blocking a brute-force-like sequence.
-chains:
 
 ```yaml
   # 1. CHAIN: Credential Stuffing / Brute Force

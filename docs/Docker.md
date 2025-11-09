@@ -1,5 +1,7 @@
 # Docker
 
+See [Dockerfile.md](Dockerfile.md) for an example multi-stage Dockerfile to build a production-ready image.
+
 ## Building the image
 
 ```bash
@@ -16,12 +18,12 @@ docker build -t bot-detector:latest .
 #!/bin/bash
 
 HOST_LOG_FILE="./test_access.log"
-HOST_CONFIG_PATH="./chains.yaml"
+HOST_CONFIG_PATH="./config.yaml" # Path to your local config file (e.g., config.yaml)
 
 # Define container paths (these should match the flags)
 CONTAINER_APP_DIR="/home/appuser/bot-detector"
 CONTAINER_LOG_FILE="${CONTAINER_APP_DIR}/access.log"
-CONTAINER_CONFIG_PATH="${CONTAINER_APP_DIR}/chains.yaml"
+CONTAINER_CONFIG_PATH="${CONTAINER_APP_DIR}/config.yaml"
 
 docker run --rm \
     --name bot-detector-dry-run \
@@ -40,13 +42,13 @@ docker run --rm \
 # Define host paths based on common HAProxy and log setups
 HOST_LOG_PATH="/var/log/http/access.log"
 HOST_SOCKET_PATH="/run/haproxy/admin.sock"  # if using socket to comuunicate with HAProxy
-HOST_CONFIG_PATH="./chains.yaml" # Assuming chains.yaml is in the directory where you run this command
+HOST_CONFIG_PATH="./config.yaml" # Path to your local config file (e.g., config.yaml)
 
 # Define container paths (these should match the defaults or flags used by bot-detector)
 CONTAINER_APP_DIR="/home/appuser/bot-detector"
 CONTAINER_LOG_PATH="${CONTAINER_APP_DIR}/access.log"
 CONTAINER_SOCKET_PATH="${CONTAINER_APP_DIR}/haproxy.sock"
-CONTAINER_CONFIG_PATH="${CONTAINER_APP_DIR}/chains.yaml"
+CONTAINER_CONFIG_PATH="${CONTAINER_APP_DIR}/config.yaml"
 
 docker run -d \
     --name bot-detector-instance \
