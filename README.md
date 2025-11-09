@@ -253,6 +253,7 @@ Use an object to define numeric ranges. This is especially useful for `StatusCod
 *   `gte`: greater than or equal to
 *   `lt`: less than
 *   `lte`: less than or equal to
+*   `not`: negates the condition
 
 ```yaml
 field_matches:
@@ -260,6 +261,13 @@ field_matches:
   StatusCode:
     gte: 401
     lt: 500
+
+  # The 'not' operator can be used with any field type.
+  # It can negate a single value or a list of values.
+  Path:
+    not:
+      - "/admin"
+      - "regex:^/api/v1/public/"
 ```
 
 

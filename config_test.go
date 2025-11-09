@@ -329,6 +329,68 @@ chains:
 	}
 }
 
+func TestLoadConfigFromYAML_ObjectMatcher_Not_WithPath(t *testing.T) {
+	tests := []struct {
+		name        string
+		yamlContent string
+		testCases   map[string]struct {
+			entry    *LogEntry
+			expected bool
+		}
+	}{
+		{
+			name: "not with single regex path",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          Path:
+            not: "regex:^/admin"`,
+			testCases: map[string]struct {
+				entry    *LogEntry
+				expected bool
+			}{
+				"Matches other path":           {entry: &LogEntry{Path: "/dashboard"}, expected: true},
+				"Does not match excluded path": {entry: &LogEntry{Path: "/admin"}, expected: false},
+				"Does not match sub-path":      {entry: &LogEntry{Path: "/admin/users"}, expected: false},
+			},
+		},
+		{
+			name: "not with list of strings and regex",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          Path:
+            not:
+              - "/admin"
+              - "regex:^/api/v1/public/"`,
+			testCases: map[string]struct {
+				entry    *LogEntry
+				expected bool
+			}{
+				"Matches other path":                 {entry: &LogEntry{Path: "/dashboard"}, expected: true},
+				"Does not match exact excluded path": {entry: &LogEntry{Path: "/admin"}, expected: false},
+				"Does not match regex excluded path": {entry: &LogEntry{Path: "/api/v1/public/users"}, expected: false},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runMatcherTest(t, tt.yamlContent, tt.testCases)
+		})
+	}
+}
+
 func TestLoadConfigFromYAML_StringMatcher_Prefixes(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -413,6 +475,28 @@ chains:
 				"Matches regex":          {entry: &LogEntry{Path: "/test/path"}, expected: true},
 				"Does not match":         {entry: &LogEntry{Path: "/other"}, expected: false},
 				"Does not match literal": {entry: &LogEntry{Path: "regex:^/test"}, expected: false},
+			},
+		},
+		{
+			name: "status code pattern matcher",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          StatusCode: "4XX"`,
+			testCases: map[string]struct {
+				entry    *LogEntry
+				expected bool
+			}{
+				"Matches 404":        {entry: &LogEntry{StatusCode: 404}, expected: true},
+				"Matches 400":        {entry: &LogEntry{StatusCode: 400}, expected: true},
+				"Matches 499":        {entry: &LogEntry{StatusCode: 499}, expected: true},
+				"Does not match 500": {entry: &LogEntry{StatusCode: 500}, expected: false},
+				"Does not match 399": {entry: &LogEntry{StatusCode: 399}, expected: false},
 			},
 		},
 	}
@@ -605,7 +689,7 @@ chains:
     match_key: "ip"
     steps: [ { field_matches: { "Path": ["/good", { "gt": 1 }] } } ]
 `,
-			expectedError: "object matchers (gte, lt, etc.) are only supported for the 'StatusCode' field, not 'Path'",
+			expectedError: "chain 'Test', step 1: operator 'gt' is only supported for numeric fields, not 'Path'",
 		},
 		{
 			name: "File Matcher Not Found (Non-Fatal)",
@@ -1476,7 +1560,12 @@ func runMatcherTest(t *testing.T, yamlContent string, testCases map[string]struc
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			if got := matcher(tc.entry); got != tc.expected {
-				t.Errorf("Matcher returned %v, expected %v for entry path '%s'", got, tc.expected, tc.entry.Path)
+				// Use a more generic error message to handle both Path and StatusCode tests.
+				var val interface{} = tc.entry.Path
+				if tc.entry.StatusCode != 0 {
+					val = tc.entry.StatusCode
+				}
+				t.Errorf("Matcher returned %v, expected %v for entry value '%v'", got, tc.expected, val)
 			}
 		})
 	}

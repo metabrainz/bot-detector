@@ -14,6 +14,15 @@ import (
 // IPVersion is used internally to track whether an IP is v4 or v6.
 type IPVersion byte
 
+// FieldType indicates the native type of a field from a LogEntry.
+type FieldType int
+
+const (
+	StringField FieldType = iota
+	IntField
+	UnsupportedField
+)
+
 // Blocker defines the interface for external IP blocking services (e.g., HAProxy).
 type Blocker interface {
 	Block(ipInfo IPInfo, duration time.Duration) error

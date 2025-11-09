@@ -3,31 +3,45 @@ package main
 import (
 	"bot-detector/internal/logging"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 )
 
 // GetMatchValue retrieves the field value from a LogEntry based on the field name.
-func GetMatchValue(fieldName string, entry *LogEntry) (string, error) {
+func GetMatchValue(fieldName string, entry *LogEntry) (interface{}, FieldType, error) {
+	// If entry is nil, this is a compile-time check for the field's type.
+	if entry == nil {
+		entry = &LogEntry{} // Use a zero-value entry to get the type.
+	}
+
 	switch fieldName {
 	case "IP":
-		return entry.IPInfo.Address, nil
+		return entry.IPInfo.Address, StringField, nil
 	case "Path":
-		return entry.Path, nil
+		return entry.Path, StringField, nil
 	case "Method":
-		return entry.Method, nil
+		return entry.Method, StringField, nil
 	case "Protocol":
-		return entry.Protocol, nil
+		return entry.Protocol, StringField, nil
 	case "UserAgent":
-		return entry.UserAgent, nil
+		return entry.UserAgent, StringField, nil
 	case "Referrer":
-		return entry.Referrer, nil
+		return entry.Referrer, StringField, nil
 	case "StatusCode":
-		return strconv.Itoa(entry.StatusCode), nil
+		return entry.StatusCode, IntField, nil
 	default:
-		return "", fmt.Errorf("unknown field: %s", fieldName)
+		return nil, UnsupportedField, fmt.Errorf("unknown field: '%s'", fieldName)
 	}
+}
+
+// GetMatchValueIfType retrieves a field's value only if it matches the expected type.
+// It returns the value, or nil if the type doesn't match or an error occurs.
+func GetMatchValueIfType(fieldName string, entry *LogEntry, expectedType FieldType) interface{} {
+	value, actualType, err := GetMatchValue(fieldName, entry)
+	if err != nil || actualType != expectedType {
+		return nil
+	}
+	return value
 }
 
 // preCheckActivity performs initial checks on an IP/key before processing against chains.
