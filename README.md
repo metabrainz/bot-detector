@@ -215,8 +215,10 @@ For more complex string matching, use a prefix.
     Path: "exact:file:not-a-real-path" # Matches the literal string "file:not-a-real-path"
     ```
 
-*   **Regular Expression:**
+*   **Regular Expression:** Uses Go's standard `regexp` package, which implements the RE2 syntax. The `(?i)` flag at the beginning of the pattern makes the match case-insensitive.
     ```yaml
+    # Matches if "Bot", "crawler", or "Python" appear anywhere in the User-Agent string.
+    # e.g., "SomeBot/1.0", "WebCrawler", or "Python-Requests/2.26.0" will all match.
     UserAgent: "regex:(?i)(bot|crawler|python)"
     ```
 *   **File-Based Matcher:** Loads a list of values from an external file. This can be used with any field that accepts string values (e.g., `Path`, `UserAgent`, `IP`). Each line in the file is treated as a separate value in a list (OR condition).
