@@ -123,7 +123,7 @@ The file is structured as a top-level map containing a single key, chains, which
 | **version** | string | The configuration version. Must match a supported version (e.g., "1.0"). |
 | **chains** | array of object | The list of behavioral chains to be loaded. |
 | **log_level** | string | Optional. Set minimum log level: `critical`, `error`, `warning`, `info`, `debug`. Default: `warning`. |
-| **poll_interval** | string | Optional. Interval to check this file for changes. Default: `5s`. |
+| **poll_interval** | string | Optional. Interval to check this file for changes. Default: `5s`. A minimum of `1s` is enforced. |
 | **cleanup_interval**| string | Optional. Interval to run the routine that cleans up idle IP state. Default: `1m`. |
 | **idle_timeout** | string | Optional. Duration an IP must be inactive before its state is purged. Default: `30m`. |
 | **out_of_order_tolerance** | string | Optional. Maximum duration an out-of-order log entry will be processed. Default: `5s`. |
@@ -176,18 +176,18 @@ Each step in the steps array defines a specific log entry characteristic that mu
 | **field_matches** | map | Yes | A set of key-value pairs defining the conditions for the step to match. See the `field_matches` section below for details on the powerful new syntax. |
 | **max_delay** | string | No | **(Steps 2+)** The maximum allowed time between the previous step and this one. If exceeded, the chain resets. Ignored on the first step. Format: Go duration string (e.g., "10s", "1m"). |
 | **min_delay**	| string | No | **(Steps 2+)** The minimum required time between the *previous successful step in this chain* and the current step. If not met, the chain resets. Ignored on the first step. Format: Go duration string (e.g., "10s", "1m"). |
-| **min_time_since_last_hit** | string | No | **(First Step Only)** The first step will only match if the time since the *last overall request* from the same tracking key (IP or IP+UA) is **greater than** this duration. If the last request was too recent, or if the IP has never been seen before, the step will not match. This is useful for detecting "sleepy" bots that have long periods of inactivity between requests, helping to distinguish them from normal user traffic. Format: Go duration string (e.g., "30m", "12h"). |
+| **min_time_since_last_hit** | string | No | **(First Step Only)** The first step will only match if the time since the *last overall request* from the same tracking key (IP or IP+UA) is **greater than** this duration. If the last request was too recent, or if the IP has never been seen before, the step will not match. This is useful for detecting "sleepy" bots that have long periods of inactivity between requests. This setting is ignored on all subsequent steps. Format: Go duration string (e.g., "30m", "12h"). |
 
 ### `field_matches`
 
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| **IP** | `string` | The client IP address. |
-| **Method** | `string` | The HTTP request method (e.g., `GET`, `POST`). |
-| **Path** | `string` | The requested URL path. |
-| **StatusCode** | `int` | The HTTP response status code (e.g., `200`, `404`). |
-| **Referrer** | `string` | The full HTTP Referer header value. |
-| **UserAgent** | `string` | The HTTP User-Agent header value. |
+| Field | Description |
+| :--- | :--- |
+| **IP** | The client IP address. |
+| **Method** | The HTTP request method (e.g., `GET`, `POST`). |
+| **Path** | The requested URL path. |
+| **StatusCode** | The HTTP response status code (e.g., `200`, `404`). |
+| **Referrer** | The full HTTP Referer header value. |
+| **UserAgent** | The HTTP User-Agent header value. |
 
 ### **Advanced `field_matches` Syntax**
 
@@ -219,7 +219,6 @@ For more complex string matching, use a prefix.
     ```yaml
     UserAgent: "regex:(?i)(bot|crawler|python)"
     ```
-*   **Status Code Pattern:** A special shorthand for matching status code classes.
 *   **File-Based Matcher:**
     ```yaml
     # Contents of bad_user_agents.txt:
@@ -227,6 +226,8 @@ For more complex string matching, use a prefix.
     # regex:(?i)evil-crawler
     UserAgent: "file:./bad_user_agents.txt"
     ```
+    Lines in the referenced file that are empty or start with `#` are treated as comments and ignored.
+*   **Status Code Pattern:** A special shorthand for matching status code classes.
     The `X` acts as a wildcard for any digit.
     ```yaml
     StatusCode: "4XX" # Matches 400-499
@@ -277,9 +278,9 @@ field_matches:
 
 The bot-detector holds the state of IPs in memory. To prevent memory from growing indefinitely, two cleanup mechanisms are in place:
 
-1.  **Idle Timeout (`idle_timeout`):** An IP's state is purged if it has been inactive (no requests seen) for longer than this duration. This is the general-purpose cleanup for all IPs, configured in the YAML file.
+1.  **Idle Timeout (`idle_timeout`):** An IP's state is purged if it has no active chain progress and has been inactive (no requests seen) for longer than this duration. This is the general-purpose cleanup for all IPs, configured in the YAML file.
 
-2.  **`min_time_since_last_hit` Optimization:** If your configuration uses `min_time_since_last_hit` rules, the application performs a more aggressive cleanup. It calculates the longest `min_time_since_last_hit` duration across all your chains. If an IP's last request is older than this duration, and it's not in the middle of a chain, its state is purged immediately, even if it hasn't reached the main `idle-timeout`. This ensures that memory is not wasted on IPs that can no longer trigger a time-based rule. If no chains use this rule, this optimization is disabled.
+2.  **`min_time_since_last_hit` Optimization:** If your configuration uses `min_time_since_last_hit` rules, the cleanup becomes more aggressive. The application finds the longest `min_time_since_last_hit` duration across all chains. An idle IP's state will then be purged if its inactivity period exceeds **either** the global `idle_timeout` **or** this longest `min_time_since_last_hit` duration. This ensures memory is not wasted on IPs that can no longer trigger a time-based rule.
 
 
 
