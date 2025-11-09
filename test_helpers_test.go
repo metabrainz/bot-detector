@@ -8,8 +8,8 @@ import (
 func TestIsTesting(t *testing.T) {
 	// The default case when running `go test`
 	t.Run("when running under go test", func(t *testing.T) {
-		if !isTesting() {
-			t.Error("isTesting() returned false, but it should be true when running tests.")
+		if !IsTesting() {
+			t.Error("IsTesting() returned false, but it should be true when running tests.")
 		}
 	})
 
@@ -23,8 +23,8 @@ func TestIsTesting(t *testing.T) {
 		t.Cleanup(func() { os.Args = originalArgs })
 
 		// --- Act & Assert ---
-		if isTesting() {
-			t.Error("isTesting() returned true, but it should be false for a simulated production run.")
+		if IsTesting() {
+			t.Error("IsTesting() returned true, but it should be false for a simulated production run.")
 		}
 	})
 }

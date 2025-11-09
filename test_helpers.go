@@ -6,11 +6,26 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+// IsTesting returns true if the code is running as part of a "go test" command.
+// It works by checking for the presence of the "-test.v" or "-test.run" arguments,
+// which are automatically added by the Go testing framework. This is more robust
+// than `flag.Lookup` when the global flag set is manipulated during tests.
+func IsTesting() bool {
+	for _, arg := range os.Args {
+		if strings.HasPrefix(arg, "-test.") {
+			return true
+		}
+	}
+	return false
+}
 
 // muteGlobalLogger redirects the output of the standard logger to discard,
 // effectively silencing any direct calls to log.Printf during tests.
@@ -27,7 +42,7 @@ func resetGlobalState() {
 	flag.CommandLine = flag.NewFlagSet("test", flag.ContinueOnError)
 	// Re-register application-specific flags.
 	RegisterCLIFlags(flag.CommandLine)
-	// Re-register the standard testing flags. This is crucial for `isTesting()` to work.
+	// Re-register the standard testing flags. This is crucial for `IsTesting()` to work.
 	testing.Init()
 }
 

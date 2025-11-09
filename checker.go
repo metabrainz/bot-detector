@@ -88,7 +88,7 @@ func handleOutOfOrderEntry(p *Processor, entry *LogEntry, currentActivity *BotAc
 func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity) {
 	// --- 1. Log the completion event ---
 	logLevel := logging.LevelCritical
-	if isTesting() {
+	if IsTesting() {
 		logLevel = logging.LevelDebug
 	}
 

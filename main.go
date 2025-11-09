@@ -103,7 +103,7 @@ func start(p *Processor) {
 		// Only start these background tasks if not in a test that bypasses them.
 		// This allows tests to focus on specific components like the tailer without
 		// interference from other goroutines like the config watcher.
-		if !isTesting() {
+		if !IsTesting() {
 			// The ConfigWatcher is not started in test mode to prevent race conditions
 			// where the test's config is overwritten by a reload from the default chains.yaml.
 			go ConfigWatcher(p, stopWatcher, nil, nil)

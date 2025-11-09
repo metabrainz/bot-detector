@@ -662,7 +662,7 @@ func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 			if chain.Action == "block" {
 				// Downgrade this warning to Debug level during test runs to reduce noise.
 				logLevel := logging.LevelWarning
-				if isTesting() {
+				if IsTesting() {
 					logLevel = logging.LevelDebug
 				}
 				logging.LogOutput(logLevel, "CONFIG", "One or more chains use the 'block' action, but no 'duration_tables' are configured. All block attempts will be skipped.")

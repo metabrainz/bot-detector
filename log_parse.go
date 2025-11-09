@@ -76,7 +76,7 @@ func processLogLineInternal(p *Processor, line string, lineNumber int) {
 	if err != nil {
 		// Downgrade parse failures to debug during testing, as they are expected in some tests.
 		logLevel := logging.LevelError
-		if isTesting() {
+		if IsTesting() {
 			logLevel = logging.LevelDebug
 		}
 		p.LogFunc(logLevel, "PARSE_FAIL", "Line %d: Parsing failed: %v", lineNumber, err)
