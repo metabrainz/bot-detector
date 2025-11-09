@@ -18,7 +18,7 @@ import (
 // CheckAndRemoveWhitelistedBlocks iterates over all IPs currently marked as blocked
 // in the in-memory ActivityStore and unblocks them via HAProxy if they now fall
 // within the newly loaded whitelist CIDRs.
-func (p *Processor) CheckAndRemoveWhitelistedBlocks() {
+func CheckAndRemoveWhitelistedBlocks(p *Processor) {
 	if p.DryRun {
 		return
 	}
@@ -59,7 +59,7 @@ func (p *Processor) CheckAndRemoveWhitelistedBlocks() {
 
 // logConfigurationSummary logs the key-value pairs of the current application configuration.
 // This is useful for visibility on startup and after a configuration reload.
-func (p *Processor) logConfigurationSummary() {
+func logConfigurationSummary(p *Processor) {
 	p.ChainMutex.RLock()
 	config := p.Config
 	logRegex := p.LogRegex
@@ -98,7 +98,7 @@ func (p *Processor) logConfigurationSummary() {
 }
 
 // logChainDetails logs details for a given list of chains, one per line.
-func (p *Processor) logChainDetails(chains []BehavioralChain, header string) {
+func logChainDetails(p *Processor, chains []BehavioralChain, header string) {
 	p.LogFunc(LevelInfo, "CONFIG", "%s (%d total)", header, len(chains))
 	for _, chain := range chains {
 		details := fmt.Sprintf("Name: '%s', Action: %s, Steps: %d, MatchKey: %s", chain.Name, chain.Action, len(chain.Steps), chain.MatchKey)
@@ -702,7 +702,7 @@ func LoadChainsFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 }
 
 // ChainWatcher monitors the YAML config file for modifications and reloads the chains dynamically.
-func (p *Processor) ChainWatcher(stop <-chan struct{}, forceCheckSignal <-chan struct{}, reloadDoneSignal chan<- struct{}) {
+func ChainWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan struct{}, reloadDoneSignal chan<- struct{}) {
 	if p.DryRun {
 		return
 	}
@@ -816,7 +816,7 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}, forceCheckSignal <-chan s
 
 				if configChanged {
 					p.LogFunc(LevelInfo, "CONFIG", "General configuration settings have been updated.")
-					p.logConfigurationSummary()
+					logConfigurationSummary(p)
 				}
 
 				// --- Compare and log chain differences ---
@@ -844,17 +844,17 @@ func (p *Processor) ChainWatcher(stop <-chan struct{}, forceCheckSignal <-chan s
 				}
 
 				if len(added) > 0 {
-					p.logChainDetails(added, "Added chains:")
+					logChainDetails(p, added, "Added chains:")
 				}
 				if len(modified) > 0 {
-					p.logChainDetails(modified, "Modified chains:")
+					logChainDetails(p, modified, "Modified chains:")
 				}
 				if len(removed) > 0 {
-					p.logChainDetails(removed, "Removed chains:")
+					logChainDetails(p, removed, "Removed chains:")
 				}
 
 				// Unblock any IPs that are now whitelisted.
-				p.CheckAndRemoveWhitelistedBlocks()
+				CheckAndRemoveWhitelistedBlocks(p)
 			}()
 		}
 	}

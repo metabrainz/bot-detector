@@ -783,7 +783,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			processor.Config.WhitelistNets = []*net.IPNet{ipNet}
 
 			// --- Act ---
-			processor.CheckAndRemoveWhitelistedBlocks()
+			CheckAndRemoveWhitelistedBlocks(processor)
 
 			// --- Assert ---
 			// Assert Log Output
@@ -844,7 +844,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 		processor.Config.WhitelistNets = []*net.IPNet{ipNet}
 
 		// --- Act ---
-		processor.CheckAndRemoveWhitelistedBlocks()
+		CheckAndRemoveWhitelistedBlocks(processor)
 
 		// --- Assert ---
 		// The IP should remain blocked in memory because the HAProxy command failed.
@@ -881,7 +881,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 		processor.Config.WhitelistNets = []*net.IPNet{}
 
 		// --- Act ---
-		processor.CheckAndRemoveWhitelistedBlocks()
+		CheckAndRemoveWhitelistedBlocks(processor)
 
 		// --- Assert ---
 		// The main assertion is that the test completes without panic.
@@ -944,8 +944,7 @@ chains:
 	forceCheckSignal := make(chan struct{}, 1)
 	reloadDoneSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
-	t.Cleanup(func() { close(stopWatcher) }) // Ensure watcher stops when test finishes.
-	go processor.ChainWatcher(stopWatcher, forceCheckSignal, reloadDoneSignal)
+	go ChainWatcher(processor, stopWatcher, forceCheckSignal, reloadDoneSignal)
 
 	// --- Act ---
 	// 5. Modify the YAML file on disk.
@@ -1054,8 +1053,7 @@ chains:
 	reloadDoneSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go processor.ChainWatcher(stopWatcher, forceCheckSignal, reloadDoneSignal)
-
+	go ChainWatcher(processor, stopWatcher, forceCheckSignal, reloadDoneSignal)
 	// --- Act ---
 	// 6. Modify ONLY the dependency file.
 	if err := os.WriteFile(agentFilePath, []byte("ReloadedBadAgent/2.0"), 0644); err != nil {
@@ -1158,7 +1156,7 @@ chains:
 	reloadDoneSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go processor.ChainWatcher(stopWatcher, forceCheckSignal, reloadDoneSignal)
+	go ChainWatcher(processor, stopWatcher, forceCheckSignal, reloadDoneSignal)
 
 	// --- Act ---
 	// 6. Modify the YAML file with INVALID content.
@@ -1259,7 +1257,7 @@ chains:
 	forceCheckSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go processor.ChainWatcher(stopWatcher, forceCheckSignal, nil)
+	go ChainWatcher(processor, stopWatcher, forceCheckSignal, nil)
 
 	// --- Act ---
 	// 4. Delete the YAML file to trigger a stat error on the next poll.

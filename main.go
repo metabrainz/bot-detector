@@ -76,9 +76,9 @@ func main() {
 	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(p, line, lineNumber) }
 
 	// Log the initial configuration summary.
-	p.logConfigurationSummary()
+	logConfigurationSummary(p)
 	// At startup, log details for all loaded chains.
-	p.logChainDetails(p.Chains, "Loaded chains")
+	logChainDetails(p, p.Chains, "Loaded chains")
 
 	start(p)
 }
@@ -105,7 +105,7 @@ func start(p *Processor) {
 		if !isTesting() {
 			// The ChainWatcher is not started in test mode to prevent race conditions
 			// where the test's config is overwritten by a reload from the default chains.yaml.
-			go p.ChainWatcher(stopWatcher, nil, nil)
+			go ChainWatcher(p, stopWatcher, nil, nil)
 			go p.CleanUpIdleActivity(stopWatcher)
 		}
 		// Listen for OS signals on the processor's channel
