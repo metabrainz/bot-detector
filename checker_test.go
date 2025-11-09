@@ -415,117 +415,47 @@ func TestCheckChains_MinDelayNotMet(t *testing.T) {
 
 // TestCheckChains_WhitelistSkip tests that a whitelisted IP is skipped entirely.
 func TestCheckChains_WhitelistSkip(t *testing.T) {
-	// 1. Setup Data Structures
-	resetGlobalState() // Clean state
-
+	// --- Setup ---
 	const targetIP = "192.0.2.1"
 	const whitelistedIP = "192.168.0.10"
-	const blockDuration = 10 * time.Minute
 
-	// Define the chain (it doesn't need to be complex)
-	chain := BehavioralChain{
+	h := newCheckerTestHarness(t, nil)
+	h.addChain(BehavioralChain{
 		Name:          "WhitelistTestChain",
 		MatchKey:      "ip",
 		Action:        "block",
-		BlockDuration: blockDuration,
-	}
-	logChain := BehavioralChain{
-		Name:     "WhitelistLogChain",
-		MatchKey: "ip",
-		Action:   "log", // This chain only logs
-	}
+		BlockDuration: 10 * time.Minute,
+		StepsYAML:     []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/step/one"}}},
+	})
 
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one", new([]string))
-	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher1}}}
-
-	matcher2, _ := compileStringMatcher(logChain.Name, 0, "Path", "/log/step", new([]string))
-	logChain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher2}}}
-
-	chains := []BehavioralChain{chain, logChain} // Include both chains
-
-	// Log entry template for whitelisted IP
-	whitelistedEntry := &LogEntry{
-		IPInfo:    NewIPInfo(whitelistedIP),
-		UserAgent: "TestAgent",
-		Timestamp: time.Now(),
-		Path:      "/step/one",
-	}
-
-	// Setup whitelisting using a mock function for IsIPWhitelisted
-	mockIsWhitelisted := func(ipInfo IPInfo) bool {
+	// Setup whitelisting using a mock function.
+	h.processor.IsWhitelistedFunc = func(ipInfo IPInfo) bool {
 		return ipInfo.Address == whitelistedIP
 	}
 
-	// Setup a mock blocker to ensure it's not called
-	var blockCalled bool
-	mockBlocker := &MockBlocker{
-		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
-			blockCalled = true
-			return nil
-		},
-	}
-
-	// Capture log output
-	var capturedLogs []string
-	var logMutex sync.Mutex
-	logCaptureFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-		logMutex.Lock()
-		capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
-		logMutex.Unlock()
-	}
-
-	// Create the processor
-	processor := newTestProcessor(&AppConfig{}, chains)
-	processor.Blocker = mockBlocker
-	processor.IsWhitelistedFunc = mockIsWhitelisted
-	processor.LogFunc = logCaptureFunc
-
-	whitelistedKey := GetTrackingKey(&chain, whitelistedEntry)
-
-	// --- ACT: Process the whitelisted request ---
-	CheckChains(processor, whitelistedEntry) // Process the 'block' action chain
-
-	// --- Assertions for Whitelisted IP (should be skipped) ---
-	var activity *BotActivity
-	var exists bool
-	processor.ActivityMutex.RLock() // Lock before accessing the map
-	activity, exists = processor.ActivityStore[whitelistedKey]
-	processor.ActivityMutex.RUnlock()
-
-	if blockCalled {
-		t.Fatal("Blocker was called, but should be skipped for a whitelisted IP.")
-	}
-
-	if exists {
-		t.Errorf("Activity state exists for whitelisted IP %s, but it should have been skipped entirely.", whitelistedIP)
-	}
-
-	// Bonus check: ensure a non-whitelisted IP works normally
-	nonWhitelistedEntry := &LogEntry{
-		IPInfo:    NewIPInfo(targetIP),
-		Timestamp: time.Now().Add(1 * time.Second),
+	// --- Act & Assert 1: Whitelisted IP ---
+	whitelistedEntry := &LogEntry{
+		IPInfo:    NewIPInfo(whitelistedIP),
+		Timestamp: time.Now(),
 		Path:      "/step/one",
 	}
+	h.processEntry(whitelistedEntry)
 
-	// --- ACT: Process the non-whitelisted request ---
-	processor.CheckChainsFunc = func(entry *LogEntry) { CheckChains(processor, entry) } // Set the real method for this part
-	CheckChains(processor, nonWhitelistedEntry)
-	nonWhitelistedKey := GetTrackingKey(&chain, nonWhitelistedEntry)
-
-	processor.ActivityMutex.RLock()
-	defer processor.ActivityMutex.RUnlock()
-	activity, exists = processor.ActivityStore[nonWhitelistedKey]
-	if !exists {
-		t.Error("Activity state for non-whitelisted IP should exist, but did not.")
-	} else {
-		// A single-step chain that matches is completed and clears ChainProgress.
-		if !activity.IsBlocked {
-			t.Error("Expected non-whitelisted IP to be marked as IsBlocked=true after single-step chain completion, but was false.")
-		}
-		if len(activity.ChainProgress) != 0 {
-			t.Errorf("ChainProgress should be cleared on chain completion (length 0) but has %d entries: %v", len(activity.ChainProgress), activity.ChainProgress)
-		}
+	if h.blockCalled {
+		t.Fatal("Blocker was called, but should be skipped for a whitelisted IP.")
 	}
+	// No activity should be created for a whitelisted IP.
+	h.assertChainProgressCleared("WhitelistTestChain", whitelistedEntry)
+
+	// --- Act & Assert 2: Non-whitelisted IP ---
+	nonWhitelistedEntry := &LogEntry{
+		IPInfo:    NewIPInfo(targetIP),
+		Timestamp: time.Now(),
+		Path:      "/step/one",
+	}
+	h.processEntry(nonWhitelistedEntry)
+
+	h.assertBlocked(nonWhitelistedEntry, true)
 }
 
 // TestCheckChains_LogAction tests that a chain with Action="log" clears the state but does not call the blocker.
@@ -693,56 +623,36 @@ func TestCheckChains_UnrecognizedAction(t *testing.T) {
 // TestCheckChains_BlockExpiration verifies that if an activity is marked as blocked but the
 // BlockedUntil time has passed, the block is cleared and the chain can be processed again.
 func TestCheckChains_BlockExpiration(t *testing.T) {
-	// 1. Setup
-	resetGlobalState()
-
+	// --- Setup ---
 	const targetIP = "192.0.2.1"
-	chain := BehavioralChain{
+	h := newCheckerTestHarness(t, nil)
+	h.addChain(BehavioralChain{
 		Name:          "SingleStepChain",
 		MatchKey:      "ip",
 		Action:        "block",
 		BlockDuration: 1 * time.Minute,
-	}
-	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/test", new([]string))
-	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
+		StepsYAML:     []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/test"}}},
+	})
 
-	chains := []BehavioralChain{chain}
-
-	processor := newTestProcessor(&AppConfig{}, chains)
-
-	// 2. Manually create a pre-existing, EXPIRED block state.
-	trackingKey := GetTrackingKey(&chain, &LogEntry{IPInfo: NewIPInfo(targetIP)})
-	processor.ActivityStore[trackingKey] = &BotActivity{
+	// Manually create a pre-existing, EXPIRED block state.
+	trackingKey := TrackingKey{IPInfo: NewIPInfo(targetIP)}
+	h.processor.ActivityStore[trackingKey] = &BotActivity{
 		LastRequestTime: time.Time{},                    // Not relevant for this test
 		BlockedUntil:    time.Now().Add(-1 * time.Hour), // Expired an hour ago
 		IsBlocked:       true,
 	}
 
-	// 3. Create the log entry that will be processed.
+	// --- Act ---
 	entry := &LogEntry{
 		IPInfo:    NewIPInfo(targetIP),
 		Timestamp: time.Now(),
 		Path:      "/test",
 	}
-
-	// --- Act ---
-	CheckChains(processor, entry)
+	h.processEntry(entry)
 
 	// --- Assert ---
-	processor.ActivityMutex.RLock()
-	finalActivity, exists := processor.ActivityStore[trackingKey]
-	processor.ActivityMutex.RUnlock()
-
-	if !exists {
-		t.Fatal("Expected activity state to exist, but it was deleted.")
-	}
-
-	// The chain should have run, completed, and re-blocked the IP with a new expiration.
-	if !finalActivity.IsBlocked {
-		t.Error("Expected IsBlocked to be true after re-processing, but it was false.")
-	}
-
-	if finalActivity.BlockedUntil.Before(time.Now()) {
+	h.assertBlocked(entry, true)
+	if h.processor.ActivityStore[trackingKey].BlockedUntil.Before(time.Now()) {
 		t.Error("Expected BlockedUntil time to be in the future, but it was not.")
 	}
 }
@@ -793,46 +703,34 @@ func TestCheckChains_IPVersionMismatch(t *testing.T) {
 // TestCheckChains_IPAndUABlockOptimization verifies that when a chain with `match_key: "ip_ua"`
 // completes a block action, it blocks BOTH the specific ip_ua key and the general ip-only key.
 func TestCheckChains_IPAndUABlockOptimization(t *testing.T) {
-	// 1. Setup
-	resetGlobalState()
-
+	// --- Setup ---
 	const targetIP = "192.0.2.100"
 	const targetUA = "BadBot/1.0"
 
-	chain := BehavioralChain{
+	h := newCheckerTestHarness(t, nil)
+	h.addChain(BehavioralChain{
 		Name:          "IP_UA_Blocker",
 		MatchKey:      "ip_ua",
 		Action:        "block",
 		BlockDuration: 5 * time.Minute,
-	}
-	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/trigger", new([]string))
-	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
-	chains := []BehavioralChain{chain}
-	processor := newTestProcessor(&AppConfig{}, chains)
+		StepsYAML:     []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/trigger"}}},
+	})
 
+	// --- Act ---
 	entry := &LogEntry{
 		IPInfo:    NewIPInfo(targetIP),
 		UserAgent: targetUA,
 		Timestamp: time.Now(),
 		Path:      "/trigger",
 	}
-
-	// --- Act ---
-	CheckChains(processor, entry)
+	h.processEntry(entry)
 
 	// --- Assert ---
-	processor.ActivityMutex.RLock()
-	defer processor.ActivityMutex.RUnlock()
-
-	ipUaKey := TrackingKey{IPInfo: NewIPInfo(targetIP), UA: targetUA}
-	ipOnlyKey := TrackingKey{IPInfo: NewIPInfo(targetIP), UA: ""}
-
-	if activity, exists := processor.ActivityStore[ipUaKey]; !exists || !activity.IsBlocked {
-		t.Error("Expected the specific IP+UA key to be blocked, but it was not.")
-	}
-	if activity, exists := processor.ActivityStore[ipOnlyKey]; !exists || !activity.IsBlocked {
-		t.Error("Expected the general IP-only key to be blocked for optimization, but it was not.")
-	}
+	// Assert that the specific IP+UA key is blocked.
+	h.assertBlocked(entry, true)
+	// Assert that the general IP-only key is also blocked.
+	ipOnlyEntry := &LogEntry{IPInfo: NewIPInfo(targetIP), UserAgent: ""}
+	h.assertBlocked(ipOnlyEntry, true)
 }
 
 // TestCheckChains_TimeRules provides focused tests for the new time-based rules,
