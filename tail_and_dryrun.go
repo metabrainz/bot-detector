@@ -262,9 +262,8 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 
 				if finalErr == io.EOF {
 					// At EOF, check for file rotation before sleeping.
-					// For testing: signal that we are about to perform the check.
-					if p.Config.eofCheckSignal != nil {
-						p.Config.eofCheckSignal <- struct{}{}
+					if p.TestSignals != nil && p.TestSignals.EOFCheckSignal != nil {
+						p.TestSignals.EOFCheckSignal <- struct{}{}
 					}
 
 					if hasFileBeenRotated(p, LogFilePath, initialStat, p.Config.StatFunc) {

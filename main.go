@@ -75,6 +75,7 @@ func main() {
 		signalCh: make(chan os.Signal, 1),
 		LogFunc:  logging.LogOutput,
 	}
+	// TestSignals is intentionally left nil in production.
 	// Inject the HAProxyBlocker which depends on the main processor instance.
 	p.Blocker = &HAProxyBlocker{P: p}
 	p.IsWhitelistedFunc = func(ipInfo IPInfo) bool { return IsIPWhitelisted(p, ipInfo) } // Set the method correctly.
@@ -111,9 +112,9 @@ func start(p *Processor) {
 		// This allows tests to focus on specific components like the tailer without
 		// interference from other goroutines like the config watcher.
 		if !IsTesting() {
-			// The ConfigWatcher is not started in test mode to prevent race conditions
-			// where the test's config is overwritten by a reload from the default chains.yaml.
-			go ConfigWatcher(p, stopWatcher, nil, nil)
+			// The ConfigWatcher is not started in test mode to prevent race conditions where
+			// the test's config is overwritten by a reload from the default chains.yaml.
+			go ConfigWatcher(p, stopWatcher)
 			go CleanUpIdleActivity(p, stopWatcher)
 		}
 		// Listen for OS signals on the processor's channel

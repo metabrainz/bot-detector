@@ -75,5 +75,10 @@ func CleanUpIdleActivity(p *Processor, stop <-chan struct{}) {
 		if cleanedCount > 0 {
 			p.LogFunc(logging.LevelDebug, "CLEANUP", "Cleaned up %d idle/useless IP states.", cleanedCount)
 		}
+
+		// Signal for test synchronization, if the channel is set.
+		if p.TestSignals != nil && p.TestSignals.CleanupDoneSignal != nil {
+			p.TestSignals.CleanupDoneSignal <- struct{}{}
+		}
 	}
 }

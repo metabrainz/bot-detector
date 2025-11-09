@@ -23,6 +23,15 @@ const (
 	UnsupportedField
 )
 
+// TestSignals holds channels used exclusively for test synchronization.
+// This struct is nil in production.
+type TestSignals struct {
+	CleanupDoneSignal chan struct{}
+	EOFCheckSignal    chan struct{}
+	ReloadDoneSignal  chan struct{}
+	ForceCheckSignal  chan struct{}
+}
+
 // Blocker defines the interface for external IP blocking services (e.g., HAProxy).
 type Blocker interface {
 	Block(ipInfo IPInfo, duration time.Duration) error
@@ -48,6 +57,7 @@ type Processor struct {
 	signalCh          chan os.Signal
 	LogFunc           func(level logging.LogLevel, tag string, format string, v ...interface{})
 	ProcessLogLine    func(line string, lineNumber int)
+	TestSignals       *TestSignals // Test-only signals for synchronization.
 }
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
@@ -68,7 +78,6 @@ type AppConfig struct {
 	OutOfOrderTolerance    time.Duration                     `config:"compare" summary:"out_of_order_tolerance"`
 	PollingInterval        time.Duration                     `config:"compare" summary:"poll_interval"`
 	TimestampFormat        string                            `config:"compare"`
-	eofCheckSignal         chan struct{}                     // Test-only
 	StatFunc               func(string) (os.FileInfo, error) // Mockable
 	WhitelistNets          []*net.IPNet                      `config:"compare"`
 }

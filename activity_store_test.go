@@ -10,6 +10,7 @@ import (
 func TestCleanUpIdleActivity(t *testing.T) {
 	// 1. Setup
 	resetGlobalState()
+	cleanupDoneSignal := make(chan struct{}, 1)
 
 	// Create a processor with specific timeout values for the test.
 	processor := &Processor{
@@ -23,6 +24,9 @@ func TestCleanUpIdleActivity(t *testing.T) {
 			MaxTimeSinceLastHit: 50 * time.Millisecond,  // A shorter time-based rule timeout
 		},
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
+		TestSignals: &TestSignals{
+			CleanupDoneSignal: cleanupDoneSignal,
+		},
 	}
 
 	// 2. Create different activity states
@@ -53,12 +57,15 @@ func TestCleanUpIdleActivity(t *testing.T) {
 	// Start the cleanup routine and let it run for a few cycles
 	stopChan := make(chan struct{})
 	go CleanUpIdleActivity(processor, stopChan)
+	defer close(stopChan)
 
-	// Wait long enough for the ticker to fire at least once.
-	time.Sleep(processor.Config.CleanupInterval * 2)
-
-	// Stop the cleanup goroutine
-	close(stopChan)
+	// Wait for the cleanup routine to signal it has completed a pass.
+	select {
+	case <-cleanupDoneSignal:
+		// Cleanup finished.
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for cleanup routine to complete.")
+	}
 
 	// --- Assert ---
 	processor.ActivityMutex.RLock()

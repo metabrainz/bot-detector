@@ -787,7 +787,7 @@ func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 }
 
 // ConfigWatcher monitors the YAML config file for modifications and reloads the chains dynamically.
-func ConfigWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan struct{}, reloadDoneSignal chan<- struct{}) {
+func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 	if p.DryRun {
 		return
 	}
@@ -807,9 +807,11 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan s
 		case <-stop:
 			p.LogFunc(logging.LevelInfo, "WATCH", "ConfigWatcher received stop signal. Shutting down.")
 			return
-		case <-forceCheckSignal:
-			// This case is for testing only, to trigger an immediate check.
-			p.LogFunc(logging.LevelDebug, "WATCH", "Received test signal for immediate reload check.")
+		case <-p.TestSignals.ForceCheckSignal:
+			if p.TestSignals != nil {
+				// This case is for testing only, to trigger an immediate check.
+				p.LogFunc(logging.LevelDebug, "WATCH", "Received test signal for immediate reload check.")
+			}
 		case <-timer.C:
 			// Timer fired, continue with polling.
 		}
@@ -851,8 +853,8 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan s
 			p.LogFunc(logging.LevelInfo, "WATCH", "Detected change in '%s'. Attempting reload...", changedFile)
 			func() { // Use an anonymous function to scope the defer correctly.
 				// Defer the test signal to ensure it's sent whether the reload succeeds or fails.
-				if reloadDoneSignal != nil {
-					defer func() { reloadDoneSignal <- struct{}{} }()
+				if p.TestSignals != nil && p.TestSignals.ReloadDoneSignal != nil {
+					defer func() { p.TestSignals.ReloadDoneSignal <- struct{}{} }()
 				}
 
 				p.ConfigMutex.RLock()

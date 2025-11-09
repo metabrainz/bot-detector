@@ -1208,9 +1208,14 @@ chains:
 		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ConfigMutex:   &sync.RWMutex{},
 		Chains:        initialLoadedCfg.Chains,
-		Config:        &AppConfig{PollingInterval: 10 * time.Millisecond},
+		Config:        &AppConfig{},
 		LogFunc:       func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
+		TestSignals: &TestSignals{
+			ForceCheckSignal: make(chan struct{}, 1),
+			ReloadDoneSignal: make(chan struct{}, 1),
+		},
 	}
+	processor.Config.PollingInterval = 10 * time.Millisecond
 	// Set LastModTime to the actual modification time of the initial file.
 	initialFileInfo, err := os.Stat(tempFile)
 	if err != nil {
@@ -1219,10 +1224,9 @@ chains:
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
 	// 4. Start the ConfigWatcher with the test signal channel.
-	forceCheckSignal := make(chan struct{}, 1)
-	reloadDoneSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
-	go ConfigWatcher(processor, stopWatcher, forceCheckSignal, reloadDoneSignal)
+	t.Cleanup(func() { close(stopWatcher) })
+	go ConfigWatcher(processor, stopWatcher)
 
 	// --- Act ---
 	// 5. Modify the YAML file on disk.
@@ -1247,11 +1251,11 @@ chains:
 	}
 
 	// 6. Force the watcher to check immediately.
-	forceCheckSignal <- struct{}{}
+	processor.TestSignals.ForceCheckSignal <- struct{}{}
 
 	// 7. Wait for the reload signal from the watcher.
 	select {
-	case <-reloadDoneSignal:
+	case <-processor.TestSignals.ReloadDoneSignal:
 		// Reload completed successfully.
 	case <-time.After(1 * time.Second):
 		t.Fatal("Timed out waiting for configuration reload.")
@@ -1319,19 +1323,21 @@ chains:
 		Chains:        initialLoadedCfg.Chains,
 		Config: &AppConfig{
 			FileDependencies: initialLoadedCfg.FileDependencies,
-			PollingInterval:  10 * time.Millisecond,
 		},
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
+		TestSignals: &TestSignals{
+			ForceCheckSignal: make(chan struct{}, 1),
+			ReloadDoneSignal: make(chan struct{}, 1),
+		},
 	}
+	processor.Config.PollingInterval = 10 * time.Millisecond
 	initialFileInfo, _ := os.Stat(tempYamlFile)
 	processor.Config.LastModTime = initialFileInfo.ModTime() // Set initial mod time
 
 	// 5. Start the ConfigWatcher with the test signal channel.
-	forceCheckSignal := make(chan struct{}, 1)
-	reloadDoneSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go ConfigWatcher(processor, stopWatcher, forceCheckSignal, reloadDoneSignal)
+	go ConfigWatcher(processor, stopWatcher)
 	// --- Act ---
 	// 6. Modify ONLY the dependency file.
 	if err := os.WriteFile(agentFilePath, []byte("ReloadedBadAgent/2.0"), 0644); err != nil {
@@ -1344,11 +1350,11 @@ chains:
 	}
 
 	// 7. Force the watcher to check immediately.
-	forceCheckSignal <- struct{}{}
+	processor.TestSignals.ForceCheckSignal <- struct{}{}
 
 	// 8. Wait for the reload signal from the watcher.
 	select {
-	case <-reloadDoneSignal:
+	case <-processor.TestSignals.ReloadDoneSignal:
 		// Reload completed successfully.
 	case <-time.After(1 * time.Second):
 		t.Fatal("Timed out waiting for configuration reload.")
@@ -1413,8 +1419,13 @@ chains:
 	processor := &Processor{
 		ConfigMutex: &sync.RWMutex{},
 		Chains:      initialLoadedCfg.Chains,
-		Config:      &AppConfig{PollingInterval: 10 * time.Millisecond},
+		Config:      &AppConfig{},
+		TestSignals: &TestSignals{
+			ForceCheckSignal: make(chan struct{}, 1),
+			ReloadDoneSignal: make(chan struct{}, 1),
+		},
 	}
+	processor.Config.PollingInterval = 10 * time.Millisecond
 	initialFileInfo, _ := os.Stat(tempFile)
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
@@ -1430,11 +1441,9 @@ chains:
 	}
 
 	// 5. Start the ConfigWatcher.
-	forceCheckSignal := make(chan struct{}, 1)
-	reloadDoneSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go ConfigWatcher(processor, stopWatcher, forceCheckSignal, reloadDoneSignal)
+	go ConfigWatcher(processor, stopWatcher)
 
 	// --- Act ---
 	// 6. Modify the YAML file with INVALID content.
@@ -1458,7 +1467,7 @@ chains:
 	}
 
 	// 7. Force the watcher to perform a check immediately, bypassing the timer.
-	forceCheckSignal <- struct{}{}
+	processor.TestSignals.ForceCheckSignal <- struct{}{}
 
 	// 8. Wait for the watcher to log the error. This is now deterministic because
 	// we triggered the check manually.
@@ -1512,13 +1521,17 @@ chains:
 	processor := &Processor{
 		ConfigMutex: &sync.RWMutex{},
 		Chains:      []BehavioralChain{{Name: "InitialChain"}}, // Simplified initial state
-		Config:      &AppConfig{PollingInterval: 10 * time.Millisecond},
+		Config:      &AppConfig{},
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 			logMutex.Lock()
 			capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
 			logMutex.Unlock()
 		},
+		TestSignals: &TestSignals{
+			ForceCheckSignal: make(chan struct{}, 1),
+		},
 	}
+	processor.Config.PollingInterval = 10 * time.Millisecond
 	initialFileInfo, _ := os.Stat(tempFile)
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
@@ -1532,10 +1545,9 @@ chains:
 			logReceived <- true
 		}
 	}
-	forceCheckSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go ConfigWatcher(processor, stopWatcher, forceCheckSignal, nil)
+	go ConfigWatcher(processor, stopWatcher)
 
 	// --- Act ---
 	// 4. Delete the YAML file to trigger a stat error on the next poll.
@@ -1546,7 +1558,7 @@ chains:
 	}
 
 	// 5. Force the watcher to check immediately.
-	forceCheckSignal <- struct{}{}
+	processor.TestSignals.ForceCheckSignal <- struct{}{}
 
 	// 6. Wait for the watcher to log the error.
 	select {

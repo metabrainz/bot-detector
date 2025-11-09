@@ -369,17 +369,18 @@ func TestDelayOrShutdown(t *testing.T) {
 
 // tailerTestHarness encapsulates the common setup and teardown for LiveLogTailer tests.
 type tailerTestHarness struct {
-	t              *testing.T
-	processor      *Processor
-	tempLogFile    string
-	signalCh       chan os.Signal
-	doneCh         chan struct{}
-	readyCh        chan struct{}
-	capturedLogs   []string
-	processedLines []string
-	logMutex       sync.Mutex
-	lineProcessed  chan string
-	fileRotated    chan struct{} // New channel to signal rotation
+	t               *testing.T
+	processor       *Processor
+	tempLogFile     string
+	signalCh        chan os.Signal
+	doneCh          chan struct{}
+	readyCh         chan struct{}
+	capturedLogs    []string
+	processedLines  []string
+	logMutex        sync.Mutex
+	lineProcessed   chan string
+	fileRotated     chan struct{} // New channel to signal rotation
+	readErrorLogged chan struct{} // New channel to signal a read error
 }
 
 // newTailerTestHarness creates and initializes a test harness for LiveLogTailer.
@@ -387,12 +388,13 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 	t.Helper()
 
 	h := &tailerTestHarness{
-		t:             t,
-		signalCh:      make(chan os.Signal, 1),
-		doneCh:        make(chan struct{}),
-		readyCh:       make(chan struct{}, 1),
-		lineProcessed: make(chan string, 10), // Buffered to prevent blocking
-		fileRotated:   make(chan struct{}, 1),
+		t:               t,
+		signalCh:        make(chan os.Signal, 1),
+		doneCh:          make(chan struct{}),
+		readyCh:         make(chan struct{}, 1),
+		lineProcessed:   make(chan string, 10), // Buffered to prevent blocking
+		fileRotated:     make(chan struct{}, 1),
+		readErrorLogged: make(chan struct{}, 1),
 	}
 
 	// Create temp file and set global path
@@ -412,6 +414,13 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 			// If the tailer logs that it's reopening due to rotation, signal the channel.
 			if tag == "TAIL" && strings.Contains(logLine, "Detected log file rotation") {
 				h.fileRotated <- struct{}{}
+			}
+			// If the tailer logs a read error, signal the channel.
+			if tag == "TAIL_ERROR" && strings.Contains(logLine, "Read error while tailing") {
+				select {
+				case h.readErrorLogged <- struct{}{}:
+				default:
+				}
 			}
 		},
 		ProcessLogLine: func(line string, lineNumber int) {
@@ -666,10 +675,23 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 		t.Fatalf("Failed to create pipe: %v", err)
 	}
 
+	// Create a consistent mock FileInfo that will be used for both the
+	// initial stat and subsequent rotation checks.
+	mockInfo := &mockFileInfo{
+		size: 0,
+		sys:  &syscall.Stat_t{Ino: 12345, Dev: 1}, // Use a consistent dummy inode
+	}
+
+	// Wrap the pipe reader in a custom file handle that returns our mock FileInfo.
+	mockHandle := &mockFileHandle{
+		file: r,
+		info: mockInfo,
+	}
+
 	// Redirect os.Open to return our pipe's reader end.
 	originalOsOpenFile := osOpenFile
 	osOpenFile = func(name string) (fileHandle, error) {
-		return r, nil
+		return mockHandle, nil
 	}
 	originalLogFilePath := LogFilePath
 	LogFilePath = "/fake/pipe/path" // Path doesn't matter due to the mock.
@@ -680,28 +702,66 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 
 	harness := newTailerTestHarness(t, &AppConfig{
 		PollingInterval: 10 * time.Millisecond,
+		// The StatFunc will now also return the same consistent mock FileInfo.
+		StatFunc: func(s string) (os.FileInfo, error) { return mockInfo, nil },
 	})
 
 	// --- Act ---
 	harness.start()
+
+	// Write a line to the pipe and wait for it to be processed.
+	// This ensures the tailer is actively reading and blocked on the pipe
+	// before we close it, preventing a race condition where the tailer might
+	// hit EOF before the intended read error.
+	if _, err := w.WriteString("line to sync\n"); err != nil {
+		t.Fatalf("Failed to write to pipe: %v", err)
+	}
+	select {
+	case <-harness.lineProcessed:
+		// Sync successful.
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for sync line to be processed.")
+	}
 
 	// Close the writer end first, then the reader end. Closing the reader
 	// will cause the blocked ReadByte() in the tailer to fail immediately.
 	w.Close()
 	r.Close()
 
-	// Wait for the tailer to log the read error. We can poll the captured logs.
-	// This is a bit racy, but simpler than adding more channels to the harness for this one case.
-	time.Sleep(100 * time.Millisecond) // Increased sleep to ensure error is logged.
+	// Wait for the tailer to log the read error. This is now deterministic.
+	select {
+	case <-harness.readErrorLogged:
+		// The error was logged as expected.
+	case <-time.After(1 * time.Second):
+		t.Fatalf("Timed out waiting for the read error to be logged. Logs:\n%s", strings.Join(harness.capturedLogs, "\n"))
+	}
 
 	harness.stop()
 
 	// --- Assert ---
 	logOutput := strings.Join(harness.capturedLogs, "\n")
 	if !strings.Contains(logOutput, "TAIL_ERROR: Read error while tailing log file") {
-		t.Error("Expected a 'Read error while tailing' message, but none was logged.")
+		t.Errorf("Expected a 'Read error while tailing' message, but none was logged. Logs:\n%s", logOutput)
 	}
 }
+
+// mockFileHandle wraps an io.ReadSeeker (like a pipe) and overrides the Stat() method.
+type mockFileHandle struct {
+	file io.ReadSeeker
+	info os.FileInfo
+}
+
+func (m *mockFileHandle) Read(p []byte) (n int, err error) { return m.file.Read(p) }
+func (m *mockFileHandle) Seek(offset int64, whence int) (int64, error) {
+	// Pipes don't support Seek, but we need to satisfy the interface.
+	// The tailer's Seek is only called on the first run, and for a pipe,
+	// it effectively does nothing, which is fine for this test.
+	return 0, nil
+}
+func (m *mockFileHandle) Close() error {
+	return m.file.(io.Closer).Close()
+}
+func (m *mockFileHandle) Stat() (os.FileInfo, error) { return m.info, nil }
 
 // TestLiveLogTailer_ShutdownDuringRetryDelay verifies that if a shutdown signal
 // is received while the tailer is in its file-open retry delay loop, it shuts
