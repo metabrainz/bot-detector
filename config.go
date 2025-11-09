@@ -355,8 +355,8 @@ func compileObjectMatcher(chainName string, stepIndex int, field string, obj map
 	}, nil
 }
 
-// LoadChainsFromYAML reads, parses, and pre-compiles regexes for the chains.
-func LoadChainsFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
+// LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
+func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 	data, err := os.ReadFile(YAMLFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read YAML file %s: %w", YAMLFilePath, err)
@@ -775,11 +775,11 @@ func ChainWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan st
 				// Create a shallow copy of the config to compare against after the reload.
 				// If we just did `oldConfig := p.Config`, we'd have a pointer to the same struct,
 				// and our comparison would be against the already-updated values.
-				oldConfig := *p.Config
+				oldConfig := *p.Config //nolint:govet
 				oldLogRegex := p.LogRegex
 				p.ChainMutex.RUnlock()
 				// LoadChainsFromYAML now returns parsed data, not modifying global state.
-				loadedCfg, err := LoadChainsFromYAML()
+				loadedCfg, err := LoadConfigFromYAML()
 				if err != nil {
 					p.LogFunc(LevelError, "LOAD_ERROR", "Failed to reload chains: %v", err)
 					return // The deferred signal will still fire.

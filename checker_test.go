@@ -1163,9 +1163,9 @@ func TestDryRunMode(t *testing.T) {
 	os.WriteFile("bad_user_agents.txt", []byte("BadUA/1.0\nregex:NastyBot"), 0644)
 	t.Cleanup(func() { os.Remove("bad_user_agents.txt") })
 	// 1. Load configuration (chains, whitelist, etc.)
-	loadedCfg, err := LoadChainsFromYAML()
+	loadedCfg, err := LoadConfigFromYAML()
 	if err != nil {
-		t.Fatalf("LoadChainsFromYAML() failed: %v", err)
+		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 	}
 	SetLogLevel(loadedCfg.LogLevel)
 

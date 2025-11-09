@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestLoadChainsFromYAML_Success(t *testing.T) {
+func TestLoadConfigFromYAML_Success(t *testing.T) {
 	// --- Setup ---
 	// Create a temporary valid YAML file
 	yamlContent := `
@@ -49,11 +49,11 @@ chains:
 	t.Cleanup(resetGlobalState)
 
 	// --- Act ---
-	loadedCfg, err := LoadChainsFromYAML() // Now returns *LoadedConfig, error
+	loadedCfg, err := LoadConfigFromYAML() // Now returns *LoadedConfig, error
 
 	// --- Assert ---
 	if err != nil {
-		t.Fatalf("LoadChainsFromYAML() returned an unexpected error: %v", err)
+		t.Fatalf("LoadConfigFromYAML() returned an unexpected error: %v", err)
 	}
 
 	if len(loadedCfg.Chains) != 2 {
@@ -127,7 +127,7 @@ func setupTestYAML(t *testing.T, content string) {
 	})
 }
 
-func TestLoadChainsFromYAML_HAProxySettings(t *testing.T) {
+func TestLoadConfigFromYAML_HAProxySettings(t *testing.T) {
 	tests := []struct {
 		name                string
 		yamlContent         string
@@ -162,9 +162,9 @@ version: "1.0"
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			setupTestYAML(t, tt.yamlContent)
-			loadedCfg, err := LoadChainsFromYAML()
+			loadedCfg, err := LoadConfigFromYAML()
 			if err != nil {
-				t.Fatalf("LoadChainsFromYAML() failed: %v", err)
+				t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 			}
 			if loadedCfg.HAProxyMaxRetries != tt.expectedMaxRetries || loadedCfg.HAProxyRetryDelay != tt.expectedRetryDelay || loadedCfg.HAProxyDialTimeout != tt.expectedDialTimeout {
 				t.Errorf("HAProxy settings mismatch. Got retries=%d, delay=%v, timeout=%v. Expected retries=%d, delay=%v, timeout=%v", loadedCfg.HAProxyMaxRetries, loadedCfg.HAProxyRetryDelay, loadedCfg.HAProxyDialTimeout, tt.expectedMaxRetries, tt.expectedRetryDelay, tt.expectedDialTimeout)
@@ -173,7 +173,7 @@ version: "1.0"
 	}
 }
 
-func TestLoadChainsFromYAML_ObjectMatcher(t *testing.T) {
+func TestLoadConfigFromYAML_ObjectMatcher(t *testing.T) {
 	// --- Setup ---
 	yamlContent := `
 version: "1.0"
@@ -190,9 +190,9 @@ chains:
 	setupTestYAML(t, yamlContent)
 
 	// --- Act ---
-	loadedCfg, err := LoadChainsFromYAML()
+	loadedCfg, err := LoadConfigFromYAML()
 	if err != nil {
-		t.Fatalf("LoadChainsFromYAML() failed: %v", err)
+		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 	}
 
 	// --- Assert ---
@@ -222,7 +222,7 @@ chains:
 	}
 }
 
-func TestLoadChainsFromYAML_ObjectMatcher_OtherOperators(t *testing.T) {
+func TestLoadConfigFromYAML_ObjectMatcher_OtherOperators(t *testing.T) {
 	// This test covers the 'gt' and 'lte' operators not covered by the main object matcher test.
 	yamlContent := `
 version: "1.0"
@@ -237,9 +237,9 @@ chains:
             lte: 404
 `
 	setupTestYAML(t, yamlContent)
-	loadedCfg, err := LoadChainsFromYAML()
+	loadedCfg, err := LoadConfigFromYAML()
 	if err != nil {
-		t.Fatalf("LoadChainsFromYAML() failed: %v", err)
+		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 	}
 	matcher := loadedCfg.Chains[0].Steps[0].Matchers[0]
 
@@ -252,7 +252,7 @@ chains:
 	}
 }
 
-func TestLoadChainsFromYAML_IntMatcherFallback(t *testing.T) {
+func TestLoadConfigFromYAML_IntMatcherFallback(t *testing.T) {
 	// This test specifically targets the non-StatusCode path in compileIntMatcher.
 	// We use a field that is not an integer (Method) to ensure the fallback logic
 	// of converting a string value to an integer is tested.
@@ -270,9 +270,9 @@ chains:
 	setupTestYAML(t, yamlContent)
 
 	// --- Act ---
-	loadedCfg, err := LoadChainsFromYAML()
+	loadedCfg, err := LoadConfigFromYAML()
 	if err != nil {
-		t.Fatalf("LoadChainsFromYAML() failed: %v", err)
+		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 	}
 
 	// --- Assert ---
@@ -288,7 +288,7 @@ chains:
 	}
 }
 
-func TestLoadChainsFromYAML_Errors(t *testing.T) {
+func TestLoadConfigFromYAML_Errors(t *testing.T) {
 	tests := []struct {
 		name          string
 		yamlContent   string
@@ -465,7 +465,7 @@ chains:
 				t.Cleanup(func() { LogOutput = originalLogFunc })
 			}
 
-			_, err := LoadChainsFromYAML()
+			_, err := LoadConfigFromYAML()
 
 			if tt.expectedError == "" {
 				if err != nil {
@@ -478,7 +478,7 @@ chains:
 	}
 }
 
-func TestLoadChainsFromYAML_InvalidDurations(t *testing.T) {
+func TestLoadConfigFromYAML_InvalidDurations(t *testing.T) {
 	tests := []struct {
 		name          string
 		yamlContent   string
@@ -607,7 +607,7 @@ haproxy_dial_timeout: "1y"`,
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			setupTestYAML(t, tt.yamlContent)
-			_, err := LoadChainsFromYAML()
+			_, err := LoadConfigFromYAML()
 			if err == nil || !strings.Contains(err.Error(), tt.expectedError) {
 				t.Errorf("Expected error containing '%s', but got: %v", tt.expectedError, err)
 			}
@@ -615,7 +615,7 @@ haproxy_dial_timeout: "1y"`,
 	}
 }
 
-func TestLoadChainsFromYAML_MissingOptionalCaptureGroup(t *testing.T) {
+func TestLoadConfigFromYAML_MissingOptionalCaptureGroup(t *testing.T) {
 	// This test verifies that a custom regex is valid even if it's missing
 	// optional capture groups like 'Referrer'.
 
@@ -627,9 +627,9 @@ chains: []
 `
 	setupTestYAML(t, yamlContent)
 
-	loadedCfg, err := LoadChainsFromYAML()
+	loadedCfg, err := LoadConfigFromYAML()
 	if err != nil {
-		t.Fatalf("LoadChainsFromYAML() failed unexpectedly: %v", err)
+		t.Fatalf("LoadConfigFromYAML() failed unexpectedly: %v", err)
 	}
 
 	if loadedCfg.LogFormatRegex == nil {
@@ -656,7 +656,7 @@ chains: []
 	}
 }
 
-func TestLoadChainsFromYAML_MissingRequiredCaptureGroup(t *testing.T) {
+func TestLoadConfigFromYAML_MissingRequiredCaptureGroup(t *testing.T) {
 	// This test verifies that a custom regex fails to load if it's missing
 	// a required capture group like 'IP'.
 	yamlContent := `
@@ -666,7 +666,7 @@ chains: []
 `
 	setupTestYAML(t, yamlContent)
 
-	_, err := LoadChainsFromYAML()
+	_, err := LoadConfigFromYAML()
 	if err == nil {
 		t.Fatal("Expected an error when loading regex with missing required capture group, but got nil.")
 	}
@@ -675,7 +675,7 @@ chains: []
 	}
 }
 
-func TestLoadChainsFromYAML_CustomTimestampFormat(t *testing.T) {
+func TestLoadConfigFromYAML_CustomTimestampFormat(t *testing.T) {
 	// This test verifies that a custom timestamp_format is correctly loaded and used.
 	yamlContent := fmt.Sprintf(`
 version: "1.0"
@@ -686,9 +686,9 @@ chains: []
 
 	setupTestYAML(t, yamlContent)
 
-	loadedCfg, err := LoadChainsFromYAML()
+	loadedCfg, err := LoadConfigFromYAML()
 	if err != nil {
-		t.Fatalf("LoadChainsFromYAML() failed unexpectedly: %v", err)
+		t.Fatalf("LoadConfigFromYAML() failed unexpectedly: %v", err)
 	}
 
 	if loadedCfg.TimestampFormat != time.RFC3339 {
@@ -919,9 +919,9 @@ chains:
 	t.Cleanup(func() { YAMLFilePath = originalPath })
 
 	// 2. Load the initial configuration.
-	initialLoadedCfg, err := LoadChainsFromYAML()
+	initialLoadedCfg, err := LoadConfigFromYAML()
 	if err != nil {
-		t.Fatalf("Initial LoadChainsFromYAML() failed: %v", err)
+		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
 	}
 
 	// 3. Create the processor with the initial config.
@@ -1028,9 +1028,9 @@ chains:
 	t.Cleanup(func() { YAMLFilePath = originalPath })
 
 	// 3. Load the initial configuration.
-	initialLoadedCfg, err := LoadChainsFromYAML()
+	initialLoadedCfg, err := LoadConfigFromYAML()
 	if err != nil {
-		t.Fatalf("Initial LoadChainsFromYAML() failed: %v", err)
+		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
 	}
 
 	// 4. Create the processor with the initial config.
@@ -1124,9 +1124,9 @@ chains:
 	t.Cleanup(func() { YAMLFilePath = originalPath })
 
 	// 2. Load the initial configuration.
-	initialLoadedCfg, err := LoadChainsFromYAML()
+	initialLoadedCfg, err := LoadConfigFromYAML()
 	if err != nil {
-		t.Fatalf("Initial LoadChainsFromYAML() failed: %v", err)
+		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
 	}
 
 	// 3. Create the processor with the initial config and a log capturer.

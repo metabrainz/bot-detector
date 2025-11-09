@@ -23,7 +23,7 @@ func main() {
 		os.Exit(1)
 	}
 	// Load initial configuration from YAML.
-	loadedCfg, err := LoadChainsFromYAML()
+	loadedCfg, err := LoadConfigFromYAML()
 	if err != nil {
 		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
 	}
