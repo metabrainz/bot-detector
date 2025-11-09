@@ -196,114 +196,62 @@ func TestCheckChains_DryRun(t *testing.T) {
 	h.assertBlocked(entry2, true)
 }
 
-// TestCheckChains_DryRun_UnknownAction tests that an unrecognized action is handled gracefully in dry-run mode.
-func TestCheckChains_DryRun_UnknownAction(t *testing.T) {
-	// 1. Setup
-	resetGlobalState()
-
-	// Define a chain with an action that is not 'block' or 'log'.
-	chain := BehavioralChain{
-		Name:     "UnknownActionChain",
-		MatchKey: "ip",
-		Action:   "throttle", // An unrecognized action
-	}
-	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/test", new([]string))
-	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
-
-	chains := []BehavioralChain{chain}
-
-	// Capture log output
-	var capturedLog string
-	var logMutex sync.Mutex
-	logCaptureFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-		logMutex.Lock()
-		if tag == "DRY_RUN" {
-			capturedLog = fmt.Sprintf(format, args...)
-		}
-		logMutex.Unlock()
+// TestCheckChains_UnknownAction tests that an unrecognized action is handled gracefully in both live and dry-run modes.
+func TestCheckChains_UnknownAction(t *testing.T) {
+	tests := []struct {
+		name   string
+		dryRun bool
+	}{
+		{name: "Live Mode", dryRun: false},
+		{name: "Dry Run Mode", dryRun: true},
 	}
 
-	processor := newTestProcessor(&AppConfig{}, chains)
-	processor.DryRun = true
-	processor.LogFunc = logCaptureFunc
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// --- Setup ---
+			h := newCheckerTestHarness(t, nil)
+			h.processor.DryRun = tt.dryRun
 
-	entry := &LogEntry{
-		IPInfo:    NewIPInfo("192.0.2.1"),
-		Timestamp: time.Now(),
-		Path:      "/test",
-	}
+			h.addChain(BehavioralChain{
+				Name:      "UnknownActionChain",
+				MatchKey:  "ip",
+				Action:    "throttle", // An unrecognized action
+				StepsYAML: []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/test"}}},
+			})
 
-	// --- Act ---
-	CheckChains(processor, entry)
+			entry := &LogEntry{
+				IPInfo:    NewIPInfo("192.0.2.1"),
+				Timestamp: time.Now(),
+				Path:      "/test",
+			}
 
-	// --- Assert ---
-	expectedLogSubstring := "UNKNOWN_ACTION!"
-	if !strings.Contains(capturedLog, expectedLogSubstring) {
-		t.Errorf("Expected log to contain '%s' for unknown action, but got: '%s'", expectedLogSubstring, capturedLog)
-	}
+			// --- Act ---
+			h.processEntry(entry)
 
-	// Also assert that no block state was created.
-	processor.ActivityMutex.RLock()
-	activity := processor.ActivityStore[GetTrackingKey(&chain, entry)]
-	processor.ActivityMutex.RUnlock()
-	if activity != nil && activity.IsBlocked {
-		t.Error("IsBlocked should be false for an unknown action, but it was true.")
-	}
-}
+			// --- Assert ---
+			if h.blockCalled {
+				t.Fatal("Blocker was called, but should have been skipped for an unknown action.")
+			}
 
-// TestCheckChains_LiveMode_UnknownAction tests that an unrecognized action is handled gracefully in live mode.
-func TestCheckChains_LiveMode_UnknownAction(t *testing.T) {
-	// 1. Setup
-	resetGlobalState()
+			// State should be cleared and no block should be recorded.
+			h.assertBlocked(entry, false)
+			h.assertChainProgressCleared("UnknownActionChain", entry)
 
-	// Define a chain with an action that is not 'block' or 'log'.
-	chain := BehavioralChain{
-		Name:     "LiveUnknownActionChain",
-		MatchKey: "ip",
-		Action:   "throttle", // An unrecognized action
-	}
-	matcher, _ := compileStringMatcher(chain.Name, 0, "Path", "/test", new([]string))
-	chain.Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
-
-	chains := []BehavioralChain{chain}
-
-	// Setup a mock blocker to ensure it's not called
-	var blockCalled bool
-	mockBlocker := &MockBlocker{
-		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
-			blockCalled = true
-			return nil
-		},
-	}
-
-	processor := newTestProcessor(&AppConfig{}, chains)
-	processor.DryRun = false
-	processor.Blocker = mockBlocker
-
-	entry := &LogEntry{
-		IPInfo:    NewIPInfo("192.0.2.1"),
-		Timestamp: time.Now(),
-		Path:      "/test",
-	}
-
-	// --- Act ---
-	CheckChains(processor, entry)
-
-	// --- Assert ---
-	if blockCalled {
-		t.Fatal("Blocker was called, but should have been skipped for an unknown action.")
-	}
-
-	// Also assert that the chain progress was reset and no block state was created.
-	processor.ActivityMutex.RLock()
-	activity := processor.ActivityStore[GetTrackingKey(&chain, entry)]
-	processor.ActivityMutex.RUnlock()
-
-	if activity.IsBlocked {
-		t.Error("IsBlocked should be false for an unknown action, but it was true.")
-	}
-	if len(activity.ChainProgress) != 0 {
-		t.Errorf("Expected ChainProgress to be cleared, but it has %d entries.", len(activity.ChainProgress))
+			// In dry-run mode, we expect a specific log message.
+			if tt.dryRun {
+				foundLog := false
+				expectedLogSubstring := "UNKNOWN_ACTION!"
+				for _, log := range h.capturedLogs {
+					if strings.Contains(log, expectedLogSubstring) {
+						foundLog = true
+						break
+					}
+				}
+				if !foundLog {
+					t.Errorf("Expected log to contain '%s' for unknown action in dry-run, but it was not found.", expectedLogSubstring)
+				}
+			}
+		})
 	}
 }
 
