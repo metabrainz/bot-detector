@@ -218,9 +218,13 @@ For more complex string matching, use a prefix.
 
 *   **Regular Expression:** Uses Go's standard `regexp` package, which implements the RE2 syntax. The `(?i)` flag at the beginning of the pattern makes the match case-insensitive.
     ```yaml
-    # Matches if "Bot", "crawler", or "Python" appear anywhere in the User-Agent string.
-    # e.g., "SomeBot/1.0", "WebCrawler", or "Python-Requests/2.26.0" will all match.
+    # Matches if "Bot", "crawler", or "Python" appear anywhere in the User-Agent string (e.g., "SomeBot/1.0", "Python-Requests/2.26.0").
     UserAgent: "regex:(?i)(bot|crawler|python)"
+    ```
+    > **Note on Escaping:** YAML strings treat the backslash (`\`) as an escape character. If your regular expression needs a literal backslash (e.g., for `\d` or to escape a dot `\.`), you must escape it for YAML by doubling it.
+    ```yaml
+    # To match a digit (\d), you must write \\d in the YAML file.
+    Path: "regex:^/user/\\d+$"
     ```
 *   **File-Based Matcher:** Loads a list of values from an external file. This can be used with any field that accepts string values (e.g., `Path`, `UserAgent`, `IP`). Each line in the file is treated as a separate value in a list (OR condition).
     For example, given a file named `bad_paths.txt` with the following content:
@@ -228,13 +232,15 @@ For more complex string matching, use a prefix.
     # Common probing paths to block
     /wp-login.php
     /xmlrpc.php
-    regex:^/admin
+    # A regex inside a file does NOT need double-backslash escaping.
+    regex:^/user/\d+$
     ```
     You would use it in your configuration like this:
     ```yaml
     Path: "file:./bad_paths.txt"
     ```
     Lines in the referenced file that are empty or start with `#` are treated as comments and ignored.
+    > **Important:** When using prefixes like `regex:` inside a file, the string is read literally. You do **not** need to escape backslashes for YAML (e.g., use `\d` directly, not `\\d`).
     Like the main configuration file, these dependency files are monitored for changes, and any modification will trigger a hot-reload of the entire configuration.
 *   **Status Code Pattern:** A special shorthand for matching status code classes.
     The `X` acts as a wildcard for any digit.
