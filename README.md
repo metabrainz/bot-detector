@@ -355,12 +355,13 @@ chains:
             lt: 500
             not: 404 # Note: 'not' is a powerful addition
 
-  # --- CHAIN 4: Broken Referrer Link ---
-  # A simple chain to log any IP that gets three 5xx errors in a row
+  # --- CHAIN 4: Broken Referrer Link (IPv6 Only) ---
+  # A simple chain to log any IPv6 address that gets three 5xx errors in a row
   # while coming from a specific internal referrer, which might indicate a broken link.
   - name: Server-Error-Trigger
     action: "log"
-    match_key: "ip"
+    match_key: "ipv6" # This chain will now only process log entries that have an IPv6 address.
+                      # Log entries with IPv4 addresses will be ignored by this specific chain.
     steps:
       - field_matches:
           StatusCode: "5XX"
