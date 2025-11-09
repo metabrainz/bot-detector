@@ -68,95 +68,60 @@ func TestCheckChains_SuccessfulBlock(t *testing.T) {
 	h.assertChainProgressCleared("TwoStepPathBlocker", entry2)
 }
 
-// TestPreCheckActivity_StillBlocked_OldEntry verifies that when an IP is already blocked,
-// and an out-of-order (older) log entry arrives, the LastRequestTime is NOT updated.
-func TestPreCheckActivity_StillBlocked_OldEntry(t *testing.T) {
-	// 1. Setup
-	resetGlobalState()
-
-	const targetIP = "192.0.2.50"
-	trackingKey := TrackingKey{IPInfo: NewIPInfo(targetIP)}
+// TestPreCheckActivity_StillBlocked verifies that when an IP is already blocked,
+// the LastRequestTime is only updated if the new log entry is newer.
+func TestPreCheckActivity_StillBlocked(t *testing.T) {
 	now := time.Now()
 
-	processor := newTestProcessor(nil, nil)
-
-	// 2. Manually create a pre-existing, non-expired block state.
-	// The last request was seen at time 'now'.
-	processor.ActivityStore[trackingKey] = &BotActivity{
-		LastRequestTime: now,
-		BlockedUntil:    now.Add(1 * time.Hour),
-		IsBlocked:       true,
+	tests := []struct {
+		name                    string
+		entryTimestamp          time.Time
+		expectedLastRequestTime time.Time
+	}{
+		{
+			name:                    "With Older Entry",
+			entryTimestamp:          now.Add(-10 * time.Second),
+			expectedLastRequestTime: now, // Should not be updated
+		},
+		{
+			name:                    "With Newer Entry",
+			entryTimestamp:          now.Add(10 * time.Second),
+			expectedLastRequestTime: now.Add(10 * time.Second), // Should be updated
+		},
 	}
 
-	// 3. Create a log entry with a timestamp OLDER than the last seen request.
-	oldEntry := &LogEntry{
-		IPInfo:    NewIPInfo(targetIP),
-		Timestamp: now.Add(-10 * time.Second), // 10 seconds in the past
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// --- Setup ---
+			resetGlobalState()
+			const targetIP = "192.0.2.50"
+			trackingKey := TrackingKey{IPInfo: NewIPInfo(targetIP)}
+			processor := newTestProcessor(nil, nil)
 
-	// --- Act ---
-	// The preCheckActivity function is not exported, so we call CheckChains,
-	// which calls it internally. We lock the mutex to inspect the result.
-	processor.ActivityMutex.Lock()
-	_, skip := preCheckActivity(processor, oldEntry, trackingKey)
-	processor.ActivityMutex.Unlock()
+			// Manually create a pre-existing, non-expired block state.
+			processor.ActivityStore[trackingKey] = &BotActivity{
+				LastRequestTime: now,
+				BlockedUntil:    now.Add(1 * time.Hour),
+				IsBlocked:       true,
+			}
 
-	// --- Assert ---
-	if !skip {
-		t.Error("Expected skip to be true for an already-blocked IP, but it was false.")
-	}
+			entry := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: tt.entryTimestamp}
 
-	// Assert that the LastRequestTime was NOT updated because the incoming entry was older.
-	processor.ActivityMutex.RLock()
-	finalActivity := processor.ActivityStore[trackingKey]
-	processor.ActivityMutex.RUnlock()
+			// --- Act ---
+			// We call the unexported preCheckActivity directly to isolate the logic under test.
+			processor.ActivityMutex.Lock()
+			_, skip := preCheckActivity(processor, entry, trackingKey)
+			processor.ActivityMutex.Unlock()
 
-	if !finalActivity.LastRequestTime.Equal(now) {
-		t.Errorf("Expected LastRequestTime to remain unchanged, but it was updated from %v to %v",
-			now, finalActivity.LastRequestTime)
-	}
-}
-
-// TestPreCheckActivity_StillBlocked_NewEntry verifies that when an IP is already blocked,
-// and a newer log entry arrives, the LastRequestTime IS updated.
-func TestPreCheckActivity_StillBlocked_NewEntry(t *testing.T) {
-	// 1. Setup
-	resetGlobalState()
-
-	const targetIP = "192.0.2.51"
-	trackingKey := TrackingKey{IPInfo: NewIPInfo(targetIP)}
-	now := time.Now()
-
-	processor := newTestProcessor(nil, nil)
-
-	// 2. Manually create a pre-existing, non-expired block state.
-	// The last request was seen at time 'now'.
-	processor.ActivityStore[trackingKey] = &BotActivity{
-		LastRequestTime: now,
-		BlockedUntil:    now.Add(1 * time.Hour),
-		IsBlocked:       true,
-	}
-
-	// 3. Create a log entry with a timestamp NEWER than the last seen request.
-	newEntryTimestamp := now.Add(10 * time.Second)
-	newEntry := &LogEntry{
-		IPInfo:    NewIPInfo(targetIP),
-		Timestamp: newEntryTimestamp,
-	}
-
-	// --- Act ---
-	processor.ActivityMutex.Lock()
-	_, skip := preCheckActivity(processor, newEntry, trackingKey)
-	processor.ActivityMutex.Unlock()
-
-	// --- Assert ---
-	if !skip {
-		t.Error("Expected skip to be true for an already-blocked IP, but it was false.")
-	}
-
-	if !processor.ActivityStore[trackingKey].LastRequestTime.Equal(newEntryTimestamp) {
-		t.Errorf("Expected LastRequestTime to be updated to %v, but it was %v",
-			newEntryTimestamp, processor.ActivityStore[trackingKey].LastRequestTime)
+			// --- Assert ---
+			if !skip {
+				t.Error("Expected skip to be true for an already-blocked IP, but it was false.")
+			}
+			if !processor.ActivityStore[trackingKey].LastRequestTime.Equal(tt.expectedLastRequestTime) {
+				t.Errorf("Expected LastRequestTime to be %v, but it was %v",
+					tt.expectedLastRequestTime, processor.ActivityStore[trackingKey].LastRequestTime)
+			}
+		})
 	}
 }
 
