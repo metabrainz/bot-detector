@@ -103,9 +103,9 @@ func start(p *Processor) {
 		// This allows tests to focus on specific components like the tailer without
 		// interference from other goroutines like the config watcher.
 		if !isTesting() {
-			// The ChainWatcher is not started in test mode to prevent race conditions
+			// The ConfigWatcher is not started in test mode to prevent race conditions
 			// where the test's config is overwritten by a reload from the default chains.yaml.
-			go ChainWatcher(p, stopWatcher, nil, nil)
+			go ConfigWatcher(p, stopWatcher, nil, nil)
 			go CleanUpIdleActivity(p, stopWatcher)
 		}
 		// Listen for OS signals on the processor's channel

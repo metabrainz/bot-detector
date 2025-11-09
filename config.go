@@ -701,8 +701,8 @@ func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 	}, nil
 }
 
-// ChainWatcher monitors the YAML config file for modifications and reloads the chains dynamically.
-func ChainWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan struct{}, reloadDoneSignal chan<- struct{}) {
+// ConfigWatcher monitors the YAML config file for modifications and reloads the chains dynamically.
+func ConfigWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan struct{}, reloadDoneSignal chan<- struct{}) {
 	if p.DryRun {
 		return
 	}
@@ -713,14 +713,14 @@ func ChainWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan st
 		pollingInterval = DefaultMinPollingInterval
 	}
 
-	p.LogFunc(LevelDebug, "WATCH", "Starting ChainWatcher, polling every %v", pollingInterval)
+	p.LogFunc(LevelDebug, "WATCH", "Starting ConfigWatcher, polling every %v", pollingInterval)
 	timer := time.NewTicker(pollingInterval)
 	defer timer.Stop()
 
 	for {
 		select {
 		case <-stop:
-			p.LogFunc(LevelInfo, "WATCH", "ChainWatcher received stop signal. Shutting down.")
+			p.LogFunc(LevelInfo, "WATCH", "ConfigWatcher received stop signal. Shutting down.")
 			return
 		case <-forceCheckSignal:
 			// This case is for testing only, to trigger an immediate check.

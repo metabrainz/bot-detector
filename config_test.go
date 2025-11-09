@@ -889,7 +889,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 	})
 }
 
-func TestChainWatcher_Reload(t *testing.T) {
+func TestConfigWatcher_Reload(t *testing.T) {
 	// --- Setup ---
 	// This test involves loading configs which can be noisy.
 	// Isolate the log level for this test.
@@ -940,11 +940,11 @@ chains:
 	}
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
-	// 4. Start the ChainWatcher with the test signal channel.
+	// 4. Start the ConfigWatcher with the test signal channel.
 	forceCheckSignal := make(chan struct{}, 1)
 	reloadDoneSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
-	go ChainWatcher(processor, stopWatcher, forceCheckSignal, reloadDoneSignal)
+	go ConfigWatcher(processor, stopWatcher, forceCheckSignal, reloadDoneSignal)
 
 	// --- Act ---
 	// 5. Modify the YAML file on disk.
@@ -995,7 +995,7 @@ chains:
 	}
 }
 
-func TestChainWatcher_FileDependencyReload(t *testing.T) {
+func TestConfigWatcher_FileDependencyReload(t *testing.T) {
 	// --- Setup ---
 	tempDir := t.TempDir()
 
@@ -1048,12 +1048,12 @@ chains:
 	initialFileInfo, _ := os.Stat(tempYamlFile)
 	processor.Config.LastModTime = initialFileInfo.ModTime() // Set initial mod time
 
-	// 5. Start the ChainWatcher with the test signal channel.
+	// 5. Start the ConfigWatcher with the test signal channel.
 	forceCheckSignal := make(chan struct{}, 1)
 	reloadDoneSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go ChainWatcher(processor, stopWatcher, forceCheckSignal, reloadDoneSignal)
+	go ConfigWatcher(processor, stopWatcher, forceCheckSignal, reloadDoneSignal)
 	// --- Act ---
 	// 6. Modify ONLY the dependency file.
 	if err := os.WriteFile(agentFilePath, []byte("ReloadedBadAgent/2.0"), 0644); err != nil {
@@ -1096,7 +1096,7 @@ chains:
 	}
 }
 
-func TestChainWatcher_ReloadFailure(t *testing.T) {
+func TestConfigWatcher_ReloadFailure(t *testing.T) {
 	// --- Setup ---
 	// This test involves loading configs which can be noisy.
 	// Isolate the log level for this test.
@@ -1151,12 +1151,12 @@ chains:
 		}
 	}
 
-	// 5. Start the ChainWatcher.
+	// 5. Start the ConfigWatcher.
 	forceCheckSignal := make(chan struct{}, 1)
 	reloadDoneSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go ChainWatcher(processor, stopWatcher, forceCheckSignal, reloadDoneSignal)
+	go ConfigWatcher(processor, stopWatcher, forceCheckSignal, reloadDoneSignal)
 
 	// --- Act ---
 	// 6. Modify the YAML file with INVALID content.
@@ -1201,7 +1201,7 @@ chains:
 	}
 }
 
-func TestChainWatcher_StatError(t *testing.T) {
+func TestConfigWatcher_StatError(t *testing.T) {
 	// --- Setup ---
 	// This test involves loading configs which can be noisy.
 	// Isolate the log level for this test.
@@ -1257,7 +1257,7 @@ chains:
 	forceCheckSignal := make(chan struct{}, 1)
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go ChainWatcher(processor, stopWatcher, forceCheckSignal, nil)
+	go ConfigWatcher(processor, stopWatcher, forceCheckSignal, nil)
 
 	// --- Act ---
 	// 4. Delete the YAML file to trigger a stat error on the next poll.
