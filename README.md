@@ -96,7 +96,7 @@ The application uses a unified logging system with five discrete levels. The `--
 | **`error`** | **1** | Displays severe, non-fatal issues (e.g., file read errors, **HAProxy connection failures** that trigger fail-safe). |
 | **`warning`** | **2** (Default) | Includes non-critical operational issues that should be reviewed (e.g., failed timestamp parsing, malformed URL referrers). |
 | **`info`** | **3** | Includes major application lifecycle events (e.g., configuration **LOAD**, **DRYRUN** start/completion, tailing start). |
-| **`debug`** | **4** (Lowest) | The most verbose level. Includes high-volume internal logic like individual step **MATCH**,
+| **`debug`** | **4** (Lowest) | The most verbose level. Includes high-volume internal logic like individual step **MATCH**. |
 
 
 **Example Command (Recommended for Production):**
