@@ -1149,7 +1149,7 @@ func TestDryRunMode(t *testing.T) {
 
 	// Set required flags for this test
 	originalYAMLPath := YAMLFilePath
-	YAMLFilePath = "chains.yaml" // Assume it exists for this test
+	YAMLFilePath = "testdata/chains.yaml" // Assume it exists for this test
 	t.Cleanup(func() { YAMLFilePath = originalYAMLPath })
 
 	// The chains.yaml file now references a file matcher. We need to create it.
@@ -1192,9 +1192,10 @@ func TestDryRunMode(t *testing.T) {
 	processor.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(processor, line, lineNumber) }
 
 	// 2. Read test_access.log and extract expected log outputs from comments
-	testLogData, err := os.ReadFile("test_access.log")
+	testLogFilePath := "testdata/test_access.log"
+	testLogData, err := os.ReadFile(testLogFilePath)
 	if err != nil {
-		t.Fatalf("Failed to read test_access.log: %v", err)
+		t.Fatalf("Failed to read %s: %v", testLogFilePath, err)
 	}
 	expectedLogs := make(map[int]string)
 	// Use a separate scanner for extracting expected logs to avoid line number confusion
