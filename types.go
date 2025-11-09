@@ -52,12 +52,14 @@ type Processor struct {
 	Config            *AppConfig
 	DryRun            bool
 	IsWhitelistedFunc func(ipInfo IPInfo) bool
+	EntryBuffer       []*LogEntry    // Buffer for holding out-of-order entries.
 	LogRegex          *regexp.Regexp // The currently active log parsing regex.
 	CheckChainsFunc   func(entry *LogEntry)
 	signalCh          chan os.Signal
 	LogFunc           func(level logging.LogLevel, tag string, format string, v ...interface{})
 	ProcessLogLine    func(line string, lineNumber int)
-	TestSignals       *TestSignals // Test-only signals for synchronization.
+	NowFunc           func() time.Time // Mockable time function.
+	TestSignals       *TestSignals     // Test-only signals for synchronization.
 }
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.

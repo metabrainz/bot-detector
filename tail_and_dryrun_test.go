@@ -319,21 +319,21 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 	h.t.Cleanup(func() { LogFilePath = originalLogFilePath })
 
 	// Create processor with mock/capture functions
-	h.processor = &Processor{
-		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-			h.logMutex.Lock()
-			defer h.logMutex.Unlock() //nolint:gocritic
-			logLine := fmt.Sprintf(tag+": "+format, args...)
-			h.capturedLogs = append(h.capturedLogs, logLine)
-		},
-		ProcessLogLine: func(line string, lineNumber int) {
-			h.logMutex.Lock()
-			defer h.logMutex.Unlock() //nolint:gocritic
-			h.processedLines = append(h.processedLines, line)
-			h.lineProcessed <- line
-		},
-		Config: config,
+	h.processor = newTestProcessor(&AppConfig{}, nil) // Use newTestProcessor to ensure all fields are initialized.
+	// Override the functions needed for this specific harness.
+	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		h.logMutex.Lock()
+		defer h.logMutex.Unlock() //nolint:gocritic
+		logLine := fmt.Sprintf(tag+": "+format, args...)
+		h.capturedLogs = append(h.capturedLogs, logLine)
 	}
+	h.processor.ProcessLogLine = func(line string, lineNumber int) {
+		h.logMutex.Lock()
+		defer h.logMutex.Unlock() //nolint:gocritic
+		h.processedLines = append(h.processedLines, line)
+		h.lineProcessed <- line
+	}
+	h.processor.Config = config
 
 	// Ensure StatFunc is never nil to prevent panics in hasFileBeenRotated.
 	if config != nil && h.processor.Config.StatFunc == nil {

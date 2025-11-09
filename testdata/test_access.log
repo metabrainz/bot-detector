@@ -26,7 +26,6 @@ musicbrainz.org 1.2.3.4 - - [28/Oct/2025:17:00:06 +0000] "GET /incomplete HTTP/1
 
 # ======================================================================================
 # === TEST CASE 5: Out-of-order within tolerance (10.0.0.3)
-# === EXPECTED LOG: OUT_OF_ORDER_TOLERATED: Processing out-of-order log entry for IP 10.0.0.3 within tolerance (5s). Current: 2025-10-28T17:00:08Z, Last seen: 2025-10-28T17:00:10Z.
 # === EXPECTED LOG: DRY_RUN: LOG! Chain: OutOfOrderChain completed by IP 10.0.0.3. Action set to 'log' (DryRun).
 # ===
 musicbrainz.org 10.0.0.3 - - [28/Oct/2025:17:00:10 +0000] "GET /order/start HTTP/1.1" 200 100 "-" "OutOfOrderBot"

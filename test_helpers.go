@@ -81,7 +81,9 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 		Chains:            chains,
 		Config:            config,
 		LogFunc:           func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
+		EntryBuffer:       make([]*LogEntry, 0),
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+		NowFunc:           time.Now, // Default to real time for tests unless overridden.
 	}
 	// Create a real HAProxyBlocker and link it to the processor.
 	blocker := &HAProxyBlocker{P: p}
@@ -114,16 +116,14 @@ func newDryRunTestHarness(t *testing.T) *dryRunTestHarness {
 	t.Cleanup(func() { LogFilePath = originalLogFilePath })
 
 	// Create processor with mock/capture functions
-	h.processor = &Processor{
-		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-			h.logMutex.Lock()
-			defer h.logMutex.Unlock()
-			h.capturedLogs = append(h.capturedLogs, fmt.Sprintf(format, args...))
-		},
-		ProcessLogLine: func(line string, lineNumber int) {
-			h.processedLines = append(h.processedLines, line)
-		},
-		Config: &AppConfig{}, // Initialize config to prevent nil pointer dereference
+	h.processor = newTestProcessor(&AppConfig{}, nil)
+	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		h.logMutex.Lock()
+		defer h.logMutex.Unlock()
+		h.capturedLogs = append(h.capturedLogs, fmt.Sprintf(format, args...))
+	}
+	h.processor.ProcessLogLine = func(line string, lineNumber int) {
+		h.processedLines = append(h.processedLines, line)
 	}
 	return h
 }

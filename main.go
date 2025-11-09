@@ -81,6 +81,7 @@ func main() {
 		DryRun:   DryRun,
 		signalCh: make(chan os.Signal, 1),
 		LogFunc:  logging.LogOutput,
+		NowFunc:  time.Now, // Use the real time.Now in production.
 	}
 	// TestSignals is intentionally left nil in production.
 	// Inject the HAProxyBlocker which depends on the main processor instance.

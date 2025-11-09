@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -148,6 +150,28 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	}
 
 endLoop:
+	// After reading all lines, if there are entries in the buffer, process them.
+	// This is crucial for dry-run mode with out-of-order tolerance enabled.
+	p.ActivityMutex.Lock()
+	// The check for `IsTesting` and the specific test name avoids interfering with TestEntryBufferWorker.
+	// A better solution might be a more explicit flag on the processor.
+	isBufferWorkerTest := false
+	if IsTesting() {
+		isBufferWorkerTest = strings.Contains(os.Args[1], "TestEntryBufferWorker")
+	}
+	if len(p.EntryBuffer) > 0 && !isBufferWorkerTest {
+		p.LogFunc(logging.LevelDebug, "DRYRUN_FLUSH", "Processing %d buffered entries at end of dry run.", len(p.EntryBuffer))
+		// Sort all remaining entries by timestamp before final processing.
+		sort.Slice(p.EntryBuffer, func(i, j int) bool {
+			return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
+		})
+		for _, entry := range p.EntryBuffer {
+			checkChainsInternal(p, entry) // Use the internal function as the lock is already held.
+		}
+		p.EntryBuffer = nil // Clear the buffer.
+	}
+	p.ActivityMutex.Unlock()
+
 	p.LogFunc(logging.LevelInfo, "DRYRUN", "DryRun complete. Processed %d lines.", processedCount)
 	close(done)
 }

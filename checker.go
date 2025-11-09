@@ -3,6 +3,7 @@ package main
 import (
 	"bot-detector/internal/logging"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -68,32 +69,6 @@ func preCheckActivity(p *Processor, entry *LogEntry, trackingKey TrackingKey) (*
 	}
 
 	return activity, false // Do not skip
-}
-
-// handleOutOfOrderEntry checks if a log entry is out-of-order and handles it based on tolerance.
-// It returns true if the entry should be skipped, false otherwise.
-// It also updates the LastRequestTime of the activity if the entry is in-order and newer.
-// The caller is responsible for holding the ActivityMutex.
-func handleOutOfOrderEntry(p *Processor, entry *LogEntry, currentActivity *BotActivity) (skip bool) {
-	previousRequestTime := currentActivity.LastRequestTime
-	// If the entry is in order or it's the first time we've seen this key, process it.
-	if previousRequestTime.IsZero() || !entry.Timestamp.Before(previousRequestTime) {
-		return false // Do not skip.
-	}
-
-	// At this point, we know the entry is out-of-order.
-	timeDifference := previousRequestTime.Sub(entry.Timestamp)
-	if timeDifference <= p.Config.OutOfOrderTolerance {
-		p.LogFunc(logging.LevelDebug, "OUT_OF_ORDER_TOLERATED", "Processing out-of-order log entry for IP %s within tolerance (%v). Current: %s, Last seen: %s.",
-			entry.IPInfo.Address, p.Config.OutOfOrderTolerance,
-			entry.Timestamp.Format(AppLogTimestampFormat), previousRequestTime.Format(AppLogTimestampFormat))
-		return false // Do not skip, process it.
-	}
-
-	p.LogFunc(logging.LevelWarning, "OUT_OF_ORDER_SKIPPED", "Skipping out-of-order log entry for IP %s (too old: %v > %v). Current: %s, Last seen: %s.",
-		entry.IPInfo.Address, timeDifference, p.Config.OutOfOrderTolerance,
-		entry.Timestamp.Format(AppLogTimestampFormat), previousRequestTime.Format(AppLogTimestampFormat))
-	return true // Skip this entry entirely.
 }
 
 // handleChainCompletion takes action when a chain is completed (log, block, etc.).
@@ -250,8 +225,12 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 	}
 }
 
-// CheckChains is refactored as a method on Processor.
-func CheckChains(p *Processor, entry *LogEntry) {
+// checkChainsInternal is the core logic for checking an entry against all chains. It's a variable to allow mocking in tests.
+var checkChainsInternal = func(p *Processor, entry *LogEntry) {
+	// This function is now called by checkChainsWithLock, which acquires the lock.
+	// The original lock acquisition has been moved up to the caller.
+
+	// --- The original logic of the function remains, but without the lock/defer unlock ---
 	// Immediately skip processing if the IP is whitelisted. This is the primary guard.
 	if p.IsWhitelistedFunc(entry.IPInfo) {
 		p.LogFunc(logging.LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IPInfo.Address)
@@ -279,21 +258,9 @@ func CheckChains(p *Processor, entry *LogEntry) {
 		trackingKey.UA = entry.UserAgent
 	}
 
-	p.ActivityMutex.Lock()
-	// Ensure the lock is released when the function exits.
-	defer p.ActivityMutex.Unlock()
-
 	// Perform pre-checks for whitelisting and existing blocks.
 	currentActivity, skip := preCheckActivity(p, entry, trackingKey)
 	if skip {
-		// If preCheckActivity returns a skip, the lock is still held,
-		// so we can just return. The defer will unlock.
-		return
-	}
-
-	// Handle out-of-order log entries and update LastRequestTime.
-	// This function will return true if the entry should be skipped.
-	if handleOutOfOrderEntry(p, entry, currentActivity) {
 		return
 	}
 
@@ -316,4 +283,111 @@ func CheckChains(p *Processor, entry *LogEntry) {
 		processChainForEntry(p, &chain, entry, currentActivity, previousRequestTime)
 	}
 
+}
+
+// checkChainsWithLock acquires the necessary lock and then calls the internal checking logic.
+// This is the new entry point for single, immediate processing.
+func checkChainsWithLock(p *Processor, entry *LogEntry) {
+	p.ActivityMutex.Lock()
+	defer p.ActivityMutex.Unlock()
+	checkChainsInternal(p, entry)
+}
+
+// CheckChains is the entry point for processing a log entry.
+// If out-of-order tolerance is configured, it buffers the entry. Otherwise, it processes immediately.
+func CheckChains(p *Processor, entry *LogEntry) {
+	p.ConfigMutex.RLock()
+	tolerance := p.Config.OutOfOrderTolerance
+	p.ConfigMutex.RUnlock()
+
+	if tolerance > 0 {
+		p.ActivityMutex.Lock()
+		p.EntryBuffer = append(p.EntryBuffer, entry)
+		p.ActivityMutex.Unlock()
+	} else {
+		// If tolerance is zero, process immediately without buffering.
+		checkChainsWithLock(p, entry)
+	}
+}
+
+// entryBufferWorker is a background goroutine that processes log entries from the buffer
+// in chronological order, respecting the out-of-order tolerance.
+func entryBufferWorker(p *Processor, stop <-chan struct{}) {
+	// Use a ticker that is half the tolerance duration for responsiveness,
+	// with a minimum floor to prevent busy-looping.
+	p.ConfigMutex.RLock()
+	tolerance := p.Config.OutOfOrderTolerance
+	p.ConfigMutex.RUnlock()
+
+	if tolerance == 0 {
+		p.LogFunc(logging.LevelDebug, "BUFFER_WORKER", "Out-of-order tolerance is zero, buffer worker is disabled.")
+		return // Do not run the worker if buffering is disabled.
+	}
+
+	tickerInterval := tolerance / 2
+	if tickerInterval < 50*time.Millisecond {
+		tickerInterval = 50 * time.Millisecond
+	}
+
+	ticker := time.NewTicker(tickerInterval)
+	defer ticker.Stop()
+
+	p.LogFunc(logging.LevelDebug, "BUFFER_WORKER", "Starting entry buffer worker with tolerance %v (tick interval %v).", tolerance, tickerInterval)
+
+	for {
+		select {
+		case <-stop:
+			p.LogFunc(logging.LevelInfo, "BUFFER_WORKER", "Shutting down. Processing remaining %d entries in buffer...", len(p.EntryBuffer))
+			// On shutdown, process all remaining entries in the buffer immediately.
+			p.ActivityMutex.Lock()
+			// Sort all remaining entries by timestamp before final processing.
+			sort.Slice(p.EntryBuffer, func(i, j int) bool {
+				return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
+			})
+			for _, entry := range p.EntryBuffer {
+				checkChainsInternal(p, entry)
+			}
+			p.EntryBuffer = nil // Clear the buffer.
+			p.ActivityMutex.Unlock()
+			return
+		case <-ticker.C:
+			p.ActivityMutex.Lock()
+
+			// Determine the processing horizon. Entries older than this are safe to process.
+			processingHorizon := p.NowFunc().Add(-tolerance)
+
+			var toProcess []*LogEntry
+			var remaining []*LogEntry
+
+			// Partition the buffer into entries that are ready and those that are not.
+			for _, entry := range p.EntryBuffer {
+				if entry.Timestamp.Before(processingHorizon) {
+					toProcess = append(toProcess, entry)
+				} else {
+					remaining = append(remaining, entry)
+				}
+			}
+
+			// Update the buffer with the entries that are not yet ready.
+			p.EntryBuffer = remaining
+
+			// Sort the entries to be processed by timestamp to ensure strict chronological order.
+			sort.Slice(toProcess, func(i, j int) bool {
+				return toProcess[i].Timestamp.Before(toProcess[j].Timestamp)
+			})
+
+			// Process the sorted entries. The lock is already held.
+			for _, entry := range toProcess {
+				checkChainsInternal(p, entry)
+			}
+			p.ActivityMutex.Unlock()
+
+			// Signal for tests that a tick has been processed.
+			// This is done after unlocking to avoid holding the lock while signaling.
+			if IsTesting() {
+				// Use a very specific tag that the test harness can listen for.
+				p.LogFunc(logging.LevelDebug, "BUFFER_WORKER_TICK_DONE", "Tick processed.")
+			}
+		}
+	}
 }

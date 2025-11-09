@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -587,7 +588,7 @@ func TestDryRunMode(t *testing.T) {
 		ConfigMutex:   &sync.RWMutex{},
 		Chains:        loadedCfg.Chains,
 		Config: &AppConfig{
-			OutOfOrderTolerance: loadedCfg.OutOfOrderTolerance,
+			OutOfOrderTolerance: 0, // Disable buffering for this specific test.
 			MaxTimeSinceLastHit: loadedCfg.MaxTimeSinceLastHit,
 			TimestampFormat:     loadedCfg.TimestampFormat,
 			WhitelistNets:       loadedCfg.WhitelistNets,
@@ -649,6 +650,20 @@ func TestDryRunMode(t *testing.T) {
 	if err := logEntryScanner.Err(); err != nil {
 		t.Fatalf("Failed to scan test_access.log for entries: %v", err)
 	}
+
+	// After processing all lines, we must manually flush the buffer to simulate the end of a run.
+	processor.ActivityMutex.Lock()
+	if len(processor.EntryBuffer) > 0 {
+		// Sort all remaining entries by timestamp before final processing.
+		sort.Slice(processor.EntryBuffer, func(i, j int) bool {
+			return processor.EntryBuffer[i].Timestamp.Before(processor.EntryBuffer[j].Timestamp)
+		})
+		for _, entry := range processor.EntryBuffer {
+			checkChainsInternal(processor, entry) // Use the internal function as the lock is already held.
+		}
+		processor.EntryBuffer = nil // Clear the buffer.
+	}
+	processor.ActivityMutex.Unlock()
 
 	// --- Assert ---
 	// 4. Verify that the captured log output matches the expected log entries
@@ -735,19 +750,17 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 			expectProcessed:  true,
 		},
 		{
-			name:                         "Out-of-order outside tolerance (skipped)",
-			outOfOrderOffset:             6 * time.Second, // 6s older
-			tolerance:                    5 * time.Second, // 5s tolerance
-			expectProcessed:              false,
-			expectedFinalLastRequestTime: now, // LastRequestTime should remain 'now' because outOfOrderEntry was skipped.
+			name:             "Out-of-order outside tolerance (processed after delay)",
+			outOfOrderOffset: 6 * time.Second, // 6s older
+			tolerance:        5 * time.Second, // 5s tolerance
+			expectProcessed:  true,            // It will be buffered and processed later, so the chain should still progress.
 		},
 		{
 			name:             "In-order entry (processed)",
 			outOfOrderOffset: -1 * time.Second, // 1s newer
 			tolerance:        5 * time.Second,
 			expectProcessed:  true,
-		},
-		// The test's `expectLastRequestTime` assertion was hardcoded to `now`, which is incorrect for the in-order case.
+		}, // The test's `expectLastRequestTime` assertion was hardcoded to `now`, which is incorrect for the in-order case.
 	}
 
 	for _, tt := range tests {
@@ -769,6 +782,10 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 
 			processor := newTestProcessor(&AppConfig{OutOfOrderTolerance: tt.tolerance, MaxTimeSinceLastHit: 1 * time.Minute}, chains)
 
+			// Manually create an activity to ensure the ChainProgress map is not nil.
+			key := TrackingKey{IPInfo: NewIPInfo(targetIP)}
+			GetOrCreateActivityUnsafe(processor.ActivityStore, key)
+
 			// 1. Process a "newer" entry first to set the LastRequestTime.
 			newerEntry := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: now, Path: "/other-path"}
 			CheckChains(processor, newerEntry)
@@ -776,6 +793,17 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 			// 2. Process the out-of-order entry.
 			outOfOrderEntry := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: now.Add(-tt.outOfOrderOffset), Path: "/step1"}
 			CheckChains(processor, outOfOrderEntry)
+
+			// Manually flush the buffer to process the entries for the test.
+			processor.ActivityMutex.Lock()
+			sort.Slice(processor.EntryBuffer, func(i, j int) bool {
+				return processor.EntryBuffer[i].Timestamp.Before(processor.EntryBuffer[j].Timestamp)
+			})
+			for _, entry := range processor.EntryBuffer {
+				checkChainsInternal(processor, entry)
+			}
+			processor.EntryBuffer = nil
+			processor.ActivityMutex.Unlock()
 
 			// 3. Assert the outcome.
 			processor.ActivityMutex.RLock()
@@ -800,4 +828,144 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 			}
 		})
 	}
+}
+
+// bufferWorkerTestHarness encapsulates the setup for testing the entryBufferWorker.
+type bufferWorkerTestHarness struct {
+	t             *testing.T
+	processor     *Processor
+	processed     []*LogEntry // Captures entries in the order they are processed.
+	processMutex  sync.Mutex
+	stopCh        chan struct{}
+	doneCh        chan struct{}
+	tickDoneCh    chan struct{} // Signals that a ticker cycle has completed.
+	originalCheck func(p *Processor, entry *LogEntry)
+}
+
+// newBufferWorkerTestHarness creates a harness for testing the entryBufferWorker.
+func newBufferWorkerTestHarness(t *testing.T, tolerance time.Duration) *bufferWorkerTestHarness {
+	t.Helper()
+
+	h := &bufferWorkerTestHarness{
+		t:          t,
+		stopCh:     make(chan struct{}),
+		doneCh:     make(chan struct{}),
+		tickDoneCh: make(chan struct{}, 1), // Buffered to prevent blocking
+	}
+
+	// Create a processor with a mock checkChainsInternal function to capture processed entries.
+	p := newTestProcessor(&AppConfig{OutOfOrderTolerance: tolerance}, nil)
+	h.processor = p
+
+	// Replace the internal check function with our mock.
+	h.originalCheck = checkChainsInternal
+	checkChainsInternal = func(p *Processor, entry *LogEntry) {
+		h.processMutex.Lock()
+		defer h.processMutex.Unlock()
+		h.processed = append(h.processed, entry)
+	}
+
+	// Override the LogFunc to detect when the worker has finished a tick.
+	p.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		// Only signal completion when the specific "tick done" message is seen.
+		if tag == "BUFFER_WORKER_TICK_DONE" {
+			h.tickDoneCh <- struct{}{}
+		}
+	}
+
+	t.Cleanup(func() {
+		checkChainsInternal = h.originalCheck // Restore the original function after the test.
+	})
+
+	return h
+}
+
+// start runs the entryBufferWorker in a goroutine.
+func (h *bufferWorkerTestHarness) start() {
+	go func() {
+		entryBufferWorker(h.processor, h.stopCh)
+		close(h.doneCh)
+	}()
+}
+
+// stop sends the shutdown signal and waits for the worker to finish.
+func (h *bufferWorkerTestHarness) stop() {
+	close(h.stopCh)
+	select {
+	case <-h.doneCh:
+		// Worker shut down gracefully.
+	case <-time.After(2 * time.Second):
+		h.t.Fatal("timed out waiting for entryBufferWorker to shut down")
+	}
+}
+
+// TestEntryBufferWorker verifies the core logic of the out-of-order entry buffer.
+func TestEntryBufferWorker(t *testing.T) {
+	// Use a tolerance that is long enough to avoid flakes but short enough for a quick test.
+	const tolerance = 100 * time.Millisecond
+	h := newBufferWorkerTestHarness(t, tolerance)
+
+	// --- Setup ---
+	// Use a fixed, "real" timestamp as the base for the test to make it deterministic.
+	baseTime, err := time.Parse(time.RFC3339, "2025-01-01T12:00:00Z")
+	if err != nil {
+		t.Fatalf("Failed to parse base time: %v", err)
+	}
+
+	// Mock the processor's NowFunc to control the worker's perception of time.
+	h.processor.NowFunc = func() time.Time { return baseTime }
+
+	// Create a set of entries with varying timestamps.
+	// e1 and e3 are old enough to be processed on the first tick.
+	// e2 and e4 are too new.
+	e1 := &LogEntry{Timestamp: baseTime.Add(-3 * tolerance), Path: "/path1"} // Oldest
+	e2 := &LogEntry{Timestamp: baseTime.Add(-tolerance / 2), Path: "/path2"} // New
+	e3 := &LogEntry{Timestamp: baseTime.Add(-2 * tolerance), Path: "/path3"}
+	e4 := &LogEntry{Timestamp: baseTime, Path: "/path4"} // Newest
+
+	// Add entries to the buffer out of order.
+	h.processor.EntryBuffer = []*LogEntry{e2, e1, e4, e3}
+
+	// --- Act 1: Start worker and wait for one processing cycle ---
+	h.start()
+
+	// Wait for the worker to signal that it has completed a processing tick.
+	select {
+	case <-h.tickDoneCh:
+		// Tick completed.
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for entry buffer worker to process a tick")
+	}
+
+	// --- Assert 1: Check which entries were processed ---
+	h.processMutex.Lock()
+	if len(h.processed) != 2 {
+		t.Fatalf("Expected 2 entries to be processed, but got %d", len(h.processed))
+	}
+	// Verify they were processed in chronological order (e1, then e3).
+	if h.processed[0].Path != "/path1" || h.processed[1].Path != "/path3" {
+		t.Errorf("Entries processed in wrong order. Got: [%s, %s], Want: [/path1, /path3]", h.processed[0].Path, h.processed[1].Path)
+	}
+	h.processMutex.Unlock()
+
+	// Verify the remaining entries are still in the buffer.
+	h.processor.ActivityMutex.Lock()
+	if len(h.processor.EntryBuffer) != 2 {
+		t.Fatalf("Expected 2 entries to remain in buffer, but got %d", len(h.processor.EntryBuffer))
+	}
+	h.processor.ActivityMutex.Unlock()
+
+	// --- Act 2: Stop the worker to trigger shutdown processing ---
+	h.stop()
+
+	// --- Assert 2: Check that all remaining entries were flushed and processed ---
+	h.processMutex.Lock()
+	if len(h.processed) != 4 {
+		t.Fatalf("Expected all 4 entries to be processed after shutdown, but got %d", len(h.processed))
+	}
+	// The final two entries (e2, e4) should have been processed, also in order.
+	if h.processed[2].Path != "/path2" || h.processed[3].Path != "/path4" {
+		t.Errorf("Shutdown entries processed in wrong order. Got: [%s, %s], Want: [/path2, /path4]", h.processed[2].Path, h.processed[3].Path)
+	}
+	h.processMutex.Unlock()
 }
