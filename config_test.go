@@ -499,6 +499,28 @@ chains:
 				"Does not match 399": {entry: &LogEntry{StatusCode: 399}, expected: false},
 			},
 		},
+		{
+			name: "status code pattern matcher 30X",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          StatusCode: "30X"`,
+			testCases: map[string]struct {
+				entry    *LogEntry
+				expected bool
+			}{
+				"Matches 301":        {entry: &LogEntry{StatusCode: 301}, expected: true},
+				"Matches 302":        {entry: &LogEntry{StatusCode: 302}, expected: true},
+				"Matches 309":        {entry: &LogEntry{StatusCode: 309}, expected: true},
+				"Does not match 310": {entry: &LogEntry{StatusCode: 310}, expected: false},
+				"Does not match 299": {entry: &LogEntry{StatusCode: 299}, expected: false},
+			},
+		},
 	}
 
 	for _, tt := range tests {

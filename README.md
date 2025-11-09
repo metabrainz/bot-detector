@@ -227,8 +227,10 @@ For more complex string matching, use a prefix.
     # regex:(?i)evil-crawler
     UserAgent: "file:./bad_user_agents.txt"
     ```
+    The `X` acts as a wildcard for any digit.
     ```yaml
     StatusCode: "4XX" # Matches 400-499
+    StatusCode: "30X" # Matches 300-309
     ```
 
 #### **List of Values (OR Condition)**

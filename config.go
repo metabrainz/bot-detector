@@ -281,18 +281,22 @@ func compileStringMatcher(chainName string, stepIndex int, field, value string, 
 	}
 
 	// Special handling for status code patterns like "4XX"
-	if field == "StatusCode" && strings.HasSuffix(strings.ToUpper(value), "XX") {
-		prefix := value[0:1] // "4" from "4XX"
-		return func(entry *LogEntry) bool {
-			// Use GetMatchValue to be consistent with other matchers.
-			// This avoids direct struct access and prepares for future flexibility.
-			fieldVal, fieldType, err := GetMatchValue(field, entry)
-			if err != nil || fieldType != IntField {
-				return false
+	if field == "StatusCode" && strings.Contains(strings.ToUpper(value), "X") {
+		xIndex := strings.Index(strings.ToUpper(value), "X")
+		if xIndex > 0 {
+			prefix := value[:xIndex]
+			// Ensure the prefix is numeric before creating the matcher.
+			if _, err := strconv.Atoi(prefix); err == nil {
+				return func(entry *LogEntry) bool {
+					fieldVal := GetMatchValueIfType(field, entry, IntField)
+					if fieldVal == nil {
+						return false
+					}
+					// Convert the integer to a string for the prefix check.
+					return strings.HasPrefix(strconv.Itoa(fieldVal.(int)), prefix)
+				}, nil
 			}
-			// Convert the integer to a string for the prefix check.
-			return strings.HasPrefix(strconv.Itoa(fieldVal.(int)), prefix)
-		}, nil
+		}
 	}
 
 	// Default for string is exact match
