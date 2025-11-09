@@ -14,6 +14,13 @@ import (
 	"time"
 )
 
+// signalMap maps common signal names to their syscall values.
+var signalMap = map[string]os.Signal{
+	"HUP":  syscall.SIGHUP,
+	"USR1": syscall.SIGUSR1,
+	"USR2": syscall.SIGUSR2,
+}
+
 // main is the application entry point.
 func main() {
 	// Parse CLI flags
@@ -114,7 +121,11 @@ func start(p *Processor) {
 		if !IsTesting() {
 			// The ConfigWatcher is not started in test mode to prevent race conditions where
 			// the test's config is overwritten by a reload from the default chains.yaml.
-			go ConfigWatcher(p, stopWatcher)
+			if ReloadOnSignal != "" {
+				go SignalReloader(p, stopWatcher)
+			} else {
+				go ConfigWatcher(p, stopWatcher)
+			}
 			go CleanUpIdleActivity(p, stopWatcher)
 		}
 		// Listen for OS signals on the processor's channel

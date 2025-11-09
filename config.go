@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -850,6 +851,133 @@ func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 	}, nil
 }
 
+// reloadConfiguration contains the logic to reload configuration, compare for changes,
+// and update the processor state. It is designed to be called by either the
+// file watcher or the signal reloader.
+func reloadConfiguration(p *Processor) { //nolint:cyclop
+	p.ConfigMutex.RLock()
+	oldChains := p.Chains
+	// Create a shallow copy of the config to compare against after the reload.
+	oldConfig := *p.Config //nolint:govet
+	oldLogRegex := p.LogRegex
+	p.ConfigMutex.RUnlock()
+
+	loadedCfg, err := LoadConfigFromYAML()
+	if err != nil {
+		p.LogFunc(logging.LevelError, "LOAD_ERROR", "Failed to reload configuration: %v", err)
+		return // The deferred signal will still fire.
+	}
+
+	// Update the processor's state with the new config.
+	p.ConfigMutex.Lock()
+	p.Chains = loadedCfg.Chains
+	p.Config.WhitelistNets = loadedCfg.WhitelistNets
+	p.Config.HAProxyAddresses = loadedCfg.HAProxyAddresses
+	p.Config.HAProxyMaxRetries = loadedCfg.HAProxyMaxRetries
+	p.Config.HAProxyRetryDelay = loadedCfg.HAProxyRetryDelay
+	p.Config.HAProxyDialTimeout = loadedCfg.HAProxyDialTimeout
+	p.Config.DurationToTableName = loadedCfg.DurationToTableName
+	p.Config.BlockTableNameFallback = loadedCfg.BlockTableNameFallback
+	p.Config.DefaultBlockDuration = loadedCfg.DefaultBlockDuration
+	p.Config.PollingInterval = loadedCfg.PollingInterval
+	p.Config.CleanupInterval = loadedCfg.CleanupInterval
+	p.Config.IdleTimeout = loadedCfg.IdleTimeout
+	p.Config.OutOfOrderTolerance = loadedCfg.OutOfOrderTolerance
+	p.Config.TimestampFormat = loadedCfg.TimestampFormat
+	p.Config.LineEnding = loadedCfg.LineEnding
+	p.LogRegex = loadedCfg.LogFormatRegex
+	logging.SetLogLevel(loadedCfg.LogLevel)
+	p.Config.MaxTimeSinceLastHit = loadedCfg.MaxTimeSinceLastHit
+	p.Config.FileDependencies = loadedCfg.FileDependencies
+	p.Config.LastModTime = time.Now() // Use time.Now() to avoid race conditions
+	p.ConfigMutex.Unlock()
+
+	// --- Compare and log general config changes ---
+	configChanged := compareConfigsByTag(oldConfig, *loadedCfg) ||
+		loadedCfg.LogLevel != logging.GetLogLevel().String() ||
+		(oldLogRegex != nil) != (loadedCfg.LogFormatRegex != nil)
+
+	if configChanged {
+		p.LogFunc(logging.LevelInfo, "CONFIG", "General configuration settings have been updated.")
+		logConfigurationSummary(p)
+	}
+
+	// --- Compare and log chain differences ---
+	oldChainsMap := make(map[string]BehavioralChain)
+	for _, chain := range oldChains {
+		oldChainsMap[chain.Name] = chain
+	}
+	newChainsMap := make(map[string]BehavioralChain)
+	for _, chain := range loadedCfg.Chains {
+		newChainsMap[chain.Name] = chain
+	}
+
+	var added, removed, modified []BehavioralChain
+	for name, newChain := range newChainsMap {
+		if oldChain, exists := oldChainsMap[name]; !exists {
+			added = append(added, newChain)
+		} else if !areChainsSemanticallyEqual(oldChain, newChain) {
+			modified = append(modified, newChain)
+		}
+	}
+	for name, oldChain := range oldChainsMap {
+		if _, exists := newChainsMap[name]; !exists {
+			removed = append(removed, oldChain)
+		}
+	}
+
+	if len(added) > 0 {
+		logChainDetails(p, added, "Added chains:")
+	}
+	if len(modified) > 0 {
+		logChainDetails(p, modified, "Modified chains:")
+	}
+	if len(removed) > 0 {
+		logChainDetails(p, removed, "Removed chains:")
+	}
+
+	// Unblock any IPs that are now whitelisted.
+	CheckAndRemoveWhitelistedBlocks(p)
+}
+
+// SignalReloader listens for a specific OS signal to trigger a configuration reload. //nolint:cyclop
+func SignalReloader(p *Processor, stop <-chan struct{}) {
+	if p.DryRun {
+		return
+	}
+
+	signalName := strings.ToUpper(ReloadOnSignal)
+	reloadSignal, ok := signalMap[signalName]
+	if !ok {
+		p.LogFunc(logging.LevelCritical, "FATAL", "Unsupported signal for reloading: '%s'. Use HUP, USR1, or USR2.", ReloadOnSignal)
+		// In a real app, you might want to stop the process here.
+		// For now, we just stop this goroutine.
+		return
+	}
+
+	signalCh := make(chan os.Signal, 1)
+	signal.Notify(signalCh, reloadSignal)
+
+	p.LogFunc(logging.LevelInfo, "RELOAD", "Signal-based config reloading enabled. Send %s signal to reload.", signalName)
+
+	for {
+		select {
+		case <-stop:
+			p.LogFunc(logging.LevelInfo, "RELOAD", "SignalReloader received stop signal. Shutting down.")
+			return
+		case s := <-signalCh:
+			p.LogFunc(logging.LevelInfo, "RELOAD", "Received signal %s. Reloading configuration...", s)
+			func() { // Use an anonymous function to scope the defer correctly.
+				// Defer the test signal to ensure it's sent whether the reload succeeds or fails.
+				if p.TestSignals != nil && p.TestSignals.ReloadDoneSignal != nil {
+					defer func() { p.TestSignals.ReloadDoneSignal <- struct{}{} }()
+				}
+				reloadConfiguration(p)
+			}()
+		}
+	}
+}
+
 // ConfigWatcher monitors the YAML config file for modifications and reloads the chains dynamically.
 func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 	if p.DryRun {
@@ -866,14 +994,20 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 	timer := time.NewTicker(pollingInterval)
 	defer timer.Stop()
 
+	// Conditionally include the test channel in the select statement.
+	forceCheckCh := make(chan struct{}) // A dummy channel that is never written to.
+	if p.TestSignals != nil {
+		forceCheckCh = p.TestSignals.ForceCheckSignal
+	}
+
 	for {
 		select {
 		case <-stop:
 			p.LogFunc(logging.LevelInfo, "WATCH", "ConfigWatcher received stop signal. Shutting down.")
 			return
-		case <-p.TestSignals.ForceCheckSignal:
-			if p.TestSignals != nil {
-				// This case is for testing only, to trigger an immediate check.
+		case <-forceCheckCh:
+			// This case is for testing only, to trigger an immediate check.
+			if p.TestSignals != nil { // Double-check for safety, though it should always be true here.
 				p.LogFunc(logging.LevelDebug, "WATCH", "Received test signal for immediate reload check.")
 			}
 		case <-timer.C:
@@ -920,93 +1054,7 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 				if p.TestSignals != nil && p.TestSignals.ReloadDoneSignal != nil {
 					defer func() { p.TestSignals.ReloadDoneSignal <- struct{}{} }()
 				}
-
-				p.ConfigMutex.RLock()
-				oldChains := p.Chains
-				// Create a shallow copy of the config to compare against after the reload.
-				// If we just did `oldConfig := p.Config`, we'd have a pointer to the same struct,
-				// and our comparison would be against the already-updated values.
-				oldConfig := *p.Config //nolint:govet
-				oldLogRegex := p.LogRegex
-				p.ConfigMutex.RUnlock()
-				// LoadChainsFromYAML now returns parsed data, not modifying global state.
-				loadedCfg, err := LoadConfigFromYAML()
-				if err != nil {
-					p.LogFunc(logging.LevelError, "LOAD_ERROR", "Failed to reload chains: %v", err)
-					return // The deferred signal will still fire.
-				}
-
-				// Update the processor's state with the new config.
-				p.ConfigMutex.Lock()
-				p.Chains = loadedCfg.Chains
-				p.Config.WhitelistNets = loadedCfg.WhitelistNets
-				p.Config.HAProxyAddresses = loadedCfg.HAProxyAddresses
-				p.Config.HAProxyMaxRetries = loadedCfg.HAProxyMaxRetries
-				p.Config.HAProxyRetryDelay = loadedCfg.HAProxyRetryDelay
-				p.Config.HAProxyDialTimeout = loadedCfg.HAProxyDialTimeout
-				p.Config.DurationToTableName = loadedCfg.DurationToTableName
-				p.Config.BlockTableNameFallback = loadedCfg.BlockTableNameFallback
-				p.Config.DefaultBlockDuration = loadedCfg.DefaultBlockDuration
-				p.Config.PollingInterval = loadedCfg.PollingInterval
-				p.Config.CleanupInterval = loadedCfg.CleanupInterval
-				p.Config.IdleTimeout = loadedCfg.IdleTimeout
-				p.Config.OutOfOrderTolerance = loadedCfg.OutOfOrderTolerance
-				p.Config.TimestampFormat = loadedCfg.TimestampFormat
-				p.Config.LineEnding = loadedCfg.LineEnding
-				p.LogRegex = loadedCfg.LogFormatRegex   // Update the regex on the processor
-				logging.SetLogLevel(loadedCfg.LogLevel) // Update log level dynamically
-				p.Config.MaxTimeSinceLastHit = loadedCfg.MaxTimeSinceLastHit
-				p.Config.FileDependencies = loadedCfg.FileDependencies
-				p.Config.LastModTime = time.Now() // Use time.Now() to avoid race conditions with fast edits
-				p.ConfigMutex.Unlock()
-
-				// --- Compare and log general config changes ---
-				// Compare tagged fields using reflection, and handle special cases manually.
-				configChanged := compareConfigsByTag(oldConfig, *loadedCfg) ||
-					loadedCfg.LogLevel != logging.GetLogLevel().String() ||
-					(oldLogRegex != nil) != (loadedCfg.LogFormatRegex != nil)
-
-				if configChanged {
-					p.LogFunc(logging.LevelInfo, "CONFIG", "General configuration settings have been updated.")
-					logConfigurationSummary(p)
-				}
-
-				// --- Compare and log chain differences ---
-				oldChainsMap := make(map[string]BehavioralChain)
-				for _, chain := range oldChains {
-					oldChainsMap[chain.Name] = chain
-				}
-				newChainsMap := make(map[string]BehavioralChain)
-				for _, chain := range loadedCfg.Chains {
-					newChainsMap[chain.Name] = chain
-				}
-
-				var added, removed, modified []BehavioralChain
-				for name, newChain := range newChainsMap {
-					if oldChain, exists := oldChainsMap[name]; !exists {
-						added = append(added, newChain)
-					} else if !areChainsSemanticallyEqual(oldChain, newChain) {
-						modified = append(modified, newChain)
-					}
-				}
-				for name, oldChain := range oldChainsMap {
-					if _, exists := newChainsMap[name]; !exists {
-						removed = append(removed, oldChain)
-					}
-				}
-
-				if len(added) > 0 {
-					logChainDetails(p, added, "Added chains:")
-				}
-				if len(modified) > 0 {
-					logChainDetails(p, modified, "Modified chains:")
-				}
-				if len(removed) > 0 {
-					logChainDetails(p, removed, "Removed chains:")
-				}
-
-				// Unblock any IPs that are now whitelisted.
-				CheckAndRemoveWhitelistedBlocks(p)
+				reloadConfiguration(p)
 			}()
 		}
 	}

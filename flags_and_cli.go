@@ -8,19 +8,21 @@ import (
 
 // --- CONFIGURATION GLOBAL VARS (Set by CLI flags) ---
 var (
-	LogFilePath  string
-	YAMLFilePath string
-	DryRun       bool
-	ShowVersion  bool
+	LogFilePath    string
+	YAMLFilePath   string
+	DryRun         bool
+	ShowVersion    bool
+	ReloadOnSignal string
 )
 
 // RegisterCLIFlags registers the command-line flags with the global flag set.
 // This function is called by init() and can be called by tests after resetting flag.CommandLine.
 func RegisterCLIFlags(fs *flag.FlagSet) {
-	fs.StringVar(&LogFilePath, "log-path", "", "Path to the access log file. (Required)")
-	fs.StringVar(&YAMLFilePath, "yaml-path", "", "Path to the YAML configuration file. (Required)")
-	fs.BoolVar(&DryRun, "dry-run", false, "If true, runs in test mode: processes the log file from the beginning and exits.")
-	fs.BoolVar(&ShowVersion, "version", false, "Print the application version and exit.")
+	fs.StringVar(&LogFilePath, "log-path", "", "Required. Path to the access log file to tail (or to read in dry-run mode).")
+	fs.StringVar(&YAMLFilePath, "yaml-path", "", "Required. Path to the YAML configuration file.")
+	fs.BoolVar(&DryRun, "dry-run", false, "Optional. If true, runs in test mode, ignoring HAProxy and live logging.")
+	fs.BoolVar(&ShowVersion, "version", false, "Optional. Print the application version and exit.")
+	fs.StringVar(&ReloadOnSignal, "reload-on-signal", "", "Optional. If set to a signal name (e.g., HUP, USR1), disables file watcher and reloads config on signal.")
 }
 
 func init() {

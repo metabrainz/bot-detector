@@ -97,6 +97,7 @@ This will produce a single executable named `bot-detector`.
 | **`--log-path`** | (none) | **Required.** Path to the access log file to tail (or to read in dry-run mode). |
 | **`--dry-run`** | `false` | Optional. If true, runs in test mode, ignoring HAProxy and live logging. |
 | **`--version`** | `false` | Optional. Print the application version and exit. |
+| **`--reload-on-signal`** | (none) | Optional. If set to a signal name (e.g., `HUP`, `USR1`), disables the file watcher and reloads the configuration upon receiving that signal. |
 
 ---
 

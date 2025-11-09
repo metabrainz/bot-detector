@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -165,6 +166,102 @@ func TestStart_LiveMode(t *testing.T) {
 	case <-rotationLogged:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Timed out waiting for log rotation to be detected.")
+	}
+}
+
+// TestSignalReloader_Reload verifies that the signal-based configuration reloading works correctly.
+func TestSignalReloader_Reload(t *testing.T) {
+	// --- Setup ---
+	resetGlobalState()
+	t.Cleanup(resetGlobalState)
+
+	// Isolate the log level for this test.
+	originalLogLevel := logging.GetLogLevel()
+	t.Cleanup(func() { logging.SetLogLevel(originalLogLevel.String()) })
+
+	// 1. Create a temporary YAML file with initial content.
+	initialYAMLContent := `
+version: "1.0"
+log_level: "info"
+chains:
+  - name: "InitialChain"
+    match_key: "ip"
+    action: "log"
+    steps: [{field_matches: {Path: "/initial"}}]
+`
+	tempDir := t.TempDir()
+	tempFile := filepath.Join(tempDir, "chains.yaml")
+	if err := os.WriteFile(tempFile, []byte(initialYAMLContent), 0644); err != nil {
+		t.Fatalf("Failed to write initial temp yaml file: %v", err)
+	}
+
+	// Point the global YAMLFilePath to our temp file for the duration of the test.
+	YAMLFilePath = tempFile
+	// Enable signal-based reloading for this test.
+	ReloadOnSignal = "HUP"
+
+	// 2. Load the initial configuration.
+	initialLoadedCfg, err := LoadConfigFromYAML()
+	if err != nil {
+		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
+	}
+
+	// 3. Create the processor with the initial config.
+	processor := &Processor{
+		ActivityMutex: &sync.RWMutex{},
+		ActivityStore: make(map[TrackingKey]*BotActivity),
+		ConfigMutex:   &sync.RWMutex{},
+		Chains:        initialLoadedCfg.Chains,
+		Config:        &AppConfig{},
+		LogFunc:       func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
+		TestSignals: &TestSignals{
+			ReloadDoneSignal: make(chan struct{}, 1),
+		},
+	}
+
+	// 4. Start the SignalReloader.
+	stopWatcher := make(chan struct{})
+	t.Cleanup(func() { close(stopWatcher) })
+	go SignalReloader(processor, stopWatcher)
+
+	// --- Act ---
+	// 5. Modify the YAML file on disk.
+	modifiedYAMLContent := `
+version: "1.0"
+log_level: "debug" # Changed log level
+chains:
+  - name: "ReloadedChain" # Changed chain name
+    match_key: "ip"
+    action: "log"
+    steps: [{field_matches: {Path: "/reloaded"}}]
+`
+	if err := os.WriteFile(tempFile, []byte(modifiedYAMLContent), 0644); err != nil {
+		t.Fatalf("Failed to write modified temp yaml file: %v", err)
+	}
+
+	// 6. Send the SIGHUP signal to the current process to trigger the reload.
+	if err := syscall.Kill(syscall.Getpid(), syscall.SIGHUP); err != nil {
+		t.Fatalf("Failed to send SIGHUP signal: %v", err)
+	}
+
+	// 7. Wait for the reload signal from the reloader.
+	select {
+	case <-processor.TestSignals.ReloadDoneSignal:
+		// Reload completed successfully.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timed out waiting for signal-based configuration reload.")
+	}
+
+	// --- Assert ---
+	// 8. Check if the processor's state has been updated.
+	processor.ConfigMutex.RLock()
+	defer processor.ConfigMutex.RUnlock()
+
+	if len(processor.Chains) != 1 || processor.Chains[0].Name != "ReloadedChain" {
+		t.Errorf("Expected chain to be 'ReloadedChain', but got: %+v", processor.Chains)
+	}
+	if logging.GetLogLevel() != logging.LevelDebug {
+		t.Errorf("Expected log level to be updated to 'debug', but it was not.")
 	}
 }
 
