@@ -231,55 +231,6 @@ version: "1.0"
 	}
 }
 
-func TestLoadConfigFromYAML_ObjectMatcher(t *testing.T) {
-	// --- Setup ---
-	yamlContent := `
-version: "1.0"
-chains:
-  - name: "StatusCodeRangeChain"
-    match_key: "ip"
-    action: "log"
-    steps:
-      - field_matches:
-          StatusCode:
-            gte: 400
-            lt: 500
-`
-	setupTestYAML(t, yamlContent)
-
-	// --- Act ---
-	loadedCfg, err := LoadConfigFromYAML()
-	if err != nil {
-		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
-	}
-
-	// --- Assert ---
-	if len(loadedCfg.Chains) != 1 || len(loadedCfg.Chains[0].Steps) != 1 || len(loadedCfg.Chains[0].Steps[0].Matchers) != 1 {
-		t.Fatal("Failed to load or compile the object matcher chain correctly.")
-	}
-
-	matcher := loadedCfg.Chains[0].Steps[0].Matchers[0]
-
-	// Test cases
-	testEntries := map[string]struct {
-		entry    *LogEntry
-		expected bool
-	}{
-		"In Range (404)":              {entry: &LogEntry{StatusCode: 404}, expected: true},
-		"Boundary In Range (400)":     {entry: &LogEntry{StatusCode: 400}, expected: true},
-		"Boundary Out of Range (500)": {entry: &LogEntry{StatusCode: 500}, expected: false},
-		"Out of Range (200)":          {entry: &LogEntry{StatusCode: 200}, expected: false},
-	}
-
-	for name, tc := range testEntries {
-		t.Run(name, func(t *testing.T) {
-			if got := matcher(tc.entry); got != tc.expected {
-				t.Errorf("Matcher returned %v, expected %v for status code %d", got, tc.expected, tc.entry.StatusCode)
-			}
-		})
-	}
-}
-
 func TestLoadConfigFromYAML_ObjectMatcher_OtherOperators(t *testing.T) {
 	// This test covers the 'gt' and 'lte' operators not covered by the main object matcher test.
 	yamlContent := `
@@ -308,6 +259,32 @@ chains:
 	if matcher(&LogEntry{StatusCode: 400}) { // 400 > 400 -> false
 		t.Error("Matcher failed for gt boundary")
 	}
+}
+
+func TestLoadConfigFromYAML_ObjectMatcher(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+chains:
+  - name: "StatusCodeRangeChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          StatusCode:
+            gte: 400
+            lt: 500
+`
+	testCases := map[string]struct {
+		entry    *LogEntry
+		expected bool
+	}{
+		"In Range (404)":              {entry: &LogEntry{StatusCode: 404}, expected: true},
+		"Boundary In Range (400)":     {entry: &LogEntry{StatusCode: 400}, expected: true},
+		"Boundary Out of Range (500)": {entry: &LogEntry{StatusCode: 500}, expected: false},
+		"Out of Range (200)":          {entry: &LogEntry{StatusCode: 200}, expected: false},
+	}
+
+	runMatcherTest(t, yamlContent, testCases)
 }
 
 func TestLoadConfigFromYAML_ObjectMatcher_WithNot(t *testing.T) {
@@ -368,20 +345,7 @@ chains:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setupTestYAML(t, tt.yamlContent)
-			loadedCfg, err := LoadConfigFromYAML()
-			if err != nil {
-				t.Fatalf("LoadConfigFromYAML() failed: %v", err)
-			}
-			matcher := loadedCfg.Chains[0].Steps[0].Matchers[0]
-
-			for name, tc := range tt.testCases {
-				t.Run(name, func(t *testing.T) {
-					if got := matcher(tc.entry); got != tc.expected {
-						t.Errorf("Matcher returned %v, expected %v for status code %d", got, tc.expected, tc.entry.StatusCode)
-					}
-				})
-			}
+			runMatcherTest(t, tt.yamlContent, tt.testCases)
 		})
 	}
 }
@@ -623,6 +587,35 @@ chains:
 	}
 }
 
+func runErrorTest(t *testing.T, name, yamlContent, expectedError string) {
+	t.Run(name, func(t *testing.T) {
+		if name == "File Not Found" {
+			// For this specific test, ensure the file does not exist.
+			YAMLFilePath = filepath.Join(t.TempDir(), "nonexistent.yaml")
+		} else {
+			setupTestYAML(t, yamlContent)
+		}
+
+		// For tests that expect non-fatal errors, we can suppress the log output
+		// to keep the test runner output clean.
+		if name == "File Matcher Not Found (Non-Fatal)" {
+			originalLogFunc := logging.LogOutput
+			logging.LogOutput = func(level logging.LogLevel, tag string, format string, args ...interface{}) {}
+			t.Cleanup(func() { logging.LogOutput = originalLogFunc })
+		}
+
+		_, err := LoadConfigFromYAML()
+
+		if expectedError == "" {
+			if err != nil {
+				t.Errorf("Expected no error, but got: %v", err)
+			}
+		} else if err == nil || !strings.Contains(err.Error(), expectedError) {
+			t.Errorf("Expected error containing '%s', but got: %v", expectedError, err)
+		}
+	})
+}
+
 func TestLoadConfigFromYAML_Errors(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -785,30 +778,7 @@ chains:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.name == "File Not Found" {
-				// For this specific test, ensure the file does not exist.
-				YAMLFilePath = filepath.Join(t.TempDir(), "nonexistent.yaml")
-			} else {
-				setupTestYAML(t, tt.yamlContent)
-			}
-
-			// For tests that expect non-fatal errors, we can suppress the log output
-			// to keep the test runner output clean.
-			if tt.name == "File Matcher Not Found (Non-Fatal)" {
-				originalLogFunc := logging.LogOutput
-				logging.LogOutput = func(level logging.LogLevel, tag string, format string, args ...interface{}) {}
-				t.Cleanup(func() { logging.LogOutput = originalLogFunc })
-			}
-
-			_, err := LoadConfigFromYAML()
-
-			if tt.expectedError == "" {
-				if err != nil {
-					t.Errorf("Expected no error, but got: %v", err)
-				}
-			} else if err == nil || !strings.Contains(err.Error(), tt.expectedError) {
-				t.Errorf("Expected error containing '%s', but got: %v", tt.expectedError, err)
-			}
+			runErrorTest(t, tt.name, tt.yamlContent, tt.expectedError)
 		})
 	}
 }
@@ -941,11 +911,7 @@ haproxy_dial_timeout: "1y"`,
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setupTestYAML(t, tt.yamlContent)
-			_, err := LoadConfigFromYAML()
-			if err == nil || !strings.Contains(err.Error(), tt.expectedError) {
-				t.Errorf("Expected error containing '%s', but got: %v", tt.expectedError, err)
-			}
+			runErrorTest(t, tt.name, tt.yamlContent, tt.expectedError)
 		})
 	}
 }
@@ -1650,12 +1616,15 @@ func runMatcherTest(t *testing.T, yamlContent string, testCases map[string]struc
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			if got := matcher(tc.entry); got != tc.expected {
-				// Use a more generic error message to handle both Path and StatusCode tests.
-				var val interface{} = tc.entry.Path
+			var val interface{}
+			if tc.entry != nil {
+				val = tc.entry.Path
 				if tc.entry.StatusCode != 0 {
 					val = tc.entry.StatusCode
 				}
+			}
+			if got := matcher(tc.entry); got != tc.expected {
+				// Use a more generic error message to handle both Path and StatusCode tests.
 				t.Errorf("Matcher returned %v, expected %v for entry value '%v'", got, tc.expected, val)
 			}
 		})

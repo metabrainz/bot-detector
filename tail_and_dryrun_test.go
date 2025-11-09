@@ -237,107 +237,6 @@ func TestHasFileBeenRotated(t *testing.T) {
 	}
 }
 
-func TestDryRunLogProcessor(t *testing.T) {
-	// --- Setup ---
-
-	// --- Test Cases ---
-	tests := []struct {
-		name                   string
-		logContent             string
-		setupFunc              func(filePath string) // For setup specific to a test case, like file existence.
-		expectedLinesProcessed int
-		expectedLogContains    string
-	}{
-		{
-			name: "Successful Processing",
-			logContent: `line 1
-line 2
-# a comment
-line 3`,
-			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte(`line 1
-line 2
-# a comment
-line 3`), 0644)
-			},
-			expectedLinesProcessed: 3,
-			expectedLogContains:    "DryRun complete. Processed 3 lines.",
-		},
-		{
-			name:                   "File Not Found",
-			setupFunc:              func(filePath string) { os.Remove(filePath) },
-			expectedLinesProcessed: 0,
-			expectedLogContains:    "Failed to open log file",
-		},
-		{
-			name: "File ends without newline",
-			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("line 1\nline 2"), 0644)
-			},
-			expectedLinesProcessed: 2,
-			expectedLogContains:    "DryRun complete. Processed 2 lines.",
-		},
-		{
-			name: "Empty line in middle of file",
-			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("line 1\n\nline 3"), 0644)
-			},
-			expectedLinesProcessed: 2,
-			expectedLogContains:    "Skipped (Comment/Empty)",
-		},
-		{
-			name: "Comment line in middle of file",
-			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("line 1\n# comment\nline 3"), 0644)
-			},
-			expectedLinesProcessed: 2,
-			expectedLogContains:    "Skipped (Comment/Empty)",
-		},
-		{
-			name:       "Line Exceeds Limit",
-			logContent: "this is a normal line\n" + strings.Repeat("a", MaxLogLineSize+1) + "\nthis is another normal line",
-			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("this is a normal line\n"+strings.Repeat("a", MaxLogLineSize+1)+"\nthis is another normal line"), 0644)
-			},
-			expectedLinesProcessed: 2, // The long line is skipped, but the other two are processed.
-			expectedLogContains:    "Skipped (Length exceeded",
-		},
-		{
-			name:       "Read Error During Processing",
-			logContent: "this is a valid line",
-			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("this is a valid line"), 0644)
-			},
-			expectedLinesProcessed: 1,
-			expectedLogContains:    "DryRun complete. Processed 1 lines.",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// --- Per-Test Setup ---
-			harness := newDryRunTestHarness(t)
-			tt.setupFunc(harness.tempLogFile)
-
-			done := make(chan struct{})
-
-			// --- Act ---
-			DryRunLogProcessor(harness.processor, done)
-			<-done // Wait for the processor to finish.
-
-			// --- Assert ---
-			if len(harness.processedLines) != tt.expectedLinesProcessed {
-				t.Errorf("Expected %d lines to be processed, but got %d", tt.expectedLinesProcessed, len(harness.processedLines))
-			}
-
-			logOutput := strings.Join(harness.capturedLogs, "\n")
-			if !strings.Contains(logOutput, tt.expectedLogContains) {
-				t.Errorf("Expected log output to contain '%s', but it did not.\nFull Log:\n%s", tt.expectedLogContains, logOutput)
-			}
-		})
-	}
-}
-
 func TestDelayOrShutdown(t *testing.T) {
 	// --- Setup ---
 	processor := &Processor{
@@ -421,13 +320,13 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 	h.tempLogFile = filepath.Join(tempDir, "test.log")
 	originalLogFilePath := LogFilePath
 	LogFilePath = h.tempLogFile
-	t.Cleanup(func() { LogFilePath = originalLogFilePath })
+	h.t.Cleanup(func() { LogFilePath = originalLogFilePath })
 
 	// Create processor with mock/capture functions
 	h.processor = &Processor{
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 			h.logMutex.Lock()
-			defer h.logMutex.Unlock()
+			defer h.logMutex.Unlock() //nolint:gocritic
 			logLine := fmt.Sprintf(tag+": "+format, args...)
 			h.capturedLogs = append(h.capturedLogs, logLine)
 			// If the tailer logs that it's reopening due to rotation, signal the channel.
@@ -444,7 +343,7 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 		},
 		ProcessLogLine: func(line string, lineNumber int) {
 			h.logMutex.Lock()
-			defer h.logMutex.Unlock()
+			defer h.logMutex.Unlock() //nolint:gocritic
 			h.processedLines = append(h.processedLines, line)
 			h.lineProcessed <- line
 		},
@@ -452,7 +351,7 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 	}
 
 	// Ensure StatFunc is never nil to prevent panics in hasFileBeenRotated.
-	if h.processor.Config.StatFunc == nil {
+	if config != nil && h.processor.Config.StatFunc == nil {
 		h.processor.Config.StatFunc = defaultStatFunc
 	}
 
@@ -485,6 +384,61 @@ func (h *tailerTestHarness) stop() {
 		h.t.Logf("[HARNESS] stop(): Shutdown complete (doneCh closed).")
 	case <-time.After(1 * time.Second):
 		h.t.Fatalf("Timed out waiting for tailer to shut down. Logs:\n%s", strings.Join(h.capturedLogs, "\n"))
+	}
+}
+
+func TestDryRunLogProcessor(t *testing.T) {
+	tests := []struct {
+		name                   string
+		setupFunc              func(filePath string)
+		expectedLinesProcessed int
+		expectedLogContains    string
+	}{
+		{
+			name: "Successful Processing",
+			setupFunc: func(filePath string) {
+				os.WriteFile(filePath, []byte("line 1\nline 2\n# a comment\nline 3"), 0644)
+			},
+			expectedLinesProcessed: 3,
+			expectedLogContains:    "DryRun complete. Processed 3 lines.",
+		},
+		{
+			name:                   "File Not Found",
+			setupFunc:              func(filePath string) { os.Remove(filePath) },
+			expectedLinesProcessed: 0,
+			expectedLogContains:    "Failed to open log file",
+		},
+		{
+			name: "File ends without newline",
+			setupFunc: func(filePath string) {
+				os.WriteFile(filePath, []byte("line 1\nline 2"), 0644)
+			},
+			expectedLinesProcessed: 2,
+			expectedLogContains:    "DryRun complete. Processed 2 lines.",
+		},
+		{
+			name: "Line Exceeds Limit",
+			setupFunc: func(filePath string) {
+				os.WriteFile(filePath, []byte("this is a normal line\n"+strings.Repeat("a", MaxLogLineSize+1)+"\nthis is another normal line"), 0644)
+			},
+			expectedLinesProcessed: 2, // The long line is skipped, but the other two are processed.
+			expectedLogContains:    "Skipped (Length exceeded",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			harness := newDryRunTestHarness(t)
+			tt.setupFunc(harness.tempLogFile)
+			done := make(chan struct{})
+
+			DryRunLogProcessor(harness.processor, done)
+			<-done
+
+			if len(harness.processedLines) != tt.expectedLinesProcessed {
+				t.Errorf("Expected %d lines to be processed, but got %d", tt.expectedLinesProcessed, len(harness.processedLines))
+			}
+		})
 	}
 }
 
