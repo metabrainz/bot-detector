@@ -127,3 +127,114 @@ func newDryRunTestHarness(t *testing.T) *dryRunTestHarness {
 	}
 	return h
 }
+
+// checkerTestHarness encapsulates common setup for CheckChains tests.
+type checkerTestHarness struct {
+	t             *testing.T
+	processor     *Processor
+	blockCalled   bool
+	unblockCalled bool
+	blockCallArgs struct {
+		ipInfo   IPInfo
+		duration time.Duration
+	}
+	capturedLogs []string
+	logMutex     sync.Mutex
+}
+
+// newCheckerTestHarness creates a harness for testing CheckChains logic.
+func newCheckerTestHarness(t *testing.T, config *AppConfig) *checkerTestHarness {
+	t.Helper()
+	resetGlobalState()
+
+	h := &checkerTestHarness{t: t}
+
+	// Setup a mock blocker to intercept calls.
+	mockBlocker := &MockBlocker{
+		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
+			h.blockCalled = true
+			h.blockCallArgs.ipInfo = ipInfo
+			h.blockCallArgs.duration = duration
+			return nil
+		},
+		UnblockFunc: func(ipInfo IPInfo) error {
+			h.unblockCalled = true
+			return nil
+		},
+	}
+
+	// Create the processor with mock functions.
+	h.processor = newTestProcessor(config, nil) // Start with no chains.
+	h.processor.Blocker = mockBlocker
+	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		h.logMutex.Lock()
+		defer h.logMutex.Unlock()
+		h.capturedLogs = append(h.capturedLogs, fmt.Sprintf(tag+": "+format, args...))
+	}
+
+	return h
+}
+
+// addChain compiles a chain from its YAML definition and adds it to the processor.
+func (h *checkerTestHarness) addChain(chainYAML BehavioralChain) {
+	h.t.Helper()
+	// This simulates the compilation part of LoadConfigFromYAML for a single chain.
+	runtimeChain := chainYAML
+	for i, stepYAML := range chainYAML.StepsYAML {
+		matchers, err := compileMatchers(chainYAML.Name, i, stepYAML.FieldMatches, &[]string{})
+		if err != nil {
+			h.t.Fatalf("Failed to compile matchers for chain '%s': %v", chainYAML.Name, err)
+		}
+		runtimeChain.Steps = append(runtimeChain.Steps, StepDef{
+			Order:    i + 1,
+			Matchers: matchers,
+		})
+	}
+	h.processor.Chains = append(h.processor.Chains, runtimeChain)
+}
+
+// processEntry runs a single log entry through the CheckChains logic.
+func (h *checkerTestHarness) processEntry(entry *LogEntry) {
+	h.t.Helper()
+	CheckChains(h.processor, entry)
+}
+
+// assertChainProgress checks if a given key is at the expected step for a chain.
+func (h *checkerTestHarness) assertChainProgress(chainName string, entry *LogEntry, expectedStep int) {
+	h.t.Helper()
+	key := GetTrackingKey(&h.processor.Chains[0], entry)
+	h.processor.ActivityMutex.RLock()
+	defer h.processor.ActivityMutex.RUnlock()
+	activity, exists := h.processor.ActivityStore[key]
+	if !exists || activity.ChainProgress[chainName].CurrentStep != expectedStep {
+		h.t.Errorf("Expected chain '%s' to be at step %d, but it was not. Activity: %+v", chainName, expectedStep, activity)
+	}
+}
+
+// assertBlocked checks if a given key is marked as blocked.
+func (h *checkerTestHarness) assertBlocked(entry *LogEntry, expected bool) { //nolint:thelper
+	h.t.Helper()
+	key := GetTrackingKey(&h.processor.Chains[0], entry)
+	h.processor.ActivityMutex.RLock()
+	defer h.processor.ActivityMutex.RUnlock()
+	activity, exists := h.processor.ActivityStore[key]
+	if !exists && expected {
+		h.t.Errorf("Expected activity for key %+v to exist and be blocked, but it doesn't exist.", key)
+		return
+	}
+	if exists && activity.IsBlocked != expected {
+		h.t.Errorf("Expected IsBlocked to be %t, but it was %t for key %+v", expected, activity.IsBlocked, key)
+	}
+}
+
+// assertChainProgressCleared checks that a chain's progress has been removed from the activity store.
+func (h *checkerTestHarness) assertChainProgressCleared(chainName string, entry *LogEntry) {
+	h.t.Helper()
+	key := GetTrackingKey(&h.processor.Chains[0], entry)
+	h.processor.ActivityMutex.RLock()
+	defer h.processor.ActivityMutex.RUnlock()
+	activity, exists := h.processor.ActivityStore[key]
+	if exists && len(activity.ChainProgress) != 0 {
+		h.t.Errorf("Expected ChainProgress to be cleared for key %+v, but it has %d entries: %v", key, len(activity.ChainProgress), activity.ChainProgress)
+	}
+}

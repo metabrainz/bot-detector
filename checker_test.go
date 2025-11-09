@@ -17,130 +17,55 @@ import (
 
 // TestCheckChains_SuccessfulBlock tests a multi-step chain that successfully triggers a block.
 func TestCheckChains_SuccessfulBlock(t *testing.T) {
-	// 1. Setup Data Structures
-	resetGlobalState() // Clean state
-
+	// --- Setup ---
 	const targetIP = "192.0.2.1"
 	const blockDuration = 10 * time.Minute
 
-	// Log entry template
-	entry := &LogEntry{
-		IPInfo:    NewIPInfo(targetIP),
-		UserAgent: "TestAgent",
-		Timestamp: time.Now().Add(-1 * time.Second), // Start time for the first request
-		Path:      "/step/one",
-	}
+	h := newCheckerTestHarness(t, nil)
 
-	// Define a two-step chain
-	chain := BehavioralChain{
+	// Define and add a two-step chain to the harness
+	h.addChain(BehavioralChain{
 		Name:          "TwoStepPathBlocker",
 		MatchKey:      "ip_ua",
 		Action:        "block",
 		BlockDuration: blockDuration,
-	}
-
-	// Manually compile matchers for this test case
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one", new([]string))
-	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two", new([]string))
-
-	chain.Steps = []StepDef{
-		{
-			Order:            1,
-			Matchers:         []fieldMatcher{matcher1},
-			MaxDelayDuration: 5 * time.Second,
+		StepsYAML: []StepDefYAML{
+			{FieldMatches: map[string]interface{}{"Path": "/step/one"}, MaxDelay: "5s"},
+			{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MaxDelay: "5s"},
 		},
-		{
-			Order:            2,
-			Matchers:         []fieldMatcher{matcher2},
-			MaxDelayDuration: 5 * time.Second,
-		},
-	}
-
-	chains := []BehavioralChain{chain}
-
-	// Setup a mock blocker to intercept the block call
-	var blockCalled bool
-	var blockCallArgs struct {
-		ipInfo   IPInfo
-		duration time.Duration
-	}
-
-	mockBlocker := &MockBlocker{
-		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
-			blockCalled = true
-			blockCallArgs.ipInfo = ipInfo
-			blockCallArgs.duration = duration
-			return nil
-		},
-	}
-
-	// Create the processor
-	processor := newTestProcessor(&AppConfig{}, chains)
-	processor.Blocker = mockBlocker // Inject the specific mock blocker for this test
-
-	// Get the correct tracking key for the activity store (ip_ua)
-	trackingKey := GetTrackingKey(&chain, entry)
+	})
 
 	// --- STEP 1: Process the first request --
-
-	// Act 1: Process entry for /step/one
-	CheckChains(processor, entry)
+	entry1 := &LogEntry{IPInfo: NewIPInfo(targetIP), UserAgent: "TestAgent", Timestamp: time.Now(), Path: "/step/one"}
+	h.processEntry(entry1)
 
 	// Assert 1: No block should be called, and the state should be at step 1
-	if blockCalled {
+	if h.blockCalled {
 		t.Fatal("Blocker was called after step 1, but it should only be called after step 2.")
 	}
 
-	processor.ActivityMutex.RLock()
-	activity, exists := processor.ActivityStore[trackingKey]
-
-	if !exists {
-		t.Fatal("Expected activity state to exist after step 1, but it did not.")
-	}
-
-	// Check chain progress
-	stepState, stateExists := activity.ChainProgress[chain.Name]
-	if !stateExists || stepState.CurrentStep != 1 {
-		t.Errorf("Expected chain state to be at step 1, got step %d (exists: %t)", stepState.CurrentStep, stateExists)
-	}
-	processor.ActivityMutex.RUnlock()
+	h.assertChainProgress("TwoStepPathBlocker", entry1, 1)
 
 	// --- STEP 2: Process the second request (the attack completion) --
 
-	// Create the second log entry, ensuring it's within the 5s MaxDelay
-	entry.Timestamp = entry.Timestamp.Add(2 * time.Second) // 2 seconds after the first request
-	entry.Path = "/step/two"
-
-	// Act 2: Process entry for /step/two
-	CheckChains(processor, entry)
+	entry2 := &LogEntry{IPInfo: NewIPInfo(targetIP), UserAgent: "TestAgent", Timestamp: entry1.Timestamp.Add(2 * time.Second), Path: "/step/two"}
+	h.processEntry(entry2)
 
 	// Assert 2: Block was called, and activity state is updated
-	if !blockCalled {
+	if !h.blockCalled {
 		t.Fatal("Expected Blocker to be called after completing the chain, but it was not.")
 	}
 
-	if blockCallArgs.ipInfo.Address != targetIP {
-		t.Errorf("Blocker called with incorrect IP. Got %s, want %s", blockCallArgs.ipInfo.Address, targetIP)
+	if h.blockCallArgs.ipInfo.Address != targetIP {
+		t.Errorf("Blocker called with incorrect IP. Got %s, want %s", h.blockCallArgs.ipInfo.Address, targetIP)
 	}
-	if blockCallArgs.duration != blockDuration {
-		t.Errorf("Blocker called with incorrect duration. Got %v, want %v", blockCallArgs.duration, blockDuration)
+	if h.blockCallArgs.duration != blockDuration {
+		t.Errorf("Blocker called with incorrect duration. Got %v, want %v", h.blockCallArgs.duration, blockDuration)
 	}
 
 	// Check final ActivityStore state: IsBlocked should be true and ChainProgress should be cleared
-	processor.ActivityMutex.RLock()
-	ipOnlyKey := TrackingKey{IPInfo: NewIPInfo(targetIP), UA: ""} // Check the IP-only key block optimization
-	activityIPOnly := processor.ActivityStore[ipOnlyKey]
-
-	if !activityIPOnly.IsBlocked {
-		t.Error("Expected IP-only activity state to be IsBlocked=true, but was false.")
-	}
-
-	activityFinal := processor.ActivityStore[trackingKey]
-	processor.ActivityMutex.RUnlock()
-
-	if len(activityFinal.ChainProgress) != 0 {
-		t.Errorf("Expected ChainProgress to be cleared, but it has %d entries: %v", len(activityFinal.ChainProgress), activityFinal.ChainProgress)
-	}
+	h.assertBlocked(entry2, true)
+	h.assertChainProgressCleared("TwoStepPathBlocker", entry2)
 }
 
 // TestPreCheckActivity_StillBlocked_OldEntry verifies that when an IP is already blocked,
