@@ -5,6 +5,7 @@ package main
 import (
 	"bot-detector/internal/logging"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -17,6 +18,12 @@ import (
 func main() {
 	// Parse CLI flags
 	flag.Parse()
+
+	// Handle the version flag first. If present, print version and exit.
+	if ShowVersion {
+		fmt.Printf("bot-detector version %s (c) MetaBrainz Foundation\n", AppVersion)
+		os.Exit(0)
+	}
 
 	// Validate that required flags are provided.
 	if LogFilePath == "" || YAMLFilePath == "" {

@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// AppVersion is the application's version string.
+const AppVersion = "0.1"
+
 // --- CONSTANT FOR CRITICAL LOG LINE BUFFER LIMIT ---
 const MaxLogLineSize = 16 * 1024
 

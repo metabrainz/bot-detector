@@ -11,6 +11,7 @@ var (
 	LogFilePath  string
 	YAMLFilePath string
 	DryRun       bool
+	ShowVersion  bool
 )
 
 // RegisterCLIFlags registers the command-line flags with the global flag set.
@@ -19,6 +20,7 @@ func RegisterCLIFlags(fs *flag.FlagSet) {
 	fs.StringVar(&LogFilePath, "log-path", "", "Path to the access log file. (Required)")
 	fs.StringVar(&YAMLFilePath, "yaml-path", "", "Path to the YAML configuration file. (Required)")
 	fs.BoolVar(&DryRun, "dry-run", false, "If true, runs in test mode: processes the log file from the beginning and exits.")
+	fs.BoolVar(&ShowVersion, "version", false, "Print the application version and exit.")
 }
 
 func init() {

@@ -96,6 +96,7 @@ This will produce a single executable named `bot-detector`.
 | **`--yaml-path`** | (none) | **Required.** Path to the YAML configuration file. |
 | **`--log-path`** | (none) | **Required.** Path to the access log file to tail (or to read in dry-run mode). |
 | **`--dry-run`** | `false` | Optional. If true, runs in test mode, ignoring HAProxy and live logging. |
+| **`--version`** | `false` | Optional. Print the application version and exit. |
 
 ---
 
