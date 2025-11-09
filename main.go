@@ -122,7 +122,7 @@ func start(p *Processor) {
 			// The ConfigWatcher is not started in test mode to prevent race conditions where
 			// the test's config is overwritten by a reload from the default chains.yaml.
 			if ReloadOnSignal != "" {
-				go SignalReloader(p, stopWatcher)
+				go SignalReloader(p, stopWatcher, p.signalCh)
 			} else {
 				go ConfigWatcher(p, stopWatcher)
 			}

@@ -213,8 +213,10 @@ chains:
 		ConfigMutex:   &sync.RWMutex{},
 		Chains:        initialLoadedCfg.Chains,
 		Config:        &AppConfig{},
+		signalCh:      make(chan os.Signal, 1), // Initialize the signal channel
 		LogFunc:       func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 		TestSignals: &TestSignals{
+			// This signal is used by the test to wait for the reload to complete.
 			ReloadDoneSignal: make(chan struct{}, 1),
 		},
 	}
@@ -222,7 +224,7 @@ chains:
 	// 4. Start the SignalReloader.
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go SignalReloader(processor, stopWatcher)
+	go SignalReloader(processor, stopWatcher, processor.signalCh)
 
 	// --- Act ---
 	// 5. Modify the YAML file on disk.
@@ -240,9 +242,7 @@ chains:
 	}
 
 	// 6. Send the SIGHUP signal to the current process to trigger the reload.
-	if err := syscall.Kill(syscall.Getpid(), syscall.SIGHUP); err != nil {
-		t.Fatalf("Failed to send SIGHUP signal: %v", err)
-	}
+	processor.signalCh <- syscall.SIGHUP
 
 	// 7. Wait for the reload signal from the reloader.
 	select {

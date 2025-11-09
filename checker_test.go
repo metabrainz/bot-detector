@@ -162,77 +162,38 @@ func TestPreCheckActivity_StillBlocked_NewEntry(t *testing.T) {
 
 // TestCheckChains_DryRun tests that a block is NOT executed when DryRun is true.
 func TestCheckChains_DryRun(t *testing.T) {
-	// 1. Setup Data Structures
-	resetGlobalState() // Clean state
-
+	// --- Setup ---
 	const targetIP = "192.0.2.1"
 	const blockDuration = 10 * time.Minute
 
-	// Log entry template
-	entry := &LogEntry{
-		IPInfo:    NewIPInfo(targetIP),
-		UserAgent: "TestAgent",
-		Timestamp: time.Now().Add(-1 * time.Second),
-		Path:      "/step/one",
-	}
+	h := newCheckerTestHarness(t, nil)
+	h.processor.DryRun = true
 
-	// Define a simple two-step chain
-	chain := BehavioralChain{
-		Name:          "DryRunTestChain",
-		MatchKey:      "ip", // Use ip-only for simplicity
+	h.addChain(BehavioralChain{
+		Name:          "DryRunChain",
+		MatchKey:      "ip",
 		Action:        "block",
 		BlockDuration: blockDuration,
-	}
-
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one", new([]string))
-	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two", new([]string))
-
-	chain.Steps = []StepDef{
-		{Order: 1, Matchers: []fieldMatcher{matcher1}, MaxDelayDuration: 5 * time.Second},
-		{Order: 2, Matchers: []fieldMatcher{matcher2}, MaxDelayDuration: 5 * time.Second},
-	}
-
-	chains := []BehavioralChain{chain}
-
-	// Setup a mock blocker to intercept the block call
-	var blockCalled bool
-	mockBlocker := &MockBlocker{
-		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
-			blockCalled = true
-			return nil
+		StepsYAML: []StepDefYAML{
+			{FieldMatches: map[string]interface{}{"Path": "/step/one"}, MaxDelay: "5s"},
+			{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MaxDelay: "5s"},
 		},
-	}
+	})
 
-	// Create the processor with DryRun=true
-	processor := newTestProcessor(&AppConfig{}, chains)
-	processor.DryRun = true
-	processor.Blocker = mockBlocker
+	// --- Act ---
+	entry1 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: time.Now(), Path: "/step/one"}
+	h.processEntry(entry1)
 
-	// Get the correct tracking key for the activity store (ip-only)
-	trackingKey := GetTrackingKey(&chain, entry)
+	entry2 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: entry1.Timestamp.Add(2 * time.Second), Path: "/step/two"}
+	h.processEntry(entry2)
 
-	// --- STEP 1 & 2: Process both steps (which should trigger a "block" in dry run) --
-	CheckChains(processor, entry) // Step 1
-	entry.Timestamp = entry.Timestamp.Add(2 * time.Second)
-	entry.Path = "/step/two"
-	CheckChains(processor, entry) // Step 2 (completion)
-
-	// Assertions
-	if blockCalled {
+	// --- Assert ---
+	if h.blockCalled {
 		t.Fatal("Blocker was called, but should be skipped in DryRun mode.")
 	}
 
-	processor.ActivityMutex.RLock()
-	activityFinal, exists := processor.ActivityStore[trackingKey]
-	processor.ActivityMutex.RUnlock()
-
-	if !exists {
-		t.Fatal("Expected DryRunActivityStore to have activity, but it did not.")
-	}
-	// The in-memory block should still happen in the DryRun store
-	if !activityFinal.IsBlocked {
-		t.Error("Expected DryRun activity state to be IsBlocked=true, but was false.")
-	}
+	// The in-memory block should still happen in the activity store, even in dry-run.
+	h.assertBlocked(entry2, true)
 }
 
 // TestCheckChains_DryRun_UnknownAction tests that an unrecognized action is handled gracefully in dry-run mode.
@@ -390,131 +351,66 @@ func TestProcessChainForEntry_AlreadyCompleted(t *testing.T) {
 
 // TestCheckChains_MaxDelayExceeded tests that a chain resets if the time between steps is too long.
 func TestCheckChains_MaxDelayExceeded(t *testing.T) {
-	// 1. Setup Data Structures
-	resetGlobalState() // Clean state
-
+	// --- Setup ---
 	const targetIP = "192.0.2.1"
+	h := newCheckerTestHarness(t, nil)
 
-	// Log entry template
-	entry := &LogEntry{
-		IPInfo:    NewIPInfo(targetIP),
-		UserAgent: "TestAgent",
-		Timestamp: time.Now(),
-		Path:      "/step/one",
-	}
-
-	// Define a two-step chain with a 5s max delay
-	chain := BehavioralChain{
+	h.addChain(BehavioralChain{
 		Name:     "DelayTestChain",
 		MatchKey: "ip",
-		Action:   "log", // Don't block, just log for simplicity
-	}
+		Action:   "log",
+		StepsYAML: []StepDefYAML{
+			{FieldMatches: map[string]interface{}{"Path": "/step/one"}, MaxDelay: "5s"},
+			{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MaxDelay: "5s"},
+		},
+	})
 
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one", new([]string))
-	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two", new([]string))
+	// --- Act ---
+	entry1 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: time.Now(), Path: "/step/one"}
+	h.processEntry(entry1)
 
-	chain.Steps = []StepDef{
-		{Order: 1, Matchers: []fieldMatcher{matcher1}, MaxDelayDuration: 5 * time.Second},
-		{Order: 2, Matchers: []fieldMatcher{matcher2}, MaxDelayDuration: 5 * time.Second},
-	}
+	// Assert 1: State is at step 1.
+	h.assertChainProgress("DelayTestChain", entry1, 1)
 
-	chains := []BehavioralChain{chain}
+	// Process the second request, after MaxDelay (e.g., 6 seconds later).
+	entry2 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: entry1.Timestamp.Add(6 * time.Second), Path: "/step/two"}
+	h.processEntry(entry2)
 
-	processor := newTestProcessor(&AppConfig{}, chains)
-
-	trackingKey := GetTrackingKey(&chain, entry)
-
-	// --- STEP 1: Process the first request ---
-	CheckChains(processor, entry)
-
-	// Assert 1: State is at step 1
-	processor.ActivityMutex.RLock()
-	activity := processor.ActivityStore[trackingKey]
-	if activity.ChainProgress[chain.Name].CurrentStep != 1 {
-		t.Fatalf("Expected state to be at step 1, got %d", activity.ChainProgress[chain.Name].CurrentStep)
-	}
-	processor.ActivityMutex.RUnlock() // <-- Release the read lock
-
-	// --- STEP 2: Process the second request, after MaxDelay (e.g., 6 seconds later) ---
-
-	entry.Timestamp = entry.Timestamp.Add(6 * time.Second) // > 5 seconds delay
-	entry.Path = "/step/two"
-
-	CheckChains(processor, entry)
-
-	// Assert 2: Chain should have been reset, and the second step should be treated as the *first* step
-	// of a new sequence, but it doesn't match step 1, so the chain progress should be cleared.
-	processor.ActivityMutex.RLock()
-	activityFinal := processor.ActivityStore[trackingKey]
-	processor.ActivityMutex.RUnlock()
-
-	if len(activityFinal.ChainProgress) != 0 {
-		t.Errorf("Expected ChainProgress to be reset/cleared (length 0) after MaxDelay, but has %d entries: %v", len(activityFinal.ChainProgress), activityFinal.ChainProgress)
-	}
+	// --- Assert 2 ---
+	// The chain should have been reset. The second step doesn't match step 1, so progress is cleared.
+	h.assertChainProgressCleared("DelayTestChain", entry2)
 }
 
 // TestCheckChains_MinDelayNotMet tests that a chain resets if the time between steps is too short.
 func TestCheckChains_MinDelayNotMet(t *testing.T) {
-	// 1. Setup Data Structures
-	resetGlobalState() // Clean state
-
+	// --- Setup ---
 	const targetIP = "192.0.2.1"
+	h := newCheckerTestHarness(t, nil)
 
-	// Log entry template
-	entry := &LogEntry{
-		IPInfo:    NewIPInfo(targetIP),
-		UserAgent: "TestAgent",
-		Timestamp: time.Now(),
-		Path:      "/step/one",
-	}
-
-	// Define a two-step chain with a 500ms min delay
-	chain := BehavioralChain{
+	h.addChain(BehavioralChain{
 		Name:     "MinDelayTestChain",
 		MatchKey: "ip",
 		Action:   "log",
-	}
+		StepsYAML: []StepDefYAML{
+			{FieldMatches: map[string]interface{}{"Path": "/step/one"}, MaxDelay: "5s"},
+			{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MinDelay: "500ms"},
+		},
+	})
 
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one", new([]string))
-	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two", new([]string))
+	// --- Act ---
+	entry1 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: time.Now(), Path: "/step/one"}
+	h.processEntry(entry1)
 
-	chain.Steps = []StepDef{
-		{Order: 1, Matchers: []fieldMatcher{matcher1}, MaxDelayDuration: 5 * time.Second},
-		{Order: 2, Matchers: []fieldMatcher{matcher2}, MinDelayDuration: 500 * time.Millisecond},
-	}
+	// Assert 1: State is at step 1.
+	h.assertChainProgress("MinDelayTestChain", entry1, 1)
 
-	chains := []BehavioralChain{chain}
+	// Process the second request, before MinDelay (e.g., 100ms later).
+	entry2 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: entry1.Timestamp.Add(100 * time.Millisecond), Path: "/step/two"}
+	h.processEntry(entry2)
 
-	processor := newTestProcessor(&AppConfig{}, chains)
-
-	trackingKey := GetTrackingKey(&chain, entry)
-
-	// --- STEP 1: Process the first request ---
-	CheckChains(processor, entry)
-
-	// Assert 1: State is at step 1
-	processor.ActivityMutex.RLock()
-	activity := processor.ActivityStore[trackingKey]
-	if activity.ChainProgress[chain.Name].CurrentStep != 1 {
-		t.Fatalf("Expected state to be at step 1, got %d", activity.ChainProgress[chain.Name].CurrentStep)
-	}
-	processor.ActivityMutex.RUnlock() // <-- Release the read lock
-
-	// --- STEP 2: Process the second request, before MinDelay (e.g., 100ms later) ---
-
-	entry.Timestamp = entry.Timestamp.Add(100 * time.Millisecond) // < 500ms delay
-	entry.Path = "/step/two"
-
-	CheckChains(processor, entry)
-
-	// Assert 2: Chain should be reset because min delay was not met.
-	processor.ActivityMutex.RLock()
-	activityFinal := processor.ActivityStore[trackingKey]
-	processor.ActivityMutex.RUnlock()
-
-	if len(activityFinal.ChainProgress) != 0 {
-		t.Errorf("Expected ChainProgress to be reset/cleared (length 0) after MinDelay failure, but has %d entries: %v", len(activityFinal.ChainProgress), activityFinal.ChainProgress)
-	}
+	// --- Assert 2 ---
+	// Chain should be reset because min delay was not met.
+	h.assertChainProgressCleared("MinDelayTestChain", entry2)
 }
 
 // TestCheckChains_WhitelistSkip tests that a whitelisted IP is skipped entirely.
@@ -634,83 +530,38 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 
 // TestCheckChains_LogAction tests that a chain with Action="log" clears the state but does not call the blocker.
 func TestCheckChains_LogAction(t *testing.T) {
-	// 1. Setup Data Structures
-	resetGlobalState()
-
+	// --- Setup ---
 	const targetIP = "192.0.2.1"
+	h := newCheckerTestHarness(t, nil)
 
-	// Log entry template
-	entry := &LogEntry{
-		IPInfo:    NewIPInfo(targetIP),
-		Timestamp: time.Now(),
-		Path:      "/step/one",
-	}
-
-	// Define a two-step chain with Action="log"
-	chain := BehavioralChain{
+	h.addChain(BehavioralChain{
 		Name:          "LogActionTestChain",
 		MatchKey:      "ip",
 		Action:        "log", // ACTION: log
 		BlockDuration: 0,
-	}
-
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step/one", new([]string))
-	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step/two", new([]string))
-
-	chain.Steps = []StepDef{
-		{Order: 1, Matchers: []fieldMatcher{matcher1}, MaxDelayDuration: 5 * time.Second},
-		{Order: 2, Matchers: []fieldMatcher{matcher2}, MaxDelayDuration: 5 * time.Second},
-	}
-
-	chains := []BehavioralChain{chain}
-
-	// Setup a mock blocker to ensure it's not called
-	var blockCalled bool
-	mockBlocker := &MockBlocker{
-		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
-			blockCalled = true
-			return nil
+		StepsYAML: []StepDefYAML{
+			{FieldMatches: map[string]interface{}{"Path": "/step/one"}, MaxDelay: "5s"},
+			{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MaxDelay: "5s"},
 		},
-	}
+	})
 
-	// Create the processor
-	processor := newTestProcessor(&AppConfig{}, chains)
-	processor.Blocker = mockBlocker
+	// --- Act ---
+	entry1 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: time.Now(), Path: "/step/one"}
+	h.processEntry(entry1)
 
-	trackingKey := GetTrackingKey(&chain, entry)
+	// Assert 1: State is at step 1.
+	h.assertChainProgress("LogActionTestChain", entry1, 1)
 
-	// --- STEP 1: Process the first request ---
-	CheckChains(processor, entry)
+	// Process the second request (completion).
+	entry2 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: entry1.Timestamp.Add(2 * time.Second), Path: "/step/two"}
+	h.processEntry(entry2)
 
-	// Assert 1: State is at step 1
-	processor.ActivityMutex.RLock()
-	activity := processor.ActivityStore[trackingKey]
-	if len(activity.ChainProgress) == 0 {
-		t.Fatal("Expected state to exist after step 1, but it was empty.")
-	}
-	processor.ActivityMutex.RUnlock()
-
-	// --- STEP 2: Process the second request (completion) ---
-	entry.Timestamp = entry.Timestamp.Add(2 * time.Second)
-	entry.Path = "/step/two"
-
-	CheckChains(processor, entry)
-
-	// Assert 2: Block was NOT called, but ChainProgress should be cleared
-	if blockCalled {
+	// --- Assert 2 ---
+	if h.blockCalled {
 		t.Fatal("Blocker was called, but should have been skipped for Action='log'.")
 	}
-
-	processor.ActivityMutex.RLock()
-	activityFinal := processor.ActivityStore[trackingKey]
-
-	// For a 'log' action, IsBlocked should be false and ChainProgress should be cleared
-	if activityFinal.IsBlocked {
-		t.Error("Expected final activity state to be IsBlocked=false for 'log' action, but was true.")
-	}
-	if len(activityFinal.ChainProgress) != 0 {
-		t.Errorf("Expected ChainProgress to be cleared for 'log' action, but has %d entries: %v", len(activityFinal.ChainProgress), activityFinal.ChainProgress)
-	}
+	h.assertBlocked(entry2, false)
+	h.assertChainProgressCleared("LogActionTestChain", entry2)
 }
 
 // TestCheckChains_LogAction_Whitelisted verifies that when a whitelisted IP completes

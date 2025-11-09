@@ -941,7 +941,7 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 }
 
 // SignalReloader listens for a specific OS signal to trigger a configuration reload. //nolint:cyclop
-func SignalReloader(p *Processor, stop <-chan struct{}) {
+func SignalReloader(p *Processor, stop <-chan struct{}, signalCh chan os.Signal) {
 	if p.DryRun {
 		return
 	}
@@ -955,8 +955,7 @@ func SignalReloader(p *Processor, stop <-chan struct{}) {
 		return
 	}
 
-	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, reloadSignal)
+	signal.Notify(signalCh, reloadSignal) // Notify on the provided channel
 
 	p.LogFunc(logging.LevelInfo, "RELOAD", "Signal-based config reloading enabled. Send %s signal to reload.", signalName)
 
