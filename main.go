@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bot-detector/internal/logging"
 	"flag"
 	"log"
 	"os"
@@ -28,7 +29,7 @@ func main() {
 		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
 	}
 
-	SetLogLevel(loadedCfg.LogLevel)
+	logging.SetLogLevel(loadedCfg.LogLevel)
 
 	// Create the config struct from the loaded data.
 	appConfig := &AppConfig{
@@ -65,7 +66,7 @@ func main() {
 		LogRegex: loadedCfg.LogFormatRegex,
 		DryRun:   DryRun,
 		signalCh: make(chan os.Signal, 1),
-		LogFunc:  LogOutput,
+		LogFunc:  logging.LogOutput,
 	}
 	// Inject the HAProxyBlocker which depends on the main processor instance.
 	p.Blocker = &HAProxyBlocker{P: p}

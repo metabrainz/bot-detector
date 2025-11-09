@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/logging"
 	"bufio"
 	"errors"
 	"fmt"
@@ -44,7 +45,7 @@ func CheckAndRemoveWhitelistedBlocks(p *Processor) {
 				// Log is handled inside UnblockIP
 			} else {
 				// Successful unblock
-				p.LogFunc(LevelInfo, "WHITELIST_UNBLOCK", "Unblocked whitelisted IP %s (was blocked until %s).", trackingKey.IPInfo.Address, activity.BlockedUntil.Format(AppLogTimestampFormat))
+				p.LogFunc(logging.LevelInfo, "WHITELIST_UNBLOCK", "Unblocked whitelisted IP %s (was blocked until %s).", trackingKey.IPInfo.Address, activity.BlockedUntil.Format(AppLogTimestampFormat))
 				activity.IsBlocked = false
 				activity.BlockedUntil = time.Time{}
 				unblockedCount++
@@ -53,7 +54,7 @@ func CheckAndRemoveWhitelistedBlocks(p *Processor) {
 	}
 
 	if unblockedCount > 0 {
-		p.LogFunc(LevelInfo, "WHITELIST_CLEANUP", "Finished Whitelist cleanup. Unblocked %d IPs.", unblockedCount)
+		p.LogFunc(logging.LevelInfo, "WHITELIST_CLEANUP", "Finished Whitelist cleanup. Unblocked %d IPs.", unblockedCount)
 	}
 }
 
@@ -63,13 +64,13 @@ func logConfigurationSummary(p *Processor) {
 	p.ConfigMutex.RLock()
 	config := p.Config
 	logRegex := p.LogRegex
-	currentLogLevel := CurrentLogLevel.String()
+	currentLogLevel := logging.GetLogLevel().String()
 	p.ConfigMutex.RUnlock()
 
-	p.LogFunc(LevelInfo, "CONFIG", "Loaded configuration:")
+	p.LogFunc(logging.LevelInfo, "CONFIG", "Loaded configuration:")
 
 	// Handle special cases first
-	p.LogFunc(LevelInfo, "CONFIG", "  - log_level: %s", currentLogLevel)
+	p.LogFunc(logging.LevelInfo, "CONFIG", "  - log_level: %s", currentLogLevel)
 
 	// Use reflection to iterate over tagged fields in AppConfig
 	val := reflect.ValueOf(*config)
@@ -83,23 +84,23 @@ func logConfigurationSummary(p *Processor) {
 		}
 
 		fieldValue := val.Field(i).Interface()
-		p.LogFunc(LevelInfo, "CONFIG", "  - %s: %v", tag, fieldValue)
+		p.LogFunc(logging.LevelInfo, "CONFIG", "  - %s: %v", tag, fieldValue)
 	}
 
 	// Only show timestamp format if it's not the default.
 	if config.TimestampFormat != AccessLogTimeFormat {
-		p.LogFunc(LevelInfo, "CONFIG", "  - timestamp_format: custom")
+		p.LogFunc(logging.LevelInfo, "CONFIG", "  - timestamp_format: custom")
 	}
 
 	// Only show log format regex if it's custom.
 	if logRegex != nil {
-		p.LogFunc(LevelInfo, "CONFIG", "  - log_format_regex: custom")
+		p.LogFunc(logging.LevelInfo, "CONFIG", "  - log_format_regex: custom")
 	}
 }
 
 // logChainDetails logs details for a given list of chains, one per line.
 func logChainDetails(p *Processor, chains []BehavioralChain, header string) {
-	p.LogFunc(LevelInfo, "CONFIG", "%s (%d total)", header, len(chains))
+	p.LogFunc(logging.LevelInfo, "CONFIG", "%s (%d total)", header, len(chains))
 	for _, chain := range chains {
 		details := fmt.Sprintf("Name: '%s', Action: %s, Steps: %d, MatchKey: %s", chain.Name, chain.Action, len(chain.Steps), chain.MatchKey)
 		// Always show block duration for clarity, indicating if it's a default.
@@ -108,7 +109,7 @@ func logChainDetails(p *Processor, chains []BehavioralChain, header string) {
 		} else if chain.BlockDuration > 0 {
 			details += fmt.Sprintf(", BlockDuration: %v", chain.BlockDuration)
 		}
-		p.LogFunc(LevelInfo, "CONFIG", "  - %s", details)
+		p.LogFunc(logging.LevelInfo, "CONFIG", "  - %s", details)
 	}
 }
 
@@ -241,7 +242,7 @@ func compileStringMatcher(chainName string, stepIndex int, field, value string, 
 		if err != nil {
 			// Log a warning but do not fail the entire config load.
 			// Treat the file as empty, effectively disabling this part of the rule.
-			LogOutput(LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': failed to read file matcher '%s', it will be treated as empty: %v", chainName, stepIndex+1, field, filePath, err)
+			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': failed to read file matcher '%s', it will be treated as empty: %v", chainName, stepIndex+1, field, filePath, err)
 			// Return a matcher for an empty list, which will never match. Do not return an error.
 			lines = []string{}
 		}
@@ -660,11 +661,11 @@ func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 		for _, chain := range newChains {
 			if chain.Action == "block" {
 				// Downgrade this warning to Debug level during test runs to reduce noise.
-				logLevel := LevelWarning
+				logLevel := logging.LevelWarning
 				if isTesting() {
-					logLevel = LevelDebug
+					logLevel = logging.LevelDebug
 				}
-				LogOutput(logLevel, "CONFIG", "One or more chains use the 'block' action, but no 'duration_tables' are configured. All block attempts will be skipped.")
+				logging.LogOutput(logLevel, "CONFIG", "One or more chains use the 'block' action, but no 'duration_tables' are configured. All block attempts will be skipped.")
 				break // We only need to log this warning once.
 			}
 		}
@@ -713,18 +714,18 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan s
 		pollingInterval = DefaultMinPollingInterval
 	}
 
-	p.LogFunc(LevelDebug, "WATCH", "Starting ConfigWatcher, polling every %v", pollingInterval)
+	p.LogFunc(logging.LevelDebug, "WATCH", "Starting ConfigWatcher, polling every %v", pollingInterval)
 	timer := time.NewTicker(pollingInterval)
 	defer timer.Stop()
 
 	for {
 		select {
 		case <-stop:
-			p.LogFunc(LevelInfo, "WATCH", "ConfigWatcher received stop signal. Shutting down.")
+			p.LogFunc(logging.LevelInfo, "WATCH", "ConfigWatcher received stop signal. Shutting down.")
 			return
 		case <-forceCheckSignal:
 			// This case is for testing only, to trigger an immediate check.
-			p.LogFunc(LevelDebug, "WATCH", "Received test signal for immediate reload check.")
+			p.LogFunc(logging.LevelDebug, "WATCH", "Received test signal for immediate reload check.")
 		case <-timer.C:
 			// Timer fired, continue with polling.
 		}
@@ -735,7 +736,7 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan s
 		// 1. Check the main YAML file
 		fileInfo, err := os.Stat(YAMLFilePath)
 		if err != nil {
-			p.LogFunc(LevelError, "WATCH_ERROR", "Failed to stat file %s: %v", YAMLFilePath, err)
+			p.LogFunc(logging.LevelError, "WATCH_ERROR", "Failed to stat file %s: %v", YAMLFilePath, err)
 			continue
 		}
 
@@ -750,7 +751,7 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan s
 				if err != nil {
 					// Log at debug level if a dependency file is missing, as this might be temporary.
 					// A reload will only be triggered if chains.yaml itself changes.
-					p.LogFunc(LevelDebug, "WATCH_SKIP", "Could not stat dependency file %s (may have been removed): %v", depPath, err)
+					p.LogFunc(logging.LevelDebug, "WATCH_SKIP", "Could not stat dependency file %s (may have been removed): %v", depPath, err)
 					continue
 				}
 				if depInfo.ModTime().After(p.Config.LastModTime) {
@@ -763,7 +764,7 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan s
 		p.ConfigMutex.RUnlock()
 
 		if isChanged {
-			p.LogFunc(LevelInfo, "WATCH", "Detected change in '%s'. Attempting reload...", changedFile)
+			p.LogFunc(logging.LevelInfo, "WATCH", "Detected change in '%s'. Attempting reload...", changedFile)
 			func() { // Use an anonymous function to scope the defer correctly.
 				// Defer the test signal to ensure it's sent whether the reload succeeds or fails.
 				if reloadDoneSignal != nil {
@@ -781,7 +782,7 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan s
 				// LoadChainsFromYAML now returns parsed data, not modifying global state.
 				loadedCfg, err := LoadConfigFromYAML()
 				if err != nil {
-					p.LogFunc(LevelError, "LOAD_ERROR", "Failed to reload chains: %v", err)
+					p.LogFunc(logging.LevelError, "LOAD_ERROR", "Failed to reload chains: %v", err)
 					return // The deferred signal will still fire.
 				}
 
@@ -801,8 +802,8 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan s
 				p.Config.IdleTimeout = loadedCfg.IdleTimeout
 				p.Config.OutOfOrderTolerance = loadedCfg.OutOfOrderTolerance
 				p.Config.TimestampFormat = loadedCfg.TimestampFormat
-				p.LogRegex = loadedCfg.LogFormatRegex // Update the regex on the processor
-				SetLogLevel(loadedCfg.LogLevel)       // Update log level dynamically
+				p.LogRegex = loadedCfg.LogFormatRegex   // Update the regex on the processor
+				logging.SetLogLevel(loadedCfg.LogLevel) // Update log level dynamically
 				p.Config.MaxTimeSinceLastHit = loadedCfg.MaxTimeSinceLastHit
 				p.Config.FileDependencies = loadedCfg.FileDependencies
 				p.Config.LastModTime = time.Now() // Use time.Now() to avoid race conditions with fast edits
@@ -811,11 +812,11 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}, forceCheckSignal <-chan s
 				// --- Compare and log general config changes ---
 				// Compare tagged fields using reflection, and handle special cases manually.
 				configChanged := compareConfigsByTag(oldConfig, *loadedCfg) ||
-					loadedCfg.LogLevel != CurrentLogLevel.String() ||
+					loadedCfg.LogLevel != logging.GetLogLevel().String() ||
 					(oldLogRegex != nil) != (loadedCfg.LogFormatRegex != nil)
 
 				if configChanged {
-					p.LogFunc(LevelInfo, "CONFIG", "General configuration settings have been updated.")
+					p.LogFunc(logging.LevelInfo, "CONFIG", "General configuration settings have been updated.")
 					logConfigurationSummary(p)
 				}
 

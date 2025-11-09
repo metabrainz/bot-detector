@@ -1,4 +1,4 @@
-package main
+package logging
 
 import (
 	"bytes"
@@ -23,7 +23,7 @@ func TestSetLogLevel(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		LogOutput = originalLogFunc
-		CurrentLogLevel = LevelWarning // Reset to default
+		currentLogLevel = LevelWarning // Reset to default
 	})
 
 	// --- Test Cases ---
@@ -45,8 +45,8 @@ func TestSetLogLevel(t *testing.T) {
 
 			SetLogLevel(tt.levelStr)
 
-			if CurrentLogLevel != tt.expectedLevel {
-				t.Errorf("Expected CurrentLogLevel to be %v, but got %v", tt.expectedLevel, CurrentLogLevel)
+			if currentLogLevel != tt.expectedLevel {
+				t.Errorf("Expected currentLogLevel to be %v, but got %v", tt.expectedLevel, currentLogLevel)
 			}
 			if tt.expectWarning && !strings.Contains(capturedLog, "Invalid log_level") {
 				t.Errorf("Expected a warning for invalid log level, but none was captured.")
@@ -68,7 +68,7 @@ func TestLogOutput(t *testing.T) {
 	log.SetOutput(&buf)
 	t.Cleanup(func() {
 		LogOutput = originalLogFunc
-		CurrentLogLevel = LevelWarning // Reset to default
+		currentLogLevel = LevelWarning // Reset to default
 		log.SetOutput(os.Stderr)       // Restore original log output
 	})
 
@@ -87,7 +87,7 @@ func TestLogOutput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			buf.Reset() // Reset buffer for each run
-			CurrentLogLevel = tt.currentLevel
+			currentLogLevel = tt.currentLevel
 			// Call the public LogOutput function, which has been mocked, not the internal one.
 			LogOutput(tt.messageLevel, "TEST", "test message")
 

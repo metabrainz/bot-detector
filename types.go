@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/logging"
 	"net"
 	"os"
 	"regexp"
@@ -36,7 +37,7 @@ type Processor struct {
 	LogRegex          *regexp.Regexp // The currently active log parsing regex.
 	CheckChainsFunc   func(entry *LogEntry)
 	signalCh          chan os.Signal
-	LogFunc           func(level LogLevel, tag string, format string, v ...interface{})
+	LogFunc           func(level logging.LogLevel, tag string, format string, v ...interface{})
 	ProcessLogLine    func(line string, lineNumber int)
 }
 

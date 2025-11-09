@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/logging"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,7 +37,7 @@ func TestStart_DryRun(t *testing.T) {
 		Chains:        []BehavioralChain{},
 		Config:        &AppConfig{},
 		DryRun:        true, // Enable dry-run mode.
-		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+		LogFunc:       func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 		ProcessLogLine: func(line string, lineNumber int) {
 			linesProcessed++
 		},
@@ -106,7 +107,7 @@ func TestStart_LiveMode(t *testing.T) {
 		},
 		DryRun:   false, // Ensure live mode.
 		signalCh: make(chan os.Signal, 1),
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
+		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 			// Log every message from the tailer to the test output for debugging.
 			logMsg := fmt.Sprintf(format, args...)
 			// In a rotation, the file might be stat'd between rename and recreate, causing a stat error.

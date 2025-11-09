@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/logging"
 	"flag"
 	"fmt"
 	"io"
@@ -64,7 +65,7 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 		ConfigMutex:       &sync.RWMutex{},
 		Chains:            chains,
 		Config:            config,
-		LogFunc:           func(level LogLevel, tag string, format string, args ...interface{}) {},
+		LogFunc:           func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
 	}
 	// Create a real HAProxyBlocker and link it to the processor.
@@ -99,7 +100,7 @@ func newDryRunTestHarness(t *testing.T) *dryRunTestHarness {
 
 	// Create processor with mock/capture functions
 	h.processor = &Processor{
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
+		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 			h.logMutex.Lock()
 			defer h.logMutex.Unlock()
 			h.capturedLogs = append(h.capturedLogs, fmt.Sprintf(format, args...))

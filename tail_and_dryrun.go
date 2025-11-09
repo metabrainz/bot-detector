@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/logging"
 	"bufio"
 	"errors"
 	"io"
@@ -68,11 +69,11 @@ func ReadLineWithLimit(reader *bufio.Reader, limit int) (string, error) {
 
 // DryRunLogProcessor reads and processes a static log file for testing.
 func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
-	p.LogFunc(LevelInfo, "DRYRUN", "MODE: Reading logs from %s...", LogFilePath)
+	p.LogFunc(logging.LevelInfo, "DRYRUN", "MODE: Reading logs from %s...", LogFilePath)
 
 	file, err := osOpenFile(LogFilePath)
 	if err != nil {
-		p.LogFunc(LevelCritical, "FATAL", "Failed to open log file %s: %v", LogFilePath, err)
+		p.LogFunc(logging.LevelCritical, "FATAL", "Failed to open log file %s: %v", LogFilePath, err)
 		// In a dry-run, a fatal error means we're done.
 		close(done)
 		return
@@ -98,16 +99,16 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 			}
 			goto endLoop // Use goto to break out of the outer for loop.
 		case errors.Is(readErr, ErrLineSkipped):
-			p.LogFunc(LevelWarning, "DRYRUN_SKIP", "Line %d: Skipped (Length exceeded %d bytes).", lineNumber, lineLimit)
+			p.LogFunc(logging.LevelWarning, "DRYRUN_SKIP", "Line %d: Skipped (Length exceeded %d bytes).", lineNumber, lineLimit)
 			continue
 		case readErr != nil:
-			p.LogFunc(LevelError, "DRYRUN_ERROR", "Line %d: Read error: %v", lineNumber, readErr)
+			p.LogFunc(logging.LevelError, "DRYRUN_ERROR", "Line %d: Read error: %v", lineNumber, readErr)
 			continue
 		}
 
 		// Skip comments and empty lines before processing.
 		if len(line) == 0 || line[0] == '#' {
-			p.LogFunc(LevelDebug, "DRYRUN_SKIP", "Line %d: Skipped (Comment/Empty).", lineNumber)
+			p.LogFunc(logging.LevelDebug, "DRYRUN_SKIP", "Line %d: Skipped (Comment/Empty).", lineNumber)
 			continue
 		}
 
@@ -117,7 +118,7 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	}
 
 endLoop:
-	p.LogFunc(LevelInfo, "DRYRUN", "DryRun complete. Processed %d lines.", processedCount)
+	p.LogFunc(logging.LevelInfo, "DRYRUN", "DryRun complete. Processed %d lines.", processedCount)
 	close(done)
 }
 
@@ -131,13 +132,13 @@ func hasFileBeenRotated(p *Processor, filePath string, initialStat os.FileInfo, 
 
 	currentStat, err := statFunc(filePath)
 	if err != nil {
-		p.LogFunc(LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Assuming rotation.", err)
+		p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Assuming rotation.", err)
 		return true // If we can't stat the file, it might be gone. Reopen.
 	}
 
 	// Check for truncation (size decreased).
 	if currentStat.Size() < initialStat.Size() {
-		p.LogFunc(LevelInfo, "TAIL", "Detected log file size reduction (truncation/rotation). Reopening file.")
+		p.LogFunc(logging.LevelInfo, "TAIL", "Detected log file size reduction (truncation/rotation). Reopening file.")
 		return true
 	}
 
@@ -145,7 +146,7 @@ func hasFileBeenRotated(p *Processor, filePath string, initialStat os.FileInfo, 
 	initialSysStat := initialStat.Sys().(*syscall.Stat_t)
 	currentSysStat := currentStat.Sys().(*syscall.Stat_t)
 	if currentSysStat.Dev != initialSysStat.Dev || currentSysStat.Ino != initialSysStat.Ino {
-		p.LogFunc(LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialSysStat.Ino, currentSysStat.Ino)
+		p.LogFunc(logging.LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialSysStat.Ino, currentSysStat.Ino)
 		return true
 	}
 
@@ -163,7 +164,7 @@ func delayOrShutdown(p *Processor, delay time.Duration, signalCh <-chan os.Signa
 	case <-time.After(delay):
 		return false // Delay completed
 	case s := <-signalCh:
-		p.LogFunc(LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
+		p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
 		return true // Shutdown signal received
 	}
 }
@@ -190,12 +191,12 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			}
 		}
 
-		p.LogFunc(LevelInfo, "TAIL", "Starting log tailer on %s...", LogFilePath)
+		p.LogFunc(logging.LevelInfo, "TAIL", "Starting log tailer on %s...", LogFilePath)
 
 		file, err := osOpenFile(LogFilePath)
 		if err != nil {
 			// File not found on first attempt, wait and retry.
-			p.LogFunc(LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", LogFilePath, err, ErrorRetryDelay)
+			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", LogFilePath, err, ErrorRetryDelay)
 			if delayOrShutdown(p, ErrorRetryDelay, signalCh) {
 				shutdown = true
 				continue // Let the main loop handle the exit.
@@ -207,9 +208,9 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 		initialStat, statErr := file.Stat()
 		if statErr == nil {
 			initialSysStat := initialStat.Sys().(*syscall.Stat_t)
-			p.LogFunc(LevelDebug, "TAIL", "Initial file state: Size=%d, Inode=%d, Device=%d", initialStat.Size(), initialSysStat.Ino, initialSysStat.Dev)
+			p.LogFunc(logging.LevelDebug, "TAIL", "Initial file state: Size=%d, Inode=%d, Device=%d", initialStat.Size(), initialSysStat.Ino, initialSysStat.Dev)
 		} else {
-			p.LogFunc(LevelWarning, "TAIL_WARN", "Failed to get initial file stat: %v. Rotation detection may be impaired.", statErr)
+			p.LogFunc(logging.LevelWarning, "TAIL_WARN", "Failed to get initial file stat: %v. Rotation detection may be impaired.", statErr)
 			// If we can't stat the file, the handle is likely bad. Close it and restart the loop.
 			file.Close()
 			restartTailing(ErrorRetryDelay) // Add a delay to prevent a tight loop on repeated stat failures.
@@ -241,7 +242,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			// Check for signals first
 			select {
 			case s := <-signalCh:
-				p.LogFunc(LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
+				p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
 				file.Close()
 				return
 			default:
@@ -255,7 +256,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			// 2. Handle read errors (EOF or other)
 			if finalErr != nil {
 				if errors.Is(finalErr, ErrLineSkipped) {
-					p.LogFunc(LevelWarning, "TAIL_SKIP", "Line %d: Skipped (Length exceeded %d bytes).", lineNumber, lineLimit)
+					p.LogFunc(logging.LevelWarning, "TAIL_SKIP", "Line %d: Skipped (Length exceeded %d bytes).", lineNumber, lineLimit)
 					continue
 				}
 
@@ -278,7 +279,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 					continue
 				} else {
 					// Read error (non-EOF) is typically a one-off event, but we retry
-					p.LogFunc(LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening in %v.", finalErr, ErrorRetryDelay)
+					p.LogFunc(logging.LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening in %v.", finalErr, ErrorRetryDelay)
 					file.Close()
 					restartTailing(ErrorRetryDelay)
 					break // Break inner loop to trigger file re-opening

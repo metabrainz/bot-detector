@@ -1,4 +1,4 @@
-package main
+package logging
 
 import (
 	"log"
@@ -16,8 +16,8 @@ const (
 	LevelDebug                    // 4: Verbose: All high-volume messages (skip, match, reset, cleanup, watch polling)
 )
 
-var CurrentLogLevel = LevelWarning // Default level set to WARNING
-var LogLevelMap = map[string]LogLevel{
+var currentLogLevel = LevelWarning // Default level set to WARNING
+var logLevelMap = map[string]LogLevel{
 	"critical": LevelCritical,
 	"error":    LevelError,
 	"warning":  LevelWarning,
@@ -52,17 +52,22 @@ func init() {
 }
 
 func logOutputInternal(level LogLevel, prefix string, format string, v ...interface{}) {
-	if level <= CurrentLogLevel {
+	if level <= currentLogLevel {
 		log.Printf("[%s] "+format, append([]interface{}{prefix}, v...)...)
 	}
 }
 
 // SetLogLevel safely sets the global CurrentLogLevel from a string.
 func SetLogLevel(levelStr string) {
-	if level, ok := LogLevelMap[strings.ToLower(levelStr)]; ok {
-		CurrentLogLevel = level
+	if level, ok := logLevelMap[strings.ToLower(levelStr)]; ok {
+		currentLogLevel = level
 	} else {
 		LogOutput(LevelWarning, "CONFIG", "Invalid log_level '%s' in config. Using default 'warning'.", levelStr)
-		CurrentLogLevel = LevelWarning
+		currentLogLevel = LevelWarning
 	}
+}
+
+// GetLogLevel is a new exported function to allow other packages to read the current level.
+func GetLogLevel() LogLevel {
+	return currentLogLevel
 }

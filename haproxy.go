@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/logging"
 	"bufio"
 	"errors"
 	"fmt"
@@ -25,7 +26,7 @@ type HAProxyBlocker struct {
 func (b *HAProxyBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 	p := b.P
 	if p.DryRun {
-		p.LogFunc(LevelInfo, "DRYRUN", "Would block IP %s for %v (Chain complete).", ipInfo.Address, duration)
+		p.LogFunc(logging.LevelInfo, "DRYRUN", "Would block IP %s for %v (Chain complete).", ipInfo.Address, duration)
 		return nil
 	}
 
@@ -39,7 +40,7 @@ func (b *HAProxyBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 	p.ConfigMutex.RUnlock()
 
 	if baseTableName == "" {
-		p.LogFunc(LevelWarning, "SKIP_BLOCK", "No HAProxy table found for block duration %v. Skipping block attempt for IP %s.", duration, ipInfo.Address)
+		p.LogFunc(logging.LevelWarning, "SKIP_BLOCK", "No HAProxy table found for block duration %v. Skipping block attempt for IP %s.", duration, ipInfo.Address)
 		return nil
 	}
 
@@ -51,7 +52,7 @@ func (b *HAProxyBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 	case VersionIPv6:
 		tableName += "_ipv6" // Simple string concatenation
 	default:
-		p.LogFunc(LevelError, "SKIP_BLOCK", "cannot block IP %s: invalid IP version", ipInfo.Address)
+		p.LogFunc(logging.LevelError, "SKIP_BLOCK", "cannot block IP %s: invalid IP version", ipInfo.Address)
 		return nil
 	}
 
@@ -76,7 +77,7 @@ func (b *HAProxyBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 func (b *HAProxyBlocker) Unblock(ipInfo IPInfo) error {
 	p := b.P
 	if p.DryRun {
-		p.LogFunc(LevelInfo, "DRYRUN", "Would unblock IP %s from all tables/maps.", ipInfo.Address)
+		p.LogFunc(logging.LevelInfo, "DRYRUN", "Would unblock IP %s from all tables/maps.", ipInfo.Address)
 		return nil
 	}
 
@@ -89,7 +90,7 @@ func (b *HAProxyBlocker) Unblock(ipInfo IPInfo) error {
 	default:
 		// If the IP is invalid or unrecognized, we cannot determine which table to clear,
 		// so we skip the action.
-		p.LogFunc(LevelError, "SKIP_UNBLOCK", "Cannot unblock IP %s: unrecognized IP version", ipInfo.Address)
+		p.LogFunc(logging.LevelError, "SKIP_UNBLOCK", "Cannot unblock IP %s: unrecognized IP version", ipInfo.Address)
 		return nil
 	}
 
@@ -140,7 +141,7 @@ func executeCommandImpl(p *Processor, addr, ip, command string) error {
 	for attempt := 0; attempt < p.Config.HAProxyMaxRetries; attempt++ {
 		if attempt > 0 {
 			// Log the retry attempt (assuming a LogOutput function is available)
-			p.LogFunc(LevelWarning, "HAPROXY_RETRY", "Retrying HAProxy command for %s (Attempt %d/%d)", addr, attempt+1, p.Config.HAProxyMaxRetries)
+			p.LogFunc(logging.LevelWarning, "HAPROXY_RETRY", "Retrying HAProxy command for %s (Attempt %d/%d)", addr, attempt+1, p.Config.HAProxyMaxRetries)
 			time.Sleep(p.Config.HAProxyRetryDelay)
 		}
 
@@ -196,7 +197,7 @@ func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[stri
 	addresses := p.Config.HAProxyAddresses
 
 	if len(addresses) == 0 {
-		p.LogFunc(LevelWarning, "SKIP_COMMAND", "HAProxy addresses list is empty. Skipping command for IP %s.", ip)
+		p.LogFunc(logging.LevelWarning, "SKIP_COMMAND", "HAProxy addresses list is empty. Skipping command for IP %s.", ip)
 		return nil
 	}
 
@@ -228,9 +229,9 @@ func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[stri
 				if err := p.CommandExecutor(p, addr, ip, command); err != nil {
 					errs <- err
 					// Log the error immediately at LevelError
-					p.LogFunc(LevelError, "HAPROXY_FAIL", "HAProxy command failed on instance %s for IP %s (Table %s): %v", addr, ip, tableName, err)
+					p.LogFunc(logging.LevelError, "HAPROXY_FAIL", "HAProxy command failed on instance %s for IP %s (Table %s): %v", addr, ip, tableName, err)
 				} else {
-					p.LogFunc(LevelInfo, "HAPROXY_SUCCESS", "Successfully sent command for IP %s on instance %s to table %s.", ip, addr, tableName)
+					p.LogFunc(logging.LevelInfo, "HAPROXY_SUCCESS", "Successfully sent command for IP %s on instance %s to table %s.", ip, addr, tableName)
 				}
 			}(addr, command)
 		}
@@ -241,7 +242,7 @@ func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[stri
 
 	// Final Error Check (Logging only)
 	if numErrs := len(errs); numErrs > 0 {
-		p.LogFunc(LevelWarning, "HAPROXY_WARN", "One or more HAProxy instances failed to process command for IP %s. Total failures: %d", ip, len(errs))
+		p.LogFunc(logging.LevelWarning, "HAPROXY_WARN", "One or more HAProxy instances failed to process command for IP %s. Total failures: %d", ip, len(errs))
 		return fmt.Errorf("%d HAProxy commands failed for IP %s", numErrs, ip)
 	}
 	return nil

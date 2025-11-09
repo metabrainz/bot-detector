@@ -1,6 +1,9 @@
 package main
 
-import "time"
+import (
+	"bot-detector/internal/logging"
+	"time"
+)
 
 // Non-locking variant used when caller already holds the mutex.
 func GetOrCreateActivityUnsafe(store map[TrackingKey]*BotActivity, trackingKey TrackingKey) *BotActivity {
@@ -70,7 +73,7 @@ func CleanUpIdleActivity(p *Processor, stop <-chan struct{}) {
 
 		p.ActivityMutex.Unlock()
 		if cleanedCount > 0 {
-			p.LogFunc(LevelDebug, "CLEANUP", "Cleaned up %d idle/useless IP states.", cleanedCount)
+			p.LogFunc(logging.LevelDebug, "CLEANUP", "Cleaned up %d idle/useless IP states.", cleanedCount)
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/logging"
 	"fmt"
 	"strconv"
 	"strings"
@@ -39,7 +40,7 @@ func preCheckActivity(p *Processor, entry *LogEntry, trackingKey TrackingKey) (*
 	if activity.IsBlocked {
 		if time.Now().After(activity.BlockedUntil) {
 			// Block has expired, clear it and proceed.
-			p.LogFunc(LevelInfo, "EXPIRE", "Chain-specific block expired for key %s (UA: %s).", trackingKey.IPInfo.Address, trackingKey.UA)
+			p.LogFunc(logging.LevelInfo, "EXPIRE", "Chain-specific block expired for key %s (UA: %s).", trackingKey.IPInfo.Address, trackingKey.UA)
 			activity.IsBlocked = false
 			activity.BlockedUntil = time.Time{}
 		} else {
@@ -47,7 +48,7 @@ func preCheckActivity(p *Processor, entry *LogEntry, trackingKey TrackingKey) (*
 			if entry.Timestamp.After(activity.LastRequestTime) {
 				activity.LastRequestTime = entry.Timestamp
 			}
-			p.LogFunc(LevelDebug, "SKIP", "Key %s (UA: %s): Skipped (Already blocked in memory by a chain).", trackingKey.IPInfo.Address, trackingKey.UA)
+			p.LogFunc(logging.LevelDebug, "SKIP", "Key %s (UA: %s): Skipped (Already blocked in memory by a chain).", trackingKey.IPInfo.Address, trackingKey.UA)
 			return activity, true // Skip processing
 		}
 	}
@@ -69,13 +70,13 @@ func handleOutOfOrderEntry(p *Processor, entry *LogEntry, currentActivity *BotAc
 	// At this point, we know the entry is out-of-order.
 	timeDifference := previousRequestTime.Sub(entry.Timestamp)
 	if timeDifference <= p.Config.OutOfOrderTolerance {
-		p.LogFunc(LevelDebug, "OUT_OF_ORDER_TOLERATED", "Processing out-of-order log entry for IP %s within tolerance (%v). Current: %s, Last seen: %s.",
+		p.LogFunc(logging.LevelDebug, "OUT_OF_ORDER_TOLERATED", "Processing out-of-order log entry for IP %s within tolerance (%v). Current: %s, Last seen: %s.",
 			entry.IPInfo.Address, p.Config.OutOfOrderTolerance,
 			entry.Timestamp.Format(AppLogTimestampFormat), previousRequestTime.Format(AppLogTimestampFormat))
 		return false // Do not skip, process it.
 	}
 
-	p.LogFunc(LevelWarning, "OUT_OF_ORDER_SKIPPED", "Skipping out-of-order log entry for IP %s (too old: %v > %v). Current: %s, Last seen: %s.",
+	p.LogFunc(logging.LevelWarning, "OUT_OF_ORDER_SKIPPED", "Skipping out-of-order log entry for IP %s (too old: %v > %v). Current: %s, Last seen: %s.",
 		entry.IPInfo.Address, timeDifference, p.Config.OutOfOrderTolerance,
 		entry.Timestamp.Format(AppLogTimestampFormat), previousRequestTime.Format(AppLogTimestampFormat))
 	return true // Skip this entry entirely.
@@ -86,9 +87,9 @@ func handleOutOfOrderEntry(p *Processor, entry *LogEntry, currentActivity *BotAc
 // The caller is responsible for holding the ActivityMutex.
 func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity) {
 	// --- 1. Log the completion event ---
-	logLevel := LevelCritical
+	logLevel := logging.LevelCritical
 	if isTesting() {
-		logLevel = LevelDebug
+		logLevel = logging.LevelDebug
 	}
 
 	if p.DryRun {
@@ -131,11 +132,11 @@ func executeBlock(p *Processor, entry *LogEntry, chain *BehavioralChain) {
 func logDryRunCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry) {
 	switch chain.Action {
 	case "block":
-		p.LogFunc(LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
 	case "log":
-		p.LogFunc(LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s. Action set to 'log' (DryRun).", chain.Name, entry.IPInfo.Address)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s. Action set to 'log' (DryRun).", chain.Name, entry.IPInfo.Address)
 	default:
-		p.LogFunc(LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s. Unrecognized action '%s' (DryRun).", chain.Name, entry.IPInfo.Address, chain.Action)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s. Unrecognized action '%s' (DryRun).", chain.Name, entry.IPInfo.Address, chain.Action)
 	}
 }
 
@@ -192,12 +193,12 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 		} else {
 			// Inter-step (2nd step onwards) checks
 			if step.MaxDelayDuration > 0 && timeSinceLastStepHit > step.MaxDelayDuration {
-				p.LogFunc(LevelDebug, "RESET", "Chain %s: MaxDelay %v exceeded. Resetting.", chain.Name, step.MaxDelayDuration)
+				p.LogFunc(logging.LevelDebug, "RESET", "Chain %s: MaxDelay %v exceeded. Resetting.", chain.Name, step.MaxDelayDuration)
 				state.CurrentStep = 0
 				continue // Restart check from step 0.
 			}
 			if step.MinDelayDuration > 0 && timeSinceLastStepHit < step.MinDelayDuration {
-				p.LogFunc(LevelDebug, "RESET", "Chain %s: MinDelay %v not met. Resetting.", chain.Name, step.MinDelayDuration)
+				p.LogFunc(logging.LevelDebug, "RESET", "Chain %s: MinDelay %v not met. Resetting.", chain.Name, step.MinDelayDuration)
 				state.CurrentStep = 0
 				continue // Restart check from step 0.
 			}
@@ -239,7 +240,7 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 func CheckChains(p *Processor, entry *LogEntry) {
 	// Immediately skip processing if the IP is whitelisted. This is the primary guard.
 	if p.IsWhitelistedFunc(entry.IPInfo) {
-		p.LogFunc(LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IPInfo.Address)
+		p.LogFunc(logging.LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IPInfo.Address)
 		return
 	}
 

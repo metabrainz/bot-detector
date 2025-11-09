@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/logging"
 	"sync"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ func TestCleanUpIdleActivity(t *testing.T) {
 			IdleTimeout:         100 * time.Millisecond, // A short general timeout
 			MaxTimeSinceLastHit: 50 * time.Millisecond,  // A shorter time-based rule timeout
 		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
+		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 	}
 
 	// 2. Create different activity states
@@ -123,7 +124,7 @@ func TestCleanUpIdleActivity_MinTimeSinceLastHit(t *testing.T) {
 			MaxTimeSinceLastHit: 5 * time.Minute,
 			CleanupInterval:     10 * time.Millisecond,
 		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
+		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 	}
 
 	// 2. Create different activity states

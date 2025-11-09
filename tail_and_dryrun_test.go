@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/logging"
 	"bufio"
 	"errors"
 	"fmt"
@@ -142,7 +143,7 @@ func (m *mockFileInfo) Sys() interface{}   { return m.sys }
 func TestHasFileBeenRotated(t *testing.T) {
 	// --- Setup ---
 	processor := &Processor{
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
+		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
 	}
 
 	// Initial file state
@@ -321,7 +322,7 @@ line 3`), 0644)
 func TestDelayOrShutdown(t *testing.T) {
 	// --- Setup ---
 	processor := &Processor{
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
+		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
 	}
 
 	tests := []struct {
@@ -403,7 +404,7 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 
 	// Create processor with mock/capture functions
 	h.processor = &Processor{
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
+		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 			h.logMutex.Lock()
 			defer h.logMutex.Unlock()
 			logLine := fmt.Sprintf(tag+": "+format, args...)
@@ -612,7 +613,7 @@ func TestLiveLogTailer_ErrorHandling(t *testing.T) {
 		// For now, we'll just assert that the code path exists and is what we expect.
 		// A more advanced test would use a mock reader.
 		// Let's assume a hypothetical error was injected.
-		harness.processor.LogFunc(LevelError, "TAIL_ERROR", "Read error while tailing log file: injected error. Reopening in %v.", ErrorRetryDelay)
+		harness.processor.LogFunc(logging.LevelError, "TAIL_ERROR", "Read error while tailing log file: injected error. Reopening in %v.", ErrorRetryDelay)
 
 		harness.logMutex.Lock()
 		logOutput := strings.Join(harness.capturedLogs, "\n")
@@ -717,7 +718,7 @@ func TestLiveLogTailer_ShutdownDuringRetryDelay(t *testing.T) {
 
 	// Override the LogFunc to count how many times "Failed to open" is logged.
 	openFailCount := 0
-	harness.processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		harness.logMutex.Lock()
 		defer harness.logMutex.Unlock()
 		if tag == "TAIL_ERROR" && strings.Contains(format, "Failed to open log file") {
@@ -775,7 +776,7 @@ func TestLiveLogTailer_InitialStatError(t *testing.T) {
 
 	// Override LogFunc to capture the specific warning.
 	statWarnLogged := make(chan struct{}, 1)
-	harness.processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMsg := fmt.Sprintf(format, args...)
 		harness.logMutex.Lock()
 		defer harness.logMutex.Unlock()
@@ -828,7 +829,7 @@ func TestLiveLogTailer_StatError(t *testing.T) {
 	var logMutex sync.Mutex
 	statErrorLogged := make(chan struct{}, 1)
 
-	harness.processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMutex.Lock()
 		defer logMutex.Unlock()
 		logLine := fmt.Sprintf(tag+": "+format, args...)

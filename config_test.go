@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/logging"
 	"fmt"
 	"net"
 	"os"
@@ -460,9 +461,9 @@ chains:
 			// For tests that expect non-fatal errors, we can suppress the log output
 			// to keep the test runner output clean.
 			if tt.name == "File Matcher Not Found (Non-Fatal)" {
-				originalLogFunc := LogOutput
-				LogOutput = func(level LogLevel, tag string, format string, args ...interface{}) {}
-				t.Cleanup(func() { LogOutput = originalLogFunc })
+				originalLogFunc := logging.LogOutput
+				logging.LogOutput = func(level logging.LogLevel, tag string, format string, args ...interface{}) {}
+				t.Cleanup(func() { logging.LogOutput = originalLogFunc })
 			}
 
 			_, err := LoadConfigFromYAML()
@@ -744,7 +745,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 					DurationToTableName: map[time.Duration]string{5 * time.Minute: "table_5m"},
 				},
 				// Capture log output for assertion.
-				LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
+				LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 					// For this test, we only care about the WHITELIST_UNBLOCK log.
 				},
 				// Set the Blocker to a mock that delegates to the original UnblockIP method,
@@ -772,7 +773,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 
 			// Capture the specific log message we care about.
 			var capturedLog string
-			processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+			processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 				if tag == "WHITELIST_UNBLOCK" {
 					capturedLog = fmt.Sprintf(format, args...)
 				}
@@ -823,7 +824,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 				HAProxyAddresses:    []string{"127.0.0.1:9999"},
 				DurationToTableName: map[time.Duration]string{time.Minute: "t1"},
 			},
-			LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
+			LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 			// Mock the Blocker to simulate a failure.
 			Blocker: &MockBlocker{
 				UnblockFunc: func(ipInfo IPInfo) error {
@@ -865,7 +866,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			ActivityMutex: &sync.RWMutex{},
 			ActivityStore: make(map[TrackingKey]*BotActivity),
 			Config:        &AppConfig{},
-			LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+			LogFunc:       func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 			// Use a MockBlocker but do NOT set the UnblockFunc.
 			Blocker: &MockBlocker{},
 		}
@@ -893,8 +894,8 @@ func TestConfigWatcher_Reload(t *testing.T) {
 	// --- Setup ---
 	// This test involves loading configs which can be noisy.
 	// Isolate the log level for this test.
-	originalLogLevel := CurrentLogLevel
-	t.Cleanup(func() { CurrentLogLevel = originalLogLevel })
+	originalLogLevel := logging.GetLogLevel()
+	t.Cleanup(func() { logging.SetLogLevel(originalLogLevel.String()) })
 
 	// 1. Create a temporary YAML file with initial content.
 	initialYAMLContent := `
@@ -931,7 +932,7 @@ chains:
 		ConfigMutex:   &sync.RWMutex{},
 		Chains:        initialLoadedCfg.Chains,
 		Config:        &AppConfig{PollingInterval: 10 * time.Millisecond},
-		LogFunc:       func(level LogLevel, tag string, format string, args ...interface{}) {},
+		LogFunc:       func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 	}
 	// Set LastModTime to the actual modification time of the initial file.
 	initialFileInfo, err := os.Stat(tempFile)
@@ -990,7 +991,7 @@ chains:
 	if len(processor.Config.WhitelistNets) != 2 {
 		t.Errorf("Expected 2 whitelist networks, but got %d", len(processor.Config.WhitelistNets))
 	}
-	if CurrentLogLevel != LevelDebug {
+	if logging.GetLogLevel() != logging.LevelDebug {
 		t.Errorf("Expected log level to be updated to 'debug', but it was not.")
 	}
 }
@@ -1043,7 +1044,7 @@ chains:
 			FileDependencies: initialLoadedCfg.FileDependencies,
 			PollingInterval:  10 * time.Millisecond,
 		},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {},
+		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 	}
 	initialFileInfo, _ := os.Stat(tempYamlFile)
 	processor.Config.LastModTime = initialFileInfo.ModTime() // Set initial mod time
@@ -1100,8 +1101,8 @@ func TestConfigWatcher_ReloadFailure(t *testing.T) {
 	// --- Setup ---
 	// This test involves loading configs which can be noisy.
 	// Isolate the log level for this test.
-	originalLogLevel := CurrentLogLevel
-	t.Cleanup(func() { CurrentLogLevel = originalLogLevel })
+	originalLogLevel := logging.GetLogLevel()
+	t.Cleanup(func() { logging.SetLogLevel(originalLogLevel.String()) })
 
 	// 1. Create a temporary YAML file with initial valid content.
 	initialYAMLContent := `
@@ -1142,7 +1143,7 @@ chains:
 
 	// 4. Set up the channel-signaling LogFunc BEFORE starting the goroutine.
 	logReceived := make(chan bool, 1)
-	processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+	processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMutex.Lock()
 		capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
 		logMutex.Unlock()
@@ -1205,8 +1206,8 @@ func TestConfigWatcher_StatError(t *testing.T) {
 	// --- Setup ---
 	// This test involves loading configs which can be noisy.
 	// Isolate the log level for this test.
-	originalLogLevel := CurrentLogLevel
-	t.Cleanup(func() { CurrentLogLevel = originalLogLevel })
+	originalLogLevel := logging.GetLogLevel()
+	t.Cleanup(func() { logging.SetLogLevel(originalLogLevel.String()) })
 
 	// 1. Create a temporary YAML file.
 	initialYAMLContent := `
@@ -1235,7 +1236,7 @@ chains:
 		ConfigMutex: &sync.RWMutex{},
 		Chains:      []BehavioralChain{{Name: "InitialChain"}}, // Simplified initial state
 		Config:      &AppConfig{PollingInterval: 10 * time.Millisecond},
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {
+		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 			logMutex.Lock()
 			capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
 			logMutex.Unlock()
@@ -1246,7 +1247,7 @@ chains:
 
 	// 3. Set up log capture BEFORE starting the watcher to avoid a race condition.
 	logReceived := make(chan bool, 1)
-	processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+	processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMutex.Lock()
 		capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
 		logMutex.Unlock()

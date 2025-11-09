@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/logging"
 	"bufio"
 	"bytes"
 	"fmt"
@@ -328,7 +329,7 @@ func TestCheckChains_DryRun_UnknownAction(t *testing.T) {
 	// Capture log output
 	var capturedLog string
 	var logMutex sync.Mutex
-	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
+	logCaptureFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMutex.Lock()
 		if tag == "DRY_RUN" {
 			capturedLog = fmt.Sprintf(format, args...)
@@ -646,7 +647,7 @@ func TestCheckChains_WhitelistSkip(t *testing.T) {
 	// Capture log output
 	var capturedLogs []string
 	var logMutex sync.Mutex
-	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
+	logCaptureFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMutex.Lock()
 		capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
 		logMutex.Unlock()
@@ -805,7 +806,7 @@ func TestCheckChains_LogAction_Whitelisted(t *testing.T) {
 	// Capture log output
 	var capturedLog string
 	var logMutex sync.Mutex
-	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
+	logCaptureFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMutex.Lock()
 		defer logMutex.Unlock()
 		if tag == "ALERT" {
@@ -1167,7 +1168,7 @@ func TestDryRunMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 	}
-	SetLogLevel(loadedCfg.LogLevel)
+	logging.SetLogLevel(loadedCfg.LogLevel)
 
 	// Create a processor (but don't start any background processes like ChainWatcher).
 	processor := &Processor{
@@ -1181,8 +1182,8 @@ func TestDryRunMode(t *testing.T) {
 			TimestampFormat:     loadedCfg.TimestampFormat,
 			WhitelistNets:       loadedCfg.WhitelistNets,
 		},
-		DryRun:  true,                                                                    // Simulate dry-run mode
-		LogFunc: func(level LogLevel, tag string, format string, args ...interface{}) {}, // Will be replaced
+		DryRun:  true,                                                                            // Simulate dry-run mode
+		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {}, // Will be replaced
 	}
 	// Set the IsWhitelistedFunc on the *actual* processor instance to avoid nil pointers.
 	processor.IsWhitelistedFunc = func(ipInfo IPInfo) bool { return IsIPWhitelisted(processor, ipInfo) }
@@ -1216,7 +1217,7 @@ func TestDryRunMode(t *testing.T) {
 
 	// 3. Process test_access.log in dry-run mode, capturing the log output
 	var capturedLogs []string // Collect captured log lines.
-	processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+	processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		// Our custom LogFunc only captures the output. We do NOT call LogOutput here
 		// to prevent verbose output during test runs unless explicitly requested via t.Logf.
 

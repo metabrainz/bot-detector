@@ -1,4 +1,4 @@
-module bot_detector
+module bot-detector
 
 go 1.22.0
 

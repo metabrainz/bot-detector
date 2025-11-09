@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/logging"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -278,8 +279,8 @@ func TestProcessLogLineInternal_ParseError(t *testing.T) {
 
 	var logMutex sync.Mutex
 	var capturedMessage string
-	var capturedLevel LogLevel
-	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
+	var capturedLevel logging.LogLevel
+	logCaptureFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMutex.Lock()
 		defer logMutex.Unlock()
 		if tag == "PARSE_FAIL" {
@@ -302,7 +303,7 @@ func TestProcessLogLineInternal_ParseError(t *testing.T) {
 		t.Errorf("Expected a 'PARSE_FAIL' log message, but it was not captured. Got: '%s'", capturedMessage)
 	}
 
-	if capturedLevel != LevelDebug {
+	if capturedLevel != logging.LevelDebug {
 		t.Errorf("Expected log level for parse failure during testing to be LevelDebug, but got %v", capturedLevel)
 	}
 }
@@ -314,7 +315,7 @@ func TestProcessLogLineInternal_SkipLine(t *testing.T) {
 
 	var logMutex sync.Mutex
 	var capturedLog string
-	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
+	logCaptureFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMutex.Lock()
 		defer logMutex.Unlock()
 		if tag == "SKIP" {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/logging"
 	"bufio"
 	"errors"
 	"fmt"
@@ -117,7 +118,7 @@ func TestBlockIP_NoTableFound(t *testing.T) {
 
 	// Capture log output
 	var capturedLog string
-	logCaptureFunc := func(level LogLevel, tag string, format string, args ...interface{}) {
+	logCaptureFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		if tag == "SKIP_BLOCK" {
 			capturedLog = fmt.Sprintf(format, args...)
 		}
@@ -248,7 +249,7 @@ func TestBlockIP_InvalidVersion(t *testing.T) {
 
 	// Capture log output to verify the error is logged.
 	var capturedLog string
-	processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+	processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		if tag == "SKIP_BLOCK" {
 			capturedLog = fmt.Sprintf(format, args...)
 		}
@@ -284,7 +285,7 @@ func TestUnblockIP_InvalidVersion(t *testing.T) {
 
 	// Capture log output to verify the error is logged.
 	var capturedLog string
-	processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+	processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		if tag == "SKIP_UNBLOCK" {
 			capturedLog = fmt.Sprintf(format, args...)
 		}
@@ -570,7 +571,7 @@ func TestExecuteHAProxyCommandImpl_RetryLogging(t *testing.T) {
 		HAProxyRetryDelay:  1 * time.Millisecond,
 		HAProxyDialTimeout: 100 * time.Millisecond,
 	}, nil)
-	processor.LogFunc = func(level LogLevel, tag string, format string, args ...interface{}) {
+	processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		if tag == "HAPROXY_RETRY" {
 			capturedLog = fmt.Sprintf(format, args...)
 			logReceived <- true
