@@ -301,7 +301,7 @@ default_block_duration: "30m" # Used by chains without a specific block_duration
 
 chains:
   # --- CHAIN 1: Aggressive Scraper ---
-  # Blocks an IP+UserAgent that makes 3 quick GET requests for forbidden content.
+  # Blocks an IP+UserAgent that probes with a HEAD, then a GET, then another non-GET request for forbidden content.
   # This uses a specific block_duration.
   - name: Aggressive-Scraper
     action: block
@@ -309,7 +309,7 @@ chains:
     match_key: "ip_ua" # Track by IP and User-Agent combination
     steps:
       - field_matches:
-          Method: "GET"
+          Method: "HEAD"
           StatusCode: 403 # Exact integer match
       - max_delay: "2s" # Must happen within 2s of the previous step
         min_delay: "200ms" # And must wait at least 200ms
@@ -318,7 +318,8 @@ chains:
           StatusCode: 403
       - max_delay: "2s"
         field_matches:
-          Method: "GET"
+          Method:
+            not: "GET"
           StatusCode: 403
 
   # --- CHAIN 2: "Sleepy" Bad Bot ---
