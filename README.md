@@ -219,14 +219,20 @@ For more complex string matching, use a prefix.
     ```yaml
     UserAgent: "regex:(?i)(bot|crawler|python)"
     ```
-*   **File-Based Matcher:**
+*   **File-Based Matcher:** Loads a list of values from an external file. This can be used with any field that accepts string values (e.g., `Path`, `UserAgent`, `IP`). Each line in the file is treated as a separate value in a list (OR condition).
+    For example, given a file named `bad_paths.txt` with the following content:
+    ```
+    # Common probing paths to block
+    /wp-login.php
+    /xmlrpc.php
+    regex:^/admin
+    ```
+    You would use it in your configuration like this:
     ```yaml
-    # Contents of bad_user_agents.txt:
-    # BadBot/1.0
-    # regex:(?i)evil-crawler
-    UserAgent: "file:./bad_user_agents.txt"
+    Path: "file:./bad_paths.txt"
     ```
     Lines in the referenced file that are empty or start with `#` are treated as comments and ignored.
+    Like the main configuration file, these dependency files are monitored for changes, and any modification will trigger a hot-reload of the entire configuration.
 *   **Status Code Pattern:** A special shorthand for matching status code classes.
     The `X` acts as a wildcard for any digit.
     ```yaml
