@@ -399,43 +399,40 @@ func TestCheckChains_BlockExpiration(t *testing.T) {
 // TestCheckChains_IPVersionMismatch verifies that chains are correctly skipped
 // if the log entry's IP version does not match the chain's `match_key`.
 func TestCheckChains_IPVersionMismatch(t *testing.T) {
-	resetGlobalState()
-
-	// 1. Define one chain for IPv4 and one for IPv6.
-	chains := []BehavioralChain{
-		{
-			Name:     "IPv4-Only-Chain",
-			MatchKey: "ipv4",
-			Action:   "log",
-		},
-		{
-			Name:     "IPv6-Only-Chain",
-			MatchKey: "ipv6",
-			Action:   "log",
-		},
+	tests := []struct {
+		name          string
+		chainMatchKey string
+		entryIP       string
+	}{
+		{name: "IPv4 entry vs ipv6 chain", chainMatchKey: "ipv6", entryIP: "192.0.2.1"},
+		{name: "IPv6 entry vs ipv4 chain", chainMatchKey: "ipv4", entryIP: "2001:db8::1"},
+		{name: "IPv4 entry vs ipv6_ua chain", chainMatchKey: "ipv6_ua", entryIP: "192.0.2.1"},
+		{name: "IPv6 entry vs ipv4_ua chain", chainMatchKey: "ipv4_ua", entryIP: "2001:db8::1"},
 	}
-	matcher, _ := compileStringMatcher("any", 0, "Path", "/test", new([]string))
-	chains[0].Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
-	chains[1].Steps = []StepDef{{Order: 1, Matchers: []fieldMatcher{matcher}}}
-	processor := newTestProcessor(&AppConfig{}, chains)
 
-	// 2. Process an IPv4 log entry.
-	entry := &LogEntry{
-		IPInfo:    NewIPInfo("192.0.2.1"),
-		Timestamp: time.Now(),
-		Path:      "/test",
-	}
-	CheckChains(processor, entry)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// --- Setup ---
+			h := newCheckerTestHarness(t, nil)
+			h.addChain(BehavioralChain{
+				Name:      "VersionMismatchChain",
+				MatchKey:  tt.chainMatchKey,
+				Action:    "log",
+				StepsYAML: []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/test"}}},
+			})
 
-	// 3. Assert the state.
-	processor.ActivityMutex.RLock()
-	defer processor.ActivityMutex.RUnlock()
+			// --- Act ---
+			entry := &LogEntry{
+				IPInfo:    NewIPInfo(tt.entryIP),
+				Timestamp: time.Now(),
+				Path:      "/test",
+			}
+			h.processEntry(entry)
 
-	activity := processor.ActivityStore[TrackingKey{IPInfo: entry.IPInfo}]
-
-	// The IPv6 chain should have been skipped, so no progress should be recorded for it.
-	if _, exists := activity.ChainProgress["IPv6-Only-Chain"]; exists {
-		t.Error("Expected IPv6-Only-Chain to be skipped for an IPv4 log entry, but its state was created.")
+			// --- Assert ---
+			// No activity should be created because the chain should be skipped entirely.
+			h.assertChainProgressCleared("VersionMismatchChain", entry)
+		})
 	}
 }
 
