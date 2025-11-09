@@ -123,6 +123,7 @@ func newDryRunTestHarness(t *testing.T) *dryRunTestHarness {
 		ProcessLogLine: func(line string, lineNumber int) {
 			h.processedLines = append(h.processedLines, line)
 		},
+		Config: &AppConfig{}, // Initialize config to prevent nil pointer dereference
 	}
 	return h
 }

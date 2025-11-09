@@ -33,6 +33,7 @@ const (
 	DefaultCleanupInterval     = "1m"
 	DefaultEOFPollingDelay     = "200ms"
 	DefaultIdleTimeout         = "30m"
+	DefaultLineEnding          = "lf"
 	DefaultOutOfOrderTolerance = "5s"
 	DefaultMinPollingInterval  = 1 * time.Second // Minimum safe polling interval to prevent tight loops.
 

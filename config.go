@@ -70,6 +70,7 @@ func logConfigurationSummary(p *Processor) {
 	p.LogFunc(logging.LevelInfo, "CONFIG", "Loaded configuration:")
 
 	// Handle special cases first
+	p.LogFunc(logging.LevelInfo, "CONFIG", "  - line_ending: %s", config.LineEnding)
 	p.LogFunc(logging.LevelInfo, "CONFIG", "  - log_level: %s", currentLogLevel)
 
 	// Use reflection to iterate over tagged fields in AppConfig
@@ -497,6 +498,7 @@ func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 	cleanupIntervalStr := DefaultCleanupInterval
 	eofPollingDelayStr := DefaultEOFPollingDelay
 	idleTimeoutStr := DefaultIdleTimeout
+	lineEndingStr := DefaultLineEnding
 	outOfOrderToleranceStr := DefaultOutOfOrderTolerance
 
 	// Override defaults with values from YAML if they exist
@@ -515,8 +517,19 @@ func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 	if config.IdleTimeout != "" {
 		idleTimeoutStr = config.IdleTimeout
 	}
+	if config.LineEnding != "" {
+		lineEndingStr = config.LineEnding
+	}
 	if config.OutOfOrderTolerance != "" {
 		outOfOrderToleranceStr = config.OutOfOrderTolerance
+	}
+
+	// Validate line_ending
+	switch lineEndingStr {
+	case "lf", "crlf", "cr":
+		// valid
+	default:
+		return nil, fmt.Errorf("invalid line_ending value: '%s'. Must be one of 'lf', 'crlf', 'cr'", lineEndingStr)
 	}
 
 	// Parse durations
@@ -777,6 +790,7 @@ func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 		HAProxyRetryDelay:      haProxyRetryDelay,
 		IdleTimeout:            idleTimeout,
 		LogLevel:               logLevelStr,
+		LineEnding:             lineEndingStr,
 		LogFormatRegex:         customLogRegex,
 		MaxTimeSinceLastHit:    maxTimeSinceLastHit,
 		OutOfOrderTolerance:    outOfOrderTolerance,
@@ -888,6 +902,7 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 				p.Config.IdleTimeout = loadedCfg.IdleTimeout
 				p.Config.OutOfOrderTolerance = loadedCfg.OutOfOrderTolerance
 				p.Config.TimestampFormat = loadedCfg.TimestampFormat
+				p.Config.LineEnding = loadedCfg.LineEnding
 				p.LogRegex = loadedCfg.LogFormatRegex   // Update the regex on the processor
 				logging.SetLogLevel(loadedCfg.LogLevel) // Update log level dynamically
 				p.Config.MaxTimeSinceLastHit = loadedCfg.MaxTimeSinceLastHit

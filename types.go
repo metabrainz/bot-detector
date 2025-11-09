@@ -73,6 +73,7 @@ type AppConfig struct {
 	HAProxyMaxRetries      int                               `config:"compare" summary:"haproxy_max_retries"`
 	HAProxyRetryDelay      time.Duration                     `config:"compare" summary:"haproxy_retry_delay"`
 	IdleTimeout            time.Duration                     `config:"compare" summary:"idle_timeout"`
+	LineEnding             string                            `config:"compare" summary:"line_ending"`
 	LastModTime            time.Time                         // Not compared
 	MaxTimeSinceLastHit    time.Duration                     `config:"compare" summary:"max_time_since_last_hit"`
 	OutOfOrderTolerance    time.Duration                     `config:"compare" summary:"out_of_order_tolerance"`
@@ -97,6 +98,7 @@ type LoadedConfig struct {
 	HAProxyRetryDelay      time.Duration            `config:"compare"`
 	IdleTimeout            time.Duration            `config:"compare"`
 	LogLevel               string                   `config:"compare"`
+	LineEnding             string                   `config:"compare"`
 	LogFormatRegex         *regexp.Regexp           // Not compared here
 	MaxTimeSinceLastHit    time.Duration            `config:"compare"`
 	OutOfOrderTolerance    time.Duration            `config:"compare"`
@@ -120,6 +122,7 @@ type ChainConfig struct {
 	HAProxyMaxRetries    int                   `yaml:"haproxy_max_retries"`
 	HAProxyRetryDelay    string                `yaml:"haproxy_retry_delay"`
 	IdleTimeout          string                `yaml:"idle_timeout"`
+	LineEnding           string                `yaml:"line_ending"`
 	LogLevel             string                `yaml:"log_level"`
 	LogFormatRegex       string                `yaml:"log_format_regex"`
 	OutOfOrderTolerance  string                `yaml:"out_of_order_tolerance"`

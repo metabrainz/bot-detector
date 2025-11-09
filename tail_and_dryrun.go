@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/logging"
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"syscall"
@@ -24,47 +25,68 @@ type fileHandle interface {
 	Stat() (os.FileInfo, error)
 }
 
-// ReadLineWithLimit reads a line from the reader up to the given limit (in bytes).
-// If the line exceeds the limit, it returns the partial line and ErrLineSkipped.
-// It correctly handles `\n`, `\r`, and `\r\n` line endings.
-func ReadLineWithLimit(reader *bufio.Reader, limit int) (string, error) {
-	var line []byte
-	for {
-		b, err := reader.ReadByte()
-		if err != nil {
-			// If we have content and hit EOF, it's a valid last line.
-			if err == io.EOF && len(line) > 0 {
-				if len(line) > limit {
-					return string(line[:limit]), ErrLineSkipped
-				}
-				return string(line), io.EOF
-			}
-			// For any other error (including EOF on an empty read), return it.
-			return string(line), err
-		}
+// lineReader is a function type for reading lines.
+type lineReader func(reader *bufio.Reader, limit int) (string, error)
 
-		if b == '\n' {
-			// Unix EOL. We're done.
-			break
-		}
-
-		if b == '\r' {
-			// Could be Windows (\r\n) or classic Mac (\r).
-			// Peek at the next byte to see if it's a '\n'.
-			if nextByte, err := reader.Peek(1); err == nil && nextByte[0] == '\n' {
-				reader.ReadByte() // It's '\r\n', so consume the '\n' as well.
-			}
-			break // In both cases (\r or \r\n), we're done with this line.
-		}
-
-		line = append(line, b)
-	}
-
+// handleLineRead is a common helper to process the result of a bufio.Reader.ReadBytes call.
+func handleLineRead(line []byte, err error, limit int) (string, error) {
 	if len(line) > limit {
 		return string(line[:limit]), ErrLineSkipped
 	}
 
+	if err != nil {
+		if err == io.EOF && len(line) > 0 {
+			return string(line), io.EOF
+		}
+		return string(line), err
+	}
 	return string(line), nil
+}
+
+// readLineLF reads a line ending with LF ('\n').
+func readLineLF(reader *bufio.Reader, limit int) (string, error) {
+	line, err := reader.ReadBytes('\n')
+	lineLen := len(line)
+	if lineLen > 0 && line[lineLen-1] == '\n' {
+		line = line[:lineLen-1] // Strip newline
+	}
+	return handleLineRead(line, err, limit)
+}
+
+// readLineCRLF reads a line ending with CRLF ('\r\n').
+func readLineCRLF(reader *bufio.Reader, limit int) (string, error) {
+	line, err := reader.ReadBytes('\n')
+	lineLen := len(line)
+	if lineLen > 1 && line[lineLen-2] == '\r' && line[lineLen-1] == '\n' {
+		line = line[:lineLen-2] // Strip CRLF
+	} else if lineLen > 0 && line[lineLen-1] == '\n' {
+		line = line[:lineLen-1] // Fallback for just LF
+	}
+	return handleLineRead(line, err, limit)
+}
+
+// readLineCR reads a line ending with CR ('\r').
+func readLineCR(reader *bufio.Reader, limit int) (string, error) {
+	line, err := reader.ReadBytes('\r')
+	lineLen := len(line)
+	if lineLen > 0 && line[lineLen-1] == '\r' {
+		line = line[:lineLen-1] // Strip carriage return
+	}
+	return handleLineRead(line, err, limit)
+}
+
+// getLineReader returns the appropriate line reading function based on the config.
+func getLineReader(lineEnding string) (lineReader, error) {
+	switch lineEnding {
+	case "lf", "": // Default to 'lf' if empty
+		return readLineLF, nil
+	case "crlf":
+		return readLineCRLF, nil
+	case "cr":
+		return readLineCR, nil
+	default:
+		return nil, fmt.Errorf("unsupported line ending: %s", lineEnding)
+	}
 }
 
 // DryRunLogProcessor reads and processes a static log file for testing.
@@ -80,13 +102,21 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	}
 	defer file.Close()
 
+	// Select the line reader function once before the loop.
+	readLine, err := getLineReader(p.Config.LineEnding)
+	if err != nil {
+		p.LogFunc(logging.LevelCritical, "FATAL", "Configuration error: %v", err)
+		close(done)
+		return
+	}
+
 	reader := bufio.NewReader(file)
 	lineNumber := 0
 	processedCount := 0
 	lineLimit := MaxLogLineSize
 
 	for {
-		line, readErr := ReadLineWithLimit(reader, lineLimit)
+		line, readErr := readLine(reader, lineLimit)
 		lineNumber++ // Increment after the read to accurately report the line number of the error.
 
 		// Use a switch for clearer error handling.
@@ -220,6 +250,15 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			continue
 		}
 
+		// Select the line reader function once before the inner loop.
+		readLine, err := getLineReader(p.Config.LineEnding)
+		if err != nil {
+			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Configuration error with line_ending: %v. Retrying.", err)
+			file.Close()
+			restartTailing(ErrorRetryDelay)
+			continue
+		}
+
 		// On the very first run, seek to the end of the file to ignore old content.
 		// On subsequent runs (after rotation), we want to read the new file from the beginning.
 		if firstRun {
@@ -250,7 +289,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			}
 
 			// 1. Read the line
-			line, finalErr := ReadLineWithLimit(reader, lineLimit)
+			line, finalErr := readLine(reader, lineLimit)
 			lineNumber++
 
 			// 2. Handle read errors (EOF or other)

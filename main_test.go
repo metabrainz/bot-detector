@@ -198,7 +198,7 @@ func TestDryRunLogProcessor_LineSkipped(t *testing.T) {
 	// Create a temporary log file with one valid line and one oversized line.
 	longLine := strings.Repeat("a", MaxLogLineSize+1)
 	logContent := "this is a valid line\n" + longLine + "\n"
-	if err := os.WriteFile(harness.tempLogFile, []byte(logContent), 0644); err != nil {
+	if err := os.WriteFile(harness.tempLogFile, []byte(logContent), 0644); err != nil { //nolint:gosec
 		t.Fatalf("Failed to write to temp file: %v", err)
 	}
 
