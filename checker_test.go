@@ -262,68 +262,53 @@ func TestProcessChainForEntry_AlreadyCompleted(t *testing.T) {
 	}
 }
 
-// TestCheckChains_MaxDelayExceeded tests that a chain resets if the time between steps is too long.
-func TestCheckChains_MaxDelayExceeded(t *testing.T) {
-	// --- Setup ---
-	const targetIP = "192.0.2.1"
-	h := newCheckerTestHarness(t, nil)
-
-	h.addChain(BehavioralChain{
-		Name:     "DelayTestChain",
-		MatchKey: "ip",
-		Action:   "log",
-		StepsYAML: []StepDefYAML{
-			{FieldMatches: map[string]interface{}{"Path": "/step/one"}, MaxDelay: "5s"},
-			{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MaxDelay: "5s"},
+// TestCheckChains_TimeDelayReset tests that a chain resets if time-based rules between steps are not met.
+func TestCheckChains_TimeDelayReset(t *testing.T) {
+	tests := []struct {
+		name            string
+		step2YAML       StepDefYAML
+		step2TimeOffset time.Duration
+	}{
+		{
+			name:            "MaxDelay Exceeded",
+			step2YAML:       StepDefYAML{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MaxDelay: "5s"},
+			step2TimeOffset: 6 * time.Second,
 		},
-	})
-
-	// --- Act ---
-	entry1 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: time.Now(), Path: "/step/one"}
-	h.processEntry(entry1)
-
-	// Assert 1: State is at step 1.
-	h.assertChainProgress("DelayTestChain", entry1, 1)
-
-	// Process the second request, after MaxDelay (e.g., 6 seconds later).
-	entry2 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: entry1.Timestamp.Add(6 * time.Second), Path: "/step/two"}
-	h.processEntry(entry2)
-
-	// --- Assert 2 ---
-	// The chain should have been reset. The second step doesn't match step 1, so progress is cleared.
-	h.assertChainProgressCleared("DelayTestChain", entry2)
-}
-
-// TestCheckChains_MinDelayNotMet tests that a chain resets if the time between steps is too short.
-func TestCheckChains_MinDelayNotMet(t *testing.T) {
-	// --- Setup ---
-	const targetIP = "192.0.2.1"
-	h := newCheckerTestHarness(t, nil)
-
-	h.addChain(BehavioralChain{
-		Name:     "MinDelayTestChain",
-		MatchKey: "ip",
-		Action:   "log",
-		StepsYAML: []StepDefYAML{
-			{FieldMatches: map[string]interface{}{"Path": "/step/one"}, MaxDelay: "5s"},
-			{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MinDelay: "500ms"},
+		{
+			name:            "MinDelay Not Met",
+			step2YAML:       StepDefYAML{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MinDelay: "500ms"},
+			step2TimeOffset: 100 * time.Millisecond,
 		},
-	})
+	}
 
-	// --- Act ---
-	entry1 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: time.Now(), Path: "/step/one"}
-	h.processEntry(entry1)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// --- Setup ---
+			const targetIP = "192.0.2.1"
+			h := newCheckerTestHarness(t, nil)
 
-	// Assert 1: State is at step 1.
-	h.assertChainProgress("MinDelayTestChain", entry1, 1)
+			h.addChain(BehavioralChain{
+				Name:      "TimeResetChain",
+				MatchKey:  "ip",
+				Action:    "log",
+				StepsYAML: []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/step/one"}}, tt.step2YAML},
+			})
 
-	// Process the second request, before MinDelay (e.g., 100ms later).
-	entry2 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: entry1.Timestamp.Add(100 * time.Millisecond), Path: "/step/two"}
-	h.processEntry(entry2)
+			// --- Act ---
+			entry1 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: time.Now(), Path: "/step/one"}
+			h.processEntry(entry1)
 
-	// --- Assert 2 ---
-	// Chain should be reset because min delay was not met.
-	h.assertChainProgressCleared("MinDelayTestChain", entry2)
+			// Assert 1: State is at step 1.
+			h.assertChainProgress("TimeResetChain", entry1, 1)
+
+			// Process the second request with the specified time offset.
+			entry2 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: entry1.Timestamp.Add(tt.step2TimeOffset), Path: "/step/two"}
+			h.processEntry(entry2)
+
+			// --- Assert 2: The chain should have been reset.
+			h.assertChainProgressCleared("TimeResetChain", entry2)
+		})
+	}
 }
 
 // TestCheckChains_WhitelistSkip tests that a whitelisted IP is skipped entirely.
