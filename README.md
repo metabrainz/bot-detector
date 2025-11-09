@@ -267,7 +267,7 @@ field_matches:
 
 The bot-detector holds the state of IPs in memory. To prevent memory from growing indefinitely, two cleanup mechanisms are in place:
 
-1.  **Idle Timeout (`--idle-timeout`):** An IP's state is purged if it has been inactive (no requests seen) for longer than this duration. This is the general-purpose cleanup for all IPs.
+1.  **Idle Timeout (`idle_timeout`):** An IP's state is purged if it has been inactive (no requests seen) for longer than this duration. This is the general-purpose cleanup for all IPs, configured in the YAML file.
 
 2.  **`min_time_since_last_hit` Optimization:** If your configuration uses `min_time_since_last_hit` rules, the application performs a more aggressive cleanup. It calculates the longest `min_time_since_last_hit` duration across all your chains. If an IP's last request is older than this duration, and it's not in the middle of a chain, its state is purged immediately, even if it hasn't reached the main `idle-timeout`. This ensures that memory is not wasted on IPs that can no longer trigger a time-based rule. If no chains use this rule, this optimization is disabled.
 
