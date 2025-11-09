@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -138,29 +137,24 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 			continue
 		}
 
-		// Skip comments and empty lines before processing.
+		// Skip comments and empty lines before counting.
 		if len(line) == 0 || line[0] == '#' {
 			p.LogFunc(logging.LevelDebug, "DRYRUN_SKIP", "Line %d: Skipped (Comment/Empty).", lineNumber)
 			continue
 		}
 
-		// 3. Process the line
+		// Process the line. The internal function will handle parsing and checking.
 		p.ProcessLogLine(line, lineNumber)
 		processedCount++
 	}
 
 endLoop:
-	// After reading all lines, if there are entries in the buffer, process them.
-	// This is crucial for dry-run mode with out-of-order tolerance enabled.
+	// After processing all lines, flush any remaining entries in the buffer.
+	// This is crucial for dry-runs with out-of-order tolerance, as it simulates
+	// the final processing that happens when the live tailer shuts down.
 	p.ActivityMutex.Lock()
-	// The check for `IsTesting` and the specific test name avoids interfering with TestEntryBufferWorker.
-	// A better solution might be a more explicit flag on the processor.
-	isBufferWorkerTest := false
-	if IsTesting() {
-		isBufferWorkerTest = strings.Contains(os.Args[1], "TestEntryBufferWorker")
-	}
-	if len(p.EntryBuffer) > 0 && !isBufferWorkerTest {
-		p.LogFunc(logging.LevelDebug, "DRYRUN_FLUSH", "Processing %d buffered entries at end of dry run.", len(p.EntryBuffer))
+	if len(p.EntryBuffer) > 0 {
+		p.LogFunc(logging.LevelDebug, "DRYRUN_FLUSH", "Flushing %d buffered entries.", len(p.EntryBuffer))
 		// Sort all remaining entries by timestamp before final processing.
 		sort.Slice(p.EntryBuffer, func(i, j int) bool {
 			return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
@@ -171,7 +165,6 @@ endLoop:
 		p.EntryBuffer = nil // Clear the buffer.
 	}
 	p.ActivityMutex.Unlock()
-
 	p.LogFunc(logging.LevelInfo, "DRYRUN", "DryRun complete. Processed %d lines.", processedCount)
 	close(done)
 }
@@ -348,8 +341,14 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 				}
 			}
 
-			// 3. Process the line
-			p.ProcessLogLine(line, lineNumber) // Use the function field
+			// Skip comments and empty lines before processing.
+			if len(line) == 0 || line[0] == '#' {
+				p.LogFunc(logging.LevelDebug, "TAIL_SKIP", "Line %d: Skipped (Comment/Empty).", lineNumber)
+				continue
+			}
+
+			// 3. Process the valid log line
+			p.ProcessLogLine(line, lineNumber)
 		}
 	}
 }

@@ -651,20 +651,6 @@ func TestDryRunMode(t *testing.T) {
 		t.Fatalf("Failed to scan test_access.log for entries: %v", err)
 	}
 
-	// After processing all lines, we must manually flush the buffer to simulate the end of a run.
-	processor.ActivityMutex.Lock()
-	if len(processor.EntryBuffer) > 0 {
-		// Sort all remaining entries by timestamp before final processing.
-		sort.Slice(processor.EntryBuffer, func(i, j int) bool {
-			return processor.EntryBuffer[i].Timestamp.Before(processor.EntryBuffer[j].Timestamp)
-		})
-		for _, entry := range processor.EntryBuffer {
-			checkChainsInternal(processor, entry) // Use the internal function as the lock is already held.
-		}
-		processor.EntryBuffer = nil // Clear the buffer.
-	}
-	processor.ActivityMutex.Unlock()
-
 	// --- Assert ---
 	// 4. Verify that the captured log output matches the expected log entries
 	for commentLineNumber, expectedLog := range expectedLogs {
