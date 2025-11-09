@@ -253,6 +253,82 @@ chains:
 	}
 }
 
+func TestLoadConfigFromYAML_ObjectMatcher_WithNot(t *testing.T) {
+	tests := []struct {
+		name        string
+		yamlContent string
+		testCases   map[string]struct {
+			entry    *LogEntry
+			expected bool
+		}
+		expectError string
+	}{
+		{
+			name: "gte, lt, and not (single int)",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "StatusCodeRangeNotChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          StatusCode:
+            gte: 400
+            lt: 500
+            not: 404`,
+			testCases: map[string]struct {
+				entry    *LogEntry
+				expected bool
+			}{
+				"In Range, Not Excluded (403)": {entry: &LogEntry{StatusCode: 403}, expected: true},
+				"Excluded (404)":               {entry: &LogEntry{StatusCode: 404}, expected: false},
+				"Out of Range (500)":           {entry: &LogEntry{StatusCode: 500}, expected: false},
+			},
+		},
+		{
+			name: "not with list of ints",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "StatusCodeNotListChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          StatusCode:
+            not: [403, 404]`,
+			testCases: map[string]struct {
+				entry    *LogEntry
+				expected bool
+			}{
+				"Not in list (200)": {entry: &LogEntry{StatusCode: 200}, expected: true},
+				"In list (403)":     {entry: &LogEntry{StatusCode: 403}, expected: false},
+				"In list (404)":     {entry: &LogEntry{StatusCode: 404}, expected: false},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupTestYAML(t, tt.yamlContent)
+			loadedCfg, err := LoadConfigFromYAML()
+			if err != nil {
+				t.Fatalf("LoadConfigFromYAML() failed: %v", err)
+			}
+			matcher := loadedCfg.Chains[0].Steps[0].Matchers[0]
+
+			for name, tc := range tt.testCases {
+				t.Run(name, func(t *testing.T) {
+					if got := matcher(tc.entry); got != tc.expected {
+						t.Errorf("Matcher returned %v, expected %v for status code %d", got, tc.expected, tc.entry.StatusCode)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestLoadConfigFromYAML_IntMatcherFallback(t *testing.T) {
 	// This test specifically targets the non-StatusCode path in compileIntMatcher.
 	// We use a field that is not an integer (Method) to ensure the fallback logic

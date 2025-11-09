@@ -321,21 +321,38 @@ func compileObjectMatcher(chainName string, stepIndex int, field string, obj map
 	var subMatchers []fieldMatcher
 
 	for key, val := range obj {
-		num, ok := val.(int)
-		if !ok {
-			return nil, fmt.Errorf("chain '%s', step %d, field '%s': value for '%s' must be an integer, got %T", chainName, stepIndex+1, field, key, val)
-		}
-
 		var matcher fieldMatcher
 		switch key {
 		case "gt":
+			num, ok := val.(int)
+			if !ok {
+				return nil, fmt.Errorf("chain '%s', step %d, field '%s': value for 'gt' must be an integer, got %T", chainName, stepIndex+1, field, val)
+			}
 			matcher = func(entry *LogEntry) bool { return entry.StatusCode > num }
 		case "gte":
+			num, ok := val.(int)
+			if !ok {
+				return nil, fmt.Errorf("chain '%s', step %d, field '%s': value for 'gte' must be an integer, got %T", chainName, stepIndex+1, field, val)
+			}
 			matcher = func(entry *LogEntry) bool { return entry.StatusCode >= num }
 		case "lt":
+			num, ok := val.(int)
+			if !ok {
+				return nil, fmt.Errorf("chain '%s', step %d, field '%s': value for 'lt' must be an integer, got %T", chainName, stepIndex+1, field, val)
+			}
 			matcher = func(entry *LogEntry) bool { return entry.StatusCode < num }
 		case "lte":
+			num, ok := val.(int)
+			if !ok {
+				return nil, fmt.Errorf("chain '%s', step %d, field '%s': value for 'lte' must be an integer, got %T", chainName, stepIndex+1, field, val)
+			}
 			matcher = func(entry *LogEntry) bool { return entry.StatusCode <= num }
+		case "not":
+			var err error
+			matcher, err = compileNotMatcher(chainName, stepIndex, field, val)
+			if err != nil {
+				return nil, err
+			}
 		default:
 			return nil, fmt.Errorf("chain '%s', step %d, field '%s': unknown operator '%s' in object matcher", chainName, stepIndex+1, field, key)
 		}
@@ -354,6 +371,33 @@ func compileObjectMatcher(chainName string, stepIndex int, field string, obj map
 		}
 		return true
 	}, nil
+}
+
+// compileNotMatcher handles the 'not' operator, which can be a single int or a list of ints.
+func compileNotMatcher(chainName string, stepIndex int, field string, value interface{}) (fieldMatcher, error) {
+	switch v := value.(type) {
+	case int:
+		// 'not' with a single integer value
+		return func(entry *LogEntry) bool {
+			return entry.StatusCode != v
+		}, nil
+	case []interface{}:
+		// 'not' with a list of integer values
+		notValues := make(map[int]struct{})
+		for i, item := range v {
+			num, ok := item.(int)
+			if !ok {
+				return nil, fmt.Errorf("chain '%s', step %d, field '%s': item at index %d in 'not' list must be an integer, got %T", chainName, stepIndex+1, field, i, item)
+			}
+			notValues[num] = struct{}{}
+		}
+		return func(entry *LogEntry) bool {
+			_, found := notValues[entry.StatusCode]
+			return !found // Return true if the status code is NOT in the map
+		}, nil
+	default:
+		return nil, fmt.Errorf("chain '%s', step %d, field '%s': value for 'not' operator must be an integer or a list of integers, got %T", chainName, stepIndex+1, field, value)
+	}
 }
 
 // LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
