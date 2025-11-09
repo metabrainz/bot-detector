@@ -326,7 +326,8 @@ chains:
   # This uses the global default_block_duration.
   - name: Sleepy-Bot-Probe
     action: block # No block_duration, so it uses the 30m default
-    match_key: "ip"
+    match_key: "ip" # With "ip", the 20m timer is for the IP address alone.
+                    # If set to "ip_ua", the timer would be tracked separately for each User-Agent from that IP.
     steps:
       - min_time_since_last_hit: "20m" # Step only matches if IP was quiet for 20+ minutes
         field_matches:
