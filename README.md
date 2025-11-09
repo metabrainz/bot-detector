@@ -154,7 +154,18 @@ Each item in the chains array must conform to the following structure:
 | **steps** | array of object | Yes | The sequential list of steps that define the malicious pattern. |
 | **action** | string | Yes | The action to take when the chain is successfully completed by an IP. **Must be one of:** `block` or `log`. |
 | **block_duration** | string | No | The duration for which the IP should be blocked if action is block. Format: Go duration string (e.g., "5m", "1h", "30m", "1h30m"). |
-| **match_key** | string | Yes | The key to track activity against. `ip` tracks by IP address only. `ip_ua` tracks by the combination of IP address and User-Agent string. |
+| **match_key** | string | Yes | The key used to track activity. This determines if behavior is tracked per IP address, per IP version, or per unique client (IP + User-Agent). See the table below for all possible values. |
+
+#### `match_key` Values
+
+| `match_key` | Tracks By | Description |
+| :--- | :--- | :--- |
+| `ip` | IP Address (v4 or v6) | Tracks activity based on the client's IP address, regardless of whether it's IPv4 or IPv6. |
+| `ipv4` | IPv4 Address Only | Tracks activity based on the client's IP address. This chain will only process log entries with a valid IPv4 address. |
+| `ipv6` | IPv6 Address Only | Tracks activity based on the client's IP address. This chain will only process log entries with a valid IPv6 address. |
+| `ip_ua` | IP (v4/v6) + User-Agent | Tracks activity based on the combination of the client's IP address (v4 or v6) and their User-Agent string. This is useful for distinguishing different bots or clients behind the same NAT. |
+| `ipv4_ua` | IPv4 + User-Agent | Tracks activity based on the combination of the client's IPv4 address and their User-Agent string. Ignores IPv6 entries. |
+| `ipv6_ua` | IPv6 + User-Agent | Tracks activity based on the combination of the client's IPv6 address and their User-Agent string. Ignores IPv4 entries. |
 
 ## **Step Definition**
 
@@ -259,54 +270,89 @@ The bot-detector holds the state of IPs in memory. To prevent memory from growin
 
 ## **Example chains.yaml**
 
-This example defines two chains: one for logging suspicious scanning and one for blocking a brute-force-like sequence.
+This example showcases a variety of features, including different matchers, time-based conditions, and actions.
+
+For this example to be valid, you would also need a `bad_agents.txt` file in the same directory with content like:
+```
+# Contents of bad_agents.txt
+BadBot/1.0
+regex:(?i)evil-crawler
+```
 
 ```yaml
-  # 1. CHAIN: Credential Stuffing / Brute Force
-  - name: Login-Brute-Force
+version: "1.0"
+default_block_duration: "30m" # Used by chains without a specific block_duration
+
+chains:
+  # --- CHAIN 1: Aggressive Scraper ---
+  # Blocks an IP+UserAgent that makes 3 quick GET requests for forbidden content.
+  # This uses a specific block_duration.
+  - name: Aggressive-Scraper
     action: block
     block_duration: "1h"
+    match_key: "ip_ua" # Track by IP and User-Agent combination
     steps:
-      - max_delay: "5m"
+      - field_matches:
+          Method: "GET"
+          StatusCode: 403 # Exact integer match
+      - max_delay: "2s" # Must happen within 2s of the previous step
+        min_delay: "200ms" # And must wait at least 200ms
         field_matches:
-          Method: "POST"
-          Path: "/api/login"
-          # Must result in a 401 Unauthorized
-          StatusCode: 401
+          Method: "GET"
+          StatusCode: 403
+      - max_delay: "2s"
+        field_matches:
+          Method: "GET"
+          StatusCode: 403
 
+  # --- CHAIN 2: "Sleepy" Bad Bot ---
+  # Detects a bot that probes a sensitive endpoint after a long period of inactivity.
+  # This uses the global default_block_duration.
+  - name: Sleepy-Bot-Probe
+    action: block # No block_duration, so it uses the 30m default
+    match_key: "ip"
+    steps:
+      - min_time_since_last_hit: "20m" # Step only matches if IP was quiet for 20+ minutes
+        field_matches:
+          UserAgent: "file:./bad_agents.txt" # Match against a list of bad user agents
+          Path: "/wp-login.php"
+
+  # --- CHAIN 3: Multi-faceted Login Abuse (Log Only) ---
+  # Logs attempts to access various login/reset paths that result in a client error.
+  # This demonstrates complex `field_matches` with lists, ranges, and `ip_ua`.
+  - name: Login-Abuse-Scanner
+    action: "log"
+    match_key: "ip_ua" # Track by IP+UA to see if a specific client is scanning.
+    steps:
+      - field_matches:
+          # Match multiple methods (OR condition)
+          Method: ["POST", "PUT"]
+          # Match multiple paths (OR condition with mixed string/regex)
+          Path:
+            - "/api/v2/login"
+            - "regex:^/reset-password/\\w+$"
+          # Match any 4xx status code except 404 (AND condition)
+          StatusCode:
+            gte: 400
+            lt: 500
+            not: 404 # Note: 'not' is a powerful addition
+
+  # --- CHAIN 4: Broken Referrer Link ---
+  # A simple chain to log any IP that gets three 5xx errors in a row
+  # while coming from a specific internal referrer, which might indicate a broken link.
+  - name: Server-Error-Trigger
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          StatusCode: "5XX"
+          Referrer: "https://internal.my-app.com/dashboard"
       - max_delay: "10s"
         field_matches:
-          Method: "POST"
-          Path: "/api/login"
-          StatusCode: 401
-
-      - max_delay: "5s"
-        field_matches:
-          Method: "POST"
-          Path: "/api/login"
-          StatusCode: 401
-
-  # 2. CHAIN: Content Scraper (Log Only)
-  - name: Content-Scraper-Fast
-    action: log
-    steps:
-      - max_delay: "5m"
-        field_matches:
-          Method: "GET"
-          # Request an article page
-          Path: "regex:^/article/\\d+$"
-          # User agent might be suspicious
-          UserAgent: "regex:(?i)(curl|wget|python-requests)"
-
-      - max_delay: "1s"
-        field_matches:
-          Method: "GET"
-          # Request another article page very quickly
-          Path: "regex:^/article/\\d+$"
-
-      - max_delay: "1s"
-        field_matches:
-          Method: "GET"
-          # Request a third article page very quickly
-          Path: "regex:^/article/\\d+$"
+          StatusCode: "5XX"
+          Referrer: "https://internal.my-app.com/dashboard"
+      - max_delay: "10s"
+        # This step uses the inline {} notation for completeness,
+        # showing it's useful for simple, single-line matchers.
+        field_matches: { StatusCode: "5XX", Referrer: "https://internal.my-app.com/dashboard" }
 ```
