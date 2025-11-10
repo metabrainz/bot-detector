@@ -39,7 +39,7 @@ func TestStart_DryRun(t *testing.T) {
 		Config:        &AppConfig{},
 		DryRun:        true, // Enable dry-run mode.
 		LogFunc:       func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
-		ProcessLogLine: func(line string, lineNumber int) {
+		ProcessLogLine: func(line string) {
 			linesProcessed++
 		},
 	}
@@ -119,7 +119,7 @@ func TestStart_LiveMode(t *testing.T) {
 		},
 		// We don't need to process lines for this test, just detect rotation.
 		// A no-op function prevents a nil pointer panic.
-		ProcessLogLine: func(line string, lineNumber int) {},
+		ProcessLogLine: func(line string) {},
 	}
 
 	// Act: Run start in a goroutine.

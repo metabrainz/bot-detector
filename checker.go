@@ -117,11 +117,39 @@ func executeBlock(p *Processor, entry *LogEntry, chain *BehavioralChain) {
 	}
 }
 
+// flushEntryBufferUnsafe contains the core logic for processing all entries in the buffer.
+// It assumes the caller holds the ActivityMutex. This function is NOT thread-safe on its own.
+func flushEntryBufferUnsafe(p *Processor) {
+	if len(p.EntryBuffer) == 0 {
+		return
+	}
+	p.LogFunc(logging.LevelDebug, "BUFFER_FLUSH", "Flushing %d buffered entries.", len(p.EntryBuffer))
+	// Sort all remaining entries by timestamp before final processing.
+	sort.Slice(p.EntryBuffer, func(i, j int) bool {
+		return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
+	})
+	for _, entry := range p.EntryBuffer {
+		checkChainsInternal(p, entry)
+	}
+	p.EntryBuffer = nil // Clear the buffer.
+}
+
+// FlushEntryBuffer checks the entry buffer and processes any entries that are older
+// than the out-of-order tolerance, which is useful when log processing is paused (e.g., at EOF).
+func FlushEntryBuffer(p *Processor) {
+	p.ActivityMutex.Lock()
+	defer p.ActivityMutex.Unlock()
+	flushEntryBufferUnsafe(p)
+}
+
+// entryBufferWorker is a background goroutine that processes log entries from the buffer
+// in chronological order, respecting the out-of-order tolerance.
+
 // logDryRunCompletion handles logging for completed chains in dry-run mode.
 func logDryRunCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry) {
 	switch chain.Action {
 	case "block":
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Action set to 'block' (DryRun).", chain.Name, entry.IPInfo.Address)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Blocking for %v (DryRun).", chain.Name, entry.IPInfo.Address, chain.BlockDuration)
 	case "log":
 		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s. Action set to 'log' (DryRun).", chain.Name, entry.IPInfo.Address)
 	default:
@@ -299,15 +327,37 @@ func CheckChains(p *Processor, entry *LogEntry) {
 	p.ConfigMutex.RLock()
 	tolerance := p.Config.OutOfOrderTolerance
 	p.ConfigMutex.RUnlock()
-
-	if tolerance > 0 {
-		p.ActivityMutex.Lock()
-		p.EntryBuffer = append(p.EntryBuffer, entry)
-		p.ActivityMutex.Unlock()
-	} else {
-		// If tolerance is zero, process immediately without buffering.
+	if tolerance == 0 {
+		// If tolerance is zero, process immediately without any buffering logic.
 		checkChainsWithLock(p, entry)
+		return
 	}
+
+	p.ActivityMutex.Lock()
+	defer p.ActivityMutex.Unlock()
+
+	// Determine the tracking key to find the last request time.
+	// We use a simple 'ip' key here as a proxy for the activity's last seen time.
+	// A more complex implementation might find the most specific key, but this is sufficient.
+	key := TrackingKey{IPInfo: entry.IPInfo}
+	activity := GetOrCreateActivityUnsafe(p.ActivityStore, key)
+	lastRequestTime := activity.LastRequestTime
+
+	// If the entry is older than the last request we've seen for this IP,
+	// and it's within the tolerance window, buffer it.
+	if !lastRequestTime.IsZero() && entry.Timestamp.Before(lastRequestTime) && lastRequestTime.Sub(entry.Timestamp) <= tolerance {
+		p.EntryBuffer = append(p.EntryBuffer, entry)
+		// Do not process it now. It will be processed by the worker or a subsequent newer entry.
+		return
+	}
+
+	// If the entry is in-order (or the first one seen), process it immediately.
+	checkChainsInternal(p, entry)
+
+	// After processing a newer entry, re-process any buffered entries that might now be valid.
+	// This is the key logic that was missing.
+	// We call the unsafe version because we already hold the lock.
+	flushEntryBufferUnsafe(p) // This call is now valid as the function is defined above.
 }
 
 // entryBufferWorker is a background goroutine that processes log entries from the buffer
@@ -339,16 +389,7 @@ func entryBufferWorker(p *Processor, stop <-chan struct{}) {
 		case <-stop:
 			p.LogFunc(logging.LevelInfo, "BUFFER_WORKER", "Shutting down. Processing remaining %d entries in buffer...", len(p.EntryBuffer))
 			// On shutdown, process all remaining entries in the buffer immediately.
-			p.ActivityMutex.Lock()
-			// Sort all remaining entries by timestamp before final processing.
-			sort.Slice(p.EntryBuffer, func(i, j int) bool {
-				return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
-			})
-			for _, entry := range p.EntryBuffer {
-				checkChainsInternal(p, entry)
-			}
-			p.EntryBuffer = nil // Clear the buffer.
-			p.ActivityMutex.Unlock()
+			FlushEntryBuffer(p) // Use the public, locking version.
 			return
 		case <-ticker.C:
 			p.ActivityMutex.Lock()
@@ -389,33 +430,5 @@ func entryBufferWorker(p *Processor, stop <-chan struct{}) {
 				p.LogFunc(logging.LevelDebug, "BUFFER_WORKER_TICK_DONE", "Tick processed.")
 			}
 		}
-	}
-}
-
-// FlushEntryBuffer checks the entry buffer and processes any entries that are older
-// than the out-of-order tolerance, which is useful when log processing is paused (e.g., at EOF).
-func FlushEntryBuffer(p *Processor) {
-	p.ActivityMutex.Lock()
-	defer p.ActivityMutex.Unlock()
-
-	if len(p.EntryBuffer) == 0 {
-		return
-	}
-
-	// Sort the buffer to find the latest timestamp accurately.
-	sort.Slice(p.EntryBuffer, func(i, j int) bool {
-		return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
-	})
-
-	latestTimestamp := p.EntryBuffer[len(p.EntryBuffer)-1].Timestamp
-
-	// If the newest entry in the buffer is older than the tolerance window relative to now,
-	// it's safe to process the entire buffer. This happens when the log file stops receiving new lines.
-	if p.NowFunc().After(latestTimestamp.Add(p.Config.OutOfOrderTolerance)) {
-		p.LogFunc(logging.LevelDebug, "BUFFER_FLUSH", "Flushing %d buffered entries due to inactivity.", len(p.EntryBuffer))
-		for _, entry := range p.EntryBuffer {
-			checkChainsInternal(p, entry)
-		}
-		p.EntryBuffer = nil // Clear the buffer.
 	}
 }

@@ -242,7 +242,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 	p.DryRun = true
 	p.Blocker = mockBlocker
 
-	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(p, line, lineNumber) }
+	p.ProcessLogLine = func(line string) { processLogLineInternal(p, line) }
 
 	ip := "192.0.2.1"
 	logLine := fmt.Sprintf(`www.example.com %s - userx [06/Nov/2025:09:00:00 +0100] "GET /1 HTTP/1.1" 200 1234 "-" "-"`, ip)
@@ -252,7 +252,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
 
 	// 1. Process the line
-	p.ProcessLogLine(logLine, 1)
+	p.ProcessLogLine(logLine)
 
 	// Assertion 1: Check the DryRun store. The activity should exist and be blocked.
 	p.ActivityMutex.RLock()
@@ -297,7 +297,7 @@ func TestProcessLogLineInternal_ParseError(t *testing.T) {
 
 	// Act: Process a malformed log line.
 	malformedLine := "this is not a valid log line"
-	processLogLineInternal(p, malformedLine, 123)
+	processLogLineInternal(p, malformedLine)
 
 	if !strings.Contains(capturedMessage, "Parsing failed") {
 		t.Errorf("Expected a 'PARSE_FAIL' log message, but it was not captured. Got: '%s'", capturedMessage)
@@ -329,8 +329,8 @@ func TestProcessLogLineInternal_SkipLine(t *testing.T) {
 		t.Error("CheckChains was called, but should have been skipped for a comment line.")
 	}
 
-	processLogLineInternal(p, "# this is a comment", 1)
-	if !strings.Contains(capturedMessage, "Skipped (Comment/Empty)") {
+	processLogLineInternal(p, "# this is a comment")
+	if !strings.Contains(capturedMessage, "Skipped empty/comment line.") {
 		t.Errorf("Expected a 'SKIP' log message, but it was not captured. Got: '%s'", capturedMessage)
 	}
 }

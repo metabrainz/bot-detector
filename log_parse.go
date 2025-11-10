@@ -69,7 +69,7 @@ func ParseLogLine(p *Processor, line string) (*LogEntry, error) {
 	}, nil
 }
 
-func processLogLineInternal(p *Processor, line string, lineNumber int) {
+func processLogLineInternal(p *Processor, line string) {
 	// 1. Parse the line
 	entry, err := ParseLogLine(p, line)
 
@@ -79,13 +79,13 @@ func processLogLineInternal(p *Processor, line string, lineNumber int) {
 		if IsTesting() {
 			logLevel = logging.LevelDebug
 		}
-		p.LogFunc(logLevel, "PARSE_FAIL", "Line %d: Parsing failed: %v", lineNumber, err)
+		p.LogFunc(logLevel, "PARSE_FAIL", "Parsing failed for line \"%s\": %v", line, err)
 		return
 	}
 
 	// Skip comments and empty lines. ParseLogLine returns (nil, nil) for these.
 	if entry == nil {
-		p.LogFunc(logging.LevelDebug, "SKIP", "Line %d: Skipped (Comment/Empty).", lineNumber)
+		p.LogFunc(logging.LevelDebug, "SKIP", "Skipped empty/comment line.")
 		return
 	}
 

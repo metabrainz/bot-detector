@@ -599,8 +599,8 @@ func TestDryRunMode(t *testing.T) {
 	// Set the IsWhitelistedFunc on the *actual* processor instance to avoid nil pointers.
 	processor.IsWhitelistedFunc = func(ipInfo IPInfo) bool { return IsIPWhitelisted(processor, ipInfo) }
 	// Set the CheckChainsFunc on the processor instance to avoid nil pointers.
-	processor.CheckChainsFunc = func(entry *LogEntry) { CheckChains(processor, entry) } // This line was correct, but included for context
-	processor.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(processor, line, lineNumber) }
+	processor.CheckChainsFunc = func(entry *LogEntry) { CheckChains(processor, entry) }
+	processor.ProcessLogLine = func(line string) { processLogLineInternal(processor, line) }
 
 	// 2. Read test_access.log and extract expected log outputs from comments
 	testLogFilePath := "testdata/test_access.log"
@@ -645,7 +645,7 @@ func TestDryRunMode(t *testing.T) {
 		actualLogLineNumber++
 		line := logEntryScanner.Text()
 
-		processor.ProcessLogLine(line, actualLogLineNumber) // Use the actual processing function
+		processor.ProcessLogLine(line) // Use the actual processing function
 	}
 	if err := logEntryScanner.Err(); err != nil {
 		t.Fatalf("Failed to scan test_access.log for entries: %v", err)
@@ -655,13 +655,7 @@ func TestDryRunMode(t *testing.T) {
 	// 4. Verify that the captured log output matches the expected log entries
 	for commentLineNumber, expectedLog := range expectedLogs {
 		found := false
-		formattedExpectedLog := expectedLog
-
-		// If the expected log contains a line number placeholder, format it dynamically.
-		if strings.Contains(expectedLog, "Line %d:") {
-			// The malformed log entry is on the line immediately after the '======' separator, which is 2 lines after the 'EXPECTED LOG' comment.
-			formattedExpectedLog = fmt.Sprintf(expectedLog, commentLineNumber+2)
-		}
+		formattedExpectedLog := strings.Replace(expectedLog, "Line %d: ", "", 1)
 
 		for _, capturedLog := range capturedLogs {
 			if strings.Contains(capturedLog, formattedExpectedLog) {

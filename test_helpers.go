@@ -121,7 +121,7 @@ func newDryRunTestHarness(t *testing.T) *dryRunTestHarness {
 	// Use a custom LogFunc to capture logs and identify skipped lines.
 	// This needs to be done before setting ProcessLogLine, as ProcessLogLine
 	// will call processLogLineInternal, which in turn calls LogFunc.
-	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) { //nolint:gocritic
 		h.logMutex.Lock()
 		defer h.logMutex.Unlock()
 		logLine := fmt.Sprintf(tag+": "+format, args...)
@@ -129,23 +129,19 @@ func newDryRunTestHarness(t *testing.T) *dryRunTestHarness {
 	}
 
 	// Override ProcessLogLine to use the real processing logic and capture processed lines.
-	h.processor.ProcessLogLine = func(line string, lineNumber int) {
+	h.processor.ProcessLogLine = func(line string) {
 		// Call the actual log line processing function.
-		processLogLineInternal(h.processor, line, lineNumber)
+		processLogLineInternal(h.processor, line)
 
 		// Check if the line was *not* skipped by processLogLineInternal.
 		// We do this by checking if a "Skipped (Comment/Empty)" log was *not* generated
-		// for this specific line number. This is a bit indirect but avoids modifying
-		// processLogLineInternal's return signature.
+		// for this specific line. This is a bit indirect but avoids modifying
+		// processLogLineInternal's return signature. This logic is now simpler since
+		// we only care if the line content itself is empty or a comment.
 		h.logMutex.Lock()
 		defer h.logMutex.Unlock()
-		skippedLogFound := false
-		for _, capturedLog := range h.capturedLogs {
-			if strings.Contains(capturedLog, fmt.Sprintf("Line %d: Skipped (Comment/Empty).", lineNumber)) {
-				skippedLogFound = true
-				break
-			}
-		}
+		trimmedLine := strings.TrimSpace(line)
+		skippedLogFound := trimmedLine == "" || strings.HasPrefix(trimmedLine, "#")
 
 		if !skippedLogFound {
 			// If no skipped log was found for this line, it means it was processed.

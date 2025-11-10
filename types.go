@@ -57,7 +57,7 @@ type Processor struct {
 	CheckChainsFunc   func(entry *LogEntry)
 	signalCh          chan os.Signal
 	LogFunc           func(level logging.LogLevel, tag string, format string, v ...interface{})
-	ProcessLogLine    func(line string, lineNumber int)
+	ProcessLogLine    func(line string)
 	NowFunc           func() time.Time // Mockable time function.
 	TestSignals       *TestSignals     // Test-only signals for synchronization.
 }

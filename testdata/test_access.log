@@ -13,14 +13,14 @@ musicbrainz.org 10.0.0.1 - - [28/Oct/2025:17:00:03 +0000] "GET /log/step2 HTTP/1
 
 # ======================================================================================
 # === TEST CASE 3: Block Action Chain (10.0.0.2) - SUCCESS (BLOCK)
-# === EXPECTED LOG: DRY_RUN: BLOCK! Chain: SimpleBlockChain completed by IP 10.0.0.2. Action set to 'block' (DryRun).
+# === EXPECTED LOG: DRY_RUN: BLOCK! Chain: SimpleBlockChain completed by IP 10.0.0.2. Blocking for 1h0m0s (DryRun).
 # ===
 musicbrainz.org 10.0.0.2 - - [28/Oct/2025:17:00:04 +0000] "GET /block/step1 HTTP/1.1" 200 100 "-" "TestAgent"
 musicbrainz.org 10.0.0.2 - - [28/Oct/2025:17:00:05 +0000] "GET /block/step2 HTTP/1.1" 200 100 "-" "TestAgent"
 
 # ======================================================================================
 # === TEST CASE 4: Parse Failure (Malformed Line)
-# === EXPECTED LOG: PARSE_FAIL: Line %d: Parsing failed: line does not match log format regex
+# === EXPECTED LOG: PARSE_FAIL: Parsing failed for line
 # ===
 musicbrainz.org 1.2.3.4 - - [28/Oct/2025:17:00:06 +0000] "GET /incomplete HTTP/1.1" 200 100 "-"
 

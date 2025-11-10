@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"syscall"
 	"time"
 )
@@ -42,6 +41,7 @@ func handleLineRead(line []byte, err error, limit int) (string, error) {
 		return string(line), err
 	}
 	return string(line), nil
+
 }
 
 // readLineLF reads a line ending with LF ('\n').
@@ -139,41 +139,39 @@ func delayOrShutdown(p *Processor, delay time.Duration, signalCh <-chan os.Signa
 
 // processFileLines is a shared helper function that reads a file line by line,
 // handling different line endings and line length limits, and calls a processor function for each line.
-func processFileLines(p *Processor, file io.Reader, lineProcessor func(line string, lineNumber int)) (int, error) {
+func processFileLines(p *Processor, file io.Reader, lineProcessor func(line string)) error {
 	// Select the line reader function based on config.
 	readLine, err := getLineReader(p.Config.LineEnding)
 	if err != nil {
-		return 0, fmt.Errorf("configuration error with line_ending: %w", err)
+		return fmt.Errorf("configuration error with line_ending: %w", err)
 	}
 
-	reader := bufio.NewReader(file)
-	lineNumber := 0
 	lineLimit := MaxLogLineSize
 
+	reader := bufio.NewReader(file)
 	for {
 		line, readErr := readLine(reader, lineLimit)
-		lineNumber++
 
 		if readErr != nil {
 			if errors.Is(readErr, ErrLineSkipped) {
-				p.LogFunc(logging.LevelWarning, "TAIL_SKIP", "Line %d: Skipped (Length exceeded %d bytes).", lineNumber, lineLimit)
+				p.LogFunc(logging.LevelWarning, "TAIL_SKIP", "Skipped line (length exceeded %d bytes): %.100s...", lineLimit, line)
 				continue
 			}
 			if readErr == io.EOF {
 				// If we read a line and got EOF, process it before exiting.
 				if len(line) > 0 {
-					lineProcessor(line, lineNumber)
+					lineProcessor(line)
 				}
 				break // End of file
 			}
-			// For other read errors, log and continue if possible.
-			p.LogFunc(logging.LevelError, "READ_ERROR", "Line %d: Read error: %v", lineNumber, readErr)
-			continue
+			// For other read errors, log and break. The caller (LiveLogTailer) will handle reopening.
+			p.LogFunc(logging.LevelError, "READ_ERROR", "Read error: %v", readErr)
+			return readErr // Propagate the error up to the caller.
 		}
 
-		lineProcessor(line, lineNumber)
+		lineProcessor(line)
 	}
-	return lineNumber, nil
+	return nil
 }
 
 // DryRunLogProcessor reads and processes a static log file for testing.
@@ -189,26 +187,15 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	defer file.Close()
 
 	// Use the shared line processing logic.
-	linesRead, err := processFileLines(p, file, p.ProcessLogLine)
-	if err != nil {
-		p.LogFunc(logging.LevelError, "DRYRUN_ERROR", "Error processing log file: %v", err)
+	if err := processFileLines(p, file, p.ProcessLogLine); err != nil {
+		// Log the error if processing fails unexpectedly (e.g., config error).
+		p.LogFunc(logging.LevelError, "DRYRUN_ERROR", "Error during file processing: %v", err)
 	}
 
 	// After processing all lines, flush any remaining entries in the buffer.
-	p.ActivityMutex.Lock()
-	if len(p.EntryBuffer) > 0 {
-		p.LogFunc(logging.LevelDebug, "DRYRUN_FLUSH", "Flushing %d buffered entries.", len(p.EntryBuffer))
-		sort.Slice(p.EntryBuffer, func(i, j int) bool {
-			return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
-		})
-		for _, entry := range p.EntryBuffer {
-			checkChainsInternal(p, entry)
-		}
-		p.EntryBuffer = nil
-	}
-	p.ActivityMutex.Unlock()
+	FlushEntryBuffer(p)
 
-	p.LogFunc(logging.LevelInfo, "DRYRUN", "DryRun complete. Read %d lines.", linesRead)
+	p.LogFunc(logging.LevelInfo, "DRYRUN", "DryRun complete.")
 	close(done)
 }
 
@@ -263,7 +250,19 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			continue
 		}
 
-		// Select the line reader function once before the inner loop.
+		// On the very first run, seek to the end to ignore old content.
+		// On subsequent runs (after rotation), we read the new file from the beginning.
+		if firstRun {
+			file.Seek(0, io.SeekEnd)
+			firstRun = false
+		}
+
+		// Signal for test synchronization, if the channel is set.
+		if readySignal != nil {
+			readySignal <- struct{}{}
+		}
+
+		reader := bufio.NewReader(file)
 		readLine, err := getLineReader(p.Config.LineEnding)
 		if err != nil {
 			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Configuration error with line_ending: %v. Retrying.", err)
@@ -271,74 +270,44 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			restartTailing(ErrorRetryDelay)
 			continue
 		}
-
-		// On the very first run, seek to the end of the file to ignore old content.
-		// On subsequent runs (after rotation), we want to read the new file from the beginning.
-		if firstRun {
-			file.Seek(0, io.SeekEnd)
-			firstRun = false
-		}
-		reader := bufio.NewReader(file)
-
-		// Signal for test synchronization, if the channel is set.
-		// This is done AFTER the initial seek to ensure the tailer is truly ready.
-		if readySignal != nil {
-			readySignal <- struct{}{}
-		}
-
-		lineNumber := 0
 		lineLimit := MaxLogLineSize
 
-		// Inner loop for reading new lines
+		// Inner loop for reading new lines. This loop will be broken by file rotation or shutdown.
 		for {
-			// Check for signals first
 			select {
 			case s := <-signalCh:
 				p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
+				FlushEntryBuffer(p) // Final flush on shutdown.
 				file.Close()
 				return
 			default:
-				// Continue reading
+				// Continue to read.
 			}
 
-			line, finalErr := readLine(reader, lineLimit) // Read one line
-			lineNumber++                                  // Increment line number for the new line
+			line, readErr := readLine(reader, lineLimit)
 
-			if finalErr != nil {
-				if errors.Is(finalErr, ErrLineSkipped) {
-					p.LogFunc(logging.LevelWarning, "TAIL_SKIP", "Line %d: Skipped (Length exceeded %d bytes).", lineNumber, lineLimit)
+			if readErr != nil {
+				if errors.Is(readErr, ErrLineSkipped) {
+					p.LogFunc(logging.LevelWarning, "TAIL_SKIP", "Skipped line (length exceeded %d bytes): %.100s...", lineLimit, line)
 					continue
 				}
-
-				if finalErr == io.EOF {
-					// At EOF, check for file rotation before sleeping.
-					if p.TestSignals != nil && p.TestSignals.EOFCheckSignal != nil {
-						p.TestSignals.EOFCheckSignal <- struct{}{}
-					}
-
-					// Flush any lingering entries from the buffer now that we are idle.
+				if readErr == io.EOF {
 					FlushEntryBuffer(p)
-
 					if hasFileBeenRotated(p, LogFilePath, initialStat, p.Config.StatFunc) {
-						// If hasFileBeenRotated failed because of a stat error, it's safer to add a small delay
-						// before retrying to avoid a tight loop if the file is genuinely gone.
-						// The restartTailing function handles the delay and shutdown check.
 						file.Close()
-						restartTailing(FileOpenRetryDelay) // Use a small delay to prevent tight loops.
-						break                              // Break inner loop to reopen
+						restartTailing(FileOpenRetryDelay) // Add delay to prevent tight loop on stat errors.
+						break                              // Break inner loop to reopen.
 					}
-					time.Sleep(p.Config.EOFPollingDelay) // Use configurable polling delay
+					time.Sleep(p.Config.EOFPollingDelay)
 					continue
-				} else {
-					// Read error (non-EOF) is typically a one-off event, but we retry
-					p.LogFunc(logging.LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening in %v.", finalErr, ErrorRetryDelay)
-					file.Close()
-					restartTailing(ErrorRetryDelay)
-					break // Break inner loop to trigger file re-opening
 				}
+				p.LogFunc(logging.LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening file.", readErr)
+				file.Close()
+				restartTailing(ErrorRetryDelay)
+				break // Break the inner loop to force a file reopen via the outer loop.
 			}
 
-			p.ProcessLogLine(line, lineNumber)
+			p.ProcessLogLine(line)
 		}
 	}
 }

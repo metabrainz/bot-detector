@@ -327,7 +327,7 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 		logLine := fmt.Sprintf(tag+": "+format, args...)
 		h.capturedLogs = append(h.capturedLogs, logLine)
 	}
-	h.processor.ProcessLogLine = func(line string, lineNumber int) {
+	h.processor.ProcessLogLine = func(line string) {
 		h.logMutex.Lock()
 		defer h.logMutex.Unlock() //nolint:gocritic
 		h.processedLines = append(h.processedLines, line)
@@ -385,7 +385,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 				os.WriteFile(filePath, []byte("line 1\nline 2\n# a comment\nline 3"), 0644)
 			},
 			expectedLinesProcessed: 3,
-			expectedLogContains:    "DryRun complete. Read 4 lines.",
+			expectedLogContains:    "DryRun complete.",
 		},
 		{
 			name: "Empty line in middle of file",
@@ -393,7 +393,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 				os.WriteFile(filePath, []byte("line 1\n\nline 3"), 0644)
 			},
 			expectedLinesProcessed: 2,
-			expectedLogContains:    "Skipped (Comment/Empty)", // This is now logged by processLogLineInternal
+			expectedLogContains:    "Skipped empty/comment line.",
 		},
 		{
 			name: "Comment line in middle of file",
@@ -401,7 +401,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 				os.WriteFile(filePath, []byte("line 1\n# comment\nline 3"), 0644)
 			},
 			expectedLinesProcessed: 2,
-			expectedLogContains:    "Skipped (Comment/Empty)", // This is now logged by processLogLineInternal
+			expectedLogContains:    "Skipped empty/comment line.",
 		},
 		{
 			name:                   "File Not Found",
@@ -415,7 +415,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 				os.WriteFile(filePath, []byte("line 1\nline 2"), 0644)
 			},
 			expectedLinesProcessed: 2,
-			expectedLogContains:    "DryRun complete. Read 2 lines.",
+			expectedLogContains:    "DryRun complete.",
 		},
 		{
 			name: "Line Exceeds Limit",
@@ -423,7 +423,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 				os.WriteFile(filePath, []byte("this is a normal line\n"+strings.Repeat("a", MaxLogLineSize+1)+"\nthis is another normal line"), 0644)
 			},
 			expectedLinesProcessed: 2, // The long line is skipped, but the other two are processed.
-			expectedLogContains:    "Skipped (Length exceeded",
+			expectedLogContains:    "Skipped line (length exceeded",
 		},
 	}
 

@@ -89,8 +89,8 @@ func main() {
 	p.IsWhitelistedFunc = func(ipInfo IPInfo) bool { return IsIPWhitelisted(p, ipInfo) } // Set the method correctly.
 	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }                  // Assign the real method to the function field.
 
-	// Assign the real implementation for ProcessLogLine.
-	p.ProcessLogLine = func(line string, lineNumber int) { processLogLineInternal(p, line, lineNumber) }
+	// Assign the real implementation for ProcessLogLine, which no longer uses line numbers.
+	p.ProcessLogLine = func(line string) { processLogLineInternal(p, line) }
 
 	// Log the initial configuration summary.
 	logConfigurationSummary(p)
@@ -128,6 +128,7 @@ func start(p *Processor) {
 				go ConfigWatcher(p, stopWatcher)
 			}
 			go CleanUpIdleActivity(p, stopWatcher)
+			go entryBufferWorker(p, stopWatcher)
 		}
 		// Listen for OS signals on the processor's channel
 		signal.Notify(p.signalCh, syscall.SIGINT, syscall.SIGTERM)
