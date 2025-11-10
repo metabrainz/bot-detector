@@ -18,7 +18,7 @@ func TestFlagUsage(t *testing.T) {
 	testFlagSet.SetOutput(&actualOutput) // Redirect output to our buffer
 
 	// We need to re-register our flags and usage function on this new flag set.
-	RegisterCLIFlags(testFlagSet)
+	_ = RegisterCLIFlags(testFlagSet) // Ignore return value for this test
 
 	// Define the usage function directly for the test flag set.
 	testFlagSet.Usage = func() {

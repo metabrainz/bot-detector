@@ -970,10 +970,10 @@ func SignalReloader(p *Processor, stop <-chan struct{}, signalCh chan os.Signal)
 		return
 	}
 
-	signalName := strings.ToUpper(ReloadOnSignal)
+	signalName := strings.ToUpper(p.ReloadOnSignal)
 	reloadSignal, ok := signalMap[signalName]
 	if !ok {
-		p.LogFunc(logging.LevelCritical, "FATAL", "Unsupported signal for reloading: '%s'. Use HUP, USR1, or USR2.", ReloadOnSignal)
+		p.LogFunc(logging.LevelCritical, "FATAL", "Unsupported signal for reloading: '%s'. Use HUP, USR1, or USR2.", p.ReloadOnSignal)
 		// In a real app, you might want to stop the process here.
 		// For now, we just stop this goroutine.
 		return

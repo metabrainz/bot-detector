@@ -62,6 +62,7 @@ type Processor struct {
 	TestSignals       *TestSignals     // Test-only signals for synchronization.
 	ConfigPath        string
 	LogPath           string
+	ReloadOnSignal    string
 }
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.

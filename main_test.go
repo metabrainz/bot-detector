@@ -189,7 +189,7 @@ chains:
 	}
 
 	// Enable signal-based reloading for this test.
-	ReloadOnSignal = "HUP"
+	// This is now set on the processor directly.
 
 	// 2. Load the initial configuration.
 	initialLoadedCfg, err := LoadConfigFromYAML(tempFile)
@@ -210,7 +210,8 @@ chains:
 			// This signal is used by the test to wait for the reload to complete.
 			ReloadDoneSignal: make(chan struct{}, 1),
 		},
-		ConfigPath: tempFile,
+		ConfigPath:     tempFile,
+		ReloadOnSignal: "HUP", // Set for this test
 	}
 
 	// 4. Start the SignalReloader.

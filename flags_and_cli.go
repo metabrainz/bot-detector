@@ -6,21 +6,25 @@ import (
 	"os"
 )
 
-// --- CONFIGURATION GLOBAL VARS (Set by CLI flags) ---
-var (
-	DryRun         bool
-	ShowVersion    bool
-	ReloadOnSignal string
-)
+// CLIFlagValues holds pointers to the variables where command-line flag values will be stored.
+// This struct is returned by RegisterCLIFlags to provide access to the parsed flag values.
+type CLIFlagValues struct {
+	LogPath        *string
+	YAMLPath       *string
+	DryRun         *bool
+	ShowVersion    *bool
+	ReloadOnSignal *string
+}
 
 // RegisterCLIFlags registers the command-line flags with the global flag set.
-func RegisterCLIFlags(fs *flag.FlagSet) (*string, *string) {
-	logPath := fs.String("log-path", "", "Required. Path to the access log file to tail (or to read in dry-run mode).")
-	yamlPath := fs.String("yaml-path", "", "Required. Path to the YAML configuration file.")
-	fs.BoolVar(&DryRun, "dry-run", false, "Optional. If true, runs in test mode, ignoring HAProxy and live logging.")
-	fs.BoolVar(&ShowVersion, "version", false, "Optional. Print the application version and exit.")
-	fs.StringVar(&ReloadOnSignal, "reload-on-signal", "", "Optional. If set to a signal name (e.g., HUP, USR1), disables file watcher and reloads config on signal.")
-	return logPath, yamlPath
+func RegisterCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
+	flags := &CLIFlagValues{}
+	flags.LogPath = fs.String("log-path", "", "Required. Path to the access log file to tail (or to read in dry-run mode).")
+	flags.YAMLPath = fs.String("yaml-path", "", "Required. Path to the YAML configuration file.")
+	flags.DryRun = fs.Bool("dry-run", false, "Optional. If true, runs in test mode, ignoring HAProxy and live logging.")
+	flags.ShowVersion = fs.Bool("version", false, "Optional. Print the application version and exit.")
+	flags.ReloadOnSignal = fs.String("reload-on-signal", "", "Optional. If set to a signal name (e.g., HUP, USR1), disables file watcher and reloads config on signal.")
+	return flags
 }
 
 func init() {
