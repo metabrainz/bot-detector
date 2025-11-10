@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -47,6 +48,8 @@ type Processor struct {
 	ActivityStore     map[TrackingKey]*BotActivity
 	Blocker           Blocker
 	ConfigMutex       *sync.RWMutex
+	ParseErrors       atomic.Int64
+	ChainsCompleted   atomic.Int64
 	Chains            []BehavioralChain
 	CommandExecutor   func(p *Processor, addr, ip, command string) error // The function that executes the backend command
 	Config            *AppConfig

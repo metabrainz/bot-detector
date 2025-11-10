@@ -79,6 +79,9 @@ func preCheckActivity(p *Processor, entry *LogEntry, trackingKey TrackingKey) (*
 // It updates the activity state and returns true if the chain was completed.
 // The caller is responsible for holding the ActivityMutex.
 func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity) {
+	// Atomically increment the counter for completed chains.
+	p.ChainsCompleted.Add(1)
+
 	// --- 1. Log the completion event ---
 	logLevel := logging.LevelCritical
 	if IsTesting() {

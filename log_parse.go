@@ -96,6 +96,7 @@ func processLogLineInternal(p *Processor, line string) {
 			logLevel = logging.LevelDebug
 		}
 		p.LogFunc(logLevel, "PARSE_FAIL", "Parsing failed for line \"%s\": %v", line, err)
+		p.ParseErrors.Add(1)
 		return
 	}
 

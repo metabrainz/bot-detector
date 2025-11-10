@@ -203,7 +203,9 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	FlushEntryBuffer(p)
 	elapsedTime := time.Since(startTime)
 
-	metricsSummary := fmt.Sprintf("Lines Processed: %d, Time Elapsed: %v", lineCount, elapsedTime)
+	chainsCompleted := p.ChainsCompleted.Load()
+	parseErrors := p.ParseErrors.Load()
+	metricsSummary := fmt.Sprintf("Lines Processed: %d, Chains Completed: %d, Parse Errors: %d, Time Elapsed: %v", lineCount, chainsCompleted, parseErrors, elapsedTime)
 	if elapsedTime.Seconds() > 0 {
 		linesPerSecond := float64(lineCount) / elapsedTime.Seconds()
 		metricsSummary += fmt.Sprintf(", Rate: %.2f lines/sec", linesPerSecond)
