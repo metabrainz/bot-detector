@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -38,8 +39,14 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+
+	// Resolve the config path to an absolute path to make file matcher paths relative to it.
+	absConfigPath, err := filepath.Abs(*cliFlags.ConfigPath)
+	if err != nil {
+		log.Fatalf("[FATAL] Could not determine absolute path for config file: %v", err)
+	}
 	// Load initial configuration from YAML.
-	loadedCfg, err := LoadConfigFromYAML(*cliFlags.ConfigPath)
+	loadedCfg, err := LoadConfigFromYAML(absConfigPath)
 	if err != nil {
 		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
 	}
@@ -85,7 +92,7 @@ func main() {
 		signalCh:       make(chan os.Signal, 1),
 		LogFunc:        logging.LogOutput,
 		NowFunc:        time.Now, // Use the real time.Now in production.
-		ConfigPath:     *cliFlags.ConfigPath,
+		ConfigPath:     absConfigPath,
 		LogPath:        *cliFlags.LogPath,
 		ReloadOnSignal: *cliFlags.ReloadOnSignal,
 	}
