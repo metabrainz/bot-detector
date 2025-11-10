@@ -41,8 +41,8 @@ The application is configured using a YAML file and a few command-line flags.
 
 ```sh
 ./bot-detector \
-  --log-path "/var/log/http/access.log" \
-  --yaml-path "config.yaml"
+  --log-path "/var/log/haproxy/access.log" \
+  --yaml-path "/etc/bot-detector/config.yaml"
 ```
 
 #### **Dry Run Mode (Testing)**
@@ -326,7 +326,7 @@ The bot-detector holds the state of IPs in memory. To prevent memory from growin
 
 
 
-## **Example chains.yaml**
+## **Example config.yaml**
 
 This example showcases a variety of features, including different matchers, time-based conditions, and actions.
 
