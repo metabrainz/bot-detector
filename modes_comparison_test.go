@@ -43,12 +43,7 @@ func (b *concurrentBuffer) Reset() {
 
 // LoadConfigFromYAMLTest is a test helper that loads a YAML configuration file
 // by temporarily setting the global YAMLFilePath.
-func LoadConfigFromYAMLTest(path string) (*LoadedConfig, error) {
-	originalPath := YAMLFilePath
-	YAMLFilePath = path
-	defer func() { YAMLFilePath = originalPath }()
-	return LoadConfigFromYAML()
-}
+func LoadConfigFromYAMLTest(path string) (*LoadedConfig, error) { return LoadConfigFromYAML(path) }
 
 // setupTestProcessor initializes a Processor for testing with a given dryRun mode.
 // It captures log output for verification.

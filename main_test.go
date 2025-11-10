@@ -195,13 +195,11 @@ chains:
 		t.Fatalf("Failed to write initial temp yaml file: %v", err)
 	}
 
-	// Point the global YAMLFilePath to our temp file for the duration of the test.
-	YAMLFilePath = tempFile
 	// Enable signal-based reloading for this test.
 	ReloadOnSignal = "HUP"
 
 	// 2. Load the initial configuration.
-	initialLoadedCfg, err := LoadConfigFromYAML()
+	initialLoadedCfg, err := LoadConfigFromYAML(tempFile)
 	if err != nil {
 		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
 	}
@@ -219,6 +217,7 @@ chains:
 			// This signal is used by the test to wait for the reload to complete.
 			ReloadDoneSignal: make(chan struct{}, 1),
 		},
+		ConfigPath: tempFile,
 	}
 
 	// 4. Start the SignalReloader.

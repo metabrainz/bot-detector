@@ -103,11 +103,11 @@ chains:
     steps:
       - field_matches: { Path: "/default" }
 `
-	setupTestYAML(t, yamlContent)
+	tmpConfigPath := setupTestYAML(t, yamlContent)
 	t.Cleanup(resetGlobalState)
 
 	// --- Act ---
-	loadedCfg, err := LoadConfigFromYAML() // Now returns *LoadedConfig, error
+	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
 
 	// --- Assert ---
 	if err != nil {
@@ -170,20 +170,16 @@ chains:
 	}
 }
 
-func setupTestYAML(t *testing.T, content string) {
+func setupTestYAML(t *testing.T, content string) string {
 	t.Helper() // Mark this as a test helper function.
 
 	tempDir := t.TempDir()
-	tempFile := filepath.Join(tempDir, "config.yaml")
-	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
+	tmpConfigPath := filepath.Join(tempDir, "config test.yaml")
+	if err := os.WriteFile(tmpConfigPath, []byte(content), 0644); err != nil {
 		t.Fatalf("Failed to write temp yaml file: %v", err)
 	}
 
-	originalPath := YAMLFilePath
-	YAMLFilePath = tempFile
-	t.Cleanup(func() {
-		YAMLFilePath = originalPath
-	})
+	return tmpConfigPath
 }
 
 func TestLoadConfigFromYAML_BlockerSettings(t *testing.T) {
@@ -228,8 +224,8 @@ version: "1.0"
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setupTestYAML(t, tt.yamlContent)
-			loadedCfg, err := LoadConfigFromYAML()
+			tmpConfigPath := setupTestYAML(t, tt.yamlContent)
+			loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
 			if err != nil {
 				t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 			}
@@ -260,8 +256,8 @@ chains:
             gt: 400
             lte: 404
 `
-	setupTestYAML(t, yamlContent)
-	loadedCfg, err := LoadConfigFromYAML()
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 	}
@@ -581,10 +577,10 @@ chains:
       - field_matches:
           Method: 123 # Using an integer value on a string field
 `
-	setupTestYAML(t, yamlContent)
+	tmpConfigPath := setupTestYAML(t, yamlContent)
 
 	// --- Act ---
-	loadedCfg, err := LoadConfigFromYAML()
+	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 	}
@@ -604,11 +600,12 @@ chains:
 
 func runErrorTest(t *testing.T, name, yamlContent, expectedError string) {
 	t.Run(name, func(t *testing.T) {
+		tmpConfigPath := ""
 		if name == "File Not Found" {
 			// For this specific test, ensure the file does not exist.
-			YAMLFilePath = filepath.Join(t.TempDir(), "nonexistent.yaml")
+			tmpConfigPath = filepath.Join(t.TempDir(), "nonexistent.yaml")
 		} else {
-			setupTestYAML(t, yamlContent)
+			tmpConfigPath = setupTestYAML(t, yamlContent)
 		}
 
 		// For tests that expect non-fatal errors, we can suppress the log output
@@ -619,7 +616,7 @@ func runErrorTest(t *testing.T, name, yamlContent, expectedError string) {
 			t.Cleanup(func() { logging.LogOutput = originalLogFunc })
 		}
 
-		_, err := LoadConfigFromYAML()
+		_, err := LoadConfigFromYAML(tmpConfigPath)
 
 		if expectedError == "" {
 			if err != nil {
@@ -941,9 +938,9 @@ version: "1.0"
 log_format_regex: '^(?P<VHost>\S+) (?P<IP>\S+) \S+ \S+ \[(?P<Timestamp>[^\]]+)\] \"(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)\" (?P<StatusCode>\d{1,3}) \d+ \"[^\"]*\" \"(?P<UserAgent>[^\"]*)\"$'
 chains: []
 `
-	setupTestYAML(t, yamlContent)
+	tmpConfigPath := setupTestYAML(t, yamlContent)
 
-	loadedCfg, err := LoadConfigFromYAML()
+	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() failed unexpectedly: %v", err)
 	}
@@ -980,9 +977,9 @@ version: "1.0"
 log_format_regex: '^(?P<VHost>\S+) \S+ \S+ \S+ \[(?P<Timestamp>[^\]]+)\] ".+"$'
 chains: []
 `
-	setupTestYAML(t, yamlContent)
+	tmpConfigPath := setupTestYAML(t, yamlContent)
 
-	_, err := LoadConfigFromYAML()
+	_, err := LoadConfigFromYAML(tmpConfigPath)
 	if err == nil {
 		t.Fatal("Expected an error when loading regex with missing required capture group, but got nil.")
 	}
@@ -1000,9 +997,9 @@ log_format_regex: '^(?P<IP>\S+) \[(?P<Timestamp>[^\]]+)\] (?P<Path>\S+)$'
 chains: []
 `, time.RFC3339)
 
-	setupTestYAML(t, yamlContent)
+	tmpConfigPath := setupTestYAML(t, yamlContent)
 
-	loadedCfg, err := LoadConfigFromYAML()
+	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() failed unexpectedly: %v", err)
 	}
@@ -1223,19 +1220,10 @@ chains:
     action: "log"
     steps: [{field_matches: {Path: "/initial"}}]
 `
-	tempDir := t.TempDir()
-	tempFile := filepath.Join(tempDir, "config.yaml")
-	if err := os.WriteFile(tempFile, []byte(initialYAMLContent), 0644); err != nil {
-		t.Fatalf("Failed to write initial temp yaml file: %v", err)
-	}
-
-	// Point the global YAMLFilePath to our temp file for the duration of the test.
-	originalPath := YAMLFilePath
-	YAMLFilePath = tempFile
-	t.Cleanup(func() { YAMLFilePath = originalPath })
+	tmpConfigPath := setupTestYAML(t, initialYAMLContent)
 
 	// 2. Load the initial configuration.
-	initialLoadedCfg, err := LoadConfigFromYAML()
+	initialLoadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
 	if err != nil {
 		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
 	}
@@ -1245,17 +1233,21 @@ chains:
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ConfigMutex:   &sync.RWMutex{},
-		Chains:        initialLoadedCfg.Chains,
-		Config:        &AppConfig{},
-		LogFunc:       func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
+		Chains:        initialLoadedCfg.Chains, // Set initial chains
+		Config: &AppConfig{ // Set initial config state
+			PollingInterval:  10 * time.Millisecond,
+			WhitelistNets:    initialLoadedCfg.WhitelistNets,
+			FileDependencies: initialLoadedCfg.FileDependencies,
+		},
+		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 		TestSignals: &TestSignals{
 			ForceCheckSignal: make(chan struct{}, 1),
 			ReloadDoneSignal: make(chan struct{}, 1),
 		},
+		ConfigPath: tmpConfigPath,
 	}
-	processor.Config.PollingInterval = 10 * time.Millisecond
 	// Set LastModTime to the actual modification time of the initial file.
-	initialFileInfo, err := os.Stat(tempFile)
+	initialFileInfo, err := os.Stat(tmpConfigPath)
 	if err != nil {
 		t.Fatalf("Failed to stat initial temp yaml file: %v", err)
 	}
@@ -1278,13 +1270,13 @@ chains:
     action: "log"
     steps: [{field_matches: {Path: "/reloaded"}}]
 `
-	if err := os.WriteFile(tempFile, []byte(modifiedYAMLContent), 0644); err != nil {
+	if err := os.WriteFile(tmpConfigPath, []byte(modifiedYAMLContent), 0644); err != nil {
 		t.Fatalf("Failed to write modified temp yaml file: %v", err)
 	}
 	// Manually advance the file's modification time to guarantee the watcher sees a change.
 	// This is faster and more reliable than time.Sleep().
 	futureTime := time.Now().Add(1 * time.Second)
-	if err := os.Chtimes(tempFile, futureTime, futureTime); err != nil {
+	if err := os.Chtimes(tmpConfigPath, futureTime, futureTime); err != nil {
 		t.Fatalf("Failed to change file modification time: %v", err)
 	}
 
@@ -1337,18 +1329,9 @@ chains:
           UserAgent: "file:%s"
 `, agentFilePath)
 
-	tempYamlFile := filepath.Join(tempDir, "config.yaml")
-	if err := os.WriteFile(tempYamlFile, []byte(initialYAMLContent), 0644); err != nil {
-		t.Fatalf("Failed to write initial temp yaml file: %v", err)
-	}
-
-	// Point the global YAMLFilePath to our temp file for the duration of the test.
-	originalPath := YAMLFilePath
-	YAMLFilePath = tempYamlFile
-	t.Cleanup(func() { YAMLFilePath = originalPath })
-
+	tmpConfigPath := setupTestYAML(t, initialYAMLContent)
 	// 3. Load the initial configuration.
-	initialLoadedCfg, err := LoadConfigFromYAML()
+	initialLoadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
 	if err != nil {
 		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
 	}
@@ -1367,9 +1350,10 @@ chains:
 			ForceCheckSignal: make(chan struct{}, 1),
 			ReloadDoneSignal: make(chan struct{}, 1),
 		},
+		ConfigPath: tmpConfigPath,
 	}
 	processor.Config.PollingInterval = 10 * time.Millisecond
-	initialFileInfo, _ := os.Stat(tempYamlFile)
+	initialFileInfo, _ := os.Stat(tmpConfigPath)
 	processor.Config.LastModTime = initialFileInfo.ModTime() // Set initial mod time
 
 	// 5. Start the ConfigWatcher with the test signal channel.
@@ -1435,18 +1419,9 @@ chains:
     action: "log"
     steps: [{field_matches: {Path: "/initial"}}]
 `
-	tempDir := t.TempDir()
-	tempFile := filepath.Join(tempDir, "config.yaml")
-	if err := os.WriteFile(tempFile, []byte(initialYAMLContent), 0644); err != nil {
-		t.Fatalf("Failed to write initial temp yaml file: %v", err)
-	}
-
-	originalPath := YAMLFilePath
-	YAMLFilePath = tempFile
-	t.Cleanup(func() { YAMLFilePath = originalPath })
-
+	tmpConfigPath := setupTestYAML(t, initialYAMLContent)
 	// 2. Load the initial configuration.
-	initialLoadedCfg, err := LoadConfigFromYAML()
+	initialLoadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
 	if err != nil {
 		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
 	}
@@ -1462,9 +1437,10 @@ chains:
 			ForceCheckSignal: make(chan struct{}, 1),
 			ReloadDoneSignal: make(chan struct{}, 1),
 		},
+		ConfigPath: tmpConfigPath,
 	}
 	processor.Config.PollingInterval = 10 * time.Millisecond
-	initialFileInfo, _ := os.Stat(tempFile)
+	initialFileInfo, _ := os.Stat(tmpConfigPath)
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
 	// 4. Set up the channel-signaling LogFunc BEFORE starting the goroutine.
@@ -1495,12 +1471,12 @@ chains:
     action: "log"
     steps: [{field_matches: {Path: "regex:("}}]
 `
-	if err := os.WriteFile(tempFile, []byte(invalidYAMLContent), 0644); err != nil {
+	if err := os.WriteFile(tmpConfigPath, []byte(invalidYAMLContent), 0644); err != nil {
 		t.Fatalf("Failed to write invalid YAML: %v", err)
 	}
 	// Manually advance the file's modification time.
 	futureTime := time.Now().Add(1 * time.Second)
-	if err := os.Chtimes(tempFile, futureTime, futureTime); err != nil {
+	if err := os.Chtimes(tmpConfigPath, futureTime, futureTime); err != nil {
 		t.Fatalf("Failed to change file modification time: %v", err)
 	}
 
@@ -1543,15 +1519,7 @@ chains:
     action: "log"
     steps: [{field_matches: {Path: "/initial"}}]
 `
-	tempDir := t.TempDir()
-	tempFile := filepath.Join(tempDir, "config.yaml")
-	if err := os.WriteFile(tempFile, []byte(initialYAMLContent), 0644); err != nil {
-		t.Fatalf("Failed to write initial temp yaml file: %v", err)
-	}
-
-	originalPath := YAMLFilePath
-	YAMLFilePath = tempFile
-	t.Cleanup(func() { YAMLFilePath = originalPath })
+	tmpConfigPath := setupTestYAML(t, initialYAMLContent)
 
 	// 2. Create the processor with a log capturer.
 	var capturedLogs []string
@@ -1568,9 +1536,10 @@ chains:
 		TestSignals: &TestSignals{
 			ForceCheckSignal: make(chan struct{}, 1),
 		},
+		ConfigPath: tmpConfigPath,
 	}
 	processor.Config.PollingInterval = 10 * time.Millisecond
-	initialFileInfo, _ := os.Stat(tempFile)
+	initialFileInfo, _ := os.Stat(tmpConfigPath)
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
 	// 3. Set up log capture BEFORE starting the watcher to avoid a race condition.
@@ -1591,7 +1560,7 @@ chains:
 	// 4. Delete the YAML file to trigger a stat error on the next poll.
 	// We add a small sleep to ensure the watcher has started and is ready.
 	time.Sleep(50 * time.Millisecond)
-	if err := os.Remove(tempFile); err != nil {
+	if err := os.Remove(tmpConfigPath); err != nil {
 		t.Fatalf("Failed to remove temp file: %v", err)
 	}
 
@@ -1622,8 +1591,8 @@ func runMatcherTest(t *testing.T, yamlContent string, testCases map[string]struc
 	expected bool
 }) {
 	t.Helper()
-	setupTestYAML(t, yamlContent)
-	loadedCfg, err := LoadConfigFromYAML()
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 	}

@@ -38,7 +38,7 @@ func main() {
 		os.Exit(1)
 	}
 	// Load initial configuration from YAML.
-	loadedCfg, err := LoadConfigFromYAML()
+	loadedCfg, err := LoadConfigFromYAML(YAMLFilePath)
 	if err != nil {
 		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
 	}
@@ -78,12 +78,13 @@ func main() {
 		CommandExecutor: func(p *Processor, addr, ip, command string) error {
 			return executeCommandImpl(p, addr, ip, command)
 		},
-		Config:   appConfig,
-		LogRegex: loadedCfg.LogFormatRegex,
-		DryRun:   DryRun,
-		signalCh: make(chan os.Signal, 1),
-		LogFunc:  logging.LogOutput,
-		NowFunc:  time.Now, // Use the real time.Now in production.
+		Config:     appConfig,
+		LogRegex:   loadedCfg.LogFormatRegex,
+		DryRun:     DryRun,
+		signalCh:   make(chan os.Signal, 1),
+		LogFunc:    logging.LogOutput,
+		NowFunc:    time.Now, // Use the real time.Now in production.
+		ConfigPath: YAMLFilePath,
 	}
 	// TestSignals is intentionally left nil in production.
 	// Inject the HAProxyBlocker.

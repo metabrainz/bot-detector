@@ -558,11 +558,6 @@ func TestDryRunMode(t *testing.T) {
 	// --- Setup ---
 	resetGlobalState()
 
-	// Set required flags for this test
-	originalYAMLPath := YAMLFilePath
-	YAMLFilePath = "testdata/config.yaml" // Assume it exists for this test
-	t.Cleanup(func() { YAMLFilePath = originalYAMLPath })
-
 	// The config.yaml file now references a file matcher. We need to create it.
 	tempDir := t.TempDir()
 	uaFile := filepath.Join(tempDir, "bad_user_agents.txt")
@@ -577,7 +572,7 @@ func TestDryRunMode(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Remove("bad_user_agents.txt") })
 	// 1. Load configuration (chains, whitelist, etc.)
-	loadedCfg, err := LoadConfigFromYAML()
+	loadedCfg, err := LoadConfigFromYAML("testdata/config.yaml")
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 	}

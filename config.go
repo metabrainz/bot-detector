@@ -493,10 +493,15 @@ func parseDuration(durationStr string) (time.Duration, error) {
 }
 
 // LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
-func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
-	data, err := os.ReadFile(YAMLFilePath)
+func LoadConfigFromYAML(paths ...string) (*LoadedConfig, error) {
+	configPath := YAMLFilePath
+	if len(paths) == 1 {
+		configPath = paths[0]
+	}
+
+	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read YAML file %s: %w", YAMLFilePath, err)
+		return nil, fmt.Errorf("failed to read YAML file %s: %w", configPath, err)
 	}
 
 	var config ChainConfig
@@ -877,36 +882,43 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 	oldLogRegex := p.LogRegex
 	p.ConfigMutex.RUnlock()
 
-	loadedCfg, err := LoadConfigFromYAML()
+	loadedCfg, err := LoadConfigFromYAML(p.ConfigPath)
 	if err != nil {
 		p.LogFunc(logging.LevelError, "LOAD_ERROR", "Failed to reload configuration: %v", err)
 		return // The deferred signal will still fire.
 	}
 
+	// Create a new AppConfig from the loaded configuration.
+	newAppConfig := &AppConfig{
+		BlockTableNameFallback:   loadedCfg.BlockTableNameFallback,
+		CleanupInterval:          loadedCfg.CleanupInterval,
+		DefaultBlockDuration:     loadedCfg.DefaultBlockDuration,
+		DurationToTableName:      loadedCfg.DurationToTableName,
+		EOFPollingDelay:          loadedCfg.EOFPollingDelay,
+		FileDependencies:         loadedCfg.FileDependencies,
+		BlockerAddresses:         loadedCfg.BlockerAddresses,
+		BlockerDialTimeout:       loadedCfg.BlockerDialTimeout,
+		BlockerMaxRetries:        loadedCfg.BlockerMaxRetries,
+		BlockerRetryDelay:        loadedCfg.BlockerRetryDelay,
+		BlockerCommandQueueSize:  loadedCfg.BlockerCommandQueueSize,
+		BlockerCommandsPerSecond: loadedCfg.BlockerCommandsPerSecond,
+		IdleTimeout:              loadedCfg.IdleTimeout,
+		LineEnding:               loadedCfg.LineEnding,
+		LastModTime:              time.Now(), // Use time.Now() to avoid race conditions
+		MaxTimeSinceLastHit:      loadedCfg.MaxTimeSinceLastHit,
+		OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
+		PollingInterval:          loadedCfg.PollingInterval,
+		TimestampFormat:          loadedCfg.TimestampFormat,
+		WhitelistNets:            loadedCfg.WhitelistNets,
+		StatFunc:                 oldConfig.StatFunc, // Preserve mockable functions
+	}
+
 	// Update the processor's state with the new config.
 	p.ConfigMutex.Lock()
 	p.Chains = loadedCfg.Chains
-	p.Config.WhitelistNets = loadedCfg.WhitelistNets
-	p.Config.BlockerAddresses = loadedCfg.BlockerAddresses
-	p.Config.BlockerMaxRetries = loadedCfg.BlockerMaxRetries
-	p.Config.BlockerRetryDelay = loadedCfg.BlockerRetryDelay
-	p.Config.BlockerDialTimeout = loadedCfg.BlockerDialTimeout
-	p.Config.BlockerCommandQueueSize = loadedCfg.BlockerCommandQueueSize
-	p.Config.BlockerCommandsPerSecond = loadedCfg.BlockerCommandsPerSecond
-	p.Config.DurationToTableName = loadedCfg.DurationToTableName
-	p.Config.BlockTableNameFallback = loadedCfg.BlockTableNameFallback
-	p.Config.DefaultBlockDuration = loadedCfg.DefaultBlockDuration
-	p.Config.PollingInterval = loadedCfg.PollingInterval
-	p.Config.CleanupInterval = loadedCfg.CleanupInterval
-	p.Config.IdleTimeout = loadedCfg.IdleTimeout
-	p.Config.OutOfOrderTolerance = loadedCfg.OutOfOrderTolerance
-	p.Config.TimestampFormat = loadedCfg.TimestampFormat
-	p.Config.LineEnding = loadedCfg.LineEnding
+	p.Config = newAppConfig // Atomically swap the config pointer.
 	p.LogRegex = loadedCfg.LogFormatRegex
 	logging.SetLogLevel(loadedCfg.LogLevel)
-	p.Config.MaxTimeSinceLastHit = loadedCfg.MaxTimeSinceLastHit
-	p.Config.FileDependencies = loadedCfg.FileDependencies
-	p.Config.LastModTime = time.Now() // Use time.Now() to avoid race conditions
 	p.ConfigMutex.Unlock()
 
 	// --- Compare and log general config changes ---
@@ -1034,16 +1046,16 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 		changedFile := ""
 
 		// 1. Check the main YAML file
-		fileInfo, err := os.Stat(YAMLFilePath)
+		fileInfo, err := os.Stat(p.ConfigPath)
 		if err != nil {
-			p.LogFunc(logging.LevelError, "WATCH_ERROR", "Failed to stat file %s: %v", YAMLFilePath, err)
+			p.LogFunc(logging.LevelError, "WATCH_ERROR", "Failed to stat file %s: %v", p.ConfigPath, err)
 			continue
 		}
 
 		p.ConfigMutex.RLock()
 		if fileInfo.ModTime().After(p.Config.LastModTime) {
 			isChanged = true
-			changedFile = YAMLFilePath
+			changedFile = p.ConfigPath
 		} else {
 			// 2. Check all file dependencies if YAML hasn't changed
 			for _, depPath := range p.Config.FileDependencies {
