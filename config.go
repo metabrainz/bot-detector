@@ -493,12 +493,7 @@ func parseDuration(durationStr string) (time.Duration, error) {
 }
 
 // LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
-func LoadConfigFromYAML(paths ...string) (*LoadedConfig, error) {
-	configPath := YAMLFilePath
-	if len(paths) == 1 {
-		configPath = paths[0]
-	}
-
+func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read YAML file %s: %w", configPath, err)

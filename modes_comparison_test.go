@@ -41,10 +41,6 @@ func (b *concurrentBuffer) Reset() {
 	b.b.Reset()
 }
 
-// LoadConfigFromYAMLTest is a test helper that loads a YAML configuration file
-// by temporarily setting the global YAMLFilePath.
-func LoadConfigFromYAMLTest(path string) (*LoadedConfig, error) { return LoadConfigFromYAML(path) }
-
 // setupTestProcessor initializes a Processor for testing with a given dryRun mode.
 // It captures log output for verification.
 func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Processor, *concurrentBuffer, chan struct{}) {
@@ -72,7 +68,7 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 
 	// Load base configuration from a test file.
 	testYAMLPath := "testdata/config.yaml"
-	loadedCfg, err := LoadConfigFromYAMLTest(testYAMLPath)
+	loadedCfg, err := LoadConfigFromYAML(testYAMLPath)
 	if err != nil {
 		t.Fatalf("Failed to load test YAML config: %v", err)
 	}

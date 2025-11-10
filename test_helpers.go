@@ -38,12 +38,9 @@ func muteGlobalLogger() {
 func resetGlobalState() {
 	muteGlobalLogger()
 
-	// Reset the global flag set to clear any flags parsed in other tests.
-	flag.CommandLine = flag.NewFlagSet("test", flag.ContinueOnError)
-	// Re-register application-specific flags.
-	RegisterCLIFlags(flag.CommandLine)
-	// Re-register the standard testing flags. This is crucial for `IsTesting()` to work.
-	testing.Init()
+	// Reset the global flag set to clear any flags parsed in other tests. This is still
+	// good practice, even if we don't have many global flags anymore.
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 }
 
 // MockBlocker implements the Blocker interface for testing, allowing Block() calls to be intercepted.

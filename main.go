@@ -23,22 +23,23 @@ var signalMap = map[string]os.Signal{
 
 // main is the application entry point.
 func main() {
+	yamlPath := RegisterCLIFlags(flag.CommandLine)
 	// Parse CLI flags
 	flag.Parse()
 
 	// Handle the version flag first. If present, print version and exit.
 	if ShowVersion {
-		fmt.Printf("bot-detector version %s (c) MetaBrainz Foundation\n", AppVersion)
+		fmt.Printf("bot-detector version %s\n", AppVersion)
 		os.Exit(0)
 	}
 
 	// Validate that required flags are provided.
-	if LogFilePath == "" || YAMLFilePath == "" {
+	if LogFilePath == "" || *yamlPath == "" {
 		flag.Usage()
 		os.Exit(1)
 	}
 	// Load initial configuration from YAML.
-	loadedCfg, err := LoadConfigFromYAML(YAMLFilePath)
+	loadedCfg, err := LoadConfigFromYAML(*yamlPath)
 	if err != nil {
 		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
 	}
@@ -84,7 +85,7 @@ func main() {
 		signalCh:   make(chan os.Signal, 1),
 		LogFunc:    logging.LogOutput,
 		NowFunc:    time.Now, // Use the real time.Now in production.
-		ConfigPath: YAMLFilePath,
+		ConfigPath: *yamlPath,
 	}
 	// TestSignals is intentionally left nil in production.
 	// Inject the HAProxyBlocker.
