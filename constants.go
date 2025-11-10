@@ -41,4 +41,6 @@ const (
 	DefaultHAProxyMaxRetries  = 3
 	DefaultHAProxyRetryDelay  = 200 * time.Millisecond
 	DefaultHAProxyDialTimeout = 5 * time.Second
+	DefaultHAProxyCommandQueueSize = 1000 // Default queue size
+	DefaultHAProxyCommandsPerSecond = 10  // Default rate limit
 )

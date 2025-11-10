@@ -688,6 +688,7 @@ func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 	// --- PARSE HAPROXY TIMEOUTS ---
 	var haProxyMaxRetries int
 	var haProxyRetryDelay, haProxyDialTimeout time.Duration
+	var haProxyCommandQueueSize, haProxyCommandsPerSecond int
 
 	if config.HAProxyMaxRetries > 0 {
 		haProxyMaxRetries = config.HAProxyMaxRetries
@@ -711,6 +712,18 @@ func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 		}
 	} else {
 		haProxyDialTimeout = DefaultHAProxyDialTimeout
+	}
+
+	if config.HAProxyCommandQueueSize > 0 {
+		haProxyCommandQueueSize = config.HAProxyCommandQueueSize
+	} else {
+		haProxyCommandQueueSize = DefaultHAProxyCommandQueueSize
+	}
+
+	if config.HAProxyCommandsPerSecond > 0 {
+		haProxyCommandsPerSecond = config.HAProxyCommandsPerSecond
+	} else {
+		haProxyCommandsPerSecond = DefaultHAProxyCommandsPerSecond
 	}
 
 	// --- PARSE CHAINS ---
@@ -839,6 +852,8 @@ func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 		HAProxyDialTimeout:     haProxyDialTimeout,
 		HAProxyMaxRetries:      haProxyMaxRetries,
 		HAProxyRetryDelay:      haProxyRetryDelay,
+		HAProxyCommandQueueSize: haProxyCommandQueueSize,
+		HAProxyCommandsPerSecond: haProxyCommandsPerSecond,
 		IdleTimeout:            idleTimeout,
 		LogLevel:               logLevelStr,
 		LineEnding:             lineEndingStr,
@@ -876,6 +891,8 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 	p.Config.HAProxyMaxRetries = loadedCfg.HAProxyMaxRetries
 	p.Config.HAProxyRetryDelay = loadedCfg.HAProxyRetryDelay
 	p.Config.HAProxyDialTimeout = loadedCfg.HAProxyDialTimeout
+	p.Config.HAProxyCommandQueueSize = loadedCfg.HAProxyCommandQueueSize
+	p.Config.HAProxyCommandsPerSecond = loadedCfg.HAProxyCommandsPerSecond
 	p.Config.DurationToTableName = loadedCfg.DurationToTableName
 	p.Config.BlockTableNameFallback = loadedCfg.BlockTableNameFallback
 	p.Config.DefaultBlockDuration = loadedCfg.DefaultBlockDuration

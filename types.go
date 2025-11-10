@@ -74,6 +74,8 @@ type AppConfig struct {
 	HAProxyDialTimeout     time.Duration                     `config:"compare" summary:"haproxy_dial_timeout"`
 	HAProxyMaxRetries      int                               `config:"compare" summary:"haproxy_max_retries"`
 	HAProxyRetryDelay      time.Duration                     `config:"compare" summary:"haproxy_retry_delay"`
+	HAProxyCommandQueueSize int                              `config:"compare" summary:"haproxy_command_queue_size"`
+	HAProxyCommandsPerSecond int                             `config:"compare" summary:"haproxy_commands_per_second"`
 	IdleTimeout            time.Duration                     `config:"compare" summary:"idle_timeout"`
 	LineEnding             string                            `config:"compare" summary:"line_ending"`
 	LastModTime            time.Time                         // Not compared
@@ -98,6 +100,8 @@ type LoadedConfig struct {
 	HAProxyDialTimeout     time.Duration            `config:"compare"`
 	HAProxyMaxRetries      int                      `config:"compare"`
 	HAProxyRetryDelay      time.Duration            `config:"compare"`
+	HAProxyCommandQueueSize int                     `config:"compare"`
+	HAProxyCommandsPerSecond int                    `config:"compare"`
 	IdleTimeout            time.Duration            `config:"compare"`
 	LogLevel               string                   `config:"compare"`
 	LineEnding             string                   `config:"compare"`
@@ -123,6 +127,8 @@ type ChainConfig struct {
 	HAProxyDialTimeout   string                `yaml:"haproxy_dial_timeout"`
 	HAProxyMaxRetries    int                   `yaml:"haproxy_max_retries"`
 	HAProxyRetryDelay    string                `yaml:"haproxy_retry_delay"`
+	HAProxyCommandQueueSize int                `yaml:"haproxy_command_queue_size"`
+	HAProxyCommandsPerSecond int               `yaml:"haproxy_commands_per_second"`
 	IdleTimeout          string                `yaml:"idle_timeout"`
 	LineEnding           string                `yaml:"line_ending"`
 	LogLevel             string                `yaml:"log_level"`

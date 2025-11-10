@@ -57,6 +57,8 @@ func main() {
 		HAProxyDialTimeout:     loadedCfg.HAProxyDialTimeout,
 		HAProxyMaxRetries:      loadedCfg.HAProxyMaxRetries,
 		HAProxyRetryDelay:      loadedCfg.HAProxyRetryDelay,
+		HAProxyCommandQueueSize: loadedCfg.HAProxyCommandQueueSize,
+		HAProxyCommandsPerSecond: loadedCfg.HAProxyCommandsPerSecond,
 		IdleTimeout:            loadedCfg.IdleTimeout,
 		LastModTime:            time.Now(),
 		MaxTimeSinceLastHit:    loadedCfg.MaxTimeSinceLastHit,
@@ -84,8 +86,13 @@ func main() {
 		NowFunc:  time.Now, // Use the real time.Now in production.
 	}
 	// TestSignals is intentionally left nil in production.
-	// Inject the HAProxyBlocker which depends on the main processor instance.
-	p.Blocker = &HAProxyBlocker{P: p}
+	// Inject the HAProxyBlocker.
+	haproxyBlocker := &HAProxyBlocker{P: p}
+	// Wrap the HAProxyBlocker with the RateLimitedBlocker.
+	rateLimitedBlocker := NewRateLimitedBlocker(p, haproxyBlocker, p.Config.HAProxyCommandQueueSize, p.Config.HAProxyCommandsPerSecond)
+	p.Blocker = rateLimitedBlocker
+	defer rateLimitedBlocker.Stop() // Ensure the rate limiter worker is stopped on exit.
+
 	p.IsWhitelistedFunc = func(ipInfo IPInfo) bool { return IsIPWhitelisted(p, ipInfo) } // Set the method correctly.
 	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }                  // Assign the real method to the function field.
 
