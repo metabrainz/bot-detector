@@ -26,7 +26,7 @@ type HAProxyBlocker struct {
 func (b *HAProxyBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 	p := b.P
 	if p.DryRun {
-		p.LogFunc(logging.LevelInfo, "DRYRUN", "Would block IP %s for %v (Chain complete).", ipInfo.Address, duration)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "Would block IP %s for %v (Chain complete).", ipInfo.Address, duration)
 		return nil
 	}
 
@@ -77,7 +77,7 @@ func (b *HAProxyBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 func (b *HAProxyBlocker) Unblock(ipInfo IPInfo) error {
 	p := b.P
 	if p.DryRun {
-		p.LogFunc(logging.LevelInfo, "DRYRUN", "Would unblock IP %s from all tables/maps.", ipInfo.Address)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "Would unblock IP %s from all tables/maps.", ipInfo.Address)
 		return nil
 	}
 
