@@ -308,18 +308,18 @@ func TestProcessLogLineInternal_ParseError(t *testing.T) {
 	}
 }
 
-// TestProcessLogLineInternal_SkipLine verifies that when processLogLineInternal
-// receives a comment or empty line, it logs the skip and does not proceed.
+// TestProcessLogLineInternal_SkipLine verifies that a comment or empty line is skipped
+// and the appropriate log message is generated.
 func TestProcessLogLineInternal_SkipLine(t *testing.T) {
 	resetGlobalState()
 
 	var logMutex sync.Mutex
-	var capturedLog string
+	var capturedMessage string
 	logCaptureFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMutex.Lock()
 		defer logMutex.Unlock()
 		if tag == "SKIP" {
-			capturedLog = fmt.Sprintf(format, args...)
+			capturedMessage = fmt.Sprintf(format, args...)
 		}
 	}
 
@@ -329,12 +329,9 @@ func TestProcessLogLineInternal_SkipLine(t *testing.T) {
 		t.Error("CheckChains was called, but should have been skipped for a comment line.")
 	}
 
-	// Act: Process a comment line.
-	commentLine := "# This is a comment and should be skipped"
-	processLogLineInternal(p, commentLine, 456)
-
-	if !strings.Contains(capturedLog, "Skipped (Comment/Empty)") {
-		t.Errorf("Expected a 'SKIP' log message, but it was not captured. Got: '%s'", capturedLog)
+	processLogLineInternal(p, "# this is a comment", 1)
+	if !strings.Contains(capturedMessage, "Skipped (Comment/Empty)") {
+		t.Errorf("Expected a 'SKIP' log message, but it was not captured. Got: '%s'", capturedMessage)
 	}
 }
 

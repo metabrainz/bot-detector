@@ -117,13 +117,40 @@ func newDryRunTestHarness(t *testing.T) *dryRunTestHarness {
 
 	// Create processor with mock/capture functions
 	h.processor = newTestProcessor(&AppConfig{}, nil)
+
+	// Use a custom LogFunc to capture logs and identify skipped lines.
+	// This needs to be done before setting ProcessLogLine, as ProcessLogLine
+	// will call processLogLineInternal, which in turn calls LogFunc.
 	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		h.logMutex.Lock()
 		defer h.logMutex.Unlock()
-		h.capturedLogs = append(h.capturedLogs, fmt.Sprintf(format, args...))
+		logLine := fmt.Sprintf(tag+": "+format, args...)
+		h.capturedLogs = append(h.capturedLogs, logLine)
 	}
+
+	// Override ProcessLogLine to use the real processing logic and capture processed lines.
 	h.processor.ProcessLogLine = func(line string, lineNumber int) {
-		h.processedLines = append(h.processedLines, line)
+		// Call the actual log line processing function.
+		processLogLineInternal(h.processor, line, lineNumber)
+
+		// Check if the line was *not* skipped by processLogLineInternal.
+		// We do this by checking if a "Skipped (Comment/Empty)" log was *not* generated
+		// for this specific line number. This is a bit indirect but avoids modifying
+		// processLogLineInternal's return signature.
+		h.logMutex.Lock()
+		defer h.logMutex.Unlock()
+		skippedLogFound := false
+		for _, capturedLog := range h.capturedLogs {
+			if strings.Contains(capturedLog, fmt.Sprintf("Line %d: Skipped (Comment/Empty).", lineNumber)) {
+				skippedLogFound = true
+				break
+			}
+		}
+
+		if !skippedLogFound {
+			// If no skipped log was found for this line, it means it was processed.
+			h.processedLines = append(h.processedLines, line)
+		}
 	}
 	return h
 }

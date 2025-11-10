@@ -385,7 +385,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 				os.WriteFile(filePath, []byte("line 1\nline 2\n# a comment\nline 3"), 0644)
 			},
 			expectedLinesProcessed: 3,
-			expectedLogContains:    "DryRun complete. Processed 3 lines.",
+			expectedLogContains:    "DryRun complete. Read 4 lines.",
 		},
 		{
 			name: "Empty line in middle of file",
@@ -393,7 +393,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 				os.WriteFile(filePath, []byte("line 1\n\nline 3"), 0644)
 			},
 			expectedLinesProcessed: 2,
-			expectedLogContains:    "Skipped (Comment/Empty)",
+			expectedLogContains:    "Skipped (Comment/Empty)", // This is now logged by processLogLineInternal
 		},
 		{
 			name: "Comment line in middle of file",
@@ -401,7 +401,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 				os.WriteFile(filePath, []byte("line 1\n# comment\nline 3"), 0644)
 			},
 			expectedLinesProcessed: 2,
-			expectedLogContains:    "Skipped (Comment/Empty)",
+			expectedLogContains:    "Skipped (Comment/Empty)", // This is now logged by processLogLineInternal
 		},
 		{
 			name:                   "File Not Found",
@@ -415,7 +415,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 				os.WriteFile(filePath, []byte("line 1\nline 2"), 0644)
 			},
 			expectedLinesProcessed: 2,
-			expectedLogContains:    "DryRun complete. Processed 2 lines.",
+			expectedLogContains:    "DryRun complete. Read 2 lines.",
 		},
 		{
 			name: "Line Exceeds Limit",

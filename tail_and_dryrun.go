@@ -90,85 +90,6 @@ func getLineReader(lineEnding string) (lineReader, error) {
 	}
 }
 
-// DryRunLogProcessor reads and processes a static log file for testing.
-func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
-	p.LogFunc(logging.LevelInfo, "DRYRUN", "MODE: Reading logs from %s...", LogFilePath)
-
-	file, err := osOpenFile(LogFilePath)
-	if err != nil {
-		p.LogFunc(logging.LevelCritical, "FATAL", "Failed to open log file %s: %v", LogFilePath, err)
-		// In a dry-run, a fatal error means we're done.
-		close(done)
-		return
-	}
-	defer file.Close()
-
-	// Select the line reader function once before the loop.
-	readLine, err := getLineReader(p.Config.LineEnding)
-	if err != nil {
-		p.LogFunc(logging.LevelCritical, "FATAL", "Configuration error: %v", err)
-		close(done)
-		return
-	}
-
-	reader := bufio.NewReader(file)
-	lineNumber := 0
-	processedCount := 0
-	lineLimit := MaxLogLineSize
-
-	for {
-		line, readErr := readLine(reader, lineLimit)
-		lineNumber++ // Increment after the read to accurately report the line number of the error.
-
-		// Use a switch for clearer error handling.
-		switch {
-		case errors.Is(readErr, io.EOF):
-			// If we read a line and got EOF, process it and then exit the loop.
-			if len(line) > 0 {
-				p.ProcessLogLine(line, lineNumber)
-				processedCount++
-			}
-			goto endLoop // Use goto to break out of the outer for loop.
-		case errors.Is(readErr, ErrLineSkipped):
-			p.LogFunc(logging.LevelWarning, "DRYRUN_SKIP", "Line %d: Skipped (Length exceeded %d bytes).", lineNumber, lineLimit)
-			continue
-		case readErr != nil:
-			p.LogFunc(logging.LevelError, "DRYRUN_ERROR", "Line %d: Read error: %v", lineNumber, readErr)
-			continue
-		}
-
-		// Skip comments and empty lines before counting.
-		if len(line) == 0 || line[0] == '#' {
-			p.LogFunc(logging.LevelDebug, "DRYRUN_SKIP", "Line %d: Skipped (Comment/Empty).", lineNumber)
-			continue
-		}
-
-		// Process the line. The internal function will handle parsing and checking.
-		p.ProcessLogLine(line, lineNumber)
-		processedCount++
-	}
-
-endLoop:
-	// After processing all lines, flush any remaining entries in the buffer.
-	// This is crucial for dry-runs with out-of-order tolerance, as it simulates
-	// the final processing that happens when the live tailer shuts down.
-	p.ActivityMutex.Lock()
-	if len(p.EntryBuffer) > 0 {
-		p.LogFunc(logging.LevelDebug, "DRYRUN_FLUSH", "Flushing %d buffered entries.", len(p.EntryBuffer))
-		// Sort all remaining entries by timestamp before final processing.
-		sort.Slice(p.EntryBuffer, func(i, j int) bool {
-			return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
-		})
-		for _, entry := range p.EntryBuffer {
-			checkChainsInternal(p, entry) // Use the internal function as the lock is already held.
-		}
-		p.EntryBuffer = nil // Clear the buffer.
-	}
-	p.ActivityMutex.Unlock()
-	p.LogFunc(logging.LevelInfo, "DRYRUN", "DryRun complete. Processed %d lines.", processedCount)
-	close(done)
-}
-
 // hasFileBeenRotated checks if the log file has been rotated or truncated.
 // It returns true if the file should be reopened, false otherwise.
 func hasFileBeenRotated(p *Processor, filePath string, initialStat os.FileInfo, statFunc func(string) (os.FileInfo, error)) bool {
@@ -214,6 +135,81 @@ func delayOrShutdown(p *Processor, delay time.Duration, signalCh <-chan os.Signa
 		p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
 		return true // Shutdown signal received
 	}
+}
+
+// processFileLines is a shared helper function that reads a file line by line,
+// handling different line endings and line length limits, and calls a processor function for each line.
+func processFileLines(p *Processor, file io.Reader, lineProcessor func(line string, lineNumber int)) (int, error) {
+	// Select the line reader function based on config.
+	readLine, err := getLineReader(p.Config.LineEnding)
+	if err != nil {
+		return 0, fmt.Errorf("configuration error with line_ending: %w", err)
+	}
+
+	reader := bufio.NewReader(file)
+	lineNumber := 0
+	lineLimit := MaxLogLineSize
+
+	for {
+		line, readErr := readLine(reader, lineLimit)
+		lineNumber++
+
+		if readErr != nil {
+			if errors.Is(readErr, ErrLineSkipped) {
+				p.LogFunc(logging.LevelWarning, "TAIL_SKIP", "Line %d: Skipped (Length exceeded %d bytes).", lineNumber, lineLimit)
+				continue
+			}
+			if readErr == io.EOF {
+				// If we read a line and got EOF, process it before exiting.
+				if len(line) > 0 {
+					lineProcessor(line, lineNumber)
+				}
+				break // End of file
+			}
+			// For other read errors, log and continue if possible.
+			p.LogFunc(logging.LevelError, "READ_ERROR", "Line %d: Read error: %v", lineNumber, readErr)
+			continue
+		}
+
+		lineProcessor(line, lineNumber)
+	}
+	return lineNumber, nil
+}
+
+// DryRunLogProcessor reads and processes a static log file for testing.
+func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
+	p.LogFunc(logging.LevelInfo, "DRYRUN", "MODE: Reading logs from %s...", LogFilePath)
+
+	file, err := osOpenFile(LogFilePath)
+	if err != nil {
+		p.LogFunc(logging.LevelCritical, "FATAL", "Failed to open log file %s: %v", LogFilePath, err)
+		close(done)
+		return
+	}
+	defer file.Close()
+
+	// Use the shared line processing logic.
+	linesRead, err := processFileLines(p, file, p.ProcessLogLine)
+	if err != nil {
+		p.LogFunc(logging.LevelError, "DRYRUN_ERROR", "Error processing log file: %v", err)
+	}
+
+	// After processing all lines, flush any remaining entries in the buffer.
+	p.ActivityMutex.Lock()
+	if len(p.EntryBuffer) > 0 {
+		p.LogFunc(logging.LevelDebug, "DRYRUN_FLUSH", "Flushing %d buffered entries.", len(p.EntryBuffer))
+		sort.Slice(p.EntryBuffer, func(i, j int) bool {
+			return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
+		})
+		for _, entry := range p.EntryBuffer {
+			checkChainsInternal(p, entry)
+		}
+		p.EntryBuffer = nil
+	}
+	p.ActivityMutex.Unlock()
+
+	p.LogFunc(logging.LevelInfo, "DRYRUN", "DryRun complete. Read %d lines.", linesRead)
+	close(done)
 }
 
 // LiveLogTailer continuously tails a log file, handling rotation and truncation.
@@ -305,11 +301,9 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 				// Continue reading
 			}
 
-			// 1. Read the line
-			line, finalErr := readLine(reader, lineLimit)
-			lineNumber++
+			line, finalErr := readLine(reader, lineLimit) // Read one line
+			lineNumber++                                  // Increment line number for the new line
 
-			// 2. Handle read errors (EOF or other)
 			if finalErr != nil {
 				if errors.Is(finalErr, ErrLineSkipped) {
 					p.LogFunc(logging.LevelWarning, "TAIL_SKIP", "Line %d: Skipped (Length exceeded %d bytes).", lineNumber, lineLimit)
@@ -321,6 +315,9 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 					if p.TestSignals != nil && p.TestSignals.EOFCheckSignal != nil {
 						p.TestSignals.EOFCheckSignal <- struct{}{}
 					}
+
+					// Flush any lingering entries from the buffer now that we are idle.
+					FlushEntryBuffer(p)
 
 					if hasFileBeenRotated(p, LogFilePath, initialStat, p.Config.StatFunc) {
 						// If hasFileBeenRotated failed because of a stat error, it's safer to add a small delay
@@ -341,13 +338,6 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 				}
 			}
 
-			// Skip comments and empty lines before processing.
-			if len(line) == 0 || line[0] == '#' {
-				p.LogFunc(logging.LevelDebug, "TAIL_SKIP", "Line %d: Skipped (Comment/Empty).", lineNumber)
-				continue
-			}
-
-			// 3. Process the valid log line
 			p.ProcessLogLine(line, lineNumber)
 		}
 	}

@@ -391,3 +391,31 @@ func entryBufferWorker(p *Processor, stop <-chan struct{}) {
 		}
 	}
 }
+
+// FlushEntryBuffer checks the entry buffer and processes any entries that are older
+// than the out-of-order tolerance, which is useful when log processing is paused (e.g., at EOF).
+func FlushEntryBuffer(p *Processor) {
+	p.ActivityMutex.Lock()
+	defer p.ActivityMutex.Unlock()
+
+	if len(p.EntryBuffer) == 0 {
+		return
+	}
+
+	// Sort the buffer to find the latest timestamp accurately.
+	sort.Slice(p.EntryBuffer, func(i, j int) bool {
+		return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
+	})
+
+	latestTimestamp := p.EntryBuffer[len(p.EntryBuffer)-1].Timestamp
+
+	// If the newest entry in the buffer is older than the tolerance window relative to now,
+	// it's safe to process the entire buffer. This happens when the log file stops receiving new lines.
+	if p.NowFunc().After(latestTimestamp.Add(p.Config.OutOfOrderTolerance)) {
+		p.LogFunc(logging.LevelDebug, "BUFFER_FLUSH", "Flushing %d buffered entries due to inactivity.", len(p.EntryBuffer))
+		for _, entry := range p.EntryBuffer {
+			checkChainsInternal(p, entry)
+		}
+		p.EntryBuffer = nil // Clear the buffer.
+	}
+}
