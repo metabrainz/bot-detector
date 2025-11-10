@@ -48,9 +48,7 @@ type Processor struct {
 	ActivityStore     map[TrackingKey]*BotActivity
 	Blocker           Blocker
 	ConfigMutex       *sync.RWMutex
-	ParseErrors       atomic.Int64
-	ReorderedEntries  atomic.Int64
-	ChainsCompleted   atomic.Int64
+	Metrics           *Metrics
 	Chains            []BehavioralChain
 	CommandExecutor   func(p *Processor, addr, ip, command string) error // The function that executes the backend command
 	Config            *AppConfig
@@ -193,6 +191,8 @@ type BehavioralChain struct {
 	MatchKey                 string        // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
 	StepsYAML                []StepDefYAML // Store original YAML for accurate comparison
 	Steps                    []StepDef
+	MetricsResetCounter      *atomic.Int64 // Counter for resets of this specific chain.
+	MetricsCounter           *atomic.Int64 // Counter for this specific chain.
 }
 
 type StepState struct {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -79,8 +80,13 @@ func preCheckActivity(p *Processor, entry *LogEntry, trackingKey TrackingKey) (*
 // It updates the activity state and returns true if the chain was completed.
 // The caller is responsible for holding the ActivityMutex.
 func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity) {
-	// Atomically increment the counter for completed chains.
-	p.ChainsCompleted.Add(1)
+	// Increment the counter for the specific chain that was completed.
+	// This is the equivalent of `chains_completed_total{chain="<name>"}`.
+	if val, ok := p.Metrics.ChainsCompleted.Load(chain.Name); ok {
+		if counter, ok := val.(*atomic.Int64); ok {
+			counter.Add(1)
+		}
+	}
 
 	// --- 1. Log the completion event ---
 	logLevel := logging.LevelCritical
@@ -218,11 +224,21 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 		} else {
 			// Inter-step (2nd step onwards) checks
 			if step.MaxDelayDuration > 0 && timeSinceLastStepHit > step.MaxDelayDuration {
+				if val, ok := p.Metrics.ChainsReset.Load(chain.Name); ok {
+					if counter, ok := val.(*atomic.Int64); ok {
+						counter.Add(1)
+					}
+				}
 				p.LogFunc(logging.LevelDebug, "RESET", "Chain %s: MaxDelay %v exceeded. Resetting.", chain.Name, step.MaxDelayDuration)
 				state.CurrentStep = 0
 				continue // Restart check from step 0.
 			}
 			if step.MinDelayDuration > 0 && timeSinceLastStepHit < step.MinDelayDuration {
+				if val, ok := p.Metrics.ChainsReset.Load(chain.Name); ok {
+					if counter, ok := val.(*atomic.Int64); ok {
+						counter.Add(1)
+					}
+				}
 				p.LogFunc(logging.LevelDebug, "RESET", "Chain %s: MinDelay %v not met. Resetting.", chain.Name, step.MinDelayDuration)
 				state.CurrentStep = 0
 				continue // Restart check from step 0.
@@ -355,7 +371,7 @@ func CheckChains(p *Processor, entry *LogEntry) {
 	// and it's within the tolerance window, buffer it.
 	if !lastRequestTime.IsZero() && entry.Timestamp.Before(lastRequestTime) && lastRequestTime.Sub(entry.Timestamp) <= tolerance {
 		p.EntryBuffer = append(p.EntryBuffer, entry)
-		p.ReorderedEntries.Add(1)
+		p.Metrics.ReorderedEntries.Add(1)
 		// Do not process it now. It will be processed by the worker or a subsequent newer entry.
 		return
 	}

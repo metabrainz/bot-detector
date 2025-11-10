@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -203,18 +205,66 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	FlushEntryBuffer(p)
 	elapsedTime := time.Since(startTime)
 
-	chainsCompleted := p.ChainsCompleted.Load()
-	parseErrors := p.ParseErrors.Load()
-	reorderedEntries := p.ReorderedEntries.Load()
-	metricsSummary := fmt.Sprintf("Lines Processed: %d, Chains Completed: %d, Parse Errors: %d, Reordered Entries: %d, Time Elapsed: %v", lineCount, chainsCompleted, parseErrors, reorderedEntries, elapsedTime)
+	// --- Metrics Calculation ---
+	type chainMetric struct {
+		Name  string
+		Count int64
+	}
+	var completedMetrics []chainMetric
+	var totalChainsCompleted int64
+
+	var totalChainsReset int64
+
+	p.Metrics.ChainsReset.Range(func(key, value interface{}) bool {
+		if counter, ok := value.(*atomic.Int64); ok {
+			totalChainsReset += counter.Load()
+		}
+		return true
+	})
+	p.Metrics.ChainsCompleted.Range(func(key, value interface{}) bool {
+		chainName, ok1 := key.(string)
+		counter, ok2 := value.(*atomic.Int64)
+		if ok1 && ok2 {
+			count := counter.Load()
+			if count > 0 {
+				completedMetrics = append(completedMetrics, chainMetric{Name: chainName, Count: count})
+				totalChainsCompleted += count
+			}
+		}
+		return true
+	})
+
+	// Sort metrics by count descending for a "top chains" view.
+	sort.Slice(completedMetrics, func(i, j int) bool {
+		return completedMetrics[i].Count > completedMetrics[j].Count
+	})
+
+	parseErrors := p.Metrics.ParseErrors.Load()
+	reorderedEntries := p.Metrics.ReorderedEntries.Load()
+
+	// --- Log Summary ---
+	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Dry-run finished.")
+	p.LogFunc(logging.LevelInfo, "METRICS", "Lines Processed: %d", lineCount)
+	p.LogFunc(logging.LevelInfo, "METRICS", "Chains Completed: %d", totalChainsCompleted)
+	p.LogFunc(logging.LevelInfo, "METRICS", "Chains Reset: %d", totalChainsReset)
+	p.LogFunc(logging.LevelInfo, "METRICS", "Parse Errors: %d", parseErrors)
+	p.LogFunc(logging.LevelInfo, "METRICS", "Reordered Entries: %d", reorderedEntries)
+	p.LogFunc(logging.LevelInfo, "METRICS", "Time Elapsed: %v", elapsedTime)
+
 	if elapsedTime.Seconds() > 0 {
 		linesPerSecond := float64(lineCount) / elapsedTime.Seconds()
-		metricsSummary += fmt.Sprintf(", Rate: %.2f lines/sec", linesPerSecond)
+		p.LogFunc(logging.LevelInfo, "METRICS", "Rate: %.2f lines/sec", linesPerSecond)
 	} else {
-		metricsSummary += ", Rate: n/a (run too fast)"
+		p.LogFunc(logging.LevelInfo, "METRICS", "Rate: n/a (run too fast)")
 	}
 
-	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Dry-run finished. %s", metricsSummary)
+	// Log the per-chain breakdown if any chains were completed.
+	if len(completedMetrics) > 0 {
+		p.LogFunc(logging.LevelInfo, "METRICS", "--- Chain Completion Breakdown ---")
+		for _, metric := range completedMetrics {
+			p.LogFunc(logging.LevelInfo, "METRICS", "  - %s: %d", metric.Name, metric.Count)
+		}
+	}
 }
 
 // LiveLogTailer continuously tails a log file, handling rotation and truncation.

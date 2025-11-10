@@ -75,6 +75,7 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 		ActivityStore: make(map[TrackingKey]*BotActivity),
 		// Blocker will be set below
 		ConfigMutex:       &sync.RWMutex{},
+		Metrics:           NewMetrics(),
 		Chains:            chains,
 		Config:            config,
 		LogFunc:           func(level logging.LogLevel, tag string, format string, args ...interface{}) {},

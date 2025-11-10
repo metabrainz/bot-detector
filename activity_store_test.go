@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bot-detector/internal/logging"
-	"sync"
 	"testing"
 	"time"
 )
@@ -12,21 +10,13 @@ func TestCleanUpIdleActivity(t *testing.T) {
 	resetGlobalState()
 	cleanupDoneSignal := make(chan struct{}, 1)
 
-	// Create a processor with specific timeout values for the test.
-	processor := &Processor{
-		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[TrackingKey]*BotActivity),
-		ConfigMutex:   &sync.RWMutex{},
-		Chains:        []BehavioralChain{}, // No chains needed for this test
-		Config: &AppConfig{
-			CleanupInterval:     10 * time.Millisecond,  // A very short cleanup interval for the test
-			IdleTimeout:         100 * time.Millisecond, // A short general timeout
-			MaxTimeSinceLastHit: 50 * time.Millisecond,  // A shorter time-based rule timeout
-		},
-		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
-		TestSignals: &TestSignals{
-			CleanupDoneSignal: cleanupDoneSignal,
-		},
+	processor := newTestProcessor(&AppConfig{
+		CleanupInterval:     10 * time.Millisecond,  // A very short cleanup interval for the test
+		IdleTimeout:         100 * time.Millisecond, // A short general timeout
+		MaxTimeSinceLastHit: 50 * time.Millisecond,  // A shorter time-based rule timeout
+	}, nil)
+	processor.TestSignals = &TestSignals{
+		CleanupDoneSignal: cleanupDoneSignal,
 	}
 
 	// 2. Create different activity states
@@ -94,12 +84,9 @@ func TestCleanUpIdleActivity_ImmediateShutdown(t *testing.T) {
 	// 1. Setup
 	resetGlobalState()
 
-	processor := &Processor{
-		Config: &AppConfig{
-			// Use a long interval so the tick won't fire during the test.
-			CleanupInterval: 1 * time.Second,
-		},
-	}
+	processor := newTestProcessor(&AppConfig{
+		CleanupInterval: 1 * time.Second,
+	}, nil)
 
 	stopChan := make(chan struct{})
 	doneChan := make(chan struct{})
@@ -121,18 +108,13 @@ func TestCleanUpIdleActivity_MinTimeSinceLastHit(t *testing.T) {
 	// 1. Setup
 	resetGlobalState()
 
-	processor := &Processor{
-		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[TrackingKey]*BotActivity),
-		Config: &AppConfig{
-			// A general idle timeout that is very long.
-			IdleTimeout: 1 * time.Hour,
-			// A specific, shorter timeout for the time-based rule optimization.
-			MaxTimeSinceLastHit: 5 * time.Minute,
-			CleanupInterval:     10 * time.Millisecond,
-		},
-		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
-	}
+	processor := newTestProcessor(&AppConfig{
+		// A general idle timeout that is very long.
+		IdleTimeout: 1 * time.Hour,
+		// A specific, shorter timeout for the time-based rule optimization.
+		MaxTimeSinceLastHit: 5 * time.Minute,
+		CleanupInterval:     10 * time.Millisecond,
+	}, nil)
 
 	// 2. Create different activity states
 	now := time.Now()

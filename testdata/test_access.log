@@ -108,3 +108,12 @@ musicbrainz.org 10.0.0.10 - - [28/Oct/2025:17:02:06 +0000] "GET /h2/other HTTP/2
 internal.api.com 10.0.0.11 - - [28/Oct/2025:17:02:07 +0000] "GET /admin/dashboard HTTP/1.1" 200 100 "-" "AdminBot"
 # --- This one should NOT match (VHost is different) ---
 external.api.com 10.0.0.11 - - [28/Oct/2025:17:02:08 +0000] "GET /admin/dashboard HTTP/1.1" 200 100 "-" "AdminBot"
+
+# ======================================================================================
+# === TEST CASE 14: Chain Reset
+# ===
+# --- This sequence should trigger a reset on the ChainResetTest chain. ---
+# --- The first hit starts the chain. The second hit is >5s later, violating max_delay. ---
+# --- This should increment the ChainsReset metric but not complete the chain. ---
+musicbrainz.org 10.0.0.12 - - [28/Oct/2025:17:03:00 +0000] "GET /reset/step1 HTTP/1.1" 200 100 "-" "ResetBot"
+musicbrainz.org 10.0.0.12 - - [28/Oct/2025:17:03:06 +0000] "GET /reset/step2 HTTP/1.1" 200 100 "-" "ResetBot"

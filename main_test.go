@@ -26,18 +26,11 @@ func TestStart_DryRun(t *testing.T) {
 	tmpFile.Close()
 
 	linesProcessed := 0
-	p := &Processor{
-		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[TrackingKey]*BotActivity),
-		ConfigMutex:   &sync.RWMutex{},
-		Chains:        []BehavioralChain{},
-		Config:        &AppConfig{},
-		DryRun:        true, // Enable dry-run mode.
-		LogPath:       tmpFile.Name(),
-		LogFunc:       func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
-		ProcessLogLine: func(line string) {
-			linesProcessed++
-		},
+	p := newTestProcessor(&AppConfig{}, nil)
+	p.DryRun = true
+	p.LogPath = tmpFile.Name()
+	p.ProcessLogLine = func(line string) {
+		linesProcessed++
 	}
 
 	// Act: Call the start function.
@@ -84,36 +77,27 @@ func TestStart_LiveMode(t *testing.T) {
 	}
 	mockStatInfo = initialStat // Initially, the mock returns the original file info.
 
+	p := newTestProcessor(&AppConfig{
+		CleanupInterval: 10 * time.Millisecond,
+		PollingInterval: 10 * time.Millisecond,
+		EOFPollingDelay: 1 * time.Millisecond, // Poll quickly for the test
+		StatFunc:        mockStat,             // Use the mock stat function
+	}, nil)
+	p.DryRun = false // Ensure live mode.
 	// Use a channel to know when the rotation log has been seen.
 	rotationLogged := make(chan struct{}, 1)
-
-	p := &Processor{
-		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[TrackingKey]*BotActivity),
-		ConfigMutex:   &sync.RWMutex{},
-		Chains:        []BehavioralChain{},
-		Config: &AppConfig{
-			CleanupInterval: 10 * time.Millisecond,
-			PollingInterval: 10 * time.Millisecond,
-			EOFPollingDelay: 1 * time.Millisecond, // Poll quickly for the test
-			StatFunc:        mockStat,             // Use the mock stat function
-		},
-		DryRun:   false, // Ensure live mode.
-		LogPath:  liveLogFile,
-		signalCh: make(chan os.Signal, 1),
-		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-			// Log every message from the tailer to the test output for debugging.
-			logMsg := fmt.Sprintf(format, args...)
-			// In a rotation, the file might be stat'd between rename and recreate, causing a stat error.
-			// This is a valid rotation detection path, so we must listen for both log messages.
-			if (tag == "TAIL" && (strings.Contains(logMsg, "Detected log file rotation") || strings.Contains(logMsg, "Detected log file size reduction"))) || (tag == "TAIL_ERROR" && strings.Contains(logMsg, "Failed to stat log path")) {
-				rotationLogged <- struct{}{}
-			}
-		},
-		// We don't need to process lines for this test, just detect rotation.
-		// A no-op function prevents a nil pointer panic.
-		ProcessLogLine: func(line string) {},
+	p.LogPath = liveLogFile
+	p.signalCh = make(chan os.Signal, 1)
+	p.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		// Log every message from the tailer to the test output for debugging.
+		logMsg := fmt.Sprintf(format, args...)
+		// In a rotation, the file might be stat'd between rename and recreate, causing a stat error.
+		// This is a valid rotation detection path, so we must listen for both log messages.
+		if (tag == "TAIL" && (strings.Contains(logMsg, "Detected log file rotation") || strings.Contains(logMsg, "Detected log file size reduction"))) || (tag == "TAIL_ERROR" && strings.Contains(logMsg, "Failed to stat log path")) {
+			rotationLogged <- struct{}{}
+		}
 	}
+	p.ProcessLogLine = func(line string) {}
 
 	// Act: Run start in a goroutine.
 	// The start function will launch LiveLogTailer, which will signal on readyCh
@@ -202,6 +186,7 @@ chains:
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ConfigMutex:   &sync.RWMutex{},
+		Metrics:       NewMetrics(),
 		Chains:        initialLoadedCfg.Chains,
 		Config:        &AppConfig{},
 		signalCh:      make(chan os.Signal, 1), // Initialize the signal channel

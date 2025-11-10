@@ -583,6 +583,7 @@ func TestDryRunMode(t *testing.T) {
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ConfigMutex:   &sync.RWMutex{},
+		Metrics:       NewMetrics(),
 		Chains:        loadedCfg.Chains,
 		Config: &AppConfig{
 			OutOfOrderTolerance: 0, // Disable buffering for this specific test.

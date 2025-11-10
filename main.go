@@ -82,6 +82,7 @@ func main() {
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ConfigMutex:   &sync.RWMutex{},
+		Metrics:       NewMetrics(),
 		Chains:        loadedCfg.Chains,
 		CommandExecutor: func(p *Processor, addr, ip, command string) error {
 			return executeCommandImpl(p, addr, ip, command)
@@ -100,6 +101,14 @@ func main() {
 	// Inject the HAProxyBlocker.
 	haproxyBlocker := &HAProxyBlocker{P: p}
 	// Wrap the HAProxyBlocker with the RateLimitedBlocker.
+
+	// Initialize the per-chain metrics counters.
+	for _, chain := range p.Chains {
+		p.Metrics.ChainsCompleted.Store(chain.Name, chain.MetricsCounter)
+	}
+	for _, chain := range p.Chains {
+		p.Metrics.ChainsReset.Store(chain.Name, chain.MetricsResetCounter)
+	}
 	rateLimitedBlocker := NewRateLimitedBlocker(p, haproxyBlocker, p.Config.BlockerCommandQueueSize, p.Config.BlockerCommandsPerSecond)
 	p.Blocker = rateLimitedBlocker
 	defer rateLimitedBlocker.Stop() // Ensure the rate limiter worker is stopped on exit.

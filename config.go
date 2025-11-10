@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -788,6 +790,10 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 			StepsYAML:                yamlChain.Steps, // Store the original YAML steps for comparison
 		}
 
+		// Initialize a counter for this chain in the metrics map.
+		runtimeChain.MetricsCounter = new(atomic.Int64)
+		runtimeChain.MetricsResetCounter = new(atomic.Int64)
+
 		// 3. Process Steps
 		for i, yamlStep := range yamlChain.Steps {
 			runtimeStep := StepDef{
@@ -923,6 +929,15 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 	p.Chains = loadedCfg.Chains
 	p.Config = newAppConfig // Atomically swap the config pointer.
 	p.LogRegex = loadedCfg.LogFormatRegex
+	// Re-initialize the chain completion counters for the new set of chains.
+	p.Metrics.ChainsCompleted = &sync.Map{}
+	for _, chain := range p.Chains {
+		p.Metrics.ChainsCompleted.Store(chain.Name, chain.MetricsCounter)
+	}
+	p.Metrics.ChainsReset = &sync.Map{}
+	for _, chain := range p.Chains {
+		p.Metrics.ChainsReset.Store(chain.Name, chain.MetricsResetCounter)
+	}
 	logging.SetLogLevel(loadedCfg.LogLevel)
 	p.ConfigMutex.Unlock()
 

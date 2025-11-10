@@ -50,7 +50,9 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 	logFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		// For this comparison test, we want to capture all relevant log types
 		// and normalize them so the output is identical between modes.
-		switch tag {
+		switch tag { //nolint:gocritic
+		case "METRICS":
+			// Ignore all metrics lines for this comparison test.
 		case "DRY_RUN", "ALERT", "SKIP", "PARSE_FAIL":
 			// Exclude informational start/finish messages from the comparison.
 			logMessage := fmt.Sprintf(format, args...)
@@ -104,6 +106,7 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 	p := &Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[TrackingKey]*BotActivity),
+		Metrics:       NewMetrics(),
 		ConfigMutex:   &sync.RWMutex{},
 		Chains:        loadedCfg.Chains,
 		Config:        appConfig,

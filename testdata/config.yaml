@@ -108,3 +108,12 @@ chains:
       - field_matches:
           VHost: "internal.api.com"
           Path: "/admin/dashboard"
+
+  # --- 11. Chain Reset Test ---
+  - name: "ChainResetTest"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches: { Path: "/reset/step1" }
+      - max_delay: "5s"
+        field_matches: { Path: "/reset/step2" }

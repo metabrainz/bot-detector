@@ -1259,6 +1259,7 @@ chains:
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[TrackingKey]*BotActivity),
 		ConfigMutex:   &sync.RWMutex{},
+		Metrics:       NewMetrics(),
 		Chains:        initialLoadedCfg.Chains, // Set initial chains
 		Config: &AppConfig{ // Set initial config state
 			PollingInterval:  10 * time.Millisecond,
@@ -1363,22 +1364,15 @@ chains:
 	}
 
 	// 4. Create the processor with the initial config.
-	processor := &Processor{
-		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[TrackingKey]*BotActivity),
-		ConfigMutex:   &sync.RWMutex{},
-		Chains:        initialLoadedCfg.Chains,
-		Config: &AppConfig{
-			FileDependencies: initialLoadedCfg.FileDependencies,
-		},
-		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
-		TestSignals: &TestSignals{
-			ForceCheckSignal: make(chan struct{}, 1),
-			ReloadDoneSignal: make(chan struct{}, 1),
-		},
-		ConfigPath: tmpConfigPath,
+	processor := newTestProcessor(&AppConfig{
+		FileDependencies: initialLoadedCfg.FileDependencies,
+		PollingInterval:  10 * time.Millisecond,
+	}, initialLoadedCfg.Chains)
+	processor.ConfigPath = tmpConfigPath
+	processor.TestSignals = &TestSignals{
+		ForceCheckSignal: make(chan struct{}, 1),
+		ReloadDoneSignal: make(chan struct{}, 1),
 	}
-	processor.Config.PollingInterval = 10 * time.Millisecond
 	initialFileInfo, _ := os.Stat(tmpConfigPath)
 	processor.Config.LastModTime = initialFileInfo.ModTime() // Set initial mod time
 

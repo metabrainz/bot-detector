@@ -174,9 +174,7 @@ func TestParseLogLine(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a processor to call the method on.
-			p := &Processor{
-				Config: &AppConfig{TimestampFormat: AccessLogTimeFormat},
-			}
+			p := newTestProcessor(&AppConfig{TimestampFormat: AccessLogTimeFormat}, nil)
 			entry, err := ParseLogLine(p, tt.line)
 
 			if tt.expectError {
@@ -209,10 +207,8 @@ func TestParseLogLine_CustomRegex(t *testing.T) {
 	customLogLine := `198.51.100.5 - - [10/Nov/2025:13:55:36 +0000] "GET /custom/path HTTP/1.1" 404 500 "http://custom.referrer/from" "CustomAgent/1.0"`
 
 	// 3. Create a processor and assign the custom regex.
-	p := &Processor{
-		LogRegex: customRegex,
-		Config:   &AppConfig{TimestampFormat: AccessLogTimeFormat},
-	}
+	p := newTestProcessor(&AppConfig{TimestampFormat: AccessLogTimeFormat}, nil)
+	p.LogRegex = customRegex
 
 	// 4. Act: Parse the log line using the processor with the custom regex.
 	entry, err := ParseLogLine(p, customLogLine)
@@ -241,9 +237,7 @@ func TestParseLogLine_CustomRegex(t *testing.T) {
 	}
 
 	// 6. Control Assertion: Verify the default parser (processor with nil regex) FAILS.
-	defaultProcessor := &Processor{
-		Config: &AppConfig{TimestampFormat: AccessLogTimeFormat},
-	}
+	defaultProcessor := newTestProcessor(&AppConfig{TimestampFormat: AccessLogTimeFormat}, nil)
 	_, defaultErr := ParseLogLine(defaultProcessor, customLogLine)
 	if defaultErr == nil {
 		t.Error("Expected the default parser to fail on the custom log line, but it succeeded.")
