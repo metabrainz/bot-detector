@@ -65,6 +65,15 @@ If a blocker instance is unavailable during a block or unblock attempt (e.g., it
 
 The bot-detector monitors the unique file identifier (inode) of the log file. If the file is renamed or truncated (as happens during logrotate), the application detects the change, closes the old handle, and re-opens the new log file to ensure continuous log processing.
 
+### **Rate-Limited Blocker**
+
+To prevent overwhelming the blocking backend (e.g., HAProxy) during a sudden burst of activity, the bot-detector does not execute block or unblock commands immediately. Instead, all commands are sent to an in-memory queue.
+
+A separate worker process consumes commands from this queue at a configurable rate, defined by `blocker_commands_per_second` in the YAML configuration (default: 10 commands/sec). This ensures that the backend is not flooded with requests.
+
+The queue itself has a configurable size (`blocker_command_queue_size`, default: 1000). If the rate of incoming commands exceeds the processing rate and the queue becomes full, any new commands will be dropped, and a warning will be logged. This design makes the system resilient to high-volume detection events without causing a "thundering herd" problem on the backend services.
+
+
 ## **Building the Application**
 
 To compile the source code, you must first initialize the Go module and fetch the external dependencies (specifically `gopkg.in/yaml.v3`).
