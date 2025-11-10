@@ -380,15 +380,15 @@ func TestDryRunLogProcessor(t *testing.T) {
 		{
 			name: "Successful Processing",
 			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("line 1\nline 2\n# a comment\nline 3"), 0644)
+				os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\nexample.com 1.1.1.2 - - [01/Jan/2025:00:00:01 +0000] \"GET /2 HTTP/1.1\" 200 100 \"-\" \"-\"\n# a comment\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
 			},
 			expectedLinesProcessed: 3,
-			expectedLogContains:    "DryRun complete.",
+			expectedLogContains:    "Dry-run finished.",
 		},
 		{
 			name: "Empty line in middle of file",
 			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("line 1\n\nline 3"), 0644)
+				os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\n\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
 			},
 			expectedLinesProcessed: 2,
 			expectedLogContains:    "Skipped empty/comment line.",
@@ -396,7 +396,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 		{
 			name: "Comment line in middle of file",
 			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("line 1\n# comment\nline 3"), 0644)
+				os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\n# comment\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
 			},
 			expectedLinesProcessed: 2,
 			expectedLogContains:    "Skipped empty/comment line.",
@@ -410,15 +410,15 @@ func TestDryRunLogProcessor(t *testing.T) {
 		{
 			name: "File ends without newline",
 			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("line 1\nline 2"), 0644)
+				os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\nexample.com 1.1.1.2 - - [01/Jan/2025:00:00:01 +0000] \"GET /2 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
 			},
 			expectedLinesProcessed: 2,
-			expectedLogContains:    "DryRun complete.",
+			expectedLogContains:    "Dry-run finished.",
 		},
 		{
 			name: "Line Exceeds Limit",
 			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("this is a normal line\n"+strings.Repeat("a", MaxLogLineSize+1)+"\nthis is another normal line"), 0644)
+				os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\n"+strings.Repeat("a", MaxLogLineSize+1)+"\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
 			},
 			expectedLinesProcessed: 2, // The long line is skipped, but the other two are processed.
 			expectedLogContains:    "Skipped line (length exceeded",

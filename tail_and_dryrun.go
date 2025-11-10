@@ -176,27 +176,42 @@ func processFileLines(p *Processor, file io.Reader, lineProcessor func(line stri
 
 // DryRunLogProcessor reads and processes a static log file for testing.
 func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
-	p.LogFunc(logging.LevelInfo, "DRYRUN", "MODE: Reading logs from %s...", p.LogPath)
+	defer close(done)
+
+	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Starting dry-run mode for log file: %s", p.LogPath)
+	startTime := time.Now()
+	lineCount := 0
 
 	file, err := osOpenFile(p.LogPath)
 	if err != nil {
 		p.LogFunc(logging.LevelCritical, "FATAL", "Failed to open log file %s: %v", p.LogPath, err)
-		close(done)
 		return
 	}
 	defer file.Close()
 
 	// Use the shared line processing logic.
-	if err := processFileLines(p, file, p.ProcessLogLine); err != nil {
+	err = processFileLines(p, file, func(line string) {
+		p.ProcessLogLine(line)
+		lineCount++
+	})
+	if err != nil {
 		// Log the error if processing fails unexpectedly (e.g., config error).
-		p.LogFunc(logging.LevelError, "DRYRUN_ERROR", "Error during file processing: %v", err)
+		p.LogFunc(logging.LevelError, "DRY_RUN_ERROR", "Error during file processing: %v", err)
 	}
 
 	// After processing all lines, flush any remaining entries in the buffer.
 	FlushEntryBuffer(p)
+	elapsedTime := time.Since(startTime)
 
-	p.LogFunc(logging.LevelInfo, "DRYRUN", "DryRun complete.")
-	close(done)
+	metricsSummary := fmt.Sprintf("Lines Processed: %d, Time Elapsed: %v", lineCount, elapsedTime)
+	if elapsedTime.Seconds() > 0 {
+		linesPerSecond := float64(lineCount) / elapsedTime.Seconds()
+		metricsSummary += fmt.Sprintf(", Rate: %.2f lines/sec", linesPerSecond)
+	} else {
+		metricsSummary += ", Rate: n/a (run too fast)"
+	}
+
+	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Dry-run finished. %s", metricsSummary)
 }
 
 // LiveLogTailer continuously tails a log file, handling rotation and truncation.

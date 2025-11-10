@@ -52,6 +52,12 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 		// and normalize them so the output is identical between modes.
 		switch tag {
 		case "DRY_RUN", "ALERT", "SKIP", "PARSE_FAIL":
+			// Exclude informational start/finish messages from the comparison.
+			logMessage := fmt.Sprintf(format, args...)
+			if strings.HasPrefix(logMessage, "Starting dry-run mode") || strings.HasPrefix(logMessage, "Dry-run finished") {
+				return
+			}
+
 			// Normalize ALERT and DRY_RUN to a common "ACTION" tag for comparison.
 			// This makes the output independent of the mode.
 			normalizedTag := tag
