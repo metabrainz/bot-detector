@@ -314,9 +314,6 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 	// Create temp file and set global path
 	tempDir := t.TempDir()
 	h.tempLogFile = filepath.Join(tempDir, "test.log")
-	originalLogFilePath := LogFilePath
-	LogFilePath = h.tempLogFile
-	h.t.Cleanup(func() { LogFilePath = originalLogFilePath })
 
 	// Create processor with mock/capture functions
 	h.processor = newTestProcessor(&AppConfig{}, nil) // Use newTestProcessor to ensure all fields are initialized.
@@ -334,6 +331,7 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 		h.lineProcessed <- line
 	}
 	h.processor.Config = config
+	h.processor.LogPath = h.tempLogFile
 
 	// Ensure StatFunc is never nil to prevent panics in hasFileBeenRotated.
 	if config != nil && h.processor.Config.StatFunc == nil {
@@ -680,14 +678,9 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 
 	// Redirect os.Open to return our pipe's reader end.
 	originalOsOpenFile := osOpenFile
-	osOpenFile = func(name string) (fileHandle, error) {
-		return mockHandle, nil
-	}
-	originalLogFilePath := LogFilePath
-	LogFilePath = "/fake/pipe/path" // Path doesn't matter due to the mock.
+	osOpenFile = func(name string) (fileHandle, error) { return mockHandle, nil }
 	t.Cleanup(func() {
 		osOpenFile = originalOsOpenFile
-		LogFilePath = originalLogFilePath
 	})
 
 	harness := newTailerTestHarness(t, &AppConfig{

@@ -108,9 +108,6 @@ func newDryRunTestHarness(t *testing.T) *dryRunTestHarness {
 	// Create temp file and set global path
 	tempDir := t.TempDir()
 	h.tempLogFile = filepath.Join(tempDir, "test_dryrun.log")
-	originalLogFilePath := LogFilePath
-	LogFilePath = h.tempLogFile
-	t.Cleanup(func() { LogFilePath = originalLogFilePath })
 
 	// Create processor with mock/capture functions
 	h.processor = newTestProcessor(&AppConfig{}, nil)
@@ -118,6 +115,7 @@ func newDryRunTestHarness(t *testing.T) *dryRunTestHarness {
 	// Use a custom LogFunc to capture logs and identify skipped lines.
 	// This needs to be done before setting ProcessLogLine, as ProcessLogLine
 	// will call processLogLineInternal, which in turn calls LogFunc.
+	h.processor.LogPath = h.tempLogFile
 	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) { //nolint:gocritic
 		h.logMutex.Lock()
 		defer h.logMutex.Unlock()

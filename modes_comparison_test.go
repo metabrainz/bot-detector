@@ -106,6 +106,7 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 		DryRun:        dryRun,
 		LogFunc:       logFunc,
 		NowFunc:       time.Now,
+		LogPath:       logFilePath,
 		signalCh:      make(chan os.Signal, 1),
 	}
 	p.IsWhitelistedFunc = func(ipInfo IPInfo) bool { return IsIPWhitelisted(p, ipInfo) }
@@ -120,9 +121,6 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 		default:
 		}
 	}
-
-	// Set the global LogFilePath for the processor to use.
-	LogFilePath = logFilePath
 
 	return p, &logOutput, lineProcessedCh
 }

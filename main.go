@@ -23,7 +23,7 @@ var signalMap = map[string]os.Signal{
 
 // main is the application entry point.
 func main() {
-	yamlPath := RegisterCLIFlags(flag.CommandLine)
+	logPath, yamlPath := RegisterCLIFlags(flag.CommandLine)
 	// Parse CLI flags
 	flag.Parse()
 
@@ -34,7 +34,7 @@ func main() {
 	}
 
 	// Validate that required flags are provided.
-	if LogFilePath == "" || *yamlPath == "" {
+	if *logPath == "" || *yamlPath == "" {
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -86,6 +86,7 @@ func main() {
 		LogFunc:    logging.LogOutput,
 		NowFunc:    time.Now, // Use the real time.Now in production.
 		ConfigPath: *yamlPath,
+		LogPath:    *logPath,
 	}
 	// TestSignals is intentionally left nil in production.
 	// Inject the HAProxyBlocker.

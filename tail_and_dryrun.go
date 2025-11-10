@@ -176,11 +176,11 @@ func processFileLines(p *Processor, file io.Reader, lineProcessor func(line stri
 
 // DryRunLogProcessor reads and processes a static log file for testing.
 func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
-	p.LogFunc(logging.LevelInfo, "DRYRUN", "MODE: Reading logs from %s...", LogFilePath)
+	p.LogFunc(logging.LevelInfo, "DRYRUN", "MODE: Reading logs from %s...", p.LogPath)
 
-	file, err := osOpenFile(LogFilePath)
+	file, err := osOpenFile(p.LogPath)
 	if err != nil {
-		p.LogFunc(logging.LevelCritical, "FATAL", "Failed to open log file %s: %v", LogFilePath, err)
+		p.LogFunc(logging.LevelCritical, "FATAL", "Failed to open log file %s: %v", p.LogPath, err)
 		close(done)
 		return
 	}
@@ -221,12 +221,12 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			}
 		}
 
-		p.LogFunc(logging.LevelInfo, "TAIL", "Starting log tailer on %s...", LogFilePath)
+		p.LogFunc(logging.LevelInfo, "TAIL", "Starting log tailer on %s...", p.LogPath)
 
-		file, err := osOpenFile(LogFilePath)
+		file, err := osOpenFile(p.LogPath)
 		if err != nil {
 			// File not found on first attempt, wait and retry.
-			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", LogFilePath, err, ErrorRetryDelay)
+			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", p.LogPath, err, ErrorRetryDelay)
 			if delayOrShutdown(p, ErrorRetryDelay, signalCh) {
 				shutdown = true
 				continue // Let the main loop handle the exit.
@@ -293,7 +293,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 				}
 				if readErr == io.EOF {
 					FlushEntryBuffer(p)
-					if hasFileBeenRotated(p, LogFilePath, initialStat, p.Config.StatFunc) {
+					if hasFileBeenRotated(p, p.LogPath, initialStat, p.Config.StatFunc) {
 						file.Close()
 						restartTailing(FileOpenRetryDelay) // Add delay to prevent tight loop on stat errors.
 						break                              // Break inner loop to reopen.

@@ -61,6 +61,7 @@ type Processor struct {
 	NowFunc           func() time.Time // Mockable time function.
 	TestSignals       *TestSignals     // Test-only signals for synchronization.
 	ConfigPath        string
+	LogPath           string
 }
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.

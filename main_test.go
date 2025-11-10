@@ -25,11 +25,6 @@ func TestStart_DryRun(t *testing.T) {
 	tmpFile.WriteString("dry run log line\n")
 	tmpFile.Close()
 
-	// Override the global TestLogPath.
-	originalLogFilePath := LogFilePath
-	LogFilePath = tmpFile.Name()
-	t.Cleanup(func() { LogFilePath = originalLogFilePath })
-
 	linesProcessed := 0
 	p := &Processor{
 		ActivityMutex: &sync.RWMutex{},
@@ -38,6 +33,7 @@ func TestStart_DryRun(t *testing.T) {
 		Chains:        []BehavioralChain{},
 		Config:        &AppConfig{},
 		DryRun:        true, // Enable dry-run mode.
+		LogPath:       tmpFile.Name(),
 		LogFunc:       func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 		ProcessLogLine: func(line string) {
 			linesProcessed++
@@ -88,10 +84,6 @@ func TestStart_LiveMode(t *testing.T) {
 	}
 	mockStatInfo = initialStat // Initially, the mock returns the original file info.
 
-	originalLogFilePath := LogFilePath
-	LogFilePath = liveLogFile
-	t.Cleanup(func() { LogFilePath = originalLogFilePath })
-
 	// Use a channel to know when the rotation log has been seen.
 	rotationLogged := make(chan struct{}, 1)
 
@@ -107,6 +99,7 @@ func TestStart_LiveMode(t *testing.T) {
 			StatFunc:        mockStat,             // Use the mock stat function
 		},
 		DryRun:   false, // Ensure live mode.
+		LogPath:  liveLogFile,
 		signalCh: make(chan os.Signal, 1),
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 			// Log every message from the tailer to the test output for debugging.
