@@ -8,7 +8,7 @@ The key to this setup is that the bot detector uses a unified list of HAProxy ta
 
 ## **1\. HAProxy Configuration (haproxy.cfg)**
 
-It must define the required stick tables and expose both the local Unix socket and a specific TCP port for the remote bot detector to connect.
+It must define the required stick tables and expose a runtime API socket (either a local Unix socket or a TCP port) for the bot detector to connect to.
 
 ### **A. Stick Tables and Runtime Socket**
 
