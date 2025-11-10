@@ -355,6 +355,7 @@ func CheckChains(p *Processor, entry *LogEntry) {
 	// and it's within the tolerance window, buffer it.
 	if !lastRequestTime.IsZero() && entry.Timestamp.Before(lastRequestTime) && lastRequestTime.Sub(entry.Timestamp) <= tolerance {
 		p.EntryBuffer = append(p.EntryBuffer, entry)
+		p.ReorderedEntries.Add(1)
 		// Do not process it now. It will be processed by the worker or a subsequent newer entry.
 		return
 	}

@@ -205,7 +205,8 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 
 	chainsCompleted := p.ChainsCompleted.Load()
 	parseErrors := p.ParseErrors.Load()
-	metricsSummary := fmt.Sprintf("Lines Processed: %d, Chains Completed: %d, Parse Errors: %d, Time Elapsed: %v", lineCount, chainsCompleted, parseErrors, elapsedTime)
+	reorderedEntries := p.ReorderedEntries.Load()
+	metricsSummary := fmt.Sprintf("Lines Processed: %d, Chains Completed: %d, Parse Errors: %d, Reordered Entries: %d, Time Elapsed: %v", lineCount, chainsCompleted, parseErrors, reorderedEntries, elapsedTime)
 	if elapsedTime.Seconds() > 0 {
 		linesPerSecond := float64(lineCount) / elapsedTime.Seconds()
 		metricsSummary += fmt.Sprintf(", Rate: %.2f lines/sec", linesPerSecond)

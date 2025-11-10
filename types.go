@@ -49,6 +49,7 @@ type Processor struct {
 	Blocker           Blocker
 	ConfigMutex       *sync.RWMutex
 	ParseErrors       atomic.Int64
+	ReorderedEntries  atomic.Int64
 	ChainsCompleted   atomic.Int64
 	Chains            []BehavioralChain
 	CommandExecutor   func(p *Processor, addr, ip, command string) error // The function that executes the backend command
