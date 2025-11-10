@@ -34,12 +34,12 @@ func main() {
 	}
 
 	// Validate that required flags are provided.
-	if *cliFlags.LogPath == "" || *cliFlags.YAMLPath == "" {
+	if *cliFlags.LogPath == "" || *cliFlags.ConfigPath == "" {
 		flag.Usage()
 		os.Exit(1)
 	}
 	// Load initial configuration from YAML.
-	loadedCfg, err := LoadConfigFromYAML(*cliFlags.YAMLPath)
+	loadedCfg, err := LoadConfigFromYAML(*cliFlags.ConfigPath)
 	if err != nil {
 		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
 	}
@@ -85,7 +85,7 @@ func main() {
 		signalCh:       make(chan os.Signal, 1),
 		LogFunc:        logging.LogOutput,
 		NowFunc:        time.Now, // Use the real time.Now in production.
-		ConfigPath:     *cliFlags.YAMLPath,
+		ConfigPath:     *cliFlags.ConfigPath,
 		LogPath:        *cliFlags.LogPath,
 		ReloadOnSignal: *cliFlags.ReloadOnSignal,
 	}

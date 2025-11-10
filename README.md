@@ -42,7 +42,7 @@ The application is configured using a YAML file and a few command-line flags.
 ```sh
 ./bot-detector \
   --log-path "/var/log/haproxy/access.log" \
-  --yaml-path "/etc/bot-detector/config.yaml"
+  --config "/etc/bot-detector/config.yaml"
 ```
 
 #### **Dry Run Mode (Testing)**
@@ -52,7 +52,7 @@ Use `-dry-run` to test your chains against a static log file. This will process 
 ```sh
 ./bot-detector --dry-run \
   --log-path "test_access.log" \
-  --yaml-path "config.yaml"
+  --config "config.yaml"
 ```
 
 ## **Resilience and Logging**
@@ -102,7 +102,7 @@ This will produce a single executable named `bot-detector`.
 
 | Flag | Default | Description |
 | :--- | :--- | :--- |
-| **`--yaml-path`** | (none) | **Required.** Path to the YAML configuration file. |
+| **`--config`** | (none) | **Required.** Path to the YAML configuration file. |
 | **`--log-path`** | (none) | **Required.** Path to the access log file to tail (or to read in dry-run mode). |
 | **`--dry-run`** | `false` | Optional. If true, runs in test mode, ignoring the configured blocking backend and live logging. |
 | **`--version`** | `false` | Optional. Print the application version and exit. |

@@ -32,7 +32,7 @@ docker run --rm \
     bot-detector:latest \
     --dry-run \
     --log-path "${CONTAINER_LOG_FILE}" \
-    --yaml-path "${CONTAINER_CONFIG_PATH}"
+    --config "${CONTAINER_CONFIG_PATH}"
 ```
 
 ## Deploying a container
@@ -58,5 +58,5 @@ docker run -d \
     -v ${HOST_CONFIG_PATH}:${CONTAINER_CONFIG_PATH} \
     bot-detector:latest \
     --log-path "${CONTAINER_LOG_PATH}" \
-    --yaml-path "${CONTAINER_CONFIG_PATH}"
+    --config "${CONTAINER_CONFIG_PATH}"
 ```
