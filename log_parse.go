@@ -102,7 +102,6 @@ func processLogLineInternal(p *Processor, line string) {
 
 	// Skip comments and empty lines. ParseLogLine returns (nil, nil) for these.
 	if entry == nil {
-		p.LogFunc(logging.LevelDebug, "SKIP", "Skipped empty/comment line.")
 		return
 	}
 
