@@ -8,123 +8,114 @@ import (
 	"time"
 )
 
-func TestRateLimitedBlocker_Block(t *testing.T) {
-	var blockCount atomic.Int32
-	mockBlocker := &MockBlocker{
+// rateLimiterTestHarness encapsulates the setup for rate limiter tests.
+type rateLimiterTestHarness struct {
+	t                *testing.T
+	processor        *Processor
+	mockBlocker      *MockBlocker
+	rlb              *RateLimitedBlocker
+	blockCount       atomic.Int32
+	unblockCount     atomic.Int32
+	commandProcessed chan struct{}
+}
+
+// newRateLimiterTestHarness creates a new test harness.
+func newRateLimiterTestHarness(t *testing.T, queueSize, commandsPerSecond int) *rateLimiterTestHarness {
+	t.Helper()
+	h := &rateLimiterTestHarness{
+		t:                t,
+		commandProcessed: make(chan struct{}, queueSize+5), // Buffer to prevent blocking
+	}
+	h.mockBlocker = &MockBlocker{
 		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
-			blockCount.Add(1)
+			h.blockCount.Add(1)
+			h.commandProcessed <- struct{}{}
+			return nil
+		},
+		UnblockFunc: func(ipInfo IPInfo) error {
+			h.unblockCount.Add(1)
+			h.commandProcessed <- struct{}{}
 			return nil
 		},
 	}
-	processor := &Processor{
-		LogFunc: logging.LogOutput,
-	}
+	h.processor = &Processor{LogFunc: logging.LogOutput}
+	h.rlb = NewRateLimitedBlocker(h.processor, h.mockBlocker, queueSize, commandsPerSecond)
+	t.Cleanup(h.rlb.Stop)
+	return h
+}
 
-	queueSize := 10
-	commandsPerSecond := 2 // 2 commands per second
-
-	rlb := NewRateLimitedBlocker(processor, mockBlocker, queueSize, commandsPerSecond)
-	defer rlb.Stop()
-
-	// Send more commands than the rate limit allows in a short burst
-	numCommands := 5
-	for i := 0; i < numCommands; i++ {
-		ip := IPInfo{Address: fmt.Sprintf("192.168.1.%d", i)}
-		rlb.Block(ip, 5*time.Minute)
-	}
-
-	// Allow some time for the worker to process commands
-	time.Sleep(2 * time.Second) // Should process 4 commands (2 per second)
-
-	// Check that not all commands were processed immediately
-	if blockCount.Load() > int32(commandsPerSecond*2) {
-		t.Errorf("Expected at most %d blocks after 2 seconds, got %d", commandsPerSecond*2, blockCount.Load())
-	}
-
-	// Wait for all commands to be processed
-	time.Sleep(3 * time.Second) // Total 5 seconds, should process all 5 commands
-
-	if blockCount.Load() != int32(numCommands) {
-		t.Errorf("Expected %d blocks after sufficient time, got %d", numCommands, blockCount.Load())
+// waitForCommands waits for a specific number of commands to be processed.
+func (h *rateLimiterTestHarness) waitForCommands(count int) {
+	for i := 0; i < count; i++ {
+		select {
+		case <-h.commandProcessed:
+			// Command processed
+		case <-time.After(2 * time.Second): // Generous timeout
+			h.t.Fatalf("timed out waiting for command %d of %d to be processed", i+1, count)
+		}
 	}
 }
 
-func TestRateLimitedBlocker_Unblock(t *testing.T) {
-	var unblockCount atomic.Int32
-	mockBlocker := &MockBlocker{
-		UnblockFunc: func(ipInfo IPInfo) error {
-			unblockCount.Add(1)
-			return nil
-		},
-	}
-	processor := &Processor{
-		LogFunc: logging.LogOutput,
-	}
+func TestRateLimitedBlocker_BlockAndUnblock(t *testing.T) {
+	// Use a high rate to make the test fast.
+	h := newRateLimiterTestHarness(t, 10, 1000)
 
-	queueSize := 10
-	commandsPerSecond := 2
-
-	rlb := NewRateLimitedBlocker(processor, mockBlocker, queueSize, commandsPerSecond)
-	defer rlb.Stop()
-
-	numCommands := 5
-	for i := 0; i < numCommands; i++ {
+	// --- Test Blocking ---
+	numBlockCommands := 5
+	for i := 0; i < numBlockCommands; i++ {
 		ip := IPInfo{Address: fmt.Sprintf("192.168.1.%d", i)}
-		rlb.Unblock(ip)
+		h.rlb.Block(ip, 5*time.Minute)
 	}
 
-	time.Sleep(2 * time.Second)
+	h.waitForCommands(numBlockCommands)
 
-	if unblockCount.Load() > int32(commandsPerSecond*2) {
-		t.Errorf("Expected at most %d unblocks after 2 seconds, got %d", commandsPerSecond*2, unblockCount.Load())
+	if h.blockCount.Load() != int32(numBlockCommands) {
+		t.Errorf("Expected %d blocks, got %d", numBlockCommands, h.blockCount.Load())
 	}
 
-	time.Sleep(3 * time.Second)
+	// --- Test Unblocking ---
+	numUnblockCommands := 3
+	for i := 0; i < numUnblockCommands; i++ {
+		ip := IPInfo{Address: fmt.Sprintf("192.168.2.%d", i)}
+		h.rlb.Unblock(ip)
+	}
 
-	if unblockCount.Load() != int32(numCommands) {
-		t.Errorf("Expected %d unblocks after sufficient time, got %d", numCommands, unblockCount.Load())
+	h.waitForCommands(numUnblockCommands)
+
+	if h.unblockCount.Load() != int32(numUnblockCommands) {
+		t.Errorf("Expected %d unblocks, got %d", numUnblockCommands, h.unblockCount.Load())
 	}
 }
 
 func TestRateLimitedBlocker_QueueFull(t *testing.T) {
-	var blockCount atomic.Int32
-	mockBlocker := &MockBlocker{
-		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
-			blockCount.Add(1)
-			return nil
-		},
-	}
-	processor := &Processor{
-		LogFunc: logging.LogOutput,
-	}
+	// Use a slow rate to ensure the queue fills up.
+	h := newRateLimiterTestHarness(t, 2, 1)
 
-	queueSize := 2
-	commandsPerSecond := 1
-
-	rlb := NewRateLimitedBlocker(processor, mockBlocker, queueSize, commandsPerSecond)
-	defer rlb.Stop()
-
-	// Fill the queue and send one more to overflow
-	for i := 0; i < queueSize+1; i++ {
+	// Fill the queue (size 2) and send one more to be dropped.
+	numCommands := 3
+	for i := 0; i < numCommands; i++ {
 		ip := IPInfo{Address: fmt.Sprintf("192.168.1.%d", i)}
-		rlb.Block(ip, 5*time.Minute)
+		h.rlb.Block(ip, 5*time.Minute)
 	}
 
-	// The queue has size 2, so 2 commands should be in the queue, 1 should be dropped.
-	// The worker will process them slowly.
-	time.Sleep(100 * time.Millisecond) // Give a little time for the queue to be filled
+	// Give a moment for the non-blocking sends to complete.
+	time.Sleep(50 * time.Millisecond)
 
-	// Check that the queue is full (or close to it) and some might have been dropped
-	if len(rlb.CommandQueue) > queueSize {
-		t.Errorf("Expected queue size to be at most %d, got %d", queueSize, len(rlb.CommandQueue))
-	}
-
-	// Wait for all commands that were accepted to be processed
-	time.Sleep(time.Duration(queueSize+1) * time.Second) // Enough time for all accepted commands to process
+	// The queue should be full, and one command should have been dropped.
+	// We expect only `queueSize` commands to be processed.
+	h.waitForCommands(2)
 
 	// We expect only `queueSize` commands to be processed, as one was dropped.
-	if blockCount.Load() != int32(queueSize) {
-		t.Errorf("Expected %d blocks (queue size), got %d", queueSize, blockCount.Load())
+	if h.blockCount.Load() != int32(2) {
+		t.Errorf("Expected %d blocks (queue size), got %d", 2, h.blockCount.Load())
+	}
+
+	// Verify no more commands are processed.
+	select {
+	case <-h.commandProcessed:
+		t.Error("an extra command was processed, but it should have been dropped")
+	case <-time.After(100 * time.Millisecond):
+		// Correct, no more commands processed.
 	}
 }
 
@@ -149,7 +140,7 @@ func TestRateLimitedBlocker_ZeroRate(t *testing.T) {
 	ip := IPInfo{Address: "192.168.1.1"}
 	rlb.Block(ip, 5*time.Minute)
 
-	time.Sleep(100 * time.Millisecond) // Give some time
+	time.Sleep(50 * time.Millisecond) // Give some time for the command to be queued.
 
 	if blockCount.Load() != 0 {
 		t.Errorf("Expected 0 blocks when rate is zero, got %d", blockCount.Load())
@@ -160,34 +151,26 @@ func TestRateLimitedBlocker_ZeroRate(t *testing.T) {
 }
 
 func TestRateLimitedBlocker_Stop(t *testing.T) {
-	var blockCount atomic.Int32
-	mockBlocker := &MockBlocker{
-		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
-			blockCount.Add(1)
-			return nil
-		},
-	}
-	processor := &Processor{
-		LogFunc: logging.LogOutput,
-	}
-
-	queueSize := 10
-	commandsPerSecond := 1
-
-	rlb := NewRateLimitedBlocker(processor, mockBlocker, queueSize, commandsPerSecond)
+	h := newRateLimiterTestHarness(t, 10, 100) // High rate
 
 	ip := IPInfo{Address: "192.168.1.1"}
-	rlb.Block(ip, 5*time.Minute)
+	h.rlb.Block(ip, 5*time.Minute)
 
-	time.Sleep(50 * time.Millisecond) // Allow command to be queued
+	// Wait for the first command to ensure the worker is running.
+	h.waitForCommands(1)
 
-	rlb.Stop() // Stop the worker
+	// Queue another command.
+	h.rlb.Block(ip, 5*time.Minute)
 
-	time.Sleep(2 * time.Second) // Give time for worker to shut down and no more processing
+	// Stop the worker immediately. This is safe to call multiple times.
+	h.rlb.Stop()
+
+	// Give a moment to see if any more commands get processed after stopping.
+	time.Sleep(50 * time.Millisecond)
 
 	// At most one command should have been processed if the timing was just right,
-	// but likely none if Stop() was called quickly.
-	if blockCount.Load() > 1 {
-		t.Errorf("Expected at most 1 block after stopping, got %d", blockCount.Load())
+	// but no more than that.
+	if h.blockCount.Load() > 1 {
+		t.Errorf("Expected at most 1 block to be processed after stopping, got %d", h.blockCount.Load())
 	}
 }

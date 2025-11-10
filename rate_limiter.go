@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	"sync"
 	"time"
 )
 
@@ -18,6 +19,7 @@ type RateLimitedBlocker struct {
 	WrappedBlocker Blocker
 	CommandQueue   chan BlockerCommand
 	StopChannel    chan struct{}
+	stopOnce       sync.Once
 }
 
 // NewRateLimitedBlocker creates a new RateLimitedBlocker.
@@ -77,7 +79,9 @@ func (b *RateLimitedBlocker) Unblock(ipInfo IPInfo) error {
 
 // Stop stops the command queue worker.
 func (b *RateLimitedBlocker) Stop() {
-	close(b.StopChannel)
+	b.stopOnce.Do(func() {
+		close(b.StopChannel)
+	})
 }
 
 // commandQueueWorker processes commands from the queue at a given rate.
