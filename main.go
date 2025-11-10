@@ -109,6 +109,12 @@ func main() {
 	for _, chain := range p.Chains {
 		p.Metrics.ChainsReset.Store(chain.Name, chain.MetricsResetCounter)
 	}
+
+	// Log the initial configuration summary.
+	logConfigurationSummary(p)
+	// At startup, log details for all loaded chains.
+	logChainDetails(p, p.Chains, "Loaded chains")
+
 	rateLimitedBlocker := NewRateLimitedBlocker(p, haproxyBlocker, p.Config.BlockerCommandQueueSize, p.Config.BlockerCommandsPerSecond)
 	p.Blocker = rateLimitedBlocker
 	defer rateLimitedBlocker.Stop() // Ensure the rate limiter worker is stopped on exit.
@@ -118,11 +124,6 @@ func main() {
 
 	// Assign the real implementation for ProcessLogLine, which no longer uses line numbers.
 	p.ProcessLogLine = func(line string) { processLogLineInternal(p, line) }
-
-	// Log the initial configuration summary.
-	logConfigurationSummary(p)
-	// At startup, log details for all loaded chains.
-	logChainDetails(p, p.Chains, "Loaded chains")
 
 	start(p)
 }
