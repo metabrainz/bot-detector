@@ -563,15 +563,15 @@ func TestDryRunMode(t *testing.T) {
 	YAMLFilePath = "testdata/chains.yaml" // Assume it exists for this test
 	t.Cleanup(func() { YAMLFilePath = originalYAMLPath })
 
-	// The chains.yaml file now references a file matcher. We need to create it.
+	// The config.yaml file now references a file matcher. We need to create it.
 	tempDir := t.TempDir()
 	uaFile := filepath.Join(tempDir, "bad_user_agents.txt")
 	if err := os.WriteFile(uaFile, []byte("BadUA/1.0\nregex:NastyBot"), 0644); err != nil {
 		t.Fatalf("Failed to create dummy user agent file: %v", err)
 	}
-	// The test chains.yaml is hardcoded to look for this relative path.
+	// The test config.yaml is hardcoded to look for this relative path.
 	// We need to create it in the current working directory.
-	// A better long-term solution would be to make the path in chains.yaml absolute or configurable for tests.
+	// A better long-term solution would be to make the path in config.yaml absolute or configurable for tests.
 	if err := os.WriteFile("bad_user_agents.txt", []byte("BadUA/1.0\nregex:NastyBot"), 0644); err != nil {
 		t.Fatalf("Failed to create dummy user agent file in current directory: %v", err)
 	}

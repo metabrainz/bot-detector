@@ -174,7 +174,7 @@ func setupTestYAML(t *testing.T, content string) {
 	t.Helper() // Mark this as a test helper function.
 
 	tempDir := t.TempDir()
-	tempFile := filepath.Join(tempDir, "chains.yaml")
+	tempFile := filepath.Join(tempDir, "config.yaml")
 	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
 		t.Fatalf("Failed to write temp yaml file: %v", err)
 	}
@@ -1224,7 +1224,7 @@ chains:
     steps: [{field_matches: {Path: "/initial"}}]
 `
 	tempDir := t.TempDir()
-	tempFile := filepath.Join(tempDir, "chains.yaml")
+	tempFile := filepath.Join(tempDir, "config.yaml")
 	if err := os.WriteFile(tempFile, []byte(initialYAMLContent), 0644); err != nil {
 		t.Fatalf("Failed to write initial temp yaml file: %v", err)
 	}
@@ -1337,7 +1337,7 @@ chains:
           UserAgent: "file:%s"
 `, agentFilePath)
 
-	tempYamlFile := filepath.Join(tempDir, "chains.yaml")
+	tempYamlFile := filepath.Join(tempDir, "config.yaml")
 	if err := os.WriteFile(tempYamlFile, []byte(initialYAMLContent), 0644); err != nil {
 		t.Fatalf("Failed to write initial temp yaml file: %v", err)
 	}
@@ -1436,7 +1436,7 @@ chains:
     steps: [{field_matches: {Path: "/initial"}}]
 `
 	tempDir := t.TempDir()
-	tempFile := filepath.Join(tempDir, "chains.yaml")
+	tempFile := filepath.Join(tempDir, "config.yaml")
 	if err := os.WriteFile(tempFile, []byte(initialYAMLContent), 0644); err != nil {
 		t.Fatalf("Failed to write initial temp yaml file: %v", err)
 	}
@@ -1544,7 +1544,7 @@ chains:
     steps: [{field_matches: {Path: "/initial"}}]
 `
 	tempDir := t.TempDir()
-	tempFile := filepath.Join(tempDir, "chains.yaml")
+	tempFile := filepath.Join(tempDir, "config.yaml")
 	if err := os.WriteFile(tempFile, []byte(initialYAMLContent), 0644); err != nil {
 		t.Fatalf("Failed to write initial temp yaml file: %v", err)
 	}
