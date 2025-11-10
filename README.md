@@ -425,8 +425,7 @@ chains:
 
 The project includes a comprehensive test configuration used for the `go test` suite. This serves as a practical, real-world example of many of the features described above.
 
-*   **testdata/config.yaml:** The full configuration file with numerous behavioral chains demonstrating various matchers and conditions.
-*   **testdata/test_access.log:** The corresponding log file designed to trigger (and not trigger) the chains in `config.yaml`. It includes comments explaining the purpose of each test case and the expected outcome.
+*   **[testdata/config.yaml](testdata/config.yaml):** The full configuration file with numerous behavioral chains demonstrating various matchers and conditions.
+*   **[testdata/test_access.log](testdata/test_access.log):** The corresponding log file designed to trigger (and not trigger) the chains in `config.yaml`. It includes comments explaining the purpose of each test case and the expected outcome.
 
 Reviewing these files is a great way to understand how to build effective detection rules.
-```
