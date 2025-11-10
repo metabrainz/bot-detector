@@ -44,6 +44,7 @@ func TestParseLogLine(t *testing.T) {
 				UserAgent:  validUserAgent,
 				Referrer:   validReferrer,
 				StatusCode: 200,
+				Size:       1234,
 			},
 		},
 		{
@@ -59,6 +60,7 @@ func TestParseLogLine(t *testing.T) {
 				UserAgent:  validIPv6UserAgent,
 				Referrer:   validReferrer,
 				StatusCode: 200,
+				Size:       1234,
 			},
 		},
 		{
@@ -74,6 +76,7 @@ func TestParseLogLine(t *testing.T) {
 				UserAgent:  "-",
 				Referrer:   "-",
 				StatusCode: 201,
+				Size:       500,
 			},
 		},
 		{
@@ -89,6 +92,7 @@ func TestParseLogLine(t *testing.T) {
 				UserAgent:  "-",
 				Referrer:   "-",
 				StatusCode: 0,
+				Size:       0,
 			},
 		},
 		{
@@ -190,6 +194,7 @@ func TestParseLogLine_CustomRegex(t *testing.T) {
 		Referrer:   "http://custom.referrer/from",
 		StatusCode: 404,
 		UserAgent:  "CustomAgent/1.0",
+		Size:       500,
 	}
 
 	if !reflect.DeepEqual(entry, expectedEntry) {

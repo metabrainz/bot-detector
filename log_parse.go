@@ -57,6 +57,20 @@ func ParseLogLine(p *Processor, line string) (*LogEntry, error) {
 
 	statusCode, _ := strconv.Atoi(getMatch("StatusCode", matches, regexToUse))
 
+	var size int
+	sizeStr := getMatch("Size", matches, regexToUse)
+	if sizeStr != "" {
+		size, err = strconv.Atoi(sizeStr)
+		if err != nil {
+			// In some log formats (like HAProxy), a '-' can mean 0 bytes.
+			if sizeStr == "-" {
+				size = 0
+			} else {
+				return nil, fmt.Errorf("failed to parse size '%s': %w", sizeStr, err)
+			}
+		}
+	}
+
 	return &LogEntry{
 		Timestamp:  timestamp, // Keep timestamp first as it's the primary time axis.
 		IPInfo:     ipInfo,
@@ -66,6 +80,7 @@ func ParseLogLine(p *Processor, line string) (*LogEntry, error) {
 		Referrer:   getMatch("Referrer", matches, regexToUse),
 		StatusCode: statusCode,
 		UserAgent:  getMatch("UserAgent", matches, regexToUse),
+		Size:       size,
 	}, nil
 }
 

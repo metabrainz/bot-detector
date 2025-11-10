@@ -168,6 +168,7 @@ type LogEntry struct {
 	Protocol   string
 	Referrer   string
 	StatusCode int
+	Size       int
 	UserAgent  string
 }
 

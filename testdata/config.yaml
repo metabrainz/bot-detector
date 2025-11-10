@@ -70,3 +70,12 @@ chains:
       - min_time_since_last_hit: "15s"
         field_matches:
           Path: "/sleepy/probe"
+
+  # --- 7. Size Field Matching ---
+  - name: "LargeDownloadChain"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          Size:
+            gte: 5000

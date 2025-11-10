@@ -298,6 +298,32 @@ chains:
 	runMatcherTest(t, yamlContent, testCases)
 }
 
+func TestLoadConfigFromYAML_ObjectMatcher_Size(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+chains:
+  - name: "SizeRangeChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          Size:
+            gte: 1000
+            lt: 2000
+`
+	testCases := map[string]struct {
+		entry    *LogEntry
+		expected bool
+	}{
+		"In Range (1500)":              {entry: &LogEntry{Size: 1500}, expected: true},
+		"Boundary In Range (1000)":     {entry: &LogEntry{Size: 1000}, expected: true},
+		"Boundary Out of Range (2000)": {entry: &LogEntry{Size: 2000}, expected: false},
+		"Out of Range (500)":           {entry: &LogEntry{Size: 500}, expected: false},
+	}
+
+	runMatcherTest(t, yamlContent, testCases)
+}
+
 func TestLoadConfigFromYAML_ObjectMatcher_WithNot(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1605,6 +1631,9 @@ func runMatcherTest(t *testing.T, yamlContent string, testCases map[string]struc
 				val = tc.entry.Path
 				if tc.entry.StatusCode != 0 {
 					val = tc.entry.StatusCode
+				}
+				if tc.entry.Size != 0 {
+					val = tc.entry.Size
 				}
 			}
 			if got := matcher(tc.entry); got != tc.expected {

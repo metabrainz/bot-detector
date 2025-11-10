@@ -140,7 +140,7 @@ The file is structured as a top-level map containing a single key, chains, which
 | **idle_timeout** | string | Optional. Duration an IP must be inactive before its state is purged. Default: `30m`. |
 | **out_of_order_tolerance** | string | Optional. Maximum duration an out-of-order log entry will be processed. Default: `5s`. |
 | **timestamp_format** | string | Optional. The time format layout string (per Go's `time.Parse` syntax) for parsing timestamps. Default: `02/Jan/2006:15:04:05 -0700`. |
-| **log_format_regex** | string | Optional. A Go-compatible regex to parse log lines. **Required capture groups:** `IP`, `Timestamp`. **Optional groups:** `Method`, `Path`, `StatusCode`, `Referrer`, `UserAgent`. If an optional group is omitted, its value will be treated as empty. If not provided, the application defaults to a regex that expects a **virtual-host-prefixed combined log format**. |
+| **log_format_regex** | string | Optional. A Go-compatible regex to parse log lines. **Required capture groups:** `IP`, `Timestamp`. **Optional groups:** `Method`, `Path`, `StatusCode`, `Size`, `Referrer`, `UserAgent`. If an optional group is omitted, its value will be treated as empty. If not provided, the application defaults to a regex that expects a **virtual-host-prefixed combined log format**. |
 | **default_block_duration** | string | Optional. A global block duration to apply to any `block` action chain that does not define its own `block_duration`. Format: Go duration string (e.g., "5m", "1h"). |
 | **blocker_max_retries** | int | Optional. Number of attempts to send a command to a blocker instance. Default: `3`. |
 | **blocker_addresses** | array of string | A list of all blocker control endpoints (TCP `host:port` or Unix socket paths) across the cluster. |
@@ -215,6 +215,7 @@ Each step in the steps array defines a specific log entry characteristic that mu
 | **Path** | The requested URL path. |
 | **StatusCode** | The HTTP response status code (e.g., `200`, `404`). |
 | **Referrer** | The full HTTP Referer header value. |
+| **Size** | The response size in bytes. |
 | **UserAgent** | The HTTP User-Agent header value. |
 
 ### **Advanced `field_matches` Syntax**
