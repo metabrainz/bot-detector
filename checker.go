@@ -127,8 +127,6 @@ func flushEntryBufferUnsafe(p *Processor) {
 	if len(p.EntryBuffer) == 0 {
 		return
 	}
-	p.LogFunc(logging.LevelDebug, "BUFFER_FLUSH", "Flushing %d buffered entries.", len(p.EntryBuffer))
-	// Sort all remaining entries by timestamp before final processing.
 	sort.Slice(p.EntryBuffer, func(i, j int) bool {
 		return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
 	})
@@ -141,6 +139,9 @@ func flushEntryBufferUnsafe(p *Processor) {
 // FlushEntryBuffer checks the entry buffer and processes any entries that are older
 // than the out-of-order tolerance, which is useful when log processing is paused (e.g., at EOF).
 func FlushEntryBuffer(p *Processor) {
+	if len(p.EntryBuffer) > 0 {
+		p.LogFunc(logging.LevelDebug, "BUFFER_FLUSH", "Flushing %d buffered entries.", len(p.EntryBuffer))
+	}
 	p.ActivityMutex.Lock()
 	defer p.ActivityMutex.Unlock()
 	flushEntryBufferUnsafe(p)

@@ -69,11 +69,11 @@ func logConfigurationSummary(p *Processor) {
 	currentLogLevel := logging.GetLogLevel().String()
 	p.ConfigMutex.RUnlock()
 
-	p.LogFunc(logging.LevelInfo, "CONFIG", "Loaded configuration:")
+	p.LogFunc(logging.LevelDebug, "CONFIG", "Loaded configuration:")
 
 	// Handle special cases first
-	p.LogFunc(logging.LevelInfo, "CONFIG", "  - line_ending: %s", config.LineEnding)
-	p.LogFunc(logging.LevelInfo, "CONFIG", "  - log_level: %s", currentLogLevel)
+	p.LogFunc(logging.LevelDebug, "CONFIG", "  - line_ending: %s", config.LineEnding)
+	p.LogFunc(logging.LevelDebug, "CONFIG", "  - log_level: %s", currentLogLevel)
 
 	// Use reflection to iterate over tagged fields in AppConfig
 	val := reflect.ValueOf(*config)
@@ -87,23 +87,23 @@ func logConfigurationSummary(p *Processor) {
 		}
 
 		fieldValue := val.Field(i).Interface()
-		p.LogFunc(logging.LevelInfo, "CONFIG", "  - %s: %v", tag, fieldValue)
+		p.LogFunc(logging.LevelDebug, "CONFIG", "  - %s: %v", tag, fieldValue)
 	}
 
 	// Only show timestamp format if it's not the default.
 	if config.TimestampFormat != AccessLogTimeFormat {
-		p.LogFunc(logging.LevelInfo, "CONFIG", "  - timestamp_format: custom")
+		p.LogFunc(logging.LevelDebug, "CONFIG", "  - timestamp_format: custom")
 	}
 
 	// Only show log format regex if it's custom.
 	if logRegex != nil {
-		p.LogFunc(logging.LevelInfo, "CONFIG", "  - log_format_regex: custom")
+		p.LogFunc(logging.LevelDebug, "CONFIG", "  - log_format_regex: custom")
 	}
 }
 
 // logChainDetails logs details for a given list of chains, one per line.
 func logChainDetails(p *Processor, chains []BehavioralChain, header string) {
-	p.LogFunc(logging.LevelInfo, "CONFIG", "%s (%d total)", header, len(chains))
+	p.LogFunc(logging.LevelDebug, "CONFIG", "%s (%d total)", header, len(chains))
 	for _, chain := range chains {
 		details := fmt.Sprintf("Name: '%s', Action: %s, Steps: %d, MatchKey: %s", chain.Name, chain.Action, len(chain.Steps), chain.MatchKey)
 		// Always show block duration for clarity, indicating if it's a default.
@@ -112,7 +112,7 @@ func logChainDetails(p *Processor, chains []BehavioralChain, header string) {
 		} else if chain.BlockDuration > 0 {
 			details += fmt.Sprintf(", BlockDuration: %v", chain.BlockDuration)
 		}
-		p.LogFunc(logging.LevelInfo, "CONFIG", "  - %s", details)
+		p.LogFunc(logging.LevelDebug, "CONFIG", "  - %s", details)
 	}
 }
 
