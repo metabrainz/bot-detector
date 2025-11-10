@@ -32,6 +32,8 @@ func GetMatchValue(fieldName string, entry *LogEntry) (interface{}, FieldType, e
 		return entry.StatusCode, IntField, nil
 	case "Size":
 		return entry.Size, IntField, nil
+	case "VHost":
+		return entry.VHost, StringField, nil
 	default:
 		return nil, UnsupportedField, fmt.Errorf("unknown field: '%s'", fieldName)
 	}

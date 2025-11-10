@@ -99,3 +99,12 @@ chains:
       - field_matches:
           Protocol: "HTTP/2.0"
           Path: "file:http2_paths.txt"
+
+  # --- 10. VHost Matching ---
+  - name: "VHostSpecificChain"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          VHost: "internal.api.com"
+          Path: "/admin/dashboard"

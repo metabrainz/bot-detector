@@ -217,6 +217,7 @@ Each step in the steps array defines a specific log entry characteristic that mu
 | **Referrer** | The full HTTP Referer header value. |
 | **Size** | The response size in bytes. A dash (`"-"`) in the log is parsed as `-1`. |
 | **UserAgent** | The HTTP User-Agent header value. |
+| **VHost** | The virtual host from the log entry. |
 
 ### **Advanced `field_matches` Syntax**
 

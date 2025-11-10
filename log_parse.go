@@ -81,6 +81,7 @@ func ParseLogLine(p *Processor, line string) (*LogEntry, error) {
 		StatusCode: statusCode,
 		UserAgent:  getMatch("UserAgent", matches, regexToUse),
 		Size:       size,
+		VHost:      getMatch("VHost", matches, regexToUse),
 	}, nil
 }
 

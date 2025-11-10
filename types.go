@@ -170,6 +170,7 @@ type LogEntry struct {
 	StatusCode int
 	Size       int
 	UserAgent  string
+	VHost      string
 }
 
 type StepDef struct {

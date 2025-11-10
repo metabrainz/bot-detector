@@ -45,6 +45,7 @@ func TestParseLogLine(t *testing.T) {
 				Referrer:   validReferrer,
 				StatusCode: 200,
 				Size:       1234,
+				VHost:      "www.example.com",
 			},
 		},
 		{
@@ -61,6 +62,7 @@ func TestParseLogLine(t *testing.T) {
 				Referrer:   validReferrer,
 				StatusCode: 200,
 				Size:       1234,
+				VHost:      "www.example.com",
 			},
 		},
 		{
@@ -77,6 +79,7 @@ func TestParseLogLine(t *testing.T) {
 				Referrer:   "-",
 				StatusCode: 201,
 				Size:       500,
+				VHost:      "www.example.com",
 			},
 		},
 		{
@@ -93,6 +96,7 @@ func TestParseLogLine(t *testing.T) {
 				Referrer:   "-",
 				StatusCode: 0,
 				Size:       0,
+				VHost:      "www.example.com",
 			},
 		},
 		{
@@ -109,6 +113,7 @@ func TestParseLogLine(t *testing.T) {
 				Referrer:   "-",
 				StatusCode: 204,
 				Size:       -1, // Should be parsed as -1
+				VHost:      "www.example.com",
 			},
 		},
 		{
@@ -125,6 +130,7 @@ func TestParseLogLine(t *testing.T) {
 				Referrer:   "-",
 				StatusCode: 400,
 				Size:       172,
+				VHost:      "www.example.com",
 			},
 		},
 		{
@@ -226,6 +232,7 @@ func TestParseLogLine_CustomRegex(t *testing.T) {
 		Referrer:   "http://custom.referrer/from",
 		StatusCode: 404,
 		UserAgent:  "CustomAgent/1.0",
+		VHost:      "", // This custom regex does not have a VHost capture group.
 		Size:       500,
 	}
 
