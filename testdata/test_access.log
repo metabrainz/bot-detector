@@ -85,3 +85,17 @@ musicbrainz.org 10.0.0.9 - - [28/Oct/2025:17:02:00 +0000] - 400 - "-" "Malformed
 musicbrainz.org 10.0.0.9 - - [28/Oct/2025:17:02:01 +0000] - 401 - "-" "MalformedBot"
 # --- This one should NOT match (size is not "-") ---
 musicbrainz.org 10.0.0.9 - - [28/Oct/2025:17:02:02 +0000] - 400 172 "-" "MalformedBot"
+
+# ======================================================================================
+# === TEST CASE 12: HTTP/2 Protocol Matching
+# ===
+# --- This one should match (Protocol is HTTP/2.0 and Path is an exact match in the file) ---
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: HTTP2RequestChain completed by IP 10.0.0.10. Action set to 'log' (DryRun).
+musicbrainz.org 10.0.0.10 - - [28/Oct/2025:17:02:03 +0000] "GET /h2/resource HTTP/2.0" 200 100 "-" "HTTP2Client"
+# --- This one should NOT match (Protocol is HTTP/1.1) ---
+musicbrainz.org 10.0.0.10 - - [28/Oct/2025:17:02:04 +0000] "GET /h2/resource HTTP/1.1" 200 100 "-" "HTTP1Client"
+# --- This one should match (Protocol is HTTP/2.0 and Path matches a regex in the file) ---
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: HTTP2RequestChain completed by IP 10.0.0.10. Action set to 'log' (DryRun).
+musicbrainz.org 10.0.0.10 - - [28/Oct/2025:17:02:05 +0000] "GET /h2/api/v1/endpoint HTTP/2.0" 200 100 "-" "HTTP2Client"
+# --- This one should NOT match (Path is not in the file) ---
+musicbrainz.org 10.0.0.10 - - [28/Oct/2025:17:02:06 +0000] "GET /h2/other HTTP/2.0" 200 100 "-" "HTTP2Client"

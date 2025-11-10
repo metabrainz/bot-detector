@@ -479,8 +479,8 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		MatchKey: "ip",
 		Action:   "log",
 	}
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step1", new([]string))
-	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step2", new([]string))
+	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step1", new([]string), "")
+	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step2", new([]string), "")
 	chain.Steps = []StepDef{
 		{Order: 1, MinTimeSinceLastHit: 2 * time.Second, Matchers: []fieldMatcher{matcher1}},
 		{Order: 2, Matchers: []fieldMatcher{matcher2}},
@@ -749,8 +749,8 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 				MatchKey: "ip",
 				Action:   "log",
 			}
-			matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step1", new([]string))
-			matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step2", new([]string))
+			matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step1", new([]string), "")
+			matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step2", new([]string), "")
 			chain.Steps = []StepDef{
 				{Order: 1, Matchers: []fieldMatcher{matcher1}},
 				{Order: 2, Matchers: []fieldMatcher{matcher2}},

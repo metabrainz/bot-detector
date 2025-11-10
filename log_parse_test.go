@@ -262,7 +262,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 	}
 
 	// Setup a simple chain that will match and call 'block'
-	matcher, _ := compileStringMatcher("dryrun_chain", 0, "Path", "/1", new([]string))
+	matcher, _ := compileStringMatcher("dryrun_chain", 0, "Path", "/1", new([]string), "")
 	chain := BehavioralChain{
 		Name: "dryrun_chain",
 		Steps: []StepDef{

@@ -1,0 +1,4 @@
+# Paths that are expected to be accessed over HTTP/2
+/h2/resource
+# A regex for API endpoints
+regex:^/h2/api/v\d+/endpoint$

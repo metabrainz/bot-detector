@@ -90,3 +90,12 @@ chains:
           StatusCode: 400
           Method: ""
           Size: -1
+
+  # --- 9. HTTP/2 Protocol Matching ---
+  - name: "HTTP2RequestChain"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          Protocol: "HTTP/2.0"
+          Path: "file:http2_paths.txt"

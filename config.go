@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -184,10 +185,10 @@ func compareConfigsByTag(oldCfg AppConfig, newCfg LoadedConfig) bool {
 type fieldMatcher func(entry *LogEntry) bool
 
 // compileMatchers parses the raw `field_matches` interface from YAML into a slice of efficient matcher functions.
-func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps *[]string) ([]fieldMatcher, error) {
+func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps *[]string, configDir string) ([]fieldMatcher, error) {
 	var matchers []fieldMatcher
 	for field, value := range fieldMatches {
-		matcher, err := compileSingleMatcher(chainName, stepIndex, field, value, fileDeps)
+		matcher, err := compileSingleMatcher(chainName, stepIndex, field, value, fileDeps, configDir)
 		if err != nil {
 			return nil, err // Propagate error up
 		}
@@ -197,17 +198,17 @@ func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]in
 }
 
 // compileSingleMatcher is a large switch that handles the different value "shapes" (string, int, list, map).
-func compileSingleMatcher(chainName string, stepIndex int, field string, value interface{}, fileDeps *[]string) (fieldMatcher, error) {
+func compileSingleMatcher(chainName string, stepIndex int, field string, value interface{}, fileDeps *[]string, configDir string) (fieldMatcher, error) {
 	switch v := value.(type) {
 	case string:
-		return compileStringMatcher(chainName, stepIndex, field, v, fileDeps)
+		return compileStringMatcher(chainName, stepIndex, field, v, fileDeps, configDir)
 	case int:
 		return compileIntMatcher(field, v), nil
 	case []interface{}:
-		return compileListMatcher(chainName, stepIndex, field, v, fileDeps)
+		return compileListMatcher(chainName, stepIndex, field, v, fileDeps, configDir)
 	case map[string]interface{}:
 		// Generalize object matcher for 'not' on any field, and ranges on StatusCode.
-		return compileObjectMatcher(chainName, stepIndex, field, v, fileDeps)
+		return compileObjectMatcher(chainName, stepIndex, field, v, fileDeps, configDir)
 	default:
 		return nil, fmt.Errorf("chain '%s', step %d, field '%s': unsupported value type '%T'", chainName, stepIndex+1, field, v)
 	}
@@ -234,7 +235,7 @@ func readLinesFromFile(path string) ([]string, error) {
 }
 
 // compileStringMatcher handles string values, which can be exact, regex, glob, or status code patterns.
-func compileStringMatcher(chainName string, stepIndex int, field, value string, fileDeps *[]string) (fieldMatcher, error) {
+func compileStringMatcher(chainName string, stepIndex int, field, value string, fileDeps *[]string, configDir string) (fieldMatcher, error) {
 	if strings.HasPrefix(value, "exact:") {
 		literalValue := strings.TrimPrefix(value, "exact:")
 		return func(entry *LogEntry) bool {
@@ -251,13 +252,20 @@ func compileStringMatcher(chainName string, stepIndex int, field, value string, 
 	if value == "file:" || value == "regex:" {
 		// Fall through to the default exact string match at the end of the function.
 	} else if strings.HasPrefix(value, "file:") {
-		filePath := strings.TrimPrefix(value, "file:")
-		*fileDeps = append(*fileDeps, filePath) // Track file for watching
-		lines, err := readLinesFromFile(filePath)
+		relativeFilePath := strings.TrimPrefix(value, "file:")
+		var absoluteFilePath string
+		if filepath.IsAbs(relativeFilePath) {
+			absoluteFilePath = relativeFilePath
+		} else {
+			absoluteFilePath = filepath.Join(configDir, relativeFilePath)
+		}
+
+		*fileDeps = append(*fileDeps, absoluteFilePath) // Track file for watching
+		lines, err := readLinesFromFile(absoluteFilePath)
 		if err != nil {
 			// Log a warning but do not fail the entire config load.
 			// Treat the file as empty, effectively disabling this part of the rule.
-			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': failed to read file matcher '%s', it will be treated as empty: %v", chainName, stepIndex+1, field, filePath, err)
+			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': failed to read file matcher '%s', it will be treated as empty: %v", chainName, stepIndex+1, field, absoluteFilePath, err)
 			// Return a matcher for an empty list, which will never match. Do not return an error.
 			lines = []string{}
 		}
@@ -266,7 +274,7 @@ func compileStringMatcher(chainName string, stepIndex int, field, value string, 
 		for i, v := range lines {
 			interfaceSlice[i] = v
 		}
-		return compileListMatcher(chainName, stepIndex, field, interfaceSlice, fileDeps)
+		return compileListMatcher(chainName, stepIndex, field, interfaceSlice, fileDeps, configDir)
 	} else if strings.HasPrefix(value, "regex:") {
 		pattern := strings.TrimPrefix(value, "regex:")
 		re, err := regexp.Compile(pattern)
@@ -323,10 +331,10 @@ func compileIntMatcher(field string, value int) fieldMatcher {
 }
 
 // compileListMatcher handles lists, creating an OR condition over its items.
-func compileListMatcher(chainName string, stepIndex int, field string, values []interface{}, fileDeps *[]string) (fieldMatcher, error) {
+func compileListMatcher(chainName string, stepIndex int, field string, values []interface{}, fileDeps *[]string, configDir string) (fieldMatcher, error) {
 	var subMatchers []fieldMatcher
 	for _, item := range values {
-		matcher, err := compileSingleMatcher(chainName, stepIndex, field, item, fileDeps)
+		matcher, err := compileSingleMatcher(chainName, stepIndex, field, item, fileDeps, configDir)
 		if err != nil {
 			return nil, err // Error in a sub-matcher
 		}
@@ -344,7 +352,7 @@ func compileListMatcher(chainName string, stepIndex int, field string, values []
 }
 
 // compileObjectMatcher handles map values, creating an AND condition for its sub-matchers.
-func compileObjectMatcher(chainName string, stepIndex int, field string, obj map[string]interface{}, fileDeps *[]string) (fieldMatcher, error) {
+func compileObjectMatcher(chainName string, stepIndex int, field string, obj map[string]interface{}, fileDeps *[]string, configDir string) (fieldMatcher, error) {
 	var subMatchers []fieldMatcher
 
 	for key, val := range obj {
@@ -355,7 +363,7 @@ func compileObjectMatcher(chainName string, stepIndex int, field string, obj map
 		case "gt", "gte", "lt", "lte":
 			matcher, err = compileRangeMatcher(chainName, stepIndex, field, key, val)
 		case "not":
-			matcher, err = compileNotMatcher(chainName, stepIndex, field, val, fileDeps)
+			matcher, err = compileNotMatcher(chainName, stepIndex, field, val, fileDeps, configDir)
 		default:
 			return nil, fmt.Errorf("chain '%s', step %d, field '%s': unknown operator '%s' in object matcher", chainName, stepIndex+1, field, key)
 		}
@@ -418,7 +426,7 @@ func compileRangeMatcher(chainName string, stepIndex int, field, op string, valu
 }
 
 // compileNotMatcher handles the 'not' operator.
-func compileNotMatcher(chainName string, stepIndex int, field string, value interface{}, fileDeps *[]string) (fieldMatcher, error) {
+func compileNotMatcher(chainName string, stepIndex int, field string, value interface{}, fileDeps *[]string, configDir string) (fieldMatcher, error) {
 	// The value of 'not' can be a single item or a list of items.
 	// We can reuse the existing list and single matcher compilers.
 	var subMatcher fieldMatcher
@@ -426,10 +434,10 @@ func compileNotMatcher(chainName string, stepIndex int, field string, value inte
 
 	if values, ok := value.([]interface{}); ok {
 		// If it's a list, compile it as an OR-matcher.
-		subMatcher, err = compileListMatcher(chainName, stepIndex, field, values, fileDeps)
+		subMatcher, err = compileListMatcher(chainName, stepIndex, field, values, fileDeps, configDir)
 	} else {
 		// Otherwise, compile it as a single matcher.
-		subMatcher, err = compileSingleMatcher(chainName, stepIndex, field, value, fileDeps)
+		subMatcher, err = compileSingleMatcher(chainName, stepIndex, field, value, fileDeps, configDir)
 	}
 
 	if err != nil {
@@ -498,6 +506,8 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read YAML file %s: %w", configPath, err)
 	}
+
+	configDir := filepath.Dir(configPath)
 
 	var config ChainConfig
 
@@ -807,7 +817,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 			}
 
 			// Compile the new flexible matchers
-			runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, &fileDependencies)
+			runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, &fileDependencies, configDir)
 			if err != nil {
 				return nil, err // Error from compilation
 			}
