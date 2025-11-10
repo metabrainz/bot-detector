@@ -96,6 +96,22 @@ func TestParseLogLine(t *testing.T) {
 			},
 		},
 		{
+			name:        "Valid Line with Dash for Size",
+			line:        `www.example.com 192.168.1.5 - userx [06/Nov/2025:09:00:00 +0100] "GET /no-content HTTP/1.1" 204 - "-" "-"`,
+			expectError: false,
+			expected: &LogEntry{
+				Timestamp:  testTime,
+				IPInfo:     NewIPInfo("192.168.1.5"),
+				Path:       "/no-content",
+				Method:     "GET",
+				Protocol:   "HTTP/1.1",
+				UserAgent:  "-",
+				Referrer:   "-",
+				StatusCode: 204,
+				Size:       -1, // Should be parsed as -1
+			},
+		},
+		{
 			name:        "Empty Line",
 			line:        "",
 			expectError: false,
