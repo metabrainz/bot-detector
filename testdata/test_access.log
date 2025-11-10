@@ -74,3 +74,14 @@ musicbrainz.org 1.2.3.4 - - [28/Oct/2025:17:01:00 +0000] "GET /large/file.zip HT
 musicbrainz.org 1.2.3.4 - - [28/Oct/2025:17:01:01 +0000] "GET /small/file.txt HTTP/1.1" 200 4999 "-" "CombinedBot"
 # --- This one should NOT match (IP does not match regex) ---
 musicbrainz.org 1.2.4.5 - - [28/Oct/2025:17:01:02 +0000] "GET /large/file.zip HTTP/1.1" 200 5000 "-" "CombinedBot"
+
+# ======================================================================================
+# === TEST CASE 11: Malformed request matching (status 400, method "", size "-")
+# ===
+# --- This one should match (status 400, method "", size "-") ---
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: MalformedRequestChain completed by IP 10.0.0.9. Action set to 'log' (DryRun).
+musicbrainz.org 10.0.0.9 - - [28/Oct/2025:17:02:00 +0000] - 400 - "-" "MalformedBot"
+# --- This one should NOT match (status is not 400) ---
+musicbrainz.org 10.0.0.9 - - [28/Oct/2025:17:02:01 +0000] - 401 - "-" "MalformedBot"
+# --- This one should NOT match (size is not "-") ---
+musicbrainz.org 10.0.0.9 - - [28/Oct/2025:17:02:02 +0000] - 400 172 "-" "MalformedBot"

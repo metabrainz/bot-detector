@@ -10,7 +10,7 @@ import (
 
 // defaultLogRegex is the fallback regex for parsing the extended log format (VHost + Combined Log Format).
 var defaultLogRegex = regexp.MustCompile(
-	`^(?P<VHost>\S+) (?P<IP>\S+) (?P<Identity>\S+) (?P<User>\S+) \[(?P<Timestamp>[^\]]+)\] \"(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)\" (?P<StatusCode>\d{1,3}) (?P<Size>\S+) \"(?P<Referrer>[^\"]*)\" \"(?P<UserAgent>[^\"]*)\"$`,
+	`^(?P<VHost>\S+) (?P<IP>\S+) (?P<Identity>\S+) (?P<User>\S+) \[(?P<Timestamp>[^\]]+)\] (?:\"(?P<Method>\S+)\s?(?P<Path>\S+)?\s?(?P<Protocol>\S+)?\"|-) (?P<StatusCode>\d{1,3}) (?P<Size>\S+) \"(?P<Referrer>[^\"]*)\" \"(?P<UserAgent>[^\"]*)\"$`,
 )
 
 // AccessLogTimeFormat defines the timestamp format used in standard access logs.

@@ -80,3 +80,13 @@ chains:
           Size:
             gte: 5000
           IP: "regex:^1\\.2\\.3\\."
+
+  # --- 8. Malformed Request Matching ---
+  - name: "MalformedRequestChain"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          StatusCode: 400
+          Method: ""
+          Size: -1

@@ -211,11 +211,11 @@ Each step in the steps array defines a specific log entry characteristic that mu
 | Field | Description |
 | :--- | :--- |
 | **IP** | The client IP address. |
-| **Method** | The HTTP request method (e.g., `GET`, `POST`). |
+| **Method** | The HTTP request method (e.g., `GET`, `POST`). A malformed request in the log (e.g., `"-"`) is parsed as an empty string. |
 | **Path** | The requested URL path. |
 | **StatusCode** | The HTTP response status code (e.g., `200`, `404`). |
 | **Referrer** | The full HTTP Referer header value. |
-| **Size** | The response size in bytes. |
+| **Size** | The response size in bytes. A dash (`"-"`) in the log is parsed as `-1`. |
 | **UserAgent** | The HTTP User-Agent header value. |
 
 ### **Advanced `field_matches` Syntax**

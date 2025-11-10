@@ -112,6 +112,22 @@ func TestParseLogLine(t *testing.T) {
 			},
 		},
 		{
+			name:        "Malformed Request Field",
+			line:        `www.example.com 192.168.1.6 - userx [06/Nov/2025:09:00:00 +0100] - 400 172 "-" "-"`,
+			expectError: false,
+			expected: &LogEntry{
+				Timestamp:  testTime,
+				IPInfo:     NewIPInfo("192.168.1.6"),
+				Path:       "", // Should be empty
+				Method:     "",
+				Protocol:   "", // Should be empty
+				UserAgent:  "-",
+				Referrer:   "-",
+				StatusCode: 400,
+				Size:       172,
+			},
+		},
+		{
 			name:        "Empty Line",
 			line:        "",
 			expectError: false,
