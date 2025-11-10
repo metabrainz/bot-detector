@@ -65,10 +65,12 @@ musicbrainz.org 10.0.0.7 - - [28/Oct/2025:17:00:50 +0000] "GET /some/other/path 
 musicbrainz.org 10.0.0.7 - - [28/Oct/2025:17:00:55 +0000] "GET /sleepy/probe HTTP/1.1" 200 100 "-" "ActiveBot"
 
 # ======================================================================================
-# === TEST CASE 10: Size field matching
+# === TEST CASE 10: Combined field matching (Size and IP)
 # ===
-# --- This one should match (size >= 5000) ---
-# === EXPECTED LOG: DRY_RUN: LOG! Chain: LargeDownloadChain completed by IP 10.0.0.8. Action set to 'log' (DryRun).
-musicbrainz.org 10.0.0.8 - - [28/Oct/2025:17:01:00 +0000] "GET /large/file.zip HTTP/1.1" 200 5000 "-" "Downloader"
-# --- This one should NOT match (size < 5000) ---
-musicbrainz.org 10.0.0.8 - - [28/Oct/2025:17:01:01 +0000] "GET /small/file.txt HTTP/1.1" 200 4999 "-" "Downloader"
+# --- This one should match (size >= 5000 AND IP starts with 1.2.3.) ---
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: CombinedMatcherChain completed by IP 1.2.3.4. Action set to 'log' (DryRun).
+musicbrainz.org 1.2.3.4 - - [28/Oct/2025:17:01:00 +0000] "GET /large/file.zip HTTP/1.1" 200 5000 "-" "CombinedBot"
+# --- This one should NOT match (size is too small) ---
+musicbrainz.org 1.2.3.4 - - [28/Oct/2025:17:01:01 +0000] "GET /small/file.txt HTTP/1.1" 200 4999 "-" "CombinedBot"
+# --- This one should NOT match (IP does not match regex) ---
+musicbrainz.org 1.2.4.5 - - [28/Oct/2025:17:01:02 +0000] "GET /large/file.zip HTTP/1.1" 200 5000 "-" "CombinedBot"

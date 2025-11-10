@@ -71,11 +71,12 @@ chains:
         field_matches:
           Path: "/sleepy/probe"
 
-  # --- 7. Size Field Matching ---
-  - name: "LargeDownloadChain"
+  # --- 7. Combined Field Matching (Size and IP) ---
+  - name: "CombinedMatcherChain"
     action: "log"
     match_key: "ip"
     steps:
       - field_matches:
           Size:
             gte: 5000
+          IP: "regex:^1\\.2\\.3\\."
