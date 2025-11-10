@@ -572,7 +572,9 @@ func TestDryRunMode(t *testing.T) {
 	// The test chains.yaml is hardcoded to look for this relative path.
 	// We need to create it in the current working directory.
 	// A better long-term solution would be to make the path in chains.yaml absolute or configurable for tests.
-	os.WriteFile("bad_user_agents.txt", []byte("BadUA/1.0\nregex:NastyBot"), 0644)
+	if err := os.WriteFile("bad_user_agents.txt", []byte("BadUA/1.0\nregex:NastyBot"), 0644); err != nil {
+		t.Fatalf("Failed to create dummy user agent file in current directory: %v", err)
+	}
 	t.Cleanup(func() { os.Remove("bad_user_agents.txt") })
 	// 1. Load configuration (chains, whitelist, etc.)
 	loadedCfg, err := LoadConfigFromYAML()
