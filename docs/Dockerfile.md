@@ -11,7 +11,7 @@ Using a multi-stage build allows you to compile the application in a temporary b
 
 # --- Build Stage ---
 # Use the official Go image as the build environment.
-FROM golang:1.21-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
