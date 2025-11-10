@@ -79,7 +79,7 @@ whitelist_cidrs:
   - "2001:db8:abcd::/48" # IPv6 Network
   - "2001:db8::dead:beef" # Bare IPv6
   - "10.0.0.1" # Bare IP
-haproxy_addresses:
+blocker_addresses:
   - "127.0.0.1:9999"
 duration_tables:
   "5m": "table_5m"
@@ -153,15 +153,16 @@ chains:
 		t.Errorf("Expected 4 whitelist CIDRs, got %d", len(loadedCfg.WhitelistNets))
 	}
 
-	if len(loadedCfg.HAProxyAddresses) != 1 {
-		t.Errorf("Expected 1 HAProxy address, got %d", len(loadedCfg.HAProxyAddresses))
-	}
-
 	if len(loadedCfg.DurationToTableName) != 2 {
 		t.Errorf("Expected 2 duration tables, got %d", len(loadedCfg.DurationToTableName))
 	}
+
 	if loadedCfg.BlockTableNameFallback != "table_1h" {
 		t.Errorf("Expected fallback table 'table_1h', got '%s'", loadedCfg.BlockTableNameFallback)
+	}
+
+	if len(loadedCfg.BlockerAddresses) != 1 {
+		t.Errorf("Expected 1 Blocker address, got %d", len(loadedCfg.BlockerAddresses))
 	}
 
 	if !IsIPWhitelistedInList(NewIPInfo("10.0.0.1"), loadedCfg.WhitelistNets) {
@@ -185,35 +186,43 @@ func setupTestYAML(t *testing.T, content string) {
 	})
 }
 
-func TestLoadConfigFromYAML_HAProxySettings(t *testing.T) {
+func TestLoadConfigFromYAML_BlockerSettings(t *testing.T) {
 	tests := []struct {
-		name                string
-		yamlContent         string
-		expectedMaxRetries  int
-		expectedRetryDelay  time.Duration
-		expectedDialTimeout time.Duration
-		expectError         bool
+		name                      string
+		yamlContent               string
+		expectedMaxRetries        int
+		expectedRetryDelay        time.Duration
+		expectedDialTimeout       time.Duration
+		expectedCommandQueueSize  int
+		expectedCommandsPerSecond int
+		expectError               bool
 	}{
 		{
 			name: "Custom values",
 			yamlContent: `
 version: "1.0"
-haproxy_max_retries: 5
-haproxy_retry_delay: "300ms"
-haproxy_dial_timeout: "10s"
+blocker_max_retries: 5
+blocker_retry_delay: "300ms"
+blocker_dial_timeout: "10s"
+blocker_command_queue_size: 500
+blocker_commands_per_second: 5
 `,
-			expectedMaxRetries:  5,
-			expectedRetryDelay:  300 * time.Millisecond,
-			expectedDialTimeout: 10 * time.Second,
+			expectedMaxRetries:        5,
+			expectedRetryDelay:        300 * time.Millisecond,
+			expectedDialTimeout:       10 * time.Second,
+			expectedCommandQueueSize:  500,
+			expectedCommandsPerSecond: 5,
 		},
 		{
 			name: "Default values",
 			yamlContent: `
 version: "1.0"
 `,
-			expectedMaxRetries:  DefaultHAProxyMaxRetries,
-			expectedRetryDelay:  DefaultHAProxyRetryDelay,
-			expectedDialTimeout: DefaultHAProxyDialTimeout,
+			expectedMaxRetries:        DefaultBlockerMaxRetries,
+			expectedRetryDelay:        DefaultBlockerRetryDelay,
+			expectedDialTimeout:       DefaultBlockerDialTimeout,
+			expectedCommandQueueSize:  DefaultBlockerCommandQueueSize,
+			expectedCommandsPerSecond: DefaultBlockerCommandsPerSecond,
 		},
 	}
 
@@ -224,8 +233,14 @@ version: "1.0"
 			if err != nil {
 				t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 			}
-			if loadedCfg.HAProxyMaxRetries != tt.expectedMaxRetries || loadedCfg.HAProxyRetryDelay != tt.expectedRetryDelay || loadedCfg.HAProxyDialTimeout != tt.expectedDialTimeout {
-				t.Errorf("HAProxy settings mismatch. Got retries=%d, delay=%v, timeout=%v. Expected retries=%d, delay=%v, timeout=%v", loadedCfg.HAProxyMaxRetries, loadedCfg.HAProxyRetryDelay, loadedCfg.HAProxyDialTimeout, tt.expectedMaxRetries, tt.expectedRetryDelay, tt.expectedDialTimeout)
+			if loadedCfg.BlockerMaxRetries != tt.expectedMaxRetries ||
+				loadedCfg.BlockerRetryDelay != tt.expectedRetryDelay ||
+				loadedCfg.BlockerDialTimeout != tt.expectedDialTimeout ||
+				loadedCfg.BlockerCommandQueueSize != tt.expectedCommandQueueSize ||
+				loadedCfg.BlockerCommandsPerSecond != tt.expectedCommandsPerSecond {
+				t.Errorf("Blocker settings mismatch. Got retries=%d, delay=%v, timeout=%v, queue_size=%d, commands_per_second=%d. Expected retries=%d, delay=%v, timeout=%v, queue_size=%d, commands_per_second=%d",
+					loadedCfg.BlockerMaxRetries, loadedCfg.BlockerRetryDelay, loadedCfg.BlockerDialTimeout, loadedCfg.BlockerCommandQueueSize, loadedCfg.BlockerCommandsPerSecond,
+					tt.expectedMaxRetries, tt.expectedRetryDelay, tt.expectedDialTimeout, tt.expectedCommandQueueSize, tt.expectedCommandsPerSecond)
 			}
 		})
 	}
@@ -894,18 +909,18 @@ chains: []
 			expectedError: "invalid block_duration format for default_block_duration",
 		},
 		{
-			name: "Invalid haproxy_retry_delay",
+			name: "Invalid blocker_retry_delay",
 			yamlContent: `
 version: "1.0"
-haproxy_retry_delay: "bad"`,
-			expectedError: "invalid haproxy_retry_delay",
+blocker_retry_delay: "bad"`,
+			expectedError: "invalid blocker_retry_delay",
 		},
 		{
-			name: "Invalid haproxy_dial_timeout",
+			name: "Invalid blocker_dial_timeout",
 			yamlContent: `
 version: "1.0"
-haproxy_dial_timeout: "1y"`,
-			expectedError: "invalid haproxy_dial_timeout",
+blocker_dial_timeout: "1y"`,
+			expectedError: "invalid blocker_dial_timeout",
 		},
 	}...)
 
@@ -1041,7 +1056,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 				ConfigMutex:   &sync.RWMutex{},
 				Config: &AppConfig{
 					// This config is needed for the p.UnblockIP call to work.
-					HAProxyAddresses:    []string{"127.0.0.1:9999"},
+					BlockerAddresses:    []string{"127.0.0.1:9999"},
 					DurationToTableName: map[time.Duration]string{5 * time.Minute: "table_5m"},
 				},
 				// Capture log output for assertion.
@@ -1121,7 +1136,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			ActivityStore: make(map[TrackingKey]*BotActivity),
 			ConfigMutex:   &sync.RWMutex{},
 			Config: &AppConfig{
-				HAProxyAddresses:    []string{"127.0.0.1:9999"},
+				BlockerAddresses:    []string{"127.0.0.1:9999"},
 				DurationToTableName: map[time.Duration]string{time.Minute: "t1"},
 			},
 			LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},

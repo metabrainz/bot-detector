@@ -124,7 +124,7 @@ Content-Type: text/plain
 
 ## **2\. Bot Detector Configuration (config.yaml)**
 
-The bot-detector's YAML configuration file is the **master list** of all targets and should be kept consistent across your cluster. The `haproxy_addresses` list specifies every endpoint the bot detector must communicate with.
+The bot-detector's YAML configuration file is the **master list** of all targets and should be kept consistent across your cluster. The `blocker_addresses` list specifies every endpoint the bot detector must communicate with.
 
 ```yaml
 # Example config.yaml
@@ -140,7 +140,7 @@ default_block_duration: "5m"
 # --- HAProxy Target Addresses ---
 # This list contains ALL HAProxy control endpoints across the cluster.
 # The bot detector handles the connection type (Unix vs. TCP) automatically.
-haproxy_addresses:
+blocker_addresses:
   # 1. Local HAProxy (Uses Unix Socket - faster, more secure locally)
   - /run/haproxy/admin.sock
 
@@ -153,9 +153,11 @@ haproxy_addresses:
 # --- HAProxy Client Settings (Optional) ---
 # These settings control the behavior of the bot-detector when it communicates
 # with the HAProxy instances listed above.
-haproxy_max_retries: 3
-haproxy_retry_delay: "200ms"
-haproxy_dial_timeout: "5s"
+blocker_max_retries: 3
+blocker_retry_delay: "200ms"
+blocker_dial_timeout: "5s"
+blocker_command_queue_size: 1000
+blocker_commands_per_second: 10
 
 
 # ... chains definitions ...

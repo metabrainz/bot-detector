@@ -63,7 +63,7 @@ func (b *HAProxyBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 	targets := make(map[string]map[string]string)
 	targets[tableName] = make(map[string]string)
 
-	addresses := p.Config.HAProxyAddresses
+	addresses := p.Config.BlockerAddresses
 
 	for _, addr := range addresses {
 		targets[tableName][addr] = command
@@ -107,7 +107,7 @@ func (b *HAProxyBlocker) Unblock(ipInfo IPInfo) error {
 	// 2. Construct the commands and the targets map
 	targets := make(map[string]map[string]string)
 
-	addresses := p.Config.HAProxyAddresses
+	addresses := p.Config.BlockerAddresses
 	p.ConfigMutex.RUnlock()
 
 	// We only clear the tables matching the IP's version
@@ -138,15 +138,15 @@ func executeCommandImpl(p *Processor, addr, ip, command string) error {
 	}
 
 	var lastErr error
-	for attempt := 0; attempt < p.Config.HAProxyMaxRetries; attempt++ {
+	for attempt := 0; attempt < p.Config.BlockerMaxRetries; attempt++ {
 		if attempt > 0 {
 			// Log the retry attempt (assuming a LogOutput function is available)
-			p.LogFunc(logging.LevelWarning, "HAPROXY_RETRY", "Retrying HAProxy command for %s (Attempt %d/%d)", addr, attempt+1, p.Config.HAProxyMaxRetries)
-			time.Sleep(p.Config.HAProxyRetryDelay)
+			p.LogFunc(logging.LevelWarning, "HAPROXY_RETRY", "Retrying HAProxy command for %s (Attempt %d/%d)", addr, attempt+1, p.Config.BlockerMaxRetries)
+			time.Sleep(p.Config.BlockerRetryDelay)
 		}
 
 		// 1. Connection attempt
-		conn, err := net.DialTimeout(network, addr, p.Config.HAProxyDialTimeout)
+		conn, err := net.DialTimeout(network, addr, p.Config.BlockerDialTimeout)
 		if err != nil {
 			lastErr = fmt.Errorf("failed to connect to HAProxy instance %s: %w", addr, err)
 			continue // Try again
@@ -163,7 +163,7 @@ func executeCommandImpl(p *Processor, addr, ip, command string) error {
 
 		// 3. Read attempt (Command Error Check)
 		reader := bufio.NewReader(conn)
-		conn.SetReadDeadline(time.Now().Add(p.Config.HAProxyDialTimeout))
+		conn.SetReadDeadline(time.Now().Add(p.Config.BlockerDialTimeout))
 		response, err := reader.ReadString('\n')
 
 		// If the error is EOF or nil, the command might have succeeded.
@@ -194,7 +194,7 @@ func executeCommandImpl(p *Processor, addr, ip, command string) error {
 // against HAProxy instances.
 func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[string]map[string]string) error {
 	p := b.P
-	addresses := p.Config.HAProxyAddresses
+	addresses := p.Config.BlockerAddresses
 
 	if len(addresses) == 0 {
 		p.LogFunc(logging.LevelWarning, "SKIP_COMMAND", "HAProxy addresses list is empty. Skipping command for IP %s.", ip)

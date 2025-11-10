@@ -685,45 +685,45 @@ func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 		}
 	}
 
-	// --- PARSE HAPROXY TIMEOUTS ---
-	var haProxyMaxRetries int
-	var haProxyRetryDelay, haProxyDialTimeout time.Duration
-	var haProxyCommandQueueSize, haProxyCommandsPerSecond int
+	// --- PARSE BLOCKER SETTINGS ---
+	var blockerMaxRetries int
+	var blockerRetryDelay, blockerDialTimeout time.Duration
+	var blockerCommandQueueSize, blockerCommandsPerSecond int
 
-	if config.HAProxyMaxRetries > 0 {
-		haProxyMaxRetries = config.HAProxyMaxRetries
+	if config.BlockerMaxRetries > 0 {
+		blockerMaxRetries = config.BlockerMaxRetries
 	} else {
-		haProxyMaxRetries = DefaultHAProxyMaxRetries
+		blockerMaxRetries = DefaultBlockerMaxRetries
 	}
 
-	if config.HAProxyRetryDelay != "" {
-		haProxyRetryDelay, err = time.ParseDuration(config.HAProxyRetryDelay)
+	if config.BlockerRetryDelay != "" {
+		blockerRetryDelay, err = time.ParseDuration(config.BlockerRetryDelay)
 		if err != nil {
-			return nil, fmt.Errorf("invalid haproxy_retry_delay: %w", err)
+			return nil, fmt.Errorf("invalid blocker_retry_delay: %w", err)
 		}
 	} else {
-		haProxyRetryDelay = DefaultHAProxyRetryDelay
+		blockerRetryDelay = DefaultBlockerRetryDelay
 	}
 
-	if config.HAProxyDialTimeout != "" {
-		haProxyDialTimeout, err = time.ParseDuration(config.HAProxyDialTimeout)
+	if config.BlockerDialTimeout != "" {
+		blockerDialTimeout, err = time.ParseDuration(config.BlockerDialTimeout)
 		if err != nil {
-			return nil, fmt.Errorf("invalid haproxy_dial_timeout: %w", err)
+			return nil, fmt.Errorf("invalid blocker_dial_timeout: %w", err)
 		}
 	} else {
-		haProxyDialTimeout = DefaultHAProxyDialTimeout
+		blockerDialTimeout = DefaultBlockerDialTimeout
 	}
 
-	if config.HAProxyCommandQueueSize > 0 {
-		haProxyCommandQueueSize = config.HAProxyCommandQueueSize
+	if config.BlockerCommandQueueSize > 0 {
+		blockerCommandQueueSize = config.BlockerCommandQueueSize
 	} else {
-		haProxyCommandQueueSize = DefaultHAProxyCommandQueueSize
+		blockerCommandQueueSize = DefaultBlockerCommandQueueSize
 	}
 
-	if config.HAProxyCommandsPerSecond > 0 {
-		haProxyCommandsPerSecond = config.HAProxyCommandsPerSecond
+	if config.BlockerCommandsPerSecond > 0 {
+		blockerCommandsPerSecond = config.BlockerCommandsPerSecond
 	} else {
-		haProxyCommandsPerSecond = DefaultHAProxyCommandsPerSecond
+		blockerCommandsPerSecond = DefaultBlockerCommandsPerSecond
 	}
 
 	// --- PARSE CHAINS ---
@@ -841,28 +841,28 @@ func LoadConfigFromYAML() (*LoadedConfig, error) { // Added EOFPollingDelay
 	}
 
 	return &LoadedConfig{
-		BlockTableNameFallback: newFallbackName,
-		Chains:                 newChains,
-		DefaultBlockDuration:   defaultBlockDuration,
-		CleanupInterval:        cleanupInterval,
-		EOFPollingDelay:        eofPollingDelay,
-		DurationToTableName:    newDurationTables,
-		FileDependencies:       fileDependencies,
-		HAProxyAddresses:       config.HAProxyAddresses,
-		HAProxyDialTimeout:     haProxyDialTimeout,
-		HAProxyMaxRetries:      haProxyMaxRetries,
-		HAProxyRetryDelay:      haProxyRetryDelay,
-		HAProxyCommandQueueSize: haProxyCommandQueueSize,
-		HAProxyCommandsPerSecond: haProxyCommandsPerSecond,
-		IdleTimeout:            idleTimeout,
-		LogLevel:               logLevelStr,
-		LineEnding:             lineEndingStr,
-		LogFormatRegex:         customLogRegex,
-		MaxTimeSinceLastHit:    maxTimeSinceLastHit,
-		OutOfOrderTolerance:    outOfOrderTolerance,
-		PollingInterval:        pollingInterval,
-		TimestampFormat:        timestampFormat,
-		WhitelistNets:          newWhitelistNets,
+		BlockTableNameFallback:   newFallbackName,
+		Chains:                   newChains,
+		DefaultBlockDuration:     defaultBlockDuration,
+		CleanupInterval:          cleanupInterval,
+		EOFPollingDelay:          eofPollingDelay,
+		DurationToTableName:      newDurationTables,
+		FileDependencies:         fileDependencies,
+		BlockerAddresses:         config.BlockerAddresses,
+		BlockerDialTimeout:       blockerDialTimeout,
+		BlockerMaxRetries:        blockerMaxRetries,
+		BlockerRetryDelay:        blockerRetryDelay,
+		BlockerCommandQueueSize:  blockerCommandQueueSize,
+		BlockerCommandsPerSecond: blockerCommandsPerSecond,
+		IdleTimeout:              idleTimeout,
+		LogLevel:                 logLevelStr,
+		LineEnding:               lineEndingStr,
+		LogFormatRegex:           customLogRegex,
+		MaxTimeSinceLastHit:      maxTimeSinceLastHit,
+		OutOfOrderTolerance:      outOfOrderTolerance,
+		PollingInterval:          pollingInterval,
+		TimestampFormat:          timestampFormat,
+		WhitelistNets:            newWhitelistNets,
 	}, nil
 }
 
@@ -887,12 +887,12 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 	p.ConfigMutex.Lock()
 	p.Chains = loadedCfg.Chains
 	p.Config.WhitelistNets = loadedCfg.WhitelistNets
-	p.Config.HAProxyAddresses = loadedCfg.HAProxyAddresses
-	p.Config.HAProxyMaxRetries = loadedCfg.HAProxyMaxRetries
-	p.Config.HAProxyRetryDelay = loadedCfg.HAProxyRetryDelay
-	p.Config.HAProxyDialTimeout = loadedCfg.HAProxyDialTimeout
-	p.Config.HAProxyCommandQueueSize = loadedCfg.HAProxyCommandQueueSize
-	p.Config.HAProxyCommandsPerSecond = loadedCfg.HAProxyCommandsPerSecond
+	p.Config.BlockerAddresses = loadedCfg.BlockerAddresses
+	p.Config.BlockerMaxRetries = loadedCfg.BlockerMaxRetries
+	p.Config.BlockerRetryDelay = loadedCfg.BlockerRetryDelay
+	p.Config.BlockerDialTimeout = loadedCfg.BlockerDialTimeout
+	p.Config.BlockerCommandQueueSize = loadedCfg.BlockerCommandQueueSize
+	p.Config.BlockerCommandsPerSecond = loadedCfg.BlockerCommandsPerSecond
 	p.Config.DurationToTableName = loadedCfg.DurationToTableName
 	p.Config.BlockTableNameFallback = loadedCfg.BlockTableNameFallback
 	p.Config.DefaultBlockDuration = loadedCfg.DefaultBlockDuration

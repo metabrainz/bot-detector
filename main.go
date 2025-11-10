@@ -47,26 +47,26 @@ func main() {
 
 	// Create the config struct from the loaded data.
 	appConfig := &AppConfig{
-		BlockTableNameFallback: loadedCfg.BlockTableNameFallback,
-		CleanupInterval:        loadedCfg.CleanupInterval,
-		DefaultBlockDuration:   loadedCfg.DefaultBlockDuration,
-		DurationToTableName:    loadedCfg.DurationToTableName,
-		EOFPollingDelay:        loadedCfg.EOFPollingDelay,
-		FileDependencies:       loadedCfg.FileDependencies,
-		HAProxyAddresses:       loadedCfg.HAProxyAddresses,
-		HAProxyDialTimeout:     loadedCfg.HAProxyDialTimeout,
-		HAProxyMaxRetries:      loadedCfg.HAProxyMaxRetries,
-		HAProxyRetryDelay:      loadedCfg.HAProxyRetryDelay,
-		HAProxyCommandQueueSize: loadedCfg.HAProxyCommandQueueSize,
-		HAProxyCommandsPerSecond: loadedCfg.HAProxyCommandsPerSecond,
-		IdleTimeout:            loadedCfg.IdleTimeout,
-		LastModTime:            time.Now(),
-		MaxTimeSinceLastHit:    loadedCfg.MaxTimeSinceLastHit,
-		OutOfOrderTolerance:    loadedCfg.OutOfOrderTolerance,
-		PollingInterval:        loadedCfg.PollingInterval,
-		TimestampFormat:        loadedCfg.TimestampFormat,
-		StatFunc:               defaultStatFunc, // Initialize StatFunc to prevent nil pointer panic.
-		WhitelistNets:          loadedCfg.WhitelistNets,
+		BlockTableNameFallback:   loadedCfg.BlockTableNameFallback,
+		CleanupInterval:          loadedCfg.CleanupInterval,
+		DefaultBlockDuration:     loadedCfg.DefaultBlockDuration,
+		DurationToTableName:      loadedCfg.DurationToTableName,
+		EOFPollingDelay:          loadedCfg.EOFPollingDelay,
+		FileDependencies:         loadedCfg.FileDependencies,
+		BlockerAddresses:         loadedCfg.BlockerAddresses,
+		BlockerDialTimeout:       loadedCfg.BlockerDialTimeout,
+		BlockerMaxRetries:        loadedCfg.BlockerMaxRetries,
+		BlockerRetryDelay:        loadedCfg.BlockerRetryDelay,
+		BlockerCommandQueueSize:  loadedCfg.BlockerCommandQueueSize,
+		BlockerCommandsPerSecond: loadedCfg.BlockerCommandsPerSecond,
+		IdleTimeout:              loadedCfg.IdleTimeout,
+		LastModTime:              time.Now(),
+		MaxTimeSinceLastHit:      loadedCfg.MaxTimeSinceLastHit,
+		OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
+		PollingInterval:          loadedCfg.PollingInterval,
+		TimestampFormat:          loadedCfg.TimestampFormat,
+		StatFunc:                 defaultStatFunc, // Initialize StatFunc to prevent nil pointer panic.
+		WhitelistNets:            loadedCfg.WhitelistNets,
 	}
 
 	// Initialize the Processor instance.
@@ -89,7 +89,7 @@ func main() {
 	// Inject the HAProxyBlocker.
 	haproxyBlocker := &HAProxyBlocker{P: p}
 	// Wrap the HAProxyBlocker with the RateLimitedBlocker.
-	rateLimitedBlocker := NewRateLimitedBlocker(p, haproxyBlocker, p.Config.HAProxyCommandQueueSize, p.Config.HAProxyCommandsPerSecond)
+	rateLimitedBlocker := NewRateLimitedBlocker(p, haproxyBlocker, p.Config.BlockerCommandQueueSize, p.Config.BlockerCommandsPerSecond)
 	p.Blocker = rateLimitedBlocker
 	defer rateLimitedBlocker.Stop() // Ensure the rate limiter worker is stopped on exit.
 

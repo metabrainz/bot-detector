@@ -64,79 +64,79 @@ type Processor struct {
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
 type AppConfig struct {
-	BlockTableNameFallback string                            `config:"compare"` // This is derived, but comparing is harmless and simple.
-	CleanupInterval        time.Duration                     `config:"compare" summary:"cleanup_interval"`
-	DurationToTableName    map[time.Duration]string          `config:"compare" summary:"duration_tables"`
-	DefaultBlockDuration   time.Duration                     `config:"compare" summary:"default_block_duration"`
-	EOFPollingDelay        time.Duration                     `config:"compare" summary:"eof_polling_delay"`
-	FileDependencies       []string                          // List of file paths used in `file:` matchers.
-	HAProxyAddresses       []string                          `config:"compare" summary:"haproxy_addresses"`
-	HAProxyDialTimeout     time.Duration                     `config:"compare" summary:"haproxy_dial_timeout"`
-	HAProxyMaxRetries      int                               `config:"compare" summary:"haproxy_max_retries"`
-	HAProxyRetryDelay      time.Duration                     `config:"compare" summary:"haproxy_retry_delay"`
-	HAProxyCommandQueueSize int                              `config:"compare" summary:"haproxy_command_queue_size"`
-	HAProxyCommandsPerSecond int                             `config:"compare" summary:"haproxy_commands_per_second"`
-	IdleTimeout            time.Duration                     `config:"compare" summary:"idle_timeout"`
-	LineEnding             string                            `config:"compare" summary:"line_ending"`
-	LastModTime            time.Time                         // Not compared
-	MaxTimeSinceLastHit    time.Duration                     `config:"compare" summary:"max_time_since_last_hit"`
-	OutOfOrderTolerance    time.Duration                     `config:"compare" summary:"out_of_order_tolerance"`
-	PollingInterval        time.Duration                     `config:"compare" summary:"poll_interval"`
-	TimestampFormat        string                            `config:"compare"`
-	StatFunc               func(string) (os.FileInfo, error) // Mockable
-	WhitelistNets          []*net.IPNet                      `config:"compare"`
+	BlockTableNameFallback   string                            `config:"compare"` // This is derived, but comparing is harmless and simple.
+	CleanupInterval          time.Duration                     `config:"compare" summary:"cleanup_interval"`
+	DurationToTableName      map[time.Duration]string          `config:"compare" summary:"duration_tables"`
+	DefaultBlockDuration     time.Duration                     `config:"compare" summary:"default_block_duration"`
+	EOFPollingDelay          time.Duration                     `config:"compare" summary:"eof_polling_delay"`
+	FileDependencies         []string                          // List of file paths used in `file:` matchers.
+	BlockerAddresses         []string                          `config:"compare" summary:"blocker_addresses"`
+	BlockerDialTimeout       time.Duration                     `config:"compare" summary:"blocker_dial_timeout"`
+	BlockerMaxRetries        int                               `config:"compare" summary:"blocker_max_retries"`
+	BlockerRetryDelay        time.Duration                     `config:"compare" summary:"blocker_retry_delay"`
+	BlockerCommandQueueSize  int                               `config:"compare" summary:"blocker_command_queue_size"`
+	BlockerCommandsPerSecond int                               `config:"compare" summary:"blocker_commands_per_second"`
+	IdleTimeout              time.Duration                     `config:"compare" summary:"idle_timeout"`
+	LineEnding               string                            `config:"compare" summary:"line_ending"`
+	LastModTime              time.Time                         // Not compared
+	MaxTimeSinceLastHit      time.Duration                     `config:"compare" summary:"max_time_since_last_hit"`
+	OutOfOrderTolerance      time.Duration                     `config:"compare" summary:"out_of_order_tolerance"`
+	PollingInterval          time.Duration                     `config:"compare" summary:"poll_interval"`
+	TimestampFormat          string                            `config:"compare"`
+	StatFunc                 func(string) (os.FileInfo, error) // Mockable
+	WhitelistNets            []*net.IPNet                      `config:"compare"`
 }
 
 // LoadedConfig encapsulates all configuration data loaded from the YAML file.
 type LoadedConfig struct {
-	BlockTableNameFallback string                   `config:"compare"`
-	Chains                 []BehavioralChain        // Not compared here
-	CleanupInterval        time.Duration            `config:"compare"`
-	DefaultBlockDuration   time.Duration            `config:"compare"`
-	DurationToTableName    map[time.Duration]string `config:"compare"`
-	EOFPollingDelay        time.Duration            `config:"compare"`
-	FileDependencies       []string                 // Not compared
-	HAProxyAddresses       []string                 `config:"compare"`
-	HAProxyDialTimeout     time.Duration            `config:"compare"`
-	HAProxyMaxRetries      int                      `config:"compare"`
-	HAProxyRetryDelay      time.Duration            `config:"compare"`
-	HAProxyCommandQueueSize int                     `config:"compare"`
-	HAProxyCommandsPerSecond int                    `config:"compare"`
-	IdleTimeout            time.Duration            `config:"compare"`
-	LogLevel               string                   `config:"compare"`
-	LineEnding             string                   `config:"compare"`
-	LogFormatRegex         *regexp.Regexp           // Not compared here
-	MaxTimeSinceLastHit    time.Duration            `config:"compare"`
-	OutOfOrderTolerance    time.Duration            `config:"compare"`
-	PollingInterval        time.Duration            `config:"compare"`
-	TimestampFormat        string                   `config:"compare"`
-	StatFunc               func(string) (os.FileInfo, error)
-	WhitelistNets          []*net.IPNet `config:"compare"`
+	BlockTableNameFallback   string                   `config:"compare"`
+	Chains                   []BehavioralChain        // Not compared here
+	CleanupInterval          time.Duration            `config:"compare"`
+	DefaultBlockDuration     time.Duration            `config:"compare"`
+	DurationToTableName      map[time.Duration]string `config:"compare"`
+	EOFPollingDelay          time.Duration            `config:"compare"`
+	FileDependencies         []string                 // Not compared
+	BlockerAddresses         []string                 `config:"compare"`
+	BlockerDialTimeout       time.Duration            `config:"compare"`
+	BlockerMaxRetries        int                      `config:"compare"`
+	BlockerRetryDelay        time.Duration            `config:"compare"`
+	BlockerCommandQueueSize  int                      `config:"compare"`
+	BlockerCommandsPerSecond int                      `config:"compare"`
+	IdleTimeout              time.Duration            `config:"compare"`
+	LogLevel                 string                   `config:"compare"`
+	LineEnding               string                   `config:"compare"`
+	LogFormatRegex           *regexp.Regexp           // Not compared here
+	MaxTimeSinceLastHit      time.Duration            `config:"compare"`
+	OutOfOrderTolerance      time.Duration            `config:"compare"`
+	PollingInterval          time.Duration            `config:"compare"`
+	TimestampFormat          string                   `config:"compare"`
+	StatFunc                 func(string) (os.FileInfo, error)
+	WhitelistNets            []*net.IPNet `config:"compare"`
 }
 
 // --- YAML DATA STRUCTURES ---
 
 type ChainConfig struct {
-	Version              string                `yaml:"version"`
-	Chains               []BehavioralChainYAML `yaml:"chains"`
-	CleanupInterval      string                `yaml:"cleanup_interval"`
-	DefaultBlockDuration string                `yaml:"default_block_duration"`
-	DurationTables       map[string]string     `yaml:"duration_tables"`
-	EOFPollingDelay      string                `yaml:"eof_polling_delay"`
-	HAProxyAddresses     []string              `yaml:"haproxy_addresses"`
-	HAProxyDialTimeout   string                `yaml:"haproxy_dial_timeout"`
-	HAProxyMaxRetries    int                   `yaml:"haproxy_max_retries"`
-	HAProxyRetryDelay    string                `yaml:"haproxy_retry_delay"`
-	HAProxyCommandQueueSize int                `yaml:"haproxy_command_queue_size"`
-	HAProxyCommandsPerSecond int               `yaml:"haproxy_commands_per_second"`
-	IdleTimeout          string                `yaml:"idle_timeout"`
-	LineEnding           string                `yaml:"line_ending"`
-	LogLevel             string                `yaml:"log_level"`
-	LogFormatRegex       string                `yaml:"log_format_regex"`
-	OutOfOrderTolerance  string                `yaml:"out_of_order_tolerance"`
-	PollingInterval      string                `yaml:"poll_interval"`
-	TimestampFormat      string                `yaml:"timestamp_format"`
-	WhitelistCIDRs       []string              `yaml:"whitelist_cidrs"`
+	Version                  string                `yaml:"version"`
+	Chains                   []BehavioralChainYAML `yaml:"chains"`
+	CleanupInterval          string                `yaml:"cleanup_interval"`
+	DefaultBlockDuration     string                `yaml:"default_block_duration"`
+	DurationTables           map[string]string     `yaml:"duration_tables"`
+	EOFPollingDelay          string                `yaml:"eof_polling_delay"`
+	BlockerAddresses         []string              `yaml:"blocker_addresses"`
+	BlockerDialTimeout       string                `yaml:"blocker_dial_timeout"`
+	BlockerMaxRetries        int                   `yaml:"blocker_max_retries"`
+	BlockerRetryDelay        string                `yaml:"blocker_retry_delay"`
+	BlockerCommandQueueSize  int                   `yaml:"blocker_command_queue_size"`
+	BlockerCommandsPerSecond int                   `yaml:"blocker_commands_per_second"`
+	IdleTimeout              string                `yaml:"idle_timeout"`
+	LineEnding               string                `yaml:"line_ending"`
+	LogLevel                 string                `yaml:"log_level"`
+	LogFormatRegex           string                `yaml:"log_format_regex"`
+	OutOfOrderTolerance      string                `yaml:"out_of_order_tolerance"`
+	PollingInterval          string                `yaml:"poll_interval"`
+	TimestampFormat          string                `yaml:"timestamp_format"`
+	WhitelistCIDRs           []string              `yaml:"whitelist_cidrs"`
 }
 
 type StepDefYAML struct {

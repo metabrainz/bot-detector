@@ -1,6 +1,6 @@
 # **Bot-Detector: Behavioral Threat Mitigation**
 
-Bot-Detector is a high-performance Go application designed to monitor live access logs, identify malicious or anomalous behavior using configurable behavioral chains, and dynamically block offending IP addresses via the HAProxy Runtime API.
+Bot-Detector is a high-performance Go application designed to monitor live access logs, identify malicious or anomalous behavior using configurable behavioral chains, and dynamically block offending IP addresses via the configured blocking backend.
 
 ## How It Works
 
@@ -10,23 +10,23 @@ The application operates in a continuous loop:
 2.  **Parses each new log line** against a configurable regex format defined in the config file.
 3.  **Checks the entry** against a series of behavioral chains defined in the YAML configuration file.
 4.  **Tracks the state** of each IP address (or IP+User-Agent) as it progresses through these chains.
-5.  **Executes an action** (e.g., `block` or `log`) via the HAProxy Runtime API when a chain is completed.
+5.  **Executes an action** (e.g., `block` or `log`) via the configured blocking backend when a chain is completed.
 6.  **Manages state** by cleaning up idle or irrelevant IP tracking data to conserve memory.
 
 ## **Features**
 
 *   **Real-Time Behavioral Analysis:** Uses flexible YAML configurations to detect sequential patterns.
-*   **HAProxy Integration:** Executes immediate IP blocking via the HAProxy Runtime API (TCP or Unix Socket).
-*   **High Resilience:** Handles HAProxy instance unavailability by logging the failure and continuing operation.
+*   **Blocker Integration:** Executes immediate IP blocking via the configured backend (e.g., HAProxy Runtime API, TCP or Unix Socket).
+*   **High Resilience:** Handles backend instance unavailability by logging the failure and continuing operation.
 *   **Configuration Hot-Reload:** Automatically detects and applies changes to the YAML configuration file and its file dependencies without a restart.
 *   **Log Rotation Safe:** Continuously tails log files, automatically re-opening the file after log rotation events.
 *   **Graceful Shutdown:** Implements signal handlers (SIGINT, SIGTERM) for safe, controlled process termination.
-*   **Dry Run Mode:** Allows testing behavioral chains against static log files without affecting a live HAProxy instance.
+*   **Dry Run Mode:** Allows testing behavioral chains against static log files without affecting a live blocking backend.
 *   **Memory Optimization:** Automatically purges state for IPs that are no longer relevant, minimizing memory footprint.
 
 ## **Setup and Usage**
 
-### **Step 1: HAProxy Configuration (CRITICAL)**
+### **Step 1: Blocker Configuration (CRITICAL)**
 
 The bot-detector only sends block commands to HAProxy; it does not configure HAProxy itself. For blocking to work, you must configure your HAProxy instance with the necessary **stick tables and ACLs** to act on the information sent by this application.
 
@@ -47,7 +47,7 @@ The application is configured using a YAML file and a few command-line flags.
 
 #### **Dry Run Mode (Testing)**
 
-Use `-dry-run` to test your chains against a static log file. This will process the file once and log all match actions without attempting to connect to HAProxy (even if chain action is block).
+Use `-dry-run` to test your chains against a static log file. This will process the file once and log all match actions without attempting to connect to the configured blocking backend (even if chain action is block).
 
 ```sh
 ./bot-detector --dry-run \
@@ -57,9 +57,9 @@ Use `-dry-run` to test your chains against a static log file. This will process 
 
 ## **Resilience and Logging**
 
-### **HAProxy Fail-Safe**
+### **Blocker Fail-Safe**
 
-If an HAProxy instance is unavailable during a block or unblock attempt (e.g., it is restarting or down), the program will log the connection error and continue its operation. The command will be attempted on other configured HAProxy instances, and the application will continue to process logs and attempt future blocks. It does not enter a persistent "passive mode"; it simply reports the failure for that specific event.
+If a blocker instance is unavailable during a block or unblock attempt (e.g., it is restarting or down), the program will log the connection error and continue its operation. The command will be attempted on other configured blocker instances, and the application will continue to process logs and attempt future blocks. It does not enter a persistent "passive mode"; it simply reports the failure for that specific event.
 
 ### **Log Rotation**
 
@@ -95,7 +95,7 @@ This will produce a single executable named `bot-detector`.
 | :--- | :--- | :--- |
 | **`--yaml-path`** | (none) | **Required.** Path to the YAML configuration file. |
 | **`--log-path`** | (none) | **Required.** Path to the access log file to tail (or to read in dry-run mode). |
-| **`--dry-run`** | `false` | Optional. If true, runs in test mode, ignoring HAProxy and live logging. |
+| **`--dry-run`** | `false` | Optional. If true, runs in test mode, ignoring the configured blocking backend and live logging. |
 | **`--version`** | `false` | Optional. Print the application version and exit. |
 | **`--reload-on-signal`** | (none) | Optional. If set to a signal name (e.g., `HUP`, `USR1`), disables the file watcher and reloads the configuration upon receiving that signal. |
 
@@ -108,7 +108,7 @@ The application uses a unified logging system with five discrete levels. The `--
 | Level | Severity | Description |
 | :--- | :--- | :--- |
 | **`critical`** | **0** (Highest) | Only displays actions that modify state or terminate the program (e.g., **IP blocks**, graceful **SHUTDOWN**). |
-| **`error`** | **1** | Displays severe, non-fatal issues (e.g., file read errors, **HAProxy connection failures** that trigger fail-safe). |
+| **`error`** | **1** | Displays severe, non-fatal issues (e.g., file read errors, **Blocker connection failures** that trigger fail-safe). |
 | **`warning`** | **2** (Default) | Includes non-critical operational issues that should be reviewed (e.g., failed timestamp parsing, malformed URL referrers). |
 | **`info`** | **3** | Includes major application lifecycle events (e.g., configuration **LOAD**, **DRYRUN** start/completion, tailing start). |
 | **`debug`** | **4** (Lowest) | The most verbose level. Includes high-volume internal logic like individual step **MATCH**. |
@@ -133,10 +133,12 @@ The file is structured as a top-level map containing a single key, chains, which
 | **timestamp_format** | string | Optional. The time format layout string (per Go's `time.Parse` syntax) for parsing timestamps. Default: `02/Jan/2006:15:04:05 -0700`. |
 | **log_format_regex** | string | Optional. A Go-compatible regex to parse log lines. **Required capture groups:** `IP`, `Timestamp`. **Optional groups:** `Method`, `Path`, `StatusCode`, `Referrer`, `UserAgent`. If an optional group is omitted, its value will be treated as empty. If not provided, the application defaults to a regex that expects a **virtual-host-prefixed combined log format**. |
 | **default_block_duration** | string | Optional. A global block duration to apply to any `block` action chain that does not define its own `block_duration`. Format: Go duration string (e.g., "5m", "1h"). |
-| **haproxy_max_retries** | int | Optional. Number of attempts to send a command to an HAProxy instance. Default: `3`. |
-| **haproxy_addresses** | array of string | A list of all HAProxy control endpoints (TCP `host:port` or Unix socket paths) across the cluster. |
-| **haproxy_retry_delay** | string | Optional. Duration to wait between retry attempts. Default: `200ms`. |
-| **haproxy_dial_timeout** | string | Optional. Timeout for establishing a connection to an HAProxy socket. Default: `5s`. |
+| **blocker_max_retries** | int | Optional. Number of attempts to send a command to a blocker instance. Default: `3`. |
+| **blocker_addresses** | array of string | A list of all blocker control endpoints (TCP `host:port` or Unix socket paths) across the cluster. |
+| **blocker_retry_delay** | string | Optional. Duration to wait between retry attempts. Default: `200ms`. |
+| **blocker_dial_timeout** | string | Optional. Timeout for establishing a connection to a blocker socket. Default: `5s`. |
+| **blocker_command_queue_size** | int | Optional. The maximum number of commands that can be queued for the blocker. Default: `1000`. |
+| **blocker_commands_per_second** | int | Optional. The maximum number of commands per second to send to the blocker. Default: `10`. |
 
 #### A Note on Durations
 

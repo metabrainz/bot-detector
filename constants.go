@@ -37,10 +37,10 @@ const (
 	DefaultOutOfOrderTolerance = "5s"
 	DefaultMinPollingInterval  = 1 * time.Second // Minimum safe polling interval to prevent tight loops.
 
-	// Default HAProxy client settings
-	DefaultHAProxyMaxRetries  = 3
-	DefaultHAProxyRetryDelay  = 200 * time.Millisecond
-	DefaultHAProxyDialTimeout = 5 * time.Second
-	DefaultHAProxyCommandQueueSize = 1000 // Default queue size
-	DefaultHAProxyCommandsPerSecond = 10  // Default rate limit
+	// Default Blocker client settings
+	DefaultBlockerMaxRetries        = 3
+	DefaultBlockerRetryDelay        = 200 * time.Millisecond
+	DefaultBlockerDialTimeout       = 5 * time.Second
+	DefaultBlockerCommandQueueSize  = 1000 // Default queue size
+	DefaultBlockerCommandsPerSecond = 10   // Default rate limit
 )
