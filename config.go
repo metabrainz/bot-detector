@@ -1050,7 +1050,7 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 				depInfo, err := os.Stat(depPath)
 				if err != nil {
 					// Log at debug level if a dependency file is missing, as this might be temporary.
-					// A reload will only be triggered if chains.yaml itself changes.
+					// A reload will only be triggered if config.yaml itself changes.
 					p.LogFunc(logging.LevelDebug, "WATCH_SKIP", "Could not stat dependency file %s (may have been removed): %v", depPath, err)
 					continue
 				}

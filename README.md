@@ -122,7 +122,7 @@ The application uses a unified logging system with five discrete levels. The `--
 | **`info`** | **3** | Includes major application lifecycle events (e.g., configuration **LOAD**, **DRYRUN** start/completion, tailing start). |
 | **`debug`** | **4** (Lowest) | The most verbose level. Includes high-volume internal logic like individual step **MATCH**. |
 
-# **Behavioral Chains Configuration File (chains.yaml)**
+# **Behavioral Chains Configuration File (config.yaml)**
 
 This file defines the sequential behavioral chains used by the bot-detector to identify and act upon suspicious traffic patterns.
 The file is structured as a top-level map containing a single key, chains, which holds an array of individual chain definitions.

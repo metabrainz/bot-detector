@@ -190,7 +190,7 @@ chains:
     steps: [{field_matches: {Path: "/initial"}}]
 `
 	tempDir := t.TempDir()
-	tempFile := filepath.Join(tempDir, "chains.yaml")
+	tempFile := filepath.Join(tempDir, "config.yaml")
 	if err := os.WriteFile(tempFile, []byte(initialYAMLContent), 0644); err != nil {
 		t.Fatalf("Failed to write initial temp yaml file: %v", err)
 	}

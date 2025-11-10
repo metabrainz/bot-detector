@@ -67,7 +67,7 @@ defaults
 
 # Stick tables are defined in "pseudo" backends. This is a standard HAProxy practice.
 # - A separate backend is needed for each unique combination of IP version (IPv4/IPv6) and expiration time.
-# - The bot-detector automatically appends "_ipv4" or "_ipv6" to the base table names defined in chains.yaml.
+# - The bot-detector automatically appends "_ipv4" or "_ipv6" to the base table names defined in config.yaml.
 # - `store gpc0` instructs HAProxy to store the General Purpose Counter 0 for each entry.
 #   The bot-detector sets this counter to 1 to signify a block.
 # - `peers mypeers` enables synchronization of stick table contents across multiple HAProxy nodes.

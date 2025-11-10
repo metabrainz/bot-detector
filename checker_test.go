@@ -551,7 +551,7 @@ func TestCheckChains_TimeRules(t *testing.T) {
 	}
 }
 
-// TestDryRunMode simulates the entire dry-run process using chains.yaml and test_access.log,
+// TestDryRunMode simulates the entire dry-run process using config.yaml and test_access.log,
 // and verifies the log output against the expected log messages extracted from comments
 // in test_access.log.
 func TestDryRunMode(t *testing.T) {
@@ -560,7 +560,7 @@ func TestDryRunMode(t *testing.T) {
 
 	// Set required flags for this test
 	originalYAMLPath := YAMLFilePath
-	YAMLFilePath = "testdata/chains.yaml" // Assume it exists for this test
+	YAMLFilePath = "testdata/config.yaml" // Assume it exists for this test
 	t.Cleanup(func() { YAMLFilePath = originalYAMLPath })
 
 	// The config.yaml file now references a file matcher. We need to create it.

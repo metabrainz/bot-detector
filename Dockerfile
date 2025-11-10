@@ -10,8 +10,8 @@ WORKDIR /app
 
 # Copy the Go application source code
 COPY main.go .
-# Copy the dependency file (assuming chains.yaml is needed for final image)
-COPY chains.yaml .
+# Copy the dependency file (assuming config.yaml is needed for final image)
+COPY config.yaml .
 
 # Fetch Go dependencies (Go 1.16+ handles this automatically if no go.mod/go.sum, 
 # but including a placeholder for future dependency management)
@@ -39,7 +39,7 @@ WORKDIR /home/appuser/bot-detector
 COPY --from=builder /app/bot-detector .
 
 # Copy the configuration file (which will be mounted over by the host)
-COPY --from=builder /app/chains.yaml .
+COPY --from=builder /app/config.yaml .
 
 # Set default command if user runs without arguments (helpful for debugging/info)
 ENTRYPOINT ["./bot-detector"]
