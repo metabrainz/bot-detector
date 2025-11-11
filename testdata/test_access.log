@@ -1,46 +1,46 @@
 # ======================================================================================
 # === TEST CASE 1: Whitelisted IP (192.0.2.10) - SKIPPED
-# === EXPECTED LOG: SKIP: IP 192.0.2.10: Skipped (IP is whitelisted).
+# === EXPECTED LOG: SKIP: IP 192.0.2.10: Skipped (IP is whitelisted)
 # ===
 musicbrainz.org 192.0.2.10 - - [28/Oct/2025:17:00:01 +0000] "GET /whitelisted HTTP/1.1" 200 100 "-" "TestAgent"
 
 # ======================================================================================
 # === TEST CASE 2: Log Action Chain (10.0.0.1) - SUCCESS (LOG)
-# === EXPECTED LOG: DRY_RUN: LOG! Chain: SimpleLogChain completed by IP 10.0.0.1. Action set to 'log' (DryRun).
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: SimpleLogChain completed by IP 10.0.0.1. Action set to 'log' (DryRun)
 # ===
 musicbrainz.org 10.0.0.1 - - [28/Oct/2025:17:00:02 +0000] "GET /log/step1 HTTP/1.1" 200 100 "-" "TestAgent"
 musicbrainz.org 10.0.0.1 - - [28/Oct/2025:17:00:03 +0000] "GET /log/step2 HTTP/1.1" 200 100 "-" "TestAgent"
 
 # ======================================================================================
 # === TEST CASE 3: Block Action Chain (10.0.0.2) - SUCCESS (BLOCK)
-# === EXPECTED LOG: DRY_RUN: BLOCK! Chain: SimpleBlockChain completed by IP 10.0.0.2. Blocking for 1h0m0s (DryRun).
+# === EXPECTED LOG: DRY_RUN: BLOCK! Chain: SimpleBlockChain completed by IP 10.0.0.2. Blocking for 1h0m0s (DryRun)
 # ===
 musicbrainz.org 10.0.0.2 - - [28/Oct/2025:17:00:04 +0000] "GET /block/step1 HTTP/1.1" 200 100 "-" "TestAgent"
 musicbrainz.org 10.0.0.2 - - [28/Oct/2025:17:00:05 +0000] "GET /block/step2 HTTP/1.1" 200 100 "-" "TestAgent"
 
 # ======================================================================================
 # === TEST CASE 4: Parse Failure (Malformed Line)
-# === EXPECTED LOG: PARSE_FAIL: Parsing failed for line
+# === EXPECTED LOG: PARSE_FAIL: Parsing failed for line "musicbrainz.org 1.2.3.4 - - [28/Oct/2025:17:00:06 +0000] "GET /incomplete HTTP/1.1" 200 100 "-"": line does not match log format regex
 # ===
 musicbrainz.org 1.2.3.4 - - [28/Oct/2025:17:00:06 +0000] "GET /incomplete HTTP/1.1" 200 100 "-"
 
 # ======================================================================================
 # === TEST CASE 5: Out-of-order within tolerance (10.0.0.3)
-# === EXPECTED LOG: DRY_RUN: LOG! Chain: OutOfOrderChain completed by IP 10.0.0.3. Action set to 'log' (DryRun).
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: OutOfOrderChain completed by IP 10.0.0.3. Action set to 'log' (DryRun)
 # ===
 musicbrainz.org 10.0.0.3 - - [28/Oct/2025:17:00:10 +0000] "GET /order/start HTTP/1.1" 200 100 "-" "OutOfOrderBot"
 musicbrainz.org 10.0.0.3 - - [28/Oct/2025:17:00:08 +0000] "GET /order/end HTTP/1.1" 200 100 "-" "OutOfOrderBot"
 
 # ======================================================================================
 # === TEST CASE 6: IPv6 User-Agent Change Detection (2001:db8::4) - SUCCESS (LOG)
-# === EXPECTED LOG: DRY_RUN: LOG! Chain: IPv6-UA-Change-Detection completed by IP 2001:db8::4. Action set to 'log' (DryRun).
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: IPv6-UA-Change-Detection completed by IP 2001:db8::4. Action set to 'log' (DryRun)
 # ===
 musicbrainz.org 2001:db8::4 - - [28/Oct/2025:17:00:11 +0000] "GET /ua/probe HTTP/1.1" 200 100 "-" "Mozilla/5.0 (UA1)"
 musicbrainz.org 2001:db8::4 - - [28/Oct/2025:17:00:13 +0000] "GET /ua/attack HTTP/1.1" 200 100 "-" "Mozilla/5.0 (UA2)"
 
 # ======================================================================================
 # === TEST CASE 7: IP+UA with Common Referrer (10.0.0.5) - SUCCESS (LOG)
-# === EXPECTED LOG: DRY_RUN: LOG! Chain: IP-UA-Referrer-Chain completed by IP 10.0.0.5. Action set to 'log' (DryRun).
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: IP-UA-Referrer-Chain completed by IP 10.0.0.5. Action set to 'log' (DryRun)
 # ===
 # --- This sequence tests chain progression while ignoring an irrelevant hit. ---
 musicbrainz.org 10.0.0.5 - - [28/Oct/2025:17:00:15 +0000] "GET /ua-ref/step1 HTTP/1.1" 200 100 "https://common.ref/page" "Consistent_UA_1.0"
@@ -49,7 +49,7 @@ musicbrainz.org 10.0.0.5 - - [28/Oct/2025:17:00:17 +0000] "GET /ua-ref/step2 HTT
 
 # ======================================================================================
 # === TEST CASE 8: min_time_since_last_hit - SUCCESS (IP was idle long enough)
-# === EXPECTED LOG: DRY_RUN: LOG! Chain: SleepyBotChain completed by IP 10.0.0.6. Action set to 'log' (DryRun).
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: SleepyBotChain completed by IP 10.0.0.6. Action set to 'log' (DryRun)
 # ===
 # The first hit primes the LastRequestTime. The second hit is >15s later, so the chain matches.
 musicbrainz.org 10.0.0.6 - - [28/Oct/2025:17:00:20 +0000] "GET /some/other/path HTTP/1.1" 200 100 "-" "SleepyBot"
@@ -68,7 +68,7 @@ musicbrainz.org 10.0.0.7 - - [28/Oct/2025:17:00:55 +0000] "GET /sleepy/probe HTT
 # === TEST CASE 10: Combined field matching (Size and IP)
 # ===
 # --- This one should match (size >= 5000 AND IP starts with 1.2.3.) ---
-# === EXPECTED LOG: DRY_RUN: LOG! Chain: CombinedMatcherChain completed by IP 1.2.3.4. Action set to 'log' (DryRun).
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: CombinedMatcherChain completed by IP 1.2.3.4. Action set to 'log' (DryRun)
 musicbrainz.org 1.2.3.4 - - [28/Oct/2025:17:01:00 +0000] "GET /large/file.zip HTTP/1.1" 200 5000 "-" "CombinedBot"
 # --- This one should NOT match (size is too small) ---
 musicbrainz.org 1.2.3.4 - - [28/Oct/2025:17:01:01 +0000] "GET /small/file.txt HTTP/1.1" 200 4999 "-" "CombinedBot"
@@ -79,7 +79,7 @@ musicbrainz.org 1.2.4.5 - - [28/Oct/2025:17:01:02 +0000] "GET /large/file.zip HT
 # === TEST CASE 11: Malformed request matching (status 400, method "", size "-")
 # ===
 # --- This one should match (status 400, method "", size "-") ---
-# === EXPECTED LOG: DRY_RUN: LOG! Chain: MalformedRequestChain completed by IP 10.0.0.9. Action set to 'log' (DryRun).
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: MalformedRequestChain completed by IP 10.0.0.9. Action set to 'log' (DryRun)
 musicbrainz.org 10.0.0.9 - - [28/Oct/2025:17:02:00 +0000] - 400 - "-" "MalformedBot"
 # --- This one should NOT match (status is not 400) ---
 musicbrainz.org 10.0.0.9 - - [28/Oct/2025:17:02:01 +0000] - 401 - "-" "MalformedBot"
@@ -90,12 +90,12 @@ musicbrainz.org 10.0.0.9 - - [28/Oct/2025:17:02:02 +0000] - 400 172 "-" "Malform
 # === TEST CASE 12: HTTP/2 Protocol Matching
 # ===
 # --- This one should match (Protocol is HTTP/2.0 and Path is an exact match in the file) ---
-# === EXPECTED LOG: DRY_RUN: LOG! Chain: HTTP2RequestChain completed by IP 10.0.0.10. Action set to 'log' (DryRun).
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: HTTP2RequestChain completed by IP 10.0.0.10. Action set to 'log' (DryRun)
 musicbrainz.org 10.0.0.10 - - [28/Oct/2025:17:02:03 +0000] "GET /h2/resource HTTP/2.0" 200 100 "-" "HTTP2Client"
 # --- This one should NOT match (Protocol is HTTP/1.1) ---
 musicbrainz.org 10.0.0.10 - - [28/Oct/2025:17:02:04 +0000] "GET /h2/resource HTTP/1.1" 200 100 "-" "HTTP1Client"
 # --- This one should match (Protocol is HTTP/2.0 and Path matches a regex in the file) ---
-# === EXPECTED LOG: DRY_RUN: LOG! Chain: HTTP2RequestChain completed by IP 10.0.0.10. Action set to 'log' (DryRun).
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: HTTP2RequestChain completed by IP 10.0.0.10. Action set to 'log' (DryRun)
 musicbrainz.org 10.0.0.10 - - [28/Oct/2025:17:02:05 +0000] "GET /h2/api/v1/endpoint HTTP/2.0" 200 100 "-" "HTTP2Client"
 # --- This one should NOT match (Path is not in the file) ---
 musicbrainz.org 10.0.0.10 - - [28/Oct/2025:17:02:06 +0000] "GET /h2/other HTTP/2.0" 200 100 "-" "HTTP2Client"
@@ -104,7 +104,7 @@ musicbrainz.org 10.0.0.10 - - [28/Oct/2025:17:02:06 +0000] "GET /h2/other HTTP/2
 # === TEST CASE 13: VHost Matching
 # ===
 # --- This one should match (VHost is internal.api.com and Path is /admin/dashboard) ---
-# === EXPECTED LOG: DRY_RUN: LOG! Chain: VHostSpecificChain completed by IP 10.0.0.11. Action set to 'log' (DryRun).
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: VHostSpecificChain completed by IP 10.0.0.11. Action set to 'log' (DryRun)
 internal.api.com 10.0.0.11 - - [28/Oct/2025:17:02:07 +0000] "GET /admin/dashboard HTTP/1.1" 200 100 "-" "AdminBot"
 # --- This one should NOT match (VHost is different) ---
 external.api.com 10.0.0.11 - - [28/Oct/2025:17:02:08 +0000] "GET /admin/dashboard HTTP/1.1" 200 100 "-" "AdminBot"
@@ -122,14 +122,14 @@ musicbrainz.org 10.0.0.12 - - [28/Oct/2025:17:03:06 +0000] "GET /reset/step2 HTT
 # === TEST CASE 15: Chain Processing Order
 # ===
 # --- This single hit should trigger two chains in sequence. ---
-# === EXPECTED LOG: DRY_RUN: LOG! Chain: ChainOrderTest_Log completed by IP 10.0.0.13. Action set to 'log' (DryRun).
-# === EXPECTED LOG: DRY_RUN: BLOCK! Chain: ChainOrderTest_Block completed by IP 10.0.0.13. Blocking for 10m0s (DryRun).
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: ChainOrderTest_Log completed by IP 10.0.0.13. Action set to 'log' (DryRun)
+# === EXPECTED LOG: DRY_RUN: BLOCK! Chain: ChainOrderTest_Block completed by IP 10.0.0.13. Blocking for 10m0s (DryRun)
 musicbrainz.org 10.0.0.13 - - [28/Oct/2025:17:04:00 +0000] "GET /chain-order-test HTTP/1.1" 200 100 "-" "ChainOrderBot"
 
 # ======================================================================================
 # === TEST CASE 16: OnMatch Stop
 # ===
 # --- This single hit should trigger the first two chains, but the second chain's `on_match: "stop"` will prevent the third from running. ---
-# === EXPECTED LOG: DRY_RUN: LOG! Chain: OnMatchStop_ChainA_Log completed by IP 10.0.0.14. Action set to 'log' (DryRun).
-# === EXPECTED LOG: DRY_RUN: LOG! Chain: OnMatchStop_ChainB_Stop completed by IP 10.0.0.14. Action set to 'log' (DryRun).
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: OnMatchStop_ChainA_Log completed by IP 10.0.0.14. Action set to 'log' (DryRun)
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: OnMatchStop_ChainB_Stop completed by IP 10.0.0.14. Action set to 'log' (DryRun) (on_match: stop)
 musicbrainz.org 10.0.0.14 - - [28/Oct/2025:17:05:00 +0000] "GET /on-match-stop-test HTTP/1.1" 200 100 "-" "OnMatchBot"

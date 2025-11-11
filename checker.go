@@ -100,9 +100,9 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 		// In live mode, log the action taken.
 		switch chain.Action {
 		case "block":
-			p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v.", chain.Name, entry.IPInfo.Address, chain.BlockDuration)
+			p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v%s", chain.Name, entry.IPInfo.Address, chain.BlockDuration, getOnMatchSuffix(chain))
 		case "log":
-			p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s. Action set to 'log'.", chain.Name, entry.IPInfo.Address)
+			p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s. Action set to 'log'%s", chain.Name, entry.IPInfo.Address, getOnMatchSuffix(chain))
 		}
 	}
 
@@ -173,13 +173,14 @@ func FlushEntryBuffer(p *Processor) {
 
 // logDryRunCompletion handles logging for completed chains in dry-run mode.
 func logDryRunCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry) {
+	onMatchSuffix := getOnMatchSuffix(chain)
 	switch chain.Action {
 	case "block":
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Blocking for %v (DryRun).", chain.Name, entry.IPInfo.Address, chain.BlockDuration)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Blocking for %v (DryRun)%s", chain.Name, entry.IPInfo.Address, chain.BlockDuration, onMatchSuffix)
 	case "log":
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s. Action set to 'log' (DryRun).", chain.Name, entry.IPInfo.Address)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s. Action set to 'log' (DryRun)%s", chain.Name, entry.IPInfo.Address, onMatchSuffix)
 	default:
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s. Unrecognized action '%s' (DryRun).", chain.Name, entry.IPInfo.Address, chain.Action)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s. Unrecognized action '%s' (DryRun)%s", chain.Name, entry.IPInfo.Address, chain.Action, onMatchSuffix)
 	}
 }
 
@@ -193,6 +194,14 @@ func matchStepFields(step *StepDef, entry *LogEntry) bool {
 		}
 	}
 	return true
+}
+
+// getOnMatchSuffix is a small helper to generate the logging suffix.
+func getOnMatchSuffix(chain *BehavioralChain) string {
+	if chain.OnMatch == "stop" {
+		return " (on_match: stop)"
+	}
+	return ""
 }
 
 // processChainForEntry evaluates a single log entry against a single behavioral chain.

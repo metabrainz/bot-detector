@@ -13,6 +13,40 @@ The application operates in a continuous loop:
 5.  **Executes an action** (e.g., `block` or `log`) via the configured blocking backend when a chain is completed.
 6.  **Manages state** by cleaning up idle or irrelevant IP tracking data to conserve memory.
 
+### Logic Flow Diagram
+
+This diagram illustrates the journey of a single log entry as it's processed by the `bot-detector`.
+
+```mermaid
+graph TD
+    A[New Log Line Read] --> B{Parse Log Line};
+    B --> C{Parse OK?};
+    C -- No --> C1[Log Parse Error & Stop];
+    C -- Yes --> D{Is Whitelisted?};
+    D -- Yes --> D1[Log Skip & Stop];
+    D -- No --> E{Pre-Check: Already Blocked?};
+    E -- Yes, and block is active --> E1[Log Skip & Stop];
+    E -- No, or block expired --> F[Start Chain Processing];
+
+    subgraph Chain Loop
+        direction LR
+        F --> G{For each Chain in order};
+        G --> H[Process against Chain];
+        H --> I{Step Conditions Match?};
+        I -- No --> G;
+        I -- Yes --> J[Advance Step Progress];
+        J --> K{Chain Complete?};
+        K -- No --> G;
+        K -- Yes --> L[Perform Action: Log or Block];
+        L --> M{on_match == "stop"?};
+        M -- No --> G;
+    end
+
+    M -- Yes --> Z[Stop Processing Chains];
+    G -- All chains processed --> Z;
+    Z --> Z1[Update Activity Timestamps & End];
+```
+
 ## **Features**
 
 *   **Real-Time Behavioral Analysis:** Uses flexible YAML configurations to detect sequential patterns.
@@ -183,6 +217,13 @@ Each item in the chains array must conform to the following structure:
 | **action** | string | Yes | The action to take when the chain is successfully completed by an IP. **Must be one of:** `block` or `log`. |
 | **block_duration** | string | No | The duration for which the IP should be blocked if action is block. Format: Go duration string (e.g., "5m", "1h", "30m", "1h30m"). |
 | **match_key** | string | Yes | The key used to track activity. This determines if behavior is tracked per IP address, per IP version, or per unique client (IP + User-Agent). See the table below for all possible values. |
+| **on_match** | string | No | Optional. If set to `"stop"`, no further behavioral chains will be processed for the current log entry after this chain completes. This can be used to optimize performance or enforce exclusive matching. |
+
+#### Chain Processing Order
+
+Chains are processed for each log entry in the order they are defined in the `chains` array. This means you should place more specific or higher-priority chains before more general ones.
+
+When a chain with `on_match: "stop"` is completed, the application immediately stops evaluating any subsequent chains for that log entry. This makes ordering critical for creating efficient and logical detection rules. For example, you might place a very specific, high-confidence "block" chain first, followed by more general "log-only" chains.
 
 #### `match_key` Values
 

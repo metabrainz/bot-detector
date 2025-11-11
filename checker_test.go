@@ -470,6 +470,52 @@ func TestCheckChains_IPAndUABlockOptimization(t *testing.T) {
 	h.assertBlocked(ipOnlyEntry, true)
 }
 
+// TestCheckChains_OnMatchStop verifies that when a chain with `on_match: "stop"`
+// completes, no further chains are processed for that log entry.
+func TestCheckChains_OnMatchStop(t *testing.T) {
+	// --- Setup ---
+	const targetIP = "192.0.2.1"
+	h := newCheckerTestHarness(t, nil)
+
+	// Chain 1: This chain will match and has on_match: "stop".
+	h.addChain(BehavioralChain{
+		Name:      "StopChain",
+		MatchKey:  "ip",
+		Action:    "log",
+		OnMatch:   "stop",
+		StepsYAML: []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/trigger"}}},
+	})
+
+	// Chain 2: This chain also matches the same entry but should be skipped.
+	h.addChain(BehavioralChain{
+		Name:      "ShouldBeSkippedChain",
+		MatchKey:  "ip",
+		Action:    "log",
+		StepsYAML: []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/trigger"}}},
+	})
+
+	// --- Act ---
+	entry := &LogEntry{
+		IPInfo:    NewIPInfo(targetIP),
+		Timestamp: time.Now(),
+		Path:      "/trigger",
+	}
+	h.processEntry(entry)
+
+	// --- Assert ---
+	// The "StopChain" should have completed and its progress cleared.
+	h.assertChainProgressCleared("StopChain", entry)
+
+	// The "ShouldBeSkippedChain" should have no progress state, as it was never processed.
+	key := GetTrackingKey(&h.processor.Chains[1], entry)
+	h.processor.ActivityMutex.RLock()
+	defer h.processor.ActivityMutex.RUnlock()
+	activity, exists := h.processor.ActivityStore[key]
+	if exists && len(activity.ChainProgress) != 0 {
+		t.Errorf("Expected ChainProgress for 'ShouldBeSkippedChain' to be empty, but it has entries: %v", activity.ChainProgress)
+	}
+}
+
 // TestCheckChains_TimeRules provides focused tests for the new time-based rules,
 // especially the first-step-only `first_hit_since` logic.
 func TestCheckChains_TimeRules(t *testing.T) {
