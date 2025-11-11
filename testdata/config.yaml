@@ -120,3 +120,20 @@ chains:
       - field_matches: { Path: "/reset/step1" }
       - max_delay: "5s"
         field_matches: { Path: "/reset/step2" }
+
+  # --- 12. Chain Order Test ---
+  # This tests that a single log entry is processed against all chains in order.
+  # The log entry for /chain-order-test will first match ChainOrderTest_Log,
+  # which logs the action. Then, processing continues to the next chain,
+  # ChainOrderTest_Block, which matches and blocks the IP.
+  - name: "ChainOrderTest_Log"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches: { Path: "/chain-order-test" }
+  - name: "ChainOrderTest_Block"
+    action: "block"
+    block_duration: "10m"
+    match_key: "ip"
+    steps:
+      - field_matches: { Path: "/chain-order-test" }

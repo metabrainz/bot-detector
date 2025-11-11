@@ -117,3 +117,11 @@ external.api.com 10.0.0.11 - - [28/Oct/2025:17:02:08 +0000] "GET /admin/dashboar
 # --- This should increment the ChainsReset metric but not complete the chain. ---
 musicbrainz.org 10.0.0.12 - - [28/Oct/2025:17:03:00 +0000] "GET /reset/step1 HTTP/1.1" 200 100 "-" "ResetBot"
 musicbrainz.org 10.0.0.12 - - [28/Oct/2025:17:03:06 +0000] "GET /reset/step2 HTTP/1.1" 200 100 "-" "ResetBot"
+
+# ======================================================================================
+# === TEST CASE 15: Chain Processing Order
+# ===
+# --- This single hit should trigger two chains in sequence. ---
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: ChainOrderTest_Log completed by IP 10.0.0.13. Action set to 'log' (DryRun).
+# === EXPECTED LOG: DRY_RUN: BLOCK! Chain: ChainOrderTest_Block completed by IP 10.0.0.13. Blocking for 10m0s (DryRun).
+musicbrainz.org 10.0.0.13 - - [28/Oct/2025:17:04:00 +0000] "GET /chain-order-test HTTP/1.1" 200 100 "-" "ChainOrderBot"
