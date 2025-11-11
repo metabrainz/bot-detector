@@ -13,40 +13,6 @@ The application operates in a continuous loop:
 5.  **Executes an action** (e.g., `block` or `log`) via the configured blocking backend when a chain is completed.
 6.  **Manages state** by cleaning up idle or irrelevant IP tracking data to conserve memory.
 
-### Logic Flow Diagram
-
-This diagram illustrates the journey of a single log entry as it's processed by the `bot-detector`.
-
-```mermaid
-graph TD
-    A[New Log Line Read] --> B{Parse Log Line};
-    B --> C{Parse OK?};
-    C -- No --> C1[Log Parse Error & Stop];
-    C -- Yes --> D{Is Whitelisted?};
-    D -- Yes --> D1[Log Skip & Stop];
-    D -- No --> E{Pre-Check: Already Blocked?};
-    E -- Yes, and block is active --> E1[Log Skip & Stop];
-    E -- No, or block expired --> F[Start Chain Processing];
-
-    subgraph Chain Loop
-        direction LR
-        F --> G{For each Chain in order};
-        G --> H[Process against Chain];
-        H --> I{Step Conditions Match?};
-        I -- No --> G;
-        I -- Yes --> J[Advance Step Progress];
-        J --> K{Chain Complete?};
-        K -- No --> G;
-        K -- Yes --> L[Perform Action: Log or Block]
-        L --> M{"on_match == 'stop'?"};
-        M -- No --> G;
-    end
-
-    M -- Yes --> Z[Stop Processing Chains];
-    G -- All chains processed --> Z;
-    Z --> Z1[Update Activity Timestamps & End];
-```
-
 ## **Features**
 
 *   **Real-Time Behavioral Analysis:** Uses flexible YAML configurations to detect sequential patterns.
@@ -376,6 +342,40 @@ The bot-detector holds the state of IPs in memory. To prevent memory from growin
 2.  **`min_time_since_last_hit` Optimization:** If your configuration uses `min_time_since_last_hit` rules, the cleanup becomes more aggressive. The application finds the longest `min_time_since_last_hit` duration across all chains. An idle IP's state will then be purged if its inactivity period exceeds **either** the global `idle_timeout` **or** this longest `min_time_since_last_hit` duration. This ensures memory is not wasted on IPs that can no longer trigger a time-based rule.
 
 
+
+## Logic Flow Diagram
+
+This diagram illustrates the journey of a single log entry as it's processed by the `bot-detector`.
+
+```mermaid
+graph TD
+    A[New Log Line Read] --> B{Parse Log Line};
+    B --> C{Parse OK?};
+    C -- No --> C1[Log Parse Error & Stop];
+    C -- Yes --> D{Is Whitelisted?};
+    D -- Yes --> D1[Log Skip & Stop];
+    D -- No --> E{Pre-Check: Already Blocked?};
+    E -- Yes, and block is active --> E1[Log Skip & Stop];
+    E -- No, or block expired --> F[Start Chain Processing];
+
+    subgraph Chain Loop
+        direction LR
+        F --> G{For each Chain in order};
+        G --> H[Process against Chain];
+        H --> I{Step Conditions Match?};
+        I -- No --> G;
+        I -- Yes --> J[Advance Step Progress];
+        J --> K{Chain Complete?};
+        K -- No --> G;
+        K -- Yes --> L[Perform Action: Log or Block]
+        L --> M{"on_match == 'stop'?"};
+        M -- No --> G;
+    end
+
+    M -- Yes --> Z[Stop Processing Chains];
+    G -- all chains processed --> Z;
+    Z --> Z1[Update Activity Timestamps & End];
+```
 
 ## **Example config.yaml**
 
