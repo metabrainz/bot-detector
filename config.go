@@ -3,6 +3,7 @@ package main
 import (
 	"bot-detector/internal/logging"
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"net"
@@ -19,6 +20,55 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// yamlKeyAliases maps various key formats (like camelCase) to their canonical
+// snake_case representation used in the YAML struct tags. This allows for flexible
+// and case-insensitive key naming in the config.yaml file.
+var yamlKeyAliases = map[string]string{
+	// Top-level keys
+	"loglevel":                 "log_level",
+	"pollinginterval":          "poll_interval",
+	"cleanupinterval":          "cleanup_interval",
+	"lineending":               "line_ending",
+	"idletimeout":              "idle_timeout",
+	"outoordertolerance":       "out_of_order_tolerance",
+	"timestampformat":          "timestamp_format",
+	"logformatregex":           "log_format_regex",
+	"defaultblockduration":     "default_block_duration",
+	"blockermaxretries":        "blocker_max_retries",
+	"blockeraddresses":         "blocker_addresses",
+	"blockerretrydelay":        "blocker_retry_delay",
+	"blockerdialtimeout":       "blocker_dial_timeout",
+	"blockercommandqueuesize":  "blocker_command_queue_size",
+	"blockercommandspersecond": "blocker_commands_per_second",
+	"whitelistcidrs":           "whitelist_cidrs",
+	"durationtables":           "duration_tables",
+
+	// Chain-level keys
+	"blockduration": "block_duration",
+	"matchkey":      "match_key",
+	"onmatch":       "on_match",
+
+	// Step-level keys
+	"fieldmatches":        "field_matches",
+	"maxdelay":            "max_delay",
+	"mindelay":            "min_delay",
+	"mintimesincelasthit": "min_time_since_last_hit",
+
+	// Field name aliases (previously in fieldNameMapping)
+	// These map lowercase/snake_case field names to their canonical PascalCase form.
+	"ip":          "IP",
+	"path":        "Path",
+	"method":      "Method",
+	"protocol":    "Protocol",
+	"useragent":   "UserAgent",
+	"user_agent":  "UserAgent",
+	"referrer":    "Referrer",
+	"statuscode":  "StatusCode",
+	"status_code": "StatusCode",
+	"size":        "Size",
+	"vhost":       "VHost",
+}
 
 // CheckAndRemoveWhitelistedBlocks iterates over all IPs currently marked as blocked
 // in the in-memory actor activity store and unblocks them via HAProxy if they now fall
@@ -192,6 +242,7 @@ type fieldMatcher func(entry *LogEntry) bool
 func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps *[]string, configDir string) ([]fieldMatcher, error) {
 	var matchers []fieldMatcher
 	for field, value := range fieldMatches {
+		// Field names are already normalized by normalizeYAMLKeys before this function is called.
 		matcher, err := compileSingleMatcher(chainName, stepIndex, field, value, fileDeps, configDir)
 		if err != nil {
 			return nil, err // Propagate error up
@@ -525,27 +576,67 @@ func parseDuration(durationStr string) (time.Duration, error) {
 	return time.ParseDuration(finalStr)
 }
 
+// normalizeYAMLKeys recursively traverses a yaml.Node tree and converts all
+// mapping keys to lowercase. This allows for case-insensitive YAML configuration.
+func normalizeYAMLKeys(node *yaml.Node) {
+	switch node.Kind {
+	case yaml.DocumentNode:
+		// The root node is a document node, its content is the actual root element.
+		for _, child := range node.Content {
+			normalizeYAMLKeys(child)
+		}
+	case yaml.MappingNode:
+		for i := 0; i < len(node.Content); i += 2 {
+			keyNode := node.Content[i]
+			if keyNode.Kind == yaml.ScalarNode {
+				// Normalize to lowercase, then check for a canonical alias.
+				lowerKey := strings.ToLower(keyNode.Value)
+				if canonical, ok := yamlKeyAliases[lowerKey]; ok {
+					keyNode.Value = canonical
+				} else {
+					keyNode.Value = lowerKey
+				}
+			}
+			// Recursively normalize keys in the value node
+			normalizeYAMLKeys(node.Content[i+1])
+		}
+	case yaml.SequenceNode:
+		for _, child := range node.Content {
+			normalizeYAMLKeys(child)
+		}
+	}
+}
+
 // LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
 func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read YAML file %s: %w", configPath, err)
 	}
-
 	configDir := filepath.Dir(configPath)
 
+	// 1. Unmarshal into a generic yaml.Node to preprocess keys.
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
+	}
+
+	// 2. Normalize all keys to lowercase for case-insensitive configuration.
+	normalizeYAMLKeys(&root)
+
+	// 3. Marshal the normalized node back to a byte slice.
+	var normalizedYAML bytes.Buffer
+	encoder := yaml.NewEncoder(&normalizedYAML)
+	encoder.SetIndent(2) // Optional: keeps the marshaled YAML readable
+	if err := encoder.Encode(&root); err != nil {
+		return nil, fmt.Errorf("failed to re-marshal normalized YAML: %w", err)
+	}
+
+	// 4. Decode the normalized YAML into the config struct with strict checking.
 	var config ChainConfig
-
-	// 1. Create a new decoder from the YAML data string.
-	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
-
-	// 2. Set the public KnownFields field to true to enforce strict decoding.
-	// This makes Decode fail if an unknown key is encountered in the YAML.
+	decoder := yaml.NewDecoder(&normalizedYAML)
 	decoder.KnownFields(true)
-
-	// 3. Decode the YAML using the strict decoder.
 	if err := decoder.Decode(&config); err != nil {
-		// This error will now explicitly include the unknown field error message.
 		return nil, fmt.Errorf("failed to strictly unmarshal YAML (unknown field found): %w", err)
 	}
 	// ---------------------------------------------------------------------------------

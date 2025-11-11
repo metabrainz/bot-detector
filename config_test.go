@@ -174,6 +174,60 @@ chains:
 	}
 }
 
+func TestLoadConfigFromYAML_FlexibleKeys(t *testing.T) {
+	// This test verifies that various key formats (camelCase, aliases, uppercase) are correctly parsed.
+	yamlContent := `
+version: "1.0"
+defaultBlockDuration: "1h" # camelCase alias for default_block_duration
+
+CHAINS: # UPPERCASE
+  - name: "FlexibleKeyTestChain"
+    matchKey: "ip_ua" # camelCase alias for match_key
+    ACTION: "block" # UPPERCASE
+    blockDuration: "15m" # camelCase alias for block_duration
+    steps:
+      - fieldMatches: # camelCase alias for field_matches
+          user_agent: "TestBot/1.0" # snake_case alias for UserAgent
+          status_code: 418 # snake_case alias for StatusCode
+`
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	t.Cleanup(resetGlobalState)
+
+	// --- Act ---
+	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
+
+	// --- Assert ---
+	if err != nil {
+		t.Fatalf("LoadConfigFromYAML() returned an unexpected error: %v", err)
+	}
+
+	// Check top-level camelCase key
+	if loadedCfg.DefaultBlockDuration != 1*time.Hour {
+		t.Errorf("Expected defaultBlockDuration of 1h, got %v", loadedCfg.DefaultBlockDuration)
+	}
+
+	if len(loadedCfg.Chains) != 1 {
+		t.Fatalf("Expected 1 chain to be loaded, got %d", len(loadedCfg.Chains))
+	}
+
+	chain := loadedCfg.Chains[0]
+	if chain.MatchKey != "ip_ua" {
+		t.Errorf("Expected matchKey 'ip_ua', got '%s'", chain.MatchKey)
+	}
+	if chain.Action != "block" {
+		t.Errorf("Expected ACTION 'block', got '%s'", chain.Action)
+	}
+	if chain.BlockDuration != 15*time.Minute {
+		t.Errorf("Expected blockDuration of 15m, got %v", chain.BlockDuration)
+	}
+
+	// Check step-level matchers compiled from aliased keys
+	matcher := chain.Steps[0].Matchers[0]
+	if !matcher(&LogEntry{UserAgent: "TestBot/1.0", StatusCode: 418}) {
+		t.Error("Matcher failed for entry that should have matched aliased field names (user_agent, status_code).")
+	}
+}
+
 func setupTestYAML(t *testing.T, content string) string {
 	t.Helper() // Mark this as a test helper function.
 

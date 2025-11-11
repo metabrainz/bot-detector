@@ -134,6 +134,8 @@ The application uses a unified logging system with five discrete levels. The `--
 This file defines the sequential behavioral chains used by the bot-detector to identify and act upon suspicious traffic patterns.
 The file is structured as a top-level map containing a single key, chains, which holds an array of individual chain definitions.
 
+> **Note on Keys:** All configuration keys in the YAML file (e.g., `log_level`, `match_key`, `field_matches`) are **case-insensitive**. They will be treated as lowercase.
+
 ## **Root Structure**
 
 | Field | Type | Description |
@@ -253,15 +255,15 @@ Each step in the steps array defines a specific log entry characteristic that mu
 
 ### `field_matches`
 
-| Field | Description |
+| Field (Case-Insensitive) | Description |
 | :--- | :--- |
 | **IP** | The client IP address. |
 | **Method** | The HTTP request method (e.g., `GET`, `POST`). A malformed request in the log (e.g., `"-"`) is parsed as an empty string. |
 | **Path** | The requested URL path. |
-| **StatusCode** | The HTTP response status code (e.g., `200`, `404`). |
+| **StatusCode**, `status_code` | The HTTP response status code (e.g., `200`, `404`). |
 | **Referrer** | The full HTTP Referer header value. |
 | **Size** | The response size in bytes. A dash (`"-"`) in the log is parsed as `-1`. |
-| **UserAgent** | The HTTP User-Agent header value. |
+| **UserAgent**, `user_agent` | The HTTP User-Agent header value. |
 | **VHost** | The virtual host from the log entry. |
 
 ### **Advanced `field_matches` Syntax**
