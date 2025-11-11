@@ -8,17 +8,23 @@ import (
 // Metrics holds all the counters for application-level metrics.
 // This is designed to be easily adaptable to a Prometheus backend in the future.
 type Metrics struct {
-	// A map to store counters for each completed chain, keyed by chain name.
-	// This maps directly to a Prometheus counter with a 'chain' label.
+	// Per-chain metrics are stored in sync.Maps for thread-safe access.
 	ChainsCompleted *sync.Map
+	ChainsReset     *sync.Map
 
-	ChainsReset *sync.Map
-	// General counters.
-	ParseErrors      atomic.Int64
-	WhitelistedHits  atomic.Int64
-	BlockActions     atomic.Int64
-	LinesProcessed   atomic.Int64
-	ReorderedEntries atomic.Int64
+	// General counters with struct tags for metadata.
+	// `metric:"..."` is the display name.
+	// `dryrun:"true"` marks it for display in dry-run mode.
+	LinesProcessed      atomic.Int64 `metric:"Lines Processed" dryrun:"true"`
+	ParseErrors         atomic.Int64 `metric:"Parse Errors" dryrun:"true"`
+	ReorderedEntries    atomic.Int64 `metric:"Reordered Entries" dryrun:"true"`
+	WhitelistedHits     atomic.Int64 `metric:"Whitelisted Hits Skipped" dryrun:"true"`
+	ActivitiesCleaned   atomic.Int64 `metric:"Activities Cleaned" dryrun:"true"`
+	BlockActions        atomic.Int64 `metric:"Block Actions Triggered" dryrun:"true"`
+	BlockerCmdsQueued   atomic.Int64 `metric:"Blocker Commands Queued" dryrun:"false"`
+	BlockerCmdsDropped  atomic.Int64 `metric:"Blocker Commands Dropped" dryrun:"false"`
+	BlockerCmdsExecuted atomic.Int64 `metric:"Blocker Commands Executed" dryrun:"false"`
+	BlockerRetries      atomic.Int64 `metric:"Blocker Retries" dryrun:"false"`
 }
 
 // NewMetrics initializes a new Metrics struct.

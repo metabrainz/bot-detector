@@ -141,6 +141,7 @@ func executeCommandImpl(p *Processor, addr, ip, command string) error {
 	for attempt := 0; attempt < p.Config.BlockerMaxRetries; attempt++ {
 		if attempt > 0 {
 			// Log the retry attempt (assuming a LogOutput function is available)
+			p.Metrics.BlockerRetries.Add(1)
 			p.LogFunc(logging.LevelWarning, "HAPROXY_RETRY", "Retrying HAProxy command for %s (Attempt %d/%d)", addr, attempt+1, p.Config.BlockerMaxRetries)
 			time.Sleep(p.Config.BlockerRetryDelay)
 		}

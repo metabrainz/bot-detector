@@ -38,7 +38,10 @@ func newRateLimiterTestHarness(t *testing.T, queueSize, commandsPerSecond int) *
 			return nil
 		},
 	}
-	h.processor = &Processor{LogFunc: logging.LogOutput}
+	h.processor = &Processor{
+		LogFunc: logging.LogOutput,
+		Metrics: NewMetrics(), // Initialize the Metrics struct
+	}
 	h.rlb = NewRateLimitedBlocker(h.processor, h.mockBlocker, queueSize, commandsPerSecond)
 	t.Cleanup(h.rlb.Stop)
 	return h
@@ -129,6 +132,7 @@ func TestRateLimitedBlocker_ZeroRate(t *testing.T) {
 	}
 	processor := &Processor{
 		LogFunc: logging.LogOutput,
+		Metrics: NewMetrics(),
 	}
 
 	queueSize := 10

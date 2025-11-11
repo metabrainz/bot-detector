@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"sort"
+	"strconv"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -204,69 +206,87 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	FlushEntryBuffer(p)
 	elapsedTime := time.Since(startTime)
 
+	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Dry-run finished.")
+	logMetricsSummary(p, elapsedTime, p.LogFunc, "METRICS", "dryrun")
+}
+
+// logMetricsSummary calculates and logs a summary of all application metrics.
+// It is a generic function that can be used in different contexts (e.g., dry-run, periodic live summary).
+//
+// Parameters:
+//   - p: The Processor containing the metrics.
+//   - elapsedTime: The duration over which the metrics were collected.
+//   - logFunc: The logging function to use for output.
+//   - logTag: The tag to use for each log line (e.g., "METRICS").
+//   - filterTag: The struct tag to filter which general metrics to display (e.g., "dryrun").
+func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag, filterTag string) {
 	// --- Metrics Calculation ---
 	type chainMetric struct {
-		Name  string
-		Count int64
+		Name        string
+		Completions int64
+		Resets      int64
 	}
-	var completedMetrics []chainMetric
+	var allChainMetrics []chainMetric
 	var totalChainsCompleted int64
-
 	var totalChainsReset int64
 
-	p.Metrics.ChainsReset.Range(func(key, value interface{}) bool {
-		if counter, ok := value.(*atomic.Int64); ok {
-			totalChainsReset += counter.Load()
-		}
-		return true
-	})
 	p.Metrics.ChainsCompleted.Range(func(key, value interface{}) bool {
-		chainName, ok1 := key.(string)
-		counter, ok2 := value.(*atomic.Int64)
-		if ok1 && ok2 {
-			count := counter.Load()
-			if count > 0 {
-				completedMetrics = append(completedMetrics, chainMetric{Name: chainName, Count: count})
-				totalChainsCompleted += count
+		chainName, _ := key.(string)
+		completedCounter, _ := value.(*atomic.Int64)
+		completions := completedCounter.Load()
+
+		var resets int64
+		if resetVal, ok := p.Metrics.ChainsReset.Load(chainName); ok {
+			if resetCounter, ok := resetVal.(*atomic.Int64); ok {
+				resets = resetCounter.Load()
 			}
 		}
+
+		if completions > 0 || resets > 0 {
+			allChainMetrics = append(allChainMetrics, chainMetric{Name: chainName, Completions: completions, Resets: resets})
+			totalChainsCompleted += completions
+			totalChainsReset += resets
+		}
 		return true
 	})
 
-	// Sort metrics by count descending for a "top chains" view.
-	sort.Slice(completedMetrics, func(i, j int) bool {
-		return completedMetrics[i].Count > completedMetrics[j].Count
+	// Sort metrics by chain name for stable, predictable output.
+	sort.Slice(allChainMetrics, func(i, j int) bool {
+		return allChainMetrics[i].Name < allChainMetrics[j].Name
 	})
 
-	parseErrors := p.Metrics.ParseErrors.Load()
-	linesProcessed := p.Metrics.LinesProcessed.Load()
-	whitelistedHits := p.Metrics.WhitelistedHits.Load()
-	blockActions := p.Metrics.BlockActions.Load()
-	reorderedEntries := p.Metrics.ReorderedEntries.Load()
-
 	// --- Log Summary ---
-	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Dry-run finished.")
-	p.LogFunc(logging.LevelInfo, "METRICS", "Lines Processed: %d", linesProcessed)
-	p.LogFunc(logging.LevelInfo, "METRICS", "Whitelisted Hits Skipped: %d", whitelistedHits)
-	p.LogFunc(logging.LevelInfo, "METRICS", "Block Actions Triggered: %d", blockActions)
-	p.LogFunc(logging.LevelInfo, "METRICS", "Chains Completed: %d", totalChainsCompleted)
-	p.LogFunc(logging.LevelInfo, "METRICS", "Chains Reset: %d", totalChainsReset)
-	p.LogFunc(logging.LevelInfo, "METRICS", "Parse Errors: %d", parseErrors)
-	p.LogFunc(logging.LevelInfo, "METRICS", "Reordered Entries: %d", reorderedEntries)
-	p.LogFunc(logging.LevelInfo, "METRICS", "Time Elapsed: %v", elapsedTime)
-
-	if elapsedTime.Seconds() > 0 {
-		linesPerSecond := float64(linesProcessed) / elapsedTime.Seconds()
-		p.LogFunc(logging.LevelInfo, "METRICS", "Rate: %.2f lines/sec", linesPerSecond)
-	} else {
-		p.LogFunc(logging.LevelInfo, "METRICS", "Rate: n/a (run too fast)")
+	// Display general metrics based on struct tags.
+	val := reflect.ValueOf(p.Metrics).Elem()
+	typ := val.Type()
+	for i := 0; i < val.NumField(); i++ {
+		field := typ.Field(i)
+		if show, _ := strconv.ParseBool(field.Tag.Get(filterTag)); show {
+			if metricName := field.Tag.Get("metric"); metricName != "" {
+				if counter, ok := val.Field(i).Interface().(atomic.Int64); ok {
+					logFunc(logging.LevelInfo, logTag, "%s: %d", metricName, counter.Load())
+				}
+			}
+		}
 	}
 
-	// Log the per-chain breakdown if any chains were completed.
-	if len(completedMetrics) > 0 {
-		p.LogFunc(logging.LevelInfo, "METRICS", "--- Chain Completion Breakdown ---")
-		for _, metric := range completedMetrics {
-			p.LogFunc(logging.LevelInfo, "METRICS", "  - %s: %d", metric.Name, metric.Count)
+	logFunc(logging.LevelInfo, logTag, "Chains Completed: %d", totalChainsCompleted)
+	logFunc(logging.LevelInfo, logTag, "Chains Reset: %d", totalChainsReset)
+
+	logFunc(logging.LevelInfo, logTag, "Time Elapsed: %v", elapsedTime)
+
+	if elapsedTime.Seconds() > 0 {
+		linesPerSecond := float64(p.Metrics.LinesProcessed.Load()) / elapsedTime.Seconds()
+		logFunc(logging.LevelInfo, logTag, "Rate: %.2f lines/sec", linesPerSecond)
+	} else {
+		logFunc(logging.LevelInfo, logTag, "Rate: n/a (run too fast)")
+	}
+
+	// Log the consolidated per-chain breakdown.
+	if len(allChainMetrics) > 0 {
+		logFunc(logging.LevelInfo, logTag, "--- Per-Chain Metrics ---")
+		for _, metric := range allChainMetrics {
+			logFunc(logging.LevelInfo, logTag, "  - %s: Completed: %d, Resets: %d", metric.Name, metric.Completions, metric.Resets)
 		}
 	}
 }

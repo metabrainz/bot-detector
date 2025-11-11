@@ -66,6 +66,7 @@ func CleanUpIdleActivity(p *Processor, stop <-chan struct{}) {
 
 				if isIdle || isUselessForTimeRule {
 					delete(p.ActivityStore, key)
+					p.Metrics.ActivitiesCleaned.Add(1)
 					cleanedCount++
 				}
 			}

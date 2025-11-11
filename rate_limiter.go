@@ -53,8 +53,10 @@ func (b *RateLimitedBlocker) Block(ipInfo IPInfo, duration time.Duration) error 
 	select {
 	case b.CommandQueue <- command:
 		b.P.LogFunc(logging.LevelDebug, "RATE_LIMITER", "Queued block command for IP %s.", ipInfo.Address)
+		b.P.Metrics.BlockerCmdsQueued.Add(1)
 	default:
 		b.P.LogFunc(logging.LevelWarning, "RATE_LIMITER", "Command queue is full. Dropping block command for IP %s.", ipInfo.Address)
+		b.P.Metrics.BlockerCmdsDropped.Add(1)
 	}
 
 	return nil
@@ -70,8 +72,10 @@ func (b *RateLimitedBlocker) Unblock(ipInfo IPInfo) error {
 	select {
 	case b.CommandQueue <- command:
 		b.P.LogFunc(logging.LevelDebug, "RATE_LIMITER", "Queued unblock command for IP %s.", ipInfo.Address)
+		b.P.Metrics.BlockerCmdsQueued.Add(1)
 	default:
 		b.P.LogFunc(logging.LevelWarning, "RATE_LIMITER", "Command queue is full. Dropping unblock command for IP %s.", ipInfo.Address)
+		b.P.Metrics.BlockerCmdsDropped.Add(1)
 	}
 
 	return nil
@@ -104,6 +108,7 @@ func (b *RateLimitedBlocker) commandQueueWorker(commandsPerSecond int) {
 			select {
 			case cmd := <-b.CommandQueue:
 				b.P.LogFunc(logging.LevelDebug, "RATE_LIMITER", "Executing %s command for IP %s.", cmd.Action, cmd.IPInfo.Address)
+				b.P.Metrics.BlockerCmdsExecuted.Add(1)
 				var err error
 				if cmd.Action == "block" {
 					err = b.WrappedBlocker.Block(cmd.IPInfo, cmd.Duration)
