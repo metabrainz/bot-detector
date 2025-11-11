@@ -72,7 +72,7 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 	}
 	p := &Processor{
 		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[TrackingKey]*BotActivity),
+		ActivityStore: make(map[Actor]*ActorActivity),
 		// Blocker will be set below
 		ConfigMutex:       &sync.RWMutex{},
 		Metrics:           NewMetrics(),
@@ -226,7 +226,7 @@ func (h *checkerTestHarness) processEntry(entry *LogEntry) {
 // assertChainProgress checks if a given key is at the expected step for a chain.
 func (h *checkerTestHarness) assertChainProgress(chainName string, entry *LogEntry, expectedStep int) {
 	h.t.Helper()
-	key := GetTrackingKey(&h.processor.Chains[0], entry)
+	key := GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
 	activity, exists := h.processor.ActivityStore[key]
@@ -238,7 +238,7 @@ func (h *checkerTestHarness) assertChainProgress(chainName string, entry *LogEnt
 // assertBlocked checks if a given key is marked as blocked.
 func (h *checkerTestHarness) assertBlocked(entry *LogEntry, expected bool) { //nolint:thelper
 	h.t.Helper()
-	key := GetTrackingKey(&h.processor.Chains[0], entry)
+	key := GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
 	activity, exists := h.processor.ActivityStore[key]
@@ -254,7 +254,7 @@ func (h *checkerTestHarness) assertBlocked(entry *LogEntry, expected bool) { //n
 // assertChainProgressCleared checks that a chain's progress has been removed from the activity store.
 func (h *checkerTestHarness) assertChainProgressCleared(chainName string, entry *LogEntry) {
 	h.t.Helper()
-	key := GetTrackingKey(&h.processor.Chains[0], entry)
+	key := GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
 	activity, exists := h.processor.ActivityStore[key]

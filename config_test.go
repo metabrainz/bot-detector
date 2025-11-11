@@ -1074,7 +1074,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			var commandsReceived []string
 			// Create a processor instance for the test.
 			processor := &Processor{
-				ActivityStore: make(map[TrackingKey]*BotActivity),
+				ActivityStore: make(map[Actor]*ActorActivity),
 				ActivityMutex: &sync.RWMutex{},
 				ConfigMutex:   &sync.RWMutex{},
 				Config: &AppConfig{
@@ -1100,11 +1100,11 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			}
 
 			// 2. Define the IP that is currently blocked but will be whitelisted.
-			trackingKey := TrackingKey{IPInfo: NewIPInfo(tt.blockedIP)}
+			actor := Actor{IPInfo: NewIPInfo(tt.blockedIP)}
 			blockExpirationTime := time.Now().Add(time.Hour)
 
 			// 3. Manually set the state in ActivityStore to simulate a blocked IP.
-			processor.ActivityStore[trackingKey] = &BotActivity{
+			processor.ActivityStore[actor] = &ActorActivity{
 				IsBlocked:    true,
 				BlockedUntil: blockExpirationTime,
 			}
@@ -1138,7 +1138,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 			}
 
 			// Assert Final State
-			activity, exists := processor.ActivityStore[trackingKey]
+			activity, exists := processor.ActivityStore[actor]
 			if !exists {
 				t.Fatal("Activity for the IP was unexpectedly deleted.")
 			}
@@ -1156,7 +1156,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 		var unblockCalled bool
 		processor := &Processor{
 			ActivityMutex: &sync.RWMutex{},
-			ActivityStore: make(map[TrackingKey]*BotActivity),
+			ActivityStore: make(map[Actor]*ActorActivity),
 			ConfigMutex:   &sync.RWMutex{},
 			Config: &AppConfig{
 				BlockerAddresses:    []string{"127.0.0.1:9999"},
@@ -1174,8 +1174,8 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 
 		// Manually set a blocked IP that is also on the whitelist.
 		blockedIP := "192.0.2.100"
-		trackingKey := TrackingKey{IPInfo: NewIPInfo(blockedIP)}
-		processor.ActivityStore[trackingKey] = &BotActivity{
+		actor := Actor{IPInfo: NewIPInfo(blockedIP)}
+		processor.ActivityStore[actor] = &ActorActivity{
 			IsBlocked:    true,
 			BlockedUntil: time.Now().Add(time.Hour),
 		}
@@ -1187,7 +1187,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 
 		// --- Assert ---
 		// The IP should remain blocked in memory because the HAProxy command failed.
-		if !processor.ActivityStore[trackingKey].IsBlocked {
+		if !processor.ActivityStore[actor].IsBlocked {
 			t.Error("Expected IsBlocked to remain true after a failed unblock attempt, but it was set to false.")
 		}
 		if !unblockCalled {
@@ -1202,7 +1202,7 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 
 		processor := &Processor{
 			ActivityMutex: &sync.RWMutex{},
-			ActivityStore: make(map[TrackingKey]*BotActivity),
+			ActivityStore: make(map[Actor]*ActorActivity),
 			Config:        &AppConfig{},
 			LogFunc:       func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 			// Use a MockBlocker but do NOT set the UnblockFunc.
@@ -1211,8 +1211,8 @@ func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
 
 		// Manually set a blocked IP that is NOT on the whitelist.
 		blockedIP := "192.0.2.100"
-		trackingKey := TrackingKey{IPInfo: NewIPInfo(blockedIP)}
-		processor.ActivityStore[trackingKey] = &BotActivity{
+		actor := Actor{IPInfo: NewIPInfo(blockedIP)}
+		processor.ActivityStore[actor] = &ActorActivity{
 			IsBlocked:    true,
 			BlockedUntil: time.Now().Add(time.Hour),
 		}
@@ -1257,7 +1257,7 @@ chains:
 	// 3. Create the processor with the initial config.
 	processor := &Processor{
 		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[TrackingKey]*BotActivity),
+		ActivityStore: make(map[Actor]*ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       NewMetrics(),
 		Chains:        initialLoadedCfg.Chains, // Set initial chains

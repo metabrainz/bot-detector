@@ -46,7 +46,7 @@ type Blocker interface {
 // making it easy to mock/stub external calls and manage state in tests.
 type Processor struct {
 	ActivityMutex     *sync.RWMutex
-	ActivityStore     map[TrackingKey]*BotActivity
+	ActivityStore     map[Actor]*ActorActivity
 	Blocker           Blocker
 	ConfigMutex       *sync.RWMutex
 	Metrics           *Metrics
@@ -214,14 +214,14 @@ type StepState struct {
 	LastMatchTime time.Time
 }
 
-// TrackingKey is a comparable struct used as the key for the ActivityStore map.
-type TrackingKey struct {
+// Actor is a comparable struct used as the key for the ActivityStore map.
+type Actor struct {
 	IPInfo IPInfo
 	UA     string // UserAgent. Empty string if tracking is IP-only.
 }
 
-// String provides a clean, readable representation of the TrackingKey for logging.
-func (tk TrackingKey) String() string {
+// String provides a clean, readable representation of the Actor for logging.
+func (tk Actor) String() string {
 	// Use a separator that is unlikely to appear in a User-Agent string.
 	if tk.UA != "" {
 		return fmt.Sprintf("%s | %s", tk.IPInfo.Address, tk.UA)
@@ -229,8 +229,8 @@ func (tk TrackingKey) String() string {
 	return tk.IPInfo.Address
 }
 
-// BotActivity tracks state for a single IP address (or IP+UA combination) across all chains.
-type BotActivity struct {
+// ActorActivity tracks state for a single actor (IP address or IP+UA combination) across all chains.
+type ActorActivity struct {
 	LastRequestTime time.Time // Time of the IP's most recent request.
 	BlockedUntil    time.Time // Time when the block expires.
 	ChainProgress   map[string]StepState

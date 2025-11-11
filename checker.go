@@ -51,16 +51,16 @@ func GetMatchValueIfType(fieldName string, entry *LogEntry, expectedType FieldTy
 }
 
 // preCheckActivity performs initial checks on an IP/key before processing against chains.
-// It returns the relevant BotActivity and a boolean indicating if further processing should be skipped.
+// It returns the relevant ActorActivity and a boolean indicating if further processing should be skipped.
 // The caller is responsible for locking/unlocking the ActivityMutex.
-func preCheckActivity(p *Processor, entry *LogEntry, trackingKey TrackingKey) (*BotActivity, bool) {
+func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*ActorActivity, bool) {
 	// 2. Get or create activity and check for existing blocks.
-	activity := GetOrCreateActivityUnsafe(p.ActivityStore, trackingKey)
+	activity := GetOrCreateActorActivityUnsafe(p.ActivityStore, actor)
 
 	if activity.IsBlocked {
 		if time.Now().After(activity.BlockedUntil) {
 			// Block has expired, clear it and proceed.
-			p.LogFunc(logging.LevelInfo, "EXPIRE", "Chain-specific block expired for key %s (UA: %s).", trackingKey.IPInfo.Address, trackingKey.UA)
+			p.LogFunc(logging.LevelInfo, "EXPIRE", "Chain-specific block expired for key %s (UA: %s).", actor.IPInfo.Address, actor.UA)
 			activity.IsBlocked = false
 			activity.BlockedUntil = time.Time{}
 		} else {
@@ -68,7 +68,7 @@ func preCheckActivity(p *Processor, entry *LogEntry, trackingKey TrackingKey) (*
 			if entry.Timestamp.After(activity.LastRequestTime) {
 				activity.LastRequestTime = entry.Timestamp
 			}
-			p.LogFunc(logging.LevelDebug, "SKIP", "Key %s (UA: %s): Skipped (Already blocked in memory by a chain).", trackingKey.IPInfo.Address, trackingKey.UA)
+			p.LogFunc(logging.LevelDebug, "SKIP", "Key %s (UA: %s): Skipped (Already blocked in memory by a chain).", actor.IPInfo.Address, actor.UA)
 			return activity, true // Skip processing
 		}
 	}
@@ -79,7 +79,7 @@ func preCheckActivity(p *Processor, entry *LogEntry, trackingKey TrackingKey) (*
 // handleChainCompletion takes action when a chain is completed (log, block, etc.).
 // It updates the activity state and returns true if the chain was completed.
 // It returns true if processing of other chains should be stopped.
-func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity) bool {
+func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *ActorActivity) bool {
 	// Increment the counter for the specific chain that was completed.
 	// This is the equivalent of `chains_completed_total{chain="<name>"}`.
 	if val, ok := p.Metrics.ChainsCompleted.Load(chain.Name); ok {
@@ -109,8 +109,8 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 	// If in dry-run mode, record the completion for top actors summary.
 	if p.DryRun {
 		// The ActivityMutex is already held by the caller.
-		trackingKey := GetTrackingKey(chain, entry)
-		actorString := trackingKey.String()
+		actor := GetActor(chain, entry)
+		actorString := actor.String()
 		if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
 			p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
 		}
@@ -130,8 +130,8 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 		}
 		executeBlock(p, entry, chain)
 		// Update the in-memory state to reflect the block for both live and dry runs.
-		ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
-		ipActivity := GetOrCreateActivityUnsafe(p.ActivityStore, ipOnlyKey)
+		ipOnlyActor := Actor{IPInfo: entry.IPInfo, UA: ""}
+		ipActivity := GetOrCreateActorActivityUnsafe(p.ActivityStore, ipOnlyActor)
 		ipActivity.IsBlocked = true
 		ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration)
 
@@ -220,9 +220,9 @@ func getOnMatchSuffix(chain *BehavioralChain) string {
 // processChainForEntry evaluates a single log entry against a single behavioral chain.
 // It manages state transitions (advancing, resetting) and triggers completion handling.
 // It returns true if processing of other chains should be stopped.
-func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity, previousRequestTime time.Time) bool {
-	// If GetTrackingKey returns an empty key, it's a mismatch for this chain (e.g., wrong IP version).
-	if GetTrackingKey(chain, entry).IPInfo.Address == "" {
+func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *ActorActivity, previousRequestTime time.Time) bool {
+	// If GetActor returns an empty key, it's a mismatch for this chain (e.g., wrong IP version).
+	if GetActor(chain, entry).IPInfo.Address == "" {
 		return false
 	}
 
@@ -273,8 +273,8 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 				}
 				if p.DryRun {
 					// Re-create the tracking key specific to this chain to get the correct actor string.
-					trackingKey := GetTrackingKey(chain, entry)
-					actorString := trackingKey.String()
+					actor := GetActor(chain, entry)
+					actorString := actor.String()
 					if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
 						p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
 					}
@@ -295,8 +295,8 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 				}
 				if p.DryRun {
 					// Re-create the tracking key specific to this chain to get the correct actor string.
-					trackingKey := GetTrackingKey(chain, entry)
-					actorString := trackingKey.String()
+					actor := GetActor(chain, entry)
+					actorString := actor.String()
 					if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
 						p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
 					}
@@ -328,8 +328,8 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 		// The ActivityMutex is already held by the caller (checkChainsWithLock).
 		if p.DryRun {
 			// Re-create the tracking key specific to this chain to get the correct actor string.
-			trackingKey := GetTrackingKey(chain, entry)
-			actorString := trackingKey.String()
+			actor := GetActor(chain, entry)
+			actorString := actor.String()
 			if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
 				p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
 			}
@@ -394,7 +394,7 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 	p.ConfigMutex.RLock()
 	chains := p.Chains
 	for _, chain := range chains {
-		if GetTrackingKey(&chain, entry).IPInfo.Address != "" { // Does this chain apply to this entry?
+		if GetActor(&chain, entry).IPInfo.Address != "" { // Does this chain apply to this entry?
 			if strings.HasSuffix(chain.MatchKey, "_ua") {
 				primaryKeySpecificity = 2 // ip_ua is most specific
 				break
@@ -405,13 +405,13 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 	}
 	p.ConfigMutex.RUnlock()
 
-	trackingKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
+	actor := Actor{IPInfo: entry.IPInfo, UA: ""}
 	if primaryKeySpecificity == 2 {
-		trackingKey.UA = entry.UserAgent
+		actor.UA = entry.UserAgent
 	}
 
 	// Perform pre-checks for whitelisting and existing blocks.
-	currentActivity, skip := preCheckActivity(p, entry, trackingKey)
+	currentActivity, skip := preCheckActivity(p, entry, actor)
 	if skip {
 		return
 	}
@@ -465,9 +465,9 @@ func CheckChains(p *Processor, entry *LogEntry) {
 	// Determine the tracking key to find the last request time.
 	// We use a simple 'ip' key here as a proxy for the activity's last seen time.
 	// A more complex implementation might find the most specific key, but this is sufficient.
-	key := TrackingKey{IPInfo: entry.IPInfo}
-	activity := GetOrCreateActivityUnsafe(p.ActivityStore, key)
-	lastRequestTime := activity.LastRequestTime
+	actor := Actor{IPInfo: entry.IPInfo}
+	actorActivity := GetOrCreateActorActivityUnsafe(p.ActivityStore, actor)
+	lastRequestTime := actorActivity.LastRequestTime
 
 	// If the entry is older than the last request we've seen for this IP,
 	// and it's within the tolerance window, buffer it.

@@ -64,37 +64,37 @@ func TestGetTrackingKey(t *testing.T) {
 		name        string
 		matchKey    string
 		entry       *LogEntry
-		expectedKey TrackingKey
+		expectedKey Actor
 	}{
 		// --- Success Cases (Key returned) ---
 		// 1. IP-only keys
-		{"Match: ip (IPv4)", "ip", baseEntry, TrackingKey{IPInfo: NewIPInfo("192.0.2.1"), UA: ""}},
-		{"Match: ip (IPv6)", "ip", &LogEntry{IPInfo: NewIPInfo("2001:db8::1")}, TrackingKey{IPInfo: NewIPInfo("2001:db8::1"), UA: ""}},
-		{"Match: ipv4 (IPv4)", "ipv4", baseEntry, TrackingKey{IPInfo: NewIPInfo("192.0.2.1"), UA: ""}},
-		{"Match: ipv6 (IPv6)", "ipv6", &LogEntry{IPInfo: NewIPInfo("2001:db8::1")}, TrackingKey{IPInfo: NewIPInfo("2001:db8::1"), UA: ""}},
+		{"Match: ip (IPv4)", "ip", baseEntry, Actor{IPInfo: NewIPInfo("192.0.2.1"), UA: ""}},
+		{"Match: ip (IPv6)", "ip", &LogEntry{IPInfo: NewIPInfo("2001:db8::1")}, Actor{IPInfo: NewIPInfo("2001:db8::1"), UA: ""}},
+		{"Match: ipv4 (IPv4)", "ipv4", baseEntry, Actor{IPInfo: NewIPInfo("192.0.2.1"), UA: ""}},
+		{"Match: ipv6 (IPv6)", "ipv6", &LogEntry{IPInfo: NewIPInfo("2001:db8::1")}, Actor{IPInfo: NewIPInfo("2001:db8::1"), UA: ""}},
 
 		// 2. IP+UA keys
-		{"Match: ip_ua (IPv4)", "ip_ua", baseEntry, TrackingKey{IPInfo: NewIPInfo("192.0.2.1"), UA: "TestAgent"}},
-		{"Match: ipv4_ua (IPv4)", "ipv4_ua", baseEntry, TrackingKey{IPInfo: NewIPInfo("192.0.2.1"), UA: "TestAgent"}},
-		{"Match: ipv6_ua (IPv6)", "ipv6_ua", &LogEntry{IPInfo: NewIPInfo("2001:db8::1"), UserAgent: "TestAgent"}, TrackingKey{IPInfo: NewIPInfo("2001:db8::1"), UA: "TestAgent"}},
+		{"Match: ip_ua (IPv4)", "ip_ua", baseEntry, Actor{IPInfo: NewIPInfo("192.0.2.1"), UA: "TestAgent"}},
+		{"Match: ipv4_ua (IPv4)", "ipv4_ua", baseEntry, Actor{IPInfo: NewIPInfo("192.0.2.1"), UA: "TestAgent"}},
+		{"Match: ipv6_ua (IPv6)", "ipv6_ua", &LogEntry{IPInfo: NewIPInfo("2001:db8::1"), UserAgent: "TestAgent"}, Actor{IPInfo: NewIPInfo("2001:db8::1"), UA: "TestAgent"}},
 
 		// --- Failure Cases (Empty Key is now expected) ---
-		{"Mismatch: ip (Invalid Version)", "ip", &LogEntry{IPInfo: NewIPInfo("bad-ip")}, TrackingKey{}},
-		{"Mismatch: ipv4 (is IPv6)", "ipv4", &LogEntry{IPInfo: NewIPInfo("2001:db8::1")}, TrackingKey{}},
-		{"Mismatch: ipv6 (is IPv4)", "ipv6", baseEntry, TrackingKey{}},
-		{"Mismatch: Unknown MatchKey", "bad_key", baseEntry, TrackingKey{}},
-		{"Mismatch: ipv4_ua (is IPv6)", "ipv4_ua", &LogEntry{IPInfo: NewIPInfo("2001:db8::1")}, TrackingKey{}},
-		{"Mismatch: ipv6_ua (is IPv4)", "ipv6_ua", baseEntry, TrackingKey{}},
-		{"Mismatch: Malformed IP", "ip", &LogEntry{IPInfo: NewIPInfo("1.2.3.4.5")}, TrackingKey{}},
+		{"Mismatch: ip (Invalid Version)", "ip", &LogEntry{IPInfo: NewIPInfo("bad-ip")}, Actor{}},
+		{"Mismatch: ipv4 (is IPv6)", "ipv4", &LogEntry{IPInfo: NewIPInfo("2001:db8::1")}, Actor{}},
+		{"Mismatch: ipv6 (is IPv4)", "ipv6", baseEntry, Actor{}},
+		{"Mismatch: Unknown MatchKey", "bad_key", baseEntry, Actor{}},
+		{"Mismatch: ipv4_ua (is IPv6)", "ipv4_ua", &LogEntry{IPInfo: NewIPInfo("2001:db8::1")}, Actor{}},
+		{"Mismatch: ipv6_ua (is IPv4)", "ipv6_ua", baseEntry, Actor{}},
+		{"Mismatch: Malformed IP", "ip", &LogEntry{IPInfo: NewIPInfo("1.2.3.4.5")}, Actor{}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			chain := &BehavioralChain{MatchKey: tt.matchKey}
-			result := GetTrackingKey(chain, tt.entry)
+			result := GetActor(chain, tt.entry)
 
 			if result != tt.expectedKey {
-				t.Errorf("GetTrackingKey() got key %+v, want %+v", result, tt.expectedKey)
+				t.Errorf("GetActor() got key %+v, want %+v", result, tt.expectedKey)
 			}
 		})
 	}

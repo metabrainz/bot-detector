@@ -39,17 +39,17 @@ func CheckAndRemoveWhitelistedBlocks(p *Processor) {
 	unblockedCount := 0
 
 	// 2. Iterate blocked IPs
-	for trackingKey, activityPtr := range p.ActivityStore {
+	for actor, activityPtr := range p.ActivityStore {
 		// Use the pointer to modify the original value in the map.
 		// The 'activity' variable from the range loop is a copy.
 		activity := activityPtr
-		if activity.IsBlocked && IsIPWhitelistedInList(trackingKey.IPInfo, currentWhitelist) {
+		if activity.IsBlocked && IsIPWhitelistedInList(actor.IPInfo, currentWhitelist) {
 			// IP is blocked AND now whitelisted -> unblock
-			if err := p.Blocker.Unblock(trackingKey.IPInfo); err != nil {
+			if err := p.Blocker.Unblock(actor.IPInfo); err != nil {
 				// Log is handled inside UnblockIP
 			} else {
 				// Successful unblock
-				p.LogFunc(logging.LevelInfo, "WHITELIST_UNBLOCK", "Unblocked whitelisted IP %s (was blocked until %s).", trackingKey.IPInfo.Address, activity.BlockedUntil.Format(AppLogTimestampFormat))
+				p.LogFunc(logging.LevelInfo, "WHITELIST_UNBLOCK", "Unblocked whitelisted IP %s (was blocked until %s).", actor.IPInfo.Address, activity.BlockedUntil.Format(AppLogTimestampFormat))
 				activity.IsBlocked = false
 				activity.BlockedUntil = time.Time{}
 				unblockedCount++

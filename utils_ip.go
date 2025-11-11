@@ -41,35 +41,35 @@ func GetIPVersion(ipStr string) IPVersion {
 	return VersionInvalid
 }
 
-// GetTrackingKey creates a TrackingKey for a given log entry and chain configuration.
+// GetActor creates a Actor for a given log entry and chain configuration.
 // It respects the chain's MatchKey to decide whether to include the User Agent and to validate the IP version.
-func GetTrackingKey(chain *BehavioralChain, entry *LogEntry) TrackingKey {
+func GetActor(chain *BehavioralChain, entry *LogEntry) Actor {
 	ipInfo := entry.IPInfo
 
 	// NOTE: We now compare against the byte constants (4 and 6) instead of strings.
 	switch chain.MatchKey {
 	case "ip", "ip_ua":
 		if ipInfo.Version == VersionInvalid {
-			return TrackingKey{} // Mismatch: return empty key
+			return Actor{} // Mismatch: return empty key
 		}
 	case "ipv4", "ipv4_ua":
 		if ipInfo.Version != VersionIPv4 { // Changed from string to byte constant
-			return TrackingKey{}
+			return Actor{}
 		}
 	case "ipv6", "ipv6_ua":
 		if ipInfo.Version != VersionIPv6 { // Changed from string to byte constant
-			return TrackingKey{}
+			return Actor{}
 		}
 	default:
-		return TrackingKey{} // Unknown match key, treat as mismatch
+		return Actor{} // Unknown match key, treat as mismatch
 	}
 
-	trackingKey := TrackingKey{IPInfo: ipInfo}
+	actor := Actor{IPInfo: ipInfo}
 	if strings.HasSuffix(chain.MatchKey, "_ua") {
-		trackingKey.UA = entry.UserAgent
+		actor.UA = entry.UserAgent
 	}
 
-	return trackingKey
+	return actor
 }
 
 // IsIPWhitelisted checks if the given IP address falls within any configured CIDR whitelist range.

@@ -6,22 +6,22 @@ import (
 )
 
 // Non-locking variant used when caller already holds the mutex.
-func GetOrCreateActivityUnsafe(store map[TrackingKey]*BotActivity, trackingKey TrackingKey) *BotActivity {
-	if activity, exists := store[trackingKey]; exists {
+func GetOrCreateActorActivityUnsafe(store map[Actor]*ActorActivity, actor Actor) *ActorActivity {
+	if activity, exists := store[actor]; exists {
 		return activity
 	}
-	newActivity := &BotActivity{
+	newActivity := &ActorActivity{
 		LastRequestTime: time.Time{},
 		ChainProgress:   make(map[string]StepState),
 	}
-	store[trackingKey] = newActivity
+	store[actor] = newActivity
 	return newActivity
 }
 
-// CleanUpIdleActivity periodically iterates through the ActivityStore and removes entries
+// CleanUpIdleActors periodically iterates through the ActivityStore and removes entries
 // for IPs that have been inactive for longer than the configured IdleTimeout or have become
 // irrelevant for `min_time_since_last_hit` checks. It listens on the `stop` channel to exit gracefully.
-func CleanUpIdleActivity(p *Processor, stop <-chan struct{}) {
+func CleanUpIdleActors(p *Processor, stop <-chan struct{}) {
 	cleanupInterval := p.Config.CleanupInterval
 
 	// Create a ticker that fires at the specified interval.

@@ -21,18 +21,18 @@ func TestCleanUpIdleActivity(t *testing.T) {
 
 	// 2. Create different activity states
 	now := time.Now()
-	keyUseless := TrackingKey{IPInfo: NewIPInfo("192.0.2.1")}     // Will be older than MaxTimeSinceLastHit
-	keyStillUseful := TrackingKey{IPInfo: NewIPInfo("192.0.2.2")} // Will be recent
-	keyIdle := TrackingKey{IPInfo: NewIPInfo("192.0.2.3")}        // Will be older than IdleTimeout
-	keyBlocked := TrackingKey{IPInfo: NewIPInfo("192.0.2.4")}     // Blocked, should not be cleaned up
-	keyStaleChain := TrackingKey{IPInfo: NewIPInfo("192.0.2.5")}  // Has chain progress, but it's stale
+	actorUseless := Actor{IPInfo: NewIPInfo("192.0.2.1")}     // Will be older than MaxTimeSinceLastHit
+	actorStillUseful := Actor{IPInfo: NewIPInfo("192.0.2.2")} // Will be recent
+	actorIdle := Actor{IPInfo: NewIPInfo("192.0.2.3")}        // Will be older than IdleTimeout
+	actorBlocked := Actor{IPInfo: NewIPInfo("192.0.2.4")}     // Blocked, should not be cleaned up
+	actorStaleChain := Actor{IPInfo: NewIPInfo("192.0.2.5")}  // Has chain progress, but it's stale
 
 	processor.ActivityMutex.Lock()
-	processor.ActivityStore[keyUseless] = &BotActivity{LastRequestTime: now.Add(-60 * time.Millisecond)}
-	processor.ActivityStore[keyStillUseful] = &BotActivity{LastRequestTime: now.Add(-20 * time.Millisecond)}
-	processor.ActivityStore[keyIdle] = &BotActivity{LastRequestTime: now.Add(-110 * time.Millisecond)}
-	processor.ActivityStore[keyBlocked] = &BotActivity{LastRequestTime: now.Add(-200 * time.Millisecond), IsBlocked: true}
-	processor.ActivityStore[keyStaleChain] = &BotActivity{
+	processor.ActivityStore[actorUseless] = &ActorActivity{LastRequestTime: now.Add(-60 * time.Millisecond)}
+	processor.ActivityStore[actorStillUseful] = &ActorActivity{LastRequestTime: now.Add(-20 * time.Millisecond)}
+	processor.ActivityStore[actorIdle] = &ActorActivity{LastRequestTime: now.Add(-110 * time.Millisecond)}
+	processor.ActivityStore[actorBlocked] = &ActorActivity{LastRequestTime: now.Add(-200 * time.Millisecond), IsBlocked: true}
+	processor.ActivityStore[actorStaleChain] = &ActorActivity{
 		LastRequestTime: now.Add(-110 * time.Millisecond), // The overall activity is idle
 		ChainProgress: map[string]StepState{
 			"StaleChain": {
@@ -46,7 +46,7 @@ func TestCleanUpIdleActivity(t *testing.T) {
 	// --- Act ---
 	// Start the cleanup routine and let it run for a few cycles
 	stopChan := make(chan struct{})
-	go CleanUpIdleActivity(processor, stopChan)
+	go CleanUpIdleActors(processor, stopChan)
 	defer close(stopChan)
 
 	// Wait for the cleanup routine to signal it has completed a pass.
@@ -61,19 +61,19 @@ func TestCleanUpIdleActivity(t *testing.T) {
 	processor.ActivityMutex.RLock()
 	defer processor.ActivityMutex.RUnlock()
 
-	if _, exists := processor.ActivityStore[keyUseless]; exists {
+	if _, exists := processor.ActivityStore[actorUseless]; exists {
 		t.Error("Expected 'useless' key to be cleaned up by MaxTimeSinceLastHit, but it still exists.")
 	}
-	if _, exists := processor.ActivityStore[keyIdle]; exists {
+	if _, exists := processor.ActivityStore[actorIdle]; exists {
 		t.Error("Expected 'idle' key to be cleaned up by IdleTimeout, but it still exists.")
 	}
-	if _, exists := processor.ActivityStore[keyStaleChain]; exists {
+	if _, exists := processor.ActivityStore[actorStaleChain]; exists {
 		t.Error("Expected key with stale chain progress to be cleaned up, but it still exists.")
 	}
-	if _, exists := processor.ActivityStore[keyStillUseful]; !exists {
+	if _, exists := processor.ActivityStore[actorStillUseful]; !exists {
 		t.Error("Expected 'still useful' key to remain, but it was cleaned up.")
 	}
-	if _, exists := processor.ActivityStore[keyBlocked]; !exists {
+	if _, exists := processor.ActivityStore[actorBlocked]; !exists {
 		t.Error("Expected 'blocked' key to remain, but it was cleaned up.")
 	}
 }
@@ -93,7 +93,7 @@ func TestCleanUpIdleActivity_ImmediateShutdown(t *testing.T) {
 
 	// --- Act ---
 	go func() {
-		CleanUpIdleActivity(processor, stopChan)
+		CleanUpIdleActors(processor, stopChan)
 		close(doneChan) // Signal that the goroutine has exited.
 	}()
 
@@ -119,18 +119,18 @@ func TestCleanUpIdleActivity_MinTimeSinceLastHit(t *testing.T) {
 	// 2. Create different activity states
 	now := time.Now()
 	// This IP was last seen 6 minutes ago, which is > MaxTimeSinceLastHit. It should be cleaned up.
-	keyUselessForTimeRule := TrackingKey{IPInfo: NewIPInfo("192.0.2.10")}
+	actorUselessForTimeRule := Actor{IPInfo: NewIPInfo("192.0.2.10")}
 	// This IP was last seen 4 minutes ago, which is < MaxTimeSinceLastHit. It should be kept.
-	keyStillRelevantForTimeRule := TrackingKey{IPInfo: NewIPInfo("192.0.2.20")}
+	actorStillRelevantForTimeRule := Actor{IPInfo: NewIPInfo("192.0.2.20")}
 
 	processor.ActivityMutex.Lock()
-	processor.ActivityStore[keyUselessForTimeRule] = &BotActivity{LastRequestTime: now.Add(-6 * time.Minute)}
-	processor.ActivityStore[keyStillRelevantForTimeRule] = &BotActivity{LastRequestTime: now.Add(-4 * time.Minute)}
+	processor.ActivityStore[actorUselessForTimeRule] = &ActorActivity{LastRequestTime: now.Add(-6 * time.Minute)}
+	processor.ActivityStore[actorStillRelevantForTimeRule] = &ActorActivity{LastRequestTime: now.Add(-4 * time.Minute)}
 	processor.ActivityMutex.Unlock()
 
 	// --- Act ---
 	stopChan := make(chan struct{})
-	go CleanUpIdleActivity(processor, stopChan)
+	go CleanUpIdleActors(processor, stopChan)
 
 	// Wait long enough for the ticker to fire at least once.
 	time.Sleep(processor.Config.CleanupInterval * 2)
@@ -141,10 +141,10 @@ func TestCleanUpIdleActivity_MinTimeSinceLastHit(t *testing.T) {
 	processor.ActivityMutex.RLock()
 	defer processor.ActivityMutex.RUnlock()
 
-	if _, exists := processor.ActivityStore[keyUselessForTimeRule]; exists {
+	if _, exists := processor.ActivityStore[actorUselessForTimeRule]; exists {
 		t.Error("Expected key older than MaxTimeSinceLastHit to be cleaned up, but it still exists.")
 	}
-	if _, exists := processor.ActivityStore[keyStillRelevantForTimeRule]; !exists {
+	if _, exists := processor.ActivityStore[actorStillRelevantForTimeRule]; !exists {
 		t.Error("Expected key still relevant for MaxTimeSinceLastHit to remain, but it was cleaned up.")
 	}
 }

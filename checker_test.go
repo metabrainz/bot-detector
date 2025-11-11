@@ -99,11 +99,11 @@ func TestPreCheckActivity_StillBlocked(t *testing.T) {
 			// --- Setup ---
 			resetGlobalState()
 			const targetIP = "192.0.2.50"
-			trackingKey := TrackingKey{IPInfo: NewIPInfo(targetIP)}
+			actor := Actor{IPInfo: NewIPInfo(targetIP)}
 			processor := newTestProcessor(nil, nil)
 
 			// Manually create a pre-existing, non-expired block state.
-			processor.ActivityStore[trackingKey] = &BotActivity{
+			processor.ActivityStore[actor] = &ActorActivity{
 				LastRequestTime: now,
 				BlockedUntil:    now.Add(1 * time.Hour),
 				IsBlocked:       true,
@@ -114,16 +114,16 @@ func TestPreCheckActivity_StillBlocked(t *testing.T) {
 			// --- Act ---
 			// We call the unexported preCheckActivity directly to isolate the logic under test.
 			processor.ActivityMutex.Lock()
-			_, skip := preCheckActivity(processor, entry, trackingKey)
+			_, skip := preCheckActivity(processor, entry, actor)
 			processor.ActivityMutex.Unlock()
 
 			// --- Assert ---
 			if !skip {
 				t.Error("Expected skip to be true for an already-blocked IP, but it was false.")
 			}
-			if !processor.ActivityStore[trackingKey].LastRequestTime.Equal(tt.expectedLastRequestTime) {
+			if !processor.ActivityStore[actor].LastRequestTime.Equal(tt.expectedLastRequestTime) {
 				t.Errorf("Expected LastRequestTime to be %v, but it was %v",
-					tt.expectedLastRequestTime, processor.ActivityStore[trackingKey].LastRequestTime)
+					tt.expectedLastRequestTime, processor.ActivityStore[actor].LastRequestTime)
 			}
 		})
 	}
@@ -200,7 +200,7 @@ func TestProcessChainForEntry_AlreadyCompleted(t *testing.T) {
 	}
 
 	// Create an activity state where the chain is already completed.
-	activity := &BotActivity{
+	activity := &ActorActivity{
 		ChainProgress: map[string]StepState{
 			"CompletedChain": {
 				CurrentStep:   1, // CurrentStep (1) == len(chain.Steps) (1)
@@ -375,8 +375,8 @@ func TestCheckChains_BlockExpiration(t *testing.T) {
 	})
 
 	// Manually create a pre-existing, EXPIRED block state.
-	trackingKey := TrackingKey{IPInfo: NewIPInfo(targetIP)}
-	h.processor.ActivityStore[trackingKey] = &BotActivity{
+	actor := Actor{IPInfo: NewIPInfo(targetIP)}
+	h.processor.ActivityStore[actor] = &ActorActivity{
 		LastRequestTime: time.Time{},                    // Not relevant for this test
 		BlockedUntil:    time.Now().Add(-1 * time.Hour), // Expired an hour ago
 		IsBlocked:       true,
@@ -392,7 +392,7 @@ func TestCheckChains_BlockExpiration(t *testing.T) {
 
 	// --- Assert ---
 	h.assertBlocked(entry, true)
-	if h.processor.ActivityStore[trackingKey].BlockedUntil.Before(time.Now()) {
+	if h.processor.ActivityStore[actor].BlockedUntil.Before(time.Now()) {
 		t.Error("Expected BlockedUntil time to be in the future, but it was not.")
 	}
 }
@@ -507,7 +507,7 @@ func TestCheckChains_OnMatchStop(t *testing.T) {
 	h.assertChainProgressCleared("StopChain", entry)
 
 	// The "ShouldBeSkippedChain" should have no progress state, as it was never processed.
-	key := GetTrackingKey(&h.processor.Chains[1], entry)
+	key := GetActor(&h.processor.Chains[1], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
 	activity, exists := h.processor.ActivityStore[key]
@@ -572,10 +572,10 @@ func TestCheckChains_TimeRules(t *testing.T) {
 
 			// Prime the activity store with the specified last request time.
 			if tt.primingTimeOffset != 0 {
-				key := TrackingKey{IPInfo: NewIPInfo("192.0.2.1")}
-				// Use GetOrCreateActivityUnsafe to ensure ChainProgress map is initialized.
+				key := Actor{IPInfo: NewIPInfo("192.0.2.1")}
+				// Use GetOrCreateActorActivityUnsafe to ensure ChainProgress map is initialized.
 				processor.ActivityMutex.Lock()
-				activity := GetOrCreateActivityUnsafe(processor.ActivityStore, key)
+				activity := GetOrCreateActorActivityUnsafe(processor.ActivityStore, key)
 				activity.LastRequestTime = now.Add(tt.primingTimeOffset)
 				processor.ActivityMutex.Unlock()
 			}
@@ -588,7 +588,7 @@ func TestCheckChains_TimeRules(t *testing.T) {
 			CheckChains(processor, entry)
 
 			processor.ActivityMutex.RLock()
-			activity := processor.ActivityStore[TrackingKey{IPInfo: entry.IPInfo}]
+			activity := processor.ActivityStore[Actor{IPInfo: entry.IPInfo}]
 			progressExists := activity.ChainProgress[chain.Name] != StepState{}
 			if progressExists != tt.shouldChainProgress {
 				t.Errorf("Chain progress existence was %t, but expected %t", progressExists, tt.shouldChainProgress)
@@ -627,7 +627,7 @@ func TestDryRunMode(t *testing.T) {
 	// Create a processor (but don't start any background processes like ChainWatcher).
 	processor := &Processor{
 		ActivityMutex:     &sync.RWMutex{},
-		ActivityStore:     make(map[TrackingKey]*BotActivity),
+		ActivityStore:     make(map[Actor]*ActorActivity),
 		TopActorsPerChain: make(map[string]map[string]*ActorStats),
 		ConfigMutex:       &sync.RWMutex{},
 		Metrics:           NewMetrics(),
@@ -808,8 +808,8 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 			processor := newTestProcessor(&AppConfig{OutOfOrderTolerance: tt.tolerance, MaxTimeSinceLastHit: 1 * time.Minute}, chains)
 
 			// Manually create an activity to ensure the ChainProgress map is not nil.
-			key := TrackingKey{IPInfo: NewIPInfo(targetIP)}
-			GetOrCreateActivityUnsafe(processor.ActivityStore, key)
+			key := Actor{IPInfo: NewIPInfo(targetIP)}
+			GetOrCreateActorActivityUnsafe(processor.ActivityStore, key)
 
 			// 1. Process a "newer" entry first to set the LastRequestTime.
 			newerEntry := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: now, Path: "/other-path"}
@@ -833,7 +833,7 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 			// 3. Assert the outcome.
 			processor.ActivityMutex.RLock()
 			defer processor.ActivityMutex.RUnlock()
-			activity := processor.ActivityStore[TrackingKey{IPInfo: NewIPInfo(targetIP)}]
+			activity := processor.ActivityStore[Actor{IPInfo: NewIPInfo(targetIP)}]
 
 			_, progressExists := activity.ChainProgress[chain.Name]
 

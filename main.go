@@ -81,7 +81,7 @@ func main() {
 	// Initialize the Processor instance.
 	p := &Processor{
 		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[TrackingKey]*BotActivity),
+		ActivityStore: make(map[Actor]*ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       NewMetrics(),
 		Chains:        loadedCfg.Chains,
@@ -150,7 +150,7 @@ func start(p *Processor) {
 			} else {
 				go ConfigWatcher(p, stopWatcher)
 			}
-			go CleanUpIdleActivity(p, stopWatcher)
+			go CleanUpIdleActors(p, stopWatcher)
 			go entryBufferWorker(p, stopWatcher)
 		}
 		// Listen for OS signals on the processor's channel

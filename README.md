@@ -218,18 +218,18 @@ The `match_key` defines **what constitutes a unique actor** when tracking behavi
 
 The `match_key` is fundamental to how the bot-detector tracks behavior. Internally, the application maintains an in-memory state map (the "Activity Store") that links an "actor" to their progress through various behavioral chains.
 
-1.  **Defining an Actor:** The `match_key` from a chain definition tells the detector how to create a unique `TrackingKey` for each log entry. This key represents the actor.
-    *   If `match_key` is `ip`, the `TrackingKey` is just the IP address.
-    *   If `match_key` is `ip_ua`, the `TrackingKey` is the combination of the IP address and the User-Agent string.
+1.  **Defining an Actor:** The `match_key` from a chain definition tells the detector how to create a unique `Actor` for each log entry. This key represents the actor.
+    *   If `match_key` is `ip`, the `Actor` is just the IP address.
+    *   If `match_key` is `ip_ua`, the `Actor` is the combination of the IP address and the User-Agent string.
 
-2.  **Tracking Activity:** This `TrackingKey` is used to look up a `BotActivity` object in the Activity Store. This object holds all state for that specific actor, including:
+2.  **Tracking Activity:** This `Actor` is used to look up a `ActorActivity` object in the Activity Store. This object holds all state for that specific actor, including:
     *   The timestamp of the actor's last request.
     *   Whether the actor is currently blocked.
     *   A map of `ChainProgress`, which stores the actor's current step for every chain they have started.
 
 3.  **Processing Steps:** When a log entry comes in, the detector iterates through all configured chains. For each chain:
-    *   It generates the appropriate `TrackingKey` based on the chain's `match_key`.
-    *   It retrieves the actor's `BotActivity`.
+    *   It generates the appropriate `Actor` based on the chain's `match_key`.
+    *   It retrieves the actor's `ActorActivity`.
     *   It looks at the `ChainProgress` for that specific chain to see which step is next.
     *   It evaluates the log entry against the conditions of that next step.
 

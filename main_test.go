@@ -184,7 +184,7 @@ chains:
 	// 3. Create the processor with the initial config.
 	processor := &Processor{
 		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[TrackingKey]*BotActivity),
+		ActivityStore: make(map[Actor]*ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       NewMetrics(),
 		Chains:        initialLoadedCfg.Chains,

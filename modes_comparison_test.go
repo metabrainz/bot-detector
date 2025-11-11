@@ -105,7 +105,7 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 	// Initialize the processor.
 	p := &Processor{
 		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[TrackingKey]*BotActivity),
+		ActivityStore: make(map[Actor]*ActorActivity),
 		Metrics:       NewMetrics(),
 		ConfigMutex:   &sync.RWMutex{},
 		Chains:        loadedCfg.Chains,

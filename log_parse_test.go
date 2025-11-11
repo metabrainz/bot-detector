@@ -284,7 +284,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 
 	ip := "192.0.2.1"
 	logLine := fmt.Sprintf(`www.example.com %s - userx [06/Nov/2025:09:00:00 +0100] "GET /1 HTTP/1.1" 200 1234 "-" "-"`, ip)
-	key := TrackingKey{IPInfo: NewIPInfo(ip)}
+	key := Actor{IPInfo: NewIPInfo(ip)}
 
 	// Set the CheckChainsFunc to the real method on the processor instance.
 	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
