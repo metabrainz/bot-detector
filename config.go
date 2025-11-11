@@ -109,10 +109,11 @@ func logChainDetails(p *Processor, chains []BehavioralChain, header string) {
 	for _, chain := range chains {
 		details := fmt.Sprintf("Name: '%s', Action: %s, Steps: %d, MatchKey: %s", chain.Name, chain.Action, len(chain.Steps), chain.MatchKey)
 		// Always show block duration for clarity, indicating if it's a default.
-		if chain.UsesDefaultBlockDuration {
-			details += fmt.Sprintf(", BlockDuration: default(%v)", chain.BlockDuration)
-		} else if chain.BlockDuration > 0 {
-			details += fmt.Sprintf(", BlockDuration: %v", chain.BlockDuration)
+		if chain.BlockDurationStr != "" {
+			details += fmt.Sprintf(", BlockDuration: %s", chain.BlockDurationStr)
+		} else if chain.UsesDefaultBlockDuration && chain.BlockDuration > 0 {
+			// Fallback for default duration which doesn't have an original string from a chain
+			details += fmt.Sprintf(", BlockDuration: default(%s)", chain.BlockDuration)
 		}
 		p.LogFunc(logging.LevelDebug, "CONFIG", "  - %s", details)
 	}
@@ -121,10 +122,11 @@ func logChainDetails(p *Processor, chains []BehavioralChain, header string) {
 // areChainsSemanticallyEqual compares two BehavioralChain structs for logical equality,
 // ignoring non-comparable fields like function pointers (Matchers).
 func areChainsSemanticallyEqual(a, b BehavioralChain) bool {
-	// Compare simple fields first.
+	// Compare simple fields first, including the original duration string.
 	if a.Name != b.Name || a.Action != b.Action ||
 		a.BlockDuration != b.BlockDuration || a.MatchKey != b.MatchKey ||
-		a.UsesDefaultBlockDuration != b.UsesDefaultBlockDuration { // Check if default usage has changed
+		a.UsesDefaultBlockDuration != b.UsesDefaultBlockDuration || // Check if default usage has changed
+		a.BlockDurationStr != b.BlockDurationStr {
 		return false
 	}
 
@@ -757,6 +759,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 	for _, yamlChain := range config.Chains {
 		var blockDuration time.Duration
 		usesDefault := false
+		blockDurationStr := yamlChain.BlockDuration // Keep original string for logging
 		if yamlChain.BlockDuration != "" {
 			var err error
 			blockDuration, err = parseDuration(yamlChain.BlockDuration)
@@ -767,6 +770,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 			// If the chain's duration is not set, it will use the default.
 			// We assign it here so that logging and comparison are accurate.
 			blockDuration = defaultBlockDuration
+			blockDurationStr = config.DefaultBlockDuration
 			// Mark that the default is being used, regardless of the action.
 			usesDefault = true
 		}
@@ -774,6 +778,17 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		// 4. Enforce that 'block' actions must have a non-zero duration.
 		if yamlChain.Action == "block" && blockDuration == 0 {
 			return nil, fmt.Errorf("chain '%s' has action 'block' but block_duration is missing or zero", yamlChain.Name)
+		}
+
+		// Validate block durations against duration tables.
+		if yamlChain.Action == "block" && blockDuration > 0 {
+			if len(newDurationTables) == 0 {
+				// This chain needs a duration table, but none are configured.
+				logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "chain '%s' has a block_duration of '%s', but no 'duration_tables' are configured. Block actions for this chain may fail if not in dry-run mode.", yamlChain.Name, blockDurationStr)
+			} else if _, ok := newDurationTables[blockDuration]; !ok {
+				// Duration tables are configured, but this specific duration is missing.
+				logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "chain '%s' has a block_duration of '%s' which is not defined in 'duration_tables'. Block actions for this chain may fail if not in dry-run mode.", yamlChain.Name, blockDurationStr)
+			}
 		}
 
 		// 2. Validate Match Key
@@ -785,6 +800,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 			Name:                     yamlChain.Name,
 			Action:                   yamlChain.Action,
 			BlockDuration:            blockDuration,
+			BlockDurationStr:         blockDurationStr,
 			UsesDefaultBlockDuration: usesDefault,
 			MatchKey:                 yamlChain.MatchKey,
 			OnMatch:                  yamlChain.OnMatch,
@@ -832,22 +848,6 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 			runtimeChain.Steps = append(runtimeChain.Steps, runtimeStep)
 		}
 		newChains = append(newChains, runtimeChain)
-	}
-
-	// After parsing all chains, check if any use the 'block' action.
-	// If so, and no duration tables are configured, issue a single warning.
-	if longestDuration == 0*time.Second {
-		for _, chain := range newChains {
-			if chain.Action == "block" {
-				// Downgrade this warning to Debug level during test runs to reduce noise.
-				logLevel := logging.LevelWarning
-				if IsTesting() {
-					logLevel = logging.LevelDebug
-				}
-				logging.LogOutput(logLevel, "CONFIG", "One or more chains use the 'block' action, but no 'duration_tables' are configured. All block attempts will be skipped.")
-				break // We only need to log this warning once.
-			}
-		}
 	}
 
 	// Find the maximum min_time_since_last_hit duration across all chains for cleanup optimization.

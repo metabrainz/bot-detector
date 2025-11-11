@@ -126,6 +126,10 @@ chains:
 		t.Errorf("Expected block duration 5m, got %v", loadedCfg.Chains[0].BlockDuration)
 	}
 
+	if loadedCfg.Chains[0].BlockDurationStr != "5m" {
+		t.Errorf("Expected block duration string '5m', got '%s'", loadedCfg.Chains[0].BlockDurationStr)
+	}
+
 	// Assert that the second chain received the default block duration
 	if loadedCfg.Chains[1].BlockDuration != 1*time.Hour {
 		t.Errorf("Expected default block duration of 1h for second chain, got %v", loadedCfg.Chains[1].BlockDuration)
@@ -819,6 +823,76 @@ chains:
 			runErrorTest(t, tt.name, tt.yamlContent, tt.expectedError)
 		})
 	}
+}
+
+func TestLoadConfigFromYAML_Warnings(t *testing.T) {
+	tests := []struct {
+		name            string
+		yamlContent     string
+		expectedWarning string
+	}{
+		{
+			name: "Block Duration without any Duration Tables",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    action: "block"
+    match_key: "ip"
+    block_duration: "1w"
+`,
+			expectedWarning: "chain 'Test' has a block_duration of '1w', but no 'duration_tables' are configured",
+		},
+		{
+			name: "Block Duration Not in Defined Duration Tables",
+			yamlContent: `
+version: "1.0"
+duration_tables:
+  "5m": "table_5m"
+chains:
+  - name: "Test"
+    action: "block"
+    match_key: "ip"
+    block_duration: "10m" # This duration is not in the table
+`,
+			expectedWarning: "chain 'Test' has a block_duration of '10m' which is not defined in 'duration_tables'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runWarningTest(t, tt.yamlContent, tt.expectedWarning)
+		})
+	}
+}
+
+// runWarningTest is a helper to check for non-fatal warnings logged during config load.
+func runWarningTest(t *testing.T, yamlContent, expectedWarning string) {
+	t.Helper()
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	var capturedLogs []string
+	var logMutex sync.Mutex
+	originalLogFunc := logging.LogOutput
+	logging.LogOutput = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		logMutex.Lock()
+		defer logMutex.Unlock()
+		capturedLogs = append(capturedLogs, fmt.Sprintf(format, args...))
+	}
+	t.Cleanup(func() { logging.LogOutput = originalLogFunc })
+
+	// Act
+	_, err := LoadConfigFromYAML(tmpConfigPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromYAML() returned an unexpected fatal error: %v", err)
+	}
+
+	// Assert
+	logMutex.Lock()
+	defer logMutex.Unlock()
+	if !strings.Contains(strings.Join(capturedLogs, "\n"), expectedWarning) {
+		t.Errorf("Expected log output to contain warning '%s', but it did not. Logs:\n%s", expectedWarning, strings.Join(capturedLogs, "\n"))
+	}
+
 }
 
 func TestLoadConfigFromYAML_InvalidDurations(t *testing.T) {
