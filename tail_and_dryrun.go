@@ -264,6 +264,8 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 	})
 
 	// --- Log Summary ---
+	linesProcessed := p.Metrics.LinesProcessed.Load()
+
 	// Display general metrics based on struct tags.
 	val := reflect.ValueOf(p.Metrics).Elem()
 	typ := val.Type()
@@ -279,7 +281,19 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 		if show, _ := strconv.ParseBool(field.Tag.Get(filterTag)); show {
 			if metricName := field.Tag.Get("metric"); metricName != "" {
 				if counter, ok := val.Field(i).Interface().(atomic.Int64); ok {
-					logFunc(logging.LevelInfo, logTag, "%s: %d", metricName, counter.Load())
+					value := counter.Load()
+					// For specific metrics, add a percentage relative to total lines processed.
+					switch fieldName {
+					case "ValidHits", "ParseErrors", "WhitelistedHits":
+						if linesProcessed > 0 {
+							percentage := (float64(value) / float64(linesProcessed)) * 100
+							logFunc(logging.LevelInfo, logTag, "%s: %d (%.2f%%)", metricName, value, percentage)
+						} else {
+							logFunc(logging.LevelInfo, logTag, "%s: %d", metricName, value)
+						}
+					default:
+						logFunc(logging.LevelInfo, logTag, "%s: %d", metricName, value)
+					}
 				}
 			}
 		}
@@ -292,29 +306,60 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 	logFunc(logging.LevelInfo, logTag, "Time Elapsed: %v", elapsedTime)
 
 	if elapsedTime.Seconds() > 0 {
-		linesPerSecond := float64(p.Metrics.LinesProcessed.Load()) / elapsedTime.Seconds()
+		linesPerSecond := float64(linesProcessed) / elapsedTime.Seconds()
 		logFunc(logging.LevelInfo, logTag, "Rate: %.2f lines/sec", linesPerSecond)
 	} else {
 		logFunc(logging.LevelInfo, logTag, "Rate: n/a (run too fast)")
 	}
 
-	// Log MatchKey Hits
-	logFunc(logging.LevelInfo, logTag, "--- Match Key Hits ---")
+	// --- Log MatchKey Hits ---
+	var totalMatchKeyHits int64
+	p.Metrics.MatchKeyHits.Range(func(key, value interface{}) bool {
+		if counter, ok := value.(*atomic.Int64); ok {
+			totalMatchKeyHits += counter.Load()
+		}
+		return true
+	})
+
+	logFunc(logging.LevelInfo, logTag, "--- Match Key Hits (Total: %d) ---", totalMatchKeyHits)
 	p.Metrics.MatchKeyHits.Range(func(key, value interface{}) bool {
 		matchKey, _ := key.(string)
 		counter, _ := value.(*atomic.Int64)
 		count := counter.Load()
 		if count > 0 {
-			logFunc(logging.LevelInfo, logTag, "  - %s: %d", matchKey, count)
+			if totalMatchKeyHits > 0 {
+				percentage := (float64(count) / float64(totalMatchKeyHits)) * 100
+				logFunc(logging.LevelInfo, logTag, "  - %s: %d (%.2f%%)", matchKey, count, percentage)
+			} else {
+				logFunc(logging.LevelInfo, logTag, "  - %s: %d", matchKey, count)
+			}
 		}
 		return true
 	})
+
+	validHits := p.Metrics.ValidHits.Load()
 
 	// Log the consolidated per-chain breakdown.
 	if len(allChainMetrics) > 0 {
 		logFunc(logging.LevelInfo, logTag, "--- Per-Chain Metrics ---")
 		for _, metric := range allChainMetrics {
-			logFunc(logging.LevelInfo, logTag, "  - %s: Hits: %d, Completed: %d, Resets: %d", metric.Name, metric.Hits, metric.Completions, metric.Resets)
+			if validHits > 0 {
+				// Hits percentage is relative to total valid hits for the run.
+				hitsPct := (float64(metric.Hits) / float64(validHits)) * 100
+				// Completions and Resets percentages are relative to their respective totals.
+				var completionsPct, resetsPct float64
+				if totalChainsCompleted > 0 {
+					completionsPct = (float64(metric.Completions) / float64(totalChainsCompleted)) * 100
+				}
+				if totalChainsReset > 0 {
+					resetsPct = (float64(metric.Resets) / float64(totalChainsReset)) * 100
+				}
+				logFunc(logging.LevelInfo, logTag, "  - %s: Hits: %d (%.2f%%), Completed: %d (%.2f%%), Resets: %d (%.2f%%)",
+					metric.Name, metric.Hits, hitsPct, metric.Completions, completionsPct, metric.Resets, resetsPct)
+			} else {
+				logFunc(logging.LevelInfo, logTag, "  - %s: Hits: %d, Completed: %d, Resets: %d",
+					metric.Name, metric.Hits, metric.Completions, metric.Resets)
+			}
 		}
 	}
 }
