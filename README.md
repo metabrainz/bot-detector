@@ -10,7 +10,7 @@ The application operates in a continuous loop:
 2.  **Parses each new log line** against a configurable regex format defined in the config file.
 3.  **Checks the entry** against a series of behavioral chains defined in the YAML configuration file.
 4.  **Tracks the state** of each IP address (or IP+User-Agent) as it progresses through these chains.
-5.  **Executes an action** (e.g., `block` or `log`) via the configured blocking backend when a chain is completed.
+5.  **Executes an action** (e.g., `block` or `log`) when a chain is completed.
 6.  **Manages state** by cleaning up idle or irrelevant IP tracking data to conserve memory.
 
 ## **Features**
@@ -18,7 +18,7 @@ The application operates in a continuous loop:
 *   **Real-Time Behavioral Analysis:** Uses flexible YAML configurations to detect sequential patterns.
 *   **Blocker Integration:** Executes immediate IP blocking via the configured backend (e.g., HAProxy Runtime API, TCP or Unix Socket).
 *   **High Resilience:** Handles backend instance unavailability by logging the failure and continuing operation.
-*   **Configuration Hot-Reload:** Automatically detects and applies changes to the YAML configuration file and its file dependencies without a restart.
+*   **Configuration Hot-Reload:** Automatically detects and applies changes to the YAML configuration file and its file-based dependencies without a restart.
 *   **Log Rotation Safe:** Continuously tails log files, automatically re-opening the file after log rotation events.
 *   **Graceful Shutdown:** Implements signal handlers (SIGINT, SIGTERM) for safe, controlled process termination.
 *   **Dry Run Mode:** Allows testing behavioral chains against static log files without affecting a live blocking backend.
@@ -37,7 +37,7 @@ This is a critical prerequisite. See [HaproxySetup.md](docs/HaproxySetup.md) for
 
 The application is configured using a YAML file and a few command-line flags.
 
-#### **Production Mode (Live Tailing)**
+#### **Production Mode (Live Tailing and Blocking)**
 
 ```sh
 ./bot-detector \
@@ -49,7 +49,7 @@ The application is configured using a YAML file and a few command-line flags.
 
 Use `--dry-run` to test your chains against a static log file. This will process the file once and log all match actions without attempting to connect to the configured blocking backend (even if the chain action is `block`).
 
-If `--log-path` is provided, it will read from that file. If `--log-path` is omitted in dry-run mode, the application will read from standard input (`stdin`), allowing you to pipe log data directly into it.
+If `--log-path` is provided, it will read from that file. If `--log-path` is omitted in dry-run mode, the application will read from standard input (`stdin`), allowing you to pipe log data into it.
 
 ```sh
 # Reading from a file
@@ -188,7 +188,7 @@ Each item in the chains array must conform to the following structure:
 | **name** | string | Yes | A unique, descriptive name for the chain (e.g., API-Abuse-Low-Agent). |
 | **steps** | array of object | Yes | The sequential list of steps that define the malicious pattern. |
 | **action** | string | Yes | The action to take when the chain is successfully completed by an IP. **Must be one of:** `block` or `log`. |
-| **block_duration** | string | No | The duration for which the IP should be blocked if action is block. Format: Go duration string (e.g., "5m", "1h", "30m", "1h30m"). |
+| **block_duration** | string | No | The duration for which the IP should be blocked if action is `block`. Format: Go duration string (e.g., "5m", "1h", "30m", "1h30m"). |
 | **match_key** | string | Yes | The key used to track activity. This determines if behavior is tracked per IP address, per IP version, or per unique client (IP + User-Agent). See the table below for all possible values. |
 | **on_match** | string | No | Optional. If set to `"stop"`, no further behavioral chains will be processed for the current log entry after this chain completes. This can be used to optimize performance or enforce exclusive matching. |
 
@@ -222,9 +222,9 @@ The `match_key` is fundamental to how the bot-detector tracks behavior. Internal
     *   If `match_key` is `ip`, the `Actor` is just the IP address.
     *   If `match_key` is `ip_ua`, the `Actor` is the combination of the IP address and the User-Agent string.
 
-2.  **Tracking Activity:** This `Actor` is used to look up a `ActorActivity` object in the Activity Store. This object holds all state for that specific actor, including:
+2.  **Tracking Activity:** This `Actor` is used to look up an `ActorActivity` object in the Activity Store. This object holds all state for that specific actor, including:
     *   The timestamp of the actor's last request.
-    *   Whether the actor is currently blocked.
+    *   Whether the actor is currently blocked (and until when).
     *   A map of `ChainProgress`, which stores the actor's current step for every chain they have started.
 
 3.  **Processing Steps:** When a log entry comes in, the detector iterates through all configured chains. For each chain:
@@ -248,8 +248,8 @@ Each step in the steps array defines a specific log entry characteristic that mu
 | :---- | :---- | :---- | :---- |
 | **field_matches** | map | Yes | A set of key-value pairs defining the conditions for the step to match. See the `field_matches` section below for details on the powerful new syntax. |
 | **max_delay** | string | No | **(Steps 2+)** The maximum allowed time between the previous step and this one. If exceeded, the chain resets. Ignored on the first step. Format: Go duration string (e.g., "10s", "1m"). |
-| **min_delay**	| string | No | **(Steps 2+)** The minimum required time between the *previous successful step in this chain* and the current step. If not met, the chain resets. Ignored on the first step. Format: Go duration string (e.g., "10s", "1m"). |
-| **min_time_since_last_hit** | string | No | **(First Step Only)** The first step will only match if the time since the *last overall request* from the same tracking key (IP or IP+UA) is **greater than** this duration. If the last request was too recent, or if the IP has never been seen before, the step will not match. This is useful for detecting "sleepy" bots that have long periods of inactivity between requests. When used in a chain with `match_key: "ip_ua"`, this check is performed independently for each unique IP and User-Agent combination, allowing the detector to distinguish between different bots operating from the same IP address. This setting is ignored on all subsequent steps. Format: Go duration string (e.g., "30m", "12h"). |
+| **min_delay** | string | No | **(Steps 2+)** The minimum required time between the *previous successful step in this chain* and the current step. If not met, the chain resets. Ignored on the first step. Format: Go duration string (e.g., "10s", "1m"). |
+| **min_time_since_last_hit** | string | No | **(First Step Only)** The first step will only match if the time since the *last overall request* from the same actor (`match_key`) is **greater than** this duration. If the last request was too recent, or if the actor has never been seen before, the step will not match. This is useful for detecting "sleepy" bots that have long periods of inactivity between requests. When used in a chain with `match_key: "ip_ua"`, this check is performed independently for each unique IP and User-Agent combination, allowing the detector to distinguish between different bots operating from the same IP address. This setting is ignored on all subsequent steps. Format: Go duration string (e.g., "30m", "12h"). |
 
 ### `field_matches`
 
@@ -381,7 +381,7 @@ The bot-detector holds the state of IPs in memory. To prevent memory from growin
 
 
 
-## Logic Flow Diagram
+## Logic Flow Diagram (Simplified)
 
 This diagram illustrates the journey of a single log entry as it's processed by the `bot-detector`.
 
