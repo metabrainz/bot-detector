@@ -193,6 +193,11 @@ When a chain with `on_match: "stop"` is completed, the application immediately s
 
 #### `match_key` Values
 
+The `match_key` defines **what constitutes a unique actor** when tracking behavior across multiple log entries. It is the key used in the internal state machine to link a sequence of requests to a single source.
+
+> **Why is there no `ua`-only key?**
+> A `match_key` based only on the User-Agent is intentionally not supported. User-Agent strings are trivial for an attacker to change with every request. If tracking were based solely on this value, a malicious actor could completely evade detection by sending a different User-Agent each time, as the detector would see each request as coming from a brand new "actor" and no behavioral chain could ever progress. The IP address is the only mandatory, non-spoofable component for tracking state.
+
 | `match_key` | Tracks By | Description |
 | :--- | :--- | :--- |
 | `ip` | IP Address (v4 or v6) | Tracks activity based on the client's IP address, regardless of whether it's IPv4 or IPv6. |
@@ -201,6 +206,32 @@ When a chain with `on_match: "stop"` is completed, the application immediately s
 | `ip_ua` | IP (v4/v6) + User-Agent | Tracks activity based on the combination of the client's IP address (v4 or v6) and their User-Agent string. This is useful for distinguishing different bots or clients behind the same NAT. |
 | `ipv4_ua` | IPv4 + User-Agent | Tracks activity based on the combination of the client's IPv4 address and their User-Agent string. Ignores IPv6 entries. |
 | `ipv6_ua` | IPv6 + User-Agent | Tracks activity based on the combination of the client's IPv6 address and their User-Agent string. Ignores IPv4 entries. |
+
+### Internal State: How `match_key` Connects to Chains and Steps
+
+The `match_key` is fundamental to how the bot-detector tracks behavior. Internally, the application maintains an in-memory state map (the "Activity Store") that links an "actor" to their progress through various behavioral chains.
+
+1.  **Defining an Actor:** The `match_key` from a chain definition tells the detector how to create a unique `TrackingKey` for each log entry. This key represents the actor.
+    *   If `match_key` is `ip`, the `TrackingKey` is just the IP address.
+    *   If `match_key` is `ip_ua`, the `TrackingKey` is the combination of the IP address and the User-Agent string.
+
+2.  **Tracking Activity:** This `TrackingKey` is used to look up a `BotActivity` object in the Activity Store. This object holds all state for that specific actor, including:
+    *   The timestamp of the actor's last request.
+    *   Whether the actor is currently blocked.
+    *   A map of `ChainProgress`, which stores the actor's current step for every chain they have started.
+
+3.  **Processing Steps:** When a log entry comes in, the detector iterates through all configured chains. For each chain:
+    *   It generates the appropriate `TrackingKey` based on the chain's `match_key`.
+    *   It retrieves the actor's `BotActivity`.
+    *   It looks at the `ChainProgress` for that specific chain to see which step is next.
+    *   It evaluates the log entry against the conditions of that next step.
+
+This design is what allows the system to track complex, overlapping behaviors. For example, a single IP address `1.2.3.4` can be simultaneously tracked for two different activities:
+
+*   As the actor `1.2.3.4` for a chain with `match_key: ip`.
+*   As the completely separate actor `1.2.3.4` + `"SomeBot/1.0"` for a different chain with `match_key: ip_ua`.
+
+Progress or completion of one chain does not affect the other unless an `on_match: "stop"` rule is triggered.
 
 ## **Step Definition**
 
