@@ -400,7 +400,7 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 					value := counter.Load()
 					// For specific metrics, add a percentage relative to total lines processed.
 					switch fieldName {
-					case "ValidHits", "ParseErrors", "WhitelistedHits":
+					case "ValidHits", "ParseErrors":
 						if linesProcessed > 0 {
 							percentage := (float64(value) / float64(linesProcessed)) * 100
 							logFunc(logging.LevelInfo, logTag, "%s: %d (%.2f%%)", metricName, value, percentage)

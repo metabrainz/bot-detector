@@ -3,7 +3,7 @@ package main
 import (
 	"bot-detector/internal/logging"
 	"fmt"
-	"net"
+
 	"os"
 	"regexp"
 	"sync"
@@ -54,7 +54,7 @@ type Processor struct {
 	CommandExecutor   func(p *Processor, addr, ip, command string) error // The function that executes the backend command
 	Config            *AppConfig
 	DryRun            bool
-	IsWhitelistedFunc func(ipInfo IPInfo) bool
+
 	EntryBuffer       []*LogEntry    // Buffer for holding out-of-order entries.
 	LogRegex          *regexp.Regexp // The currently active log parsing regex.
 	CheckChainsFunc   func(entry *LogEntry)
@@ -93,7 +93,7 @@ type AppConfig struct {
 	TimestampFormat          string                            `config:"compare"`
 	LogFormatRegex           string                            `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error) // Mockable
-	WhitelistNets            []*net.IPNet                      `config:"compare"`
+
 }
 
 // LoadedConfig encapsulates all configuration data loaded from the YAML file.
@@ -120,7 +120,7 @@ type LoadedConfig struct {
 	PollingInterval          time.Duration            `config:"compare"`
 	TimestampFormat          string                   `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error)
-	WhitelistNets            []*net.IPNet `config:"compare"`
+
 }
 
 // --- YAML DATA STRUCTURES ---
@@ -145,7 +145,7 @@ type ChainConfig struct {
 	OutOfOrderTolerance      string                `yaml:"out_of_order_tolerance"`
 	PollingInterval          string                `yaml:"poll_interval"`
 	TimestampFormat          string                `yaml:"timestamp_format"`
-	WhitelistCIDRs           []string              `yaml:"whitelist_cidrs"`
+
 }
 
 type StepDefYAML struct {

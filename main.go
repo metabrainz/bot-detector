@@ -75,7 +75,7 @@ func main() {
 		PollingInterval:          loadedCfg.PollingInterval,
 		TimestampFormat:          loadedCfg.TimestampFormat,
 		StatFunc:                 defaultStatFunc, // Initialize StatFunc to prevent nil pointer panic.
-		WhitelistNets:            loadedCfg.WhitelistNets,
+
 	}
 
 	// Initialize the Processor instance.
@@ -114,7 +114,7 @@ func main() {
 	p.Blocker = rateLimitedBlocker
 	defer rateLimitedBlocker.Stop() // Ensure the rate limiter worker is stopped on exit.
 
-	p.IsWhitelistedFunc = func(ipInfo IPInfo) bool { return IsIPWhitelisted(p, ipInfo) } // Set the method correctly.
+
 	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }                  // Assign the real method to the function field.
 
 	// Assign the real implementation for ProcessLogLine, which no longer uses line numbers.

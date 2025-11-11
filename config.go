@@ -41,7 +41,7 @@ var yamlKeyAliases = map[string]string{
 	"blockerdialtimeout":       "blocker_dial_timeout",
 	"blockercommandqueuesize":  "blocker_command_queue_size",
 	"blockercommandspersecond": "blocker_commands_per_second",
-	"whitelistcidrs":           "whitelist_cidrs",
+
 	"durationtables":           "duration_tables",
 
 	// Chain-level keys
@@ -70,47 +70,7 @@ var yamlKeyAliases = map[string]string{
 	"vhost":       "VHost",
 }
 
-// CheckAndRemoveWhitelistedBlocks iterates over all IPs currently marked as blocked
-// in the in-memory actor activity store and unblocks them via HAProxy if they now fall
-// within the newly loaded whitelist CIDRs.
-func CheckAndRemoveWhitelistedBlocks(p *Processor) {
-	if p.DryRun {
-		return
-	}
 
-	// 1. Acquire locks
-	// The ActivityMutex must be held to safely iterate and modify the actor activity store.
-	p.ActivityMutex.Lock()
-	defer p.ActivityMutex.Unlock()
-
-	// Get the latest whitelist state (protected by ConfigMutex)
-	currentWhitelist := p.Config.WhitelistNets
-
-	unblockedCount := 0
-
-	// 2. Iterate blocked IPs
-	for actor, activityPtr := range p.ActivityStore {
-		// Use the pointer to modify the original value in the map.
-		// The 'activity' variable from the range loop is a copy.
-		activity := activityPtr
-		if activity.IsBlocked && IsIPWhitelistedInList(actor.IPInfo, currentWhitelist) {
-			// IP is blocked AND now whitelisted -> unblock
-			if err := p.Blocker.Unblock(actor.IPInfo); err != nil {
-				// Log is handled inside UnblockIP
-			} else {
-				// Successful unblock
-				p.LogFunc(logging.LevelInfo, "WHITELIST_UNBLOCK", "Unblocked whitelisted IP %s (was blocked until %s).", actor.IPInfo.Address, activity.BlockedUntil.Format(AppLogTimestampFormat))
-				activity.IsBlocked = false
-				activity.BlockedUntil = time.Time{}
-				unblockedCount++
-			}
-		}
-	}
-
-	if unblockedCount > 0 {
-		p.LogFunc(logging.LevelInfo, "WHITELIST_CLEANUP", "Finished Whitelist cleanup. Unblocked %d IPs.", unblockedCount)
-	}
-}
 
 // logConfigurationSummary logs the key-value pairs of the current application configuration.
 // This is useful for visibility on startup and after a configuration reload.
@@ -762,35 +722,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		customLogRegex = re
 	}
 
-	// Parse Whitelist CIDRs
-	newWhitelistNets := make([]*net.IPNet, 0)
-	for _, cidr := range config.WhitelistCIDRs {
-		normalizedCIDR := cidr
 
-		// Check if the input is a bare IP (no '/') and is a valid IP address.
-		// If it's a bare IP, append the appropriate mask (/32 for IPv4, /128 for IPv6)
-		if !strings.Contains(cidr, "/") {
-			if ip := net.ParseIP(cidr); ip != nil {
-				if ip.To4() != nil {
-					// It's a bare IPv4 address
-					normalizedCIDR = cidr + "/32"
-				} else {
-					// It's a bare IPv6 address
-					normalizedCIDR = cidr + "/128"
-				}
-			} else {
-				// Not a valid bare IP, will fail net.ParseCIDR below
-				normalizedCIDR = cidr
-			}
-		}
-
-		// net.ParseCIDR returns the IP and the IPNet. The IPNet is what we store for comparison.
-		_, ipNet, err := net.ParseCIDR(normalizedCIDR)
-		if err != nil {
-			return nil, fmt.Errorf("invalid CIDR in whitelist: %s: %w", cidr, err)
-		}
-		newWhitelistNets = append(newWhitelistNets, ipNet)
-	}
 
 	// --- PARSE DURATION TABLES ---
 	newDurationTables := make(map[time.Duration]string, len(config.DurationTables))
@@ -992,7 +924,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		OutOfOrderTolerance:      outOfOrderTolerance,
 		PollingInterval:          pollingInterval,
 		TimestampFormat:          timestampFormat,
-		WhitelistNets:            newWhitelistNets,
+
 	}, nil
 }
 
@@ -1034,7 +966,7 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 		OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
 		PollingInterval:          loadedCfg.PollingInterval,
 		TimestampFormat:          loadedCfg.TimestampFormat,
-		WhitelistNets:            loadedCfg.WhitelistNets,
+
 		StatFunc:                 oldConfig.StatFunc, // Preserve mockable functions
 	}
 
@@ -1092,8 +1024,7 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 		logChainDetails(p, removed, "Removed chains:")
 	}
 
-	// Unblock any IPs that are now whitelisted.
-	CheckAndRemoveWhitelistedBlocks(p)
+
 }
 
 // initializeMetrics sets up all the metric counters based on the loaded configuration.

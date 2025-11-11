@@ -397,9 +397,7 @@ graph TD;
     A[New Log Line] --> B(Parse Log Line);
 
     subgraph Pre-Processing
-        B -- OK --> C{Is Whitelisted?};
-        C -- Yes --> D[Log Skip & End];
-        C -- No --> E{Is Actor Blocked?};
+        B -- OK --> E{Is Actor Blocked?};
         E -- Yes, Active --> F[Log Skip & End];
         E -- No, or Expired --> G[Start Chain Processing];
     end

@@ -81,7 +81,7 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 		LogFunc:           func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 		EntryBuffer:       make([]*LogEntry, 0),
 		TopActorsPerChain: make(map[string]map[string]*ActorStats),
-		IsWhitelistedFunc: func(ipInfo IPInfo) bool { return false },
+
 		NowFunc:           time.Now, // Default to real time for tests unless overridden.
 	}
 	// Create a real HAProxyBlocker and link it to the processor.

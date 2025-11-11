@@ -381,7 +381,7 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 	// --- The original logic of the function remains, but without the lock/defer unlock ---
 
 
-	// If we've reached this point, the line was successfully parsed and was not whitelisted.
+	// If we've reached this point, the line was successfully parsed.
 	// This is a "valid hit" that will be processed against the chains.
 	p.Metrics.ValidHits.Add(1)
 	// Determine the most specific actor key required by any applicable chain.
@@ -405,7 +405,7 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 		actor.UA = entry.UserAgent
 	}
 
-	// Perform pre-checks for whitelisting and existing blocks.
+	// Perform pre-checks for existing blocks.
 	currentActivity, skip := preCheckActivity(p, entry, actor)
 	if skip {
 		return

@@ -72,34 +72,6 @@ func GetActor(chain *BehavioralChain, entry *LogEntry) Actor {
 	return actor
 }
 
-// IsIPWhitelisted checks if the given IP address falls within any configured CIDR whitelist range.
-func IsIPWhitelisted(p *Processor, ipInfo IPInfo) bool {
-	ip := net.ParseIP(ipInfo.Address)
-	if ip == nil {
-		return false
-	}
-	// Note: WhitelistNets is protected by ConfigMutex because it's populated during config reload.
-	p.ConfigMutex.RLock()
-	defer p.ConfigMutex.RUnlock()
 
-	for _, ipNet := range p.Config.WhitelistNets {
-		if ipNet.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
 
-// IsIPWhitelistedInList checks if an IP is in the provided list of CIDR networks.
-func IsIPWhitelistedInList(ipInfo IPInfo, whitelist []*net.IPNet) bool {
-	ip := net.ParseIP(ipInfo.Address)
-	if ip == nil {
-		return false
-	}
-	for _, net := range whitelist {
-		if net.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
+

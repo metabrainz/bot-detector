@@ -594,13 +594,12 @@ func TestDryRunMode(t *testing.T) {
 			OutOfOrderTolerance: 0, // Disable buffering for this specific test.
 			MaxTimeSinceLastHit: loadedCfg.MaxTimeSinceLastHit,
 			TimestampFormat:     loadedCfg.TimestampFormat,
-			WhitelistNets:       loadedCfg.WhitelistNets,
+
 		},
 		DryRun:  true,                                                                            // Simulate dry-run mode
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {}, // Will be replaced
 	}
-	// Set the IsWhitelistedFunc on the *actual* processor instance to avoid nil pointers.
-	processor.IsWhitelistedFunc = func(ipInfo IPInfo) bool { return IsIPWhitelisted(processor, ipInfo) }
+
 	// Set the CheckChainsFunc on the processor instance to avoid nil pointers.
 	processor.CheckChainsFunc = func(entry *LogEntry) { CheckChains(processor, entry) }
 	processor.ProcessLogLine = func(line string) { processLogLineInternal(processor, line) }
