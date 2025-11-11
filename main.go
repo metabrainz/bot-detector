@@ -144,7 +144,7 @@ func start(p *Processor) {
 		// interference from other goroutines like the config watcher.
 		if !IsTesting() {
 			// The ConfigWatcher is not started in test mode to prevent race conditions where
-			// the test's config is overwritten by a reload from the default config.yaml.
+			// the test's config is overwritten by a reload from the default config file.
 			if p.ReloadOnSignal != "" {
 				go SignalReloader(p, stopWatcher, p.signalCh)
 			} else {
