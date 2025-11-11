@@ -50,17 +50,17 @@ func GetMatchValueIfType(fieldName string, entry *LogEntry, expectedType FieldTy
 	return value
 }
 
-// preCheckActivity performs initial checks on an IP/key before processing against chains.
+// preCheckActivity performs initial checks on an actor before processing against chains.
 // It returns the relevant ActorActivity and a boolean indicating if further processing should be skipped.
 // The caller is responsible for locking/unlocking the ActivityMutex.
 func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*ActorActivity, bool) {
-	// 2. Get or create activity and check for existing blocks.
+	// 2. Get or create actor activity and check for existing blocks.
 	activity := GetOrCreateActorActivityUnsafe(p.ActivityStore, actor)
 
 	if activity.IsBlocked {
 		if time.Now().After(activity.BlockedUntil) {
 			// Block has expired, clear it and proceed.
-			p.LogFunc(logging.LevelInfo, "EXPIRE", "Chain-specific block expired for key %s (UA: %s).", actor.IPInfo.Address, actor.UA)
+			p.LogFunc(logging.LevelInfo, "EXPIRE", "Chain-specific block expired for actor %s (UA: %s).", actor.IPInfo.Address, actor.UA)
 			activity.IsBlocked = false
 			activity.BlockedUntil = time.Time{}
 		} else {
@@ -68,7 +68,7 @@ func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*ActorActivit
 			if entry.Timestamp.After(activity.LastRequestTime) {
 				activity.LastRequestTime = entry.Timestamp
 			}
-			p.LogFunc(logging.LevelDebug, "SKIP", "Key %s (UA: %s): Skipped (Already blocked in memory by a chain).", actor.IPInfo.Address, actor.UA)
+			p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (Already blocked in memory by a chain).", actor.IPInfo.Address, actor.UA)
 			return activity, true // Skip processing
 		}
 	}
@@ -77,8 +77,8 @@ func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*ActorActivit
 }
 
 // handleChainCompletion takes action when a chain is completed (log, block, etc.).
-// It updates the activity state and returns true if the chain was completed.
-// It returns true if processing of other chains should be stopped.
+// It updates the actor's state and returns true if the chain was completed.
+// It returns true if processing of other chains should be stopped for this log entry.
 func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *ActorActivity) bool {
 	// Increment the counter for the specific chain that was completed.
 	// This is the equivalent of `chains_completed_total{chain="<name>"}`.
@@ -219,9 +219,9 @@ func getOnMatchSuffix(chain *BehavioralChain) string {
 
 // processChainForEntry evaluates a single log entry against a single behavioral chain.
 // It manages state transitions (advancing, resetting) and triggers completion handling.
-// It returns true if processing of other chains should be stopped.
+// It returns true if processing of other chains should be stopped for this entry.
 func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *ActorActivity, previousRequestTime time.Time) bool {
-	// If GetActor returns an empty key, it's a mismatch for this chain (e.g., wrong IP version).
+	// If GetActor returns an empty actor, it's a mismatch for this chain (e.g., wrong IP version).
 	if GetActor(chain, entry).IPInfo.Address == "" {
 		return false
 	}
@@ -237,7 +237,7 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 	// Get the current state for this chain.
 	state, exists := currentActivity.ChainProgress[chain.Name]
 	if !exists {
-		// Initialize state if it's the first time we're seeing this chain for this key.
+		// Initialize state if it's the first time we're seeing this actor for this chain.
 		state = StepState{CurrentStep: 0, LastMatchTime: time.Time{}}
 	}
 
@@ -272,7 +272,7 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 					}
 				}
 				if p.DryRun {
-					// Re-create the tracking key specific to this chain to get the correct actor string.
+					// Re-create the actor specific to this chain to get the correct actor string.
 					actor := GetActor(chain, entry)
 					actorString := actor.String()
 					if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
@@ -294,7 +294,7 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 					}
 				}
 				if p.DryRun {
-					// Re-create the tracking key specific to this chain to get the correct actor string.
+					// Re-create the actor specific to this chain to get the correct actor string.
 					actor := GetActor(chain, entry)
 					actorString := actor.String()
 					if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
@@ -327,7 +327,7 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 		// If in dry-run mode, record the actor hit for top actors summary.
 		// The ActivityMutex is already held by the caller (checkChainsWithLock).
 		if p.DryRun {
-			// Re-create the tracking key specific to this chain to get the correct actor string.
+			// Re-create the actor specific to this chain to get the correct actor string.
 			actor := GetActor(chain, entry)
 			actorString := actor.String()
 			if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
@@ -361,8 +361,8 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 	}
 
 	// --- STATE MANAGEMENT ---
-	// Only store the state if the key is actively progressing (CurrentStep > 0).
-	// This saves memory by not storing state for IPs that are at step 0.
+	// Only store the state if the actor is actively progressing (CurrentStep > 0).
+	// This saves memory by not storing state for actors that are at step 0.
 	if state.CurrentStep > 0 {
 		currentActivity.ChainProgress[chain.Name] = state
 	} else {
@@ -379,7 +379,7 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 	// The original lock acquisition has been moved up to the caller.
 
 	// --- The original logic of the function remains, but without the lock/defer unlock ---
-	// Immediately skip processing if the IP is whitelisted. This is the primary guard.
+	// Immediately skip processing if the actor is whitelisted. This is the primary guard.
 	if p.IsWhitelistedFunc(entry.IPInfo) {
 		p.LogFunc(logging.LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IPInfo.Address)
 		p.Metrics.WhitelistedHits.Add(1)
@@ -389,7 +389,7 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 	// If we've reached this point, the line was successfully parsed and was not whitelisted.
 	// This is a "valid hit" that will be processed against the chains.
 	p.Metrics.ValidHits.Add(1)
-	// Determine the most specific tracking key required by any applicable chain.
+	// Determine the most specific actor key required by any applicable chain.
 	primaryKeySpecificity := 0 // 0=none, 1=ip, 2=ip_ua
 	p.ConfigMutex.RLock()
 	chains := p.Chains
@@ -462,7 +462,7 @@ func CheckChains(p *Processor, entry *LogEntry) {
 	p.ActivityMutex.Lock()
 	defer p.ActivityMutex.Unlock()
 
-	// Determine the tracking key to find the last request time.
+	// Determine the actor key to find the last request time.
 	// We use a simple 'ip' key here as a proxy for the activity's last seen time.
 	// A more complex implementation might find the most specific key, but this is sufficient.
 	actor := Actor{IPInfo: entry.IPInfo}

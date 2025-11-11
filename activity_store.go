@@ -19,7 +19,7 @@ func GetOrCreateActorActivityUnsafe(store map[Actor]*ActorActivity, actor Actor)
 }
 
 // CleanUpIdleActors periodically iterates through the ActivityStore and removes entries
-// for IPs that have been inactive for longer than the configured IdleTimeout or have become
+// for actors that have been inactive for longer than the configured idle timeout or have become
 // irrelevant for `min_time_since_last_hit` checks. It listens on the `stop` channel to exit gracefully.
 func CleanUpIdleActors(p *Processor, stop <-chan struct{}) {
 	cleanupInterval := p.Config.CleanupInterval
@@ -41,7 +41,7 @@ func CleanUpIdleActors(p *Processor, stop <-chan struct{}) {
 			// Use a new variable to avoid loop variable capture issues.
 			activity := activityPtr
 
-			// Skip any IP that is currently blocked.
+			// Skip any actor that is currently blocked.
 			if activity.IsBlocked {
 				continue
 			}
@@ -66,7 +66,7 @@ func CleanUpIdleActors(p *Processor, stop <-chan struct{}) {
 
 				if isIdle || isUselessForTimeRule {
 					delete(p.ActivityStore, key)
-					p.Metrics.ActivitiesCleaned.Add(1)
+					p.Metrics.ActorsCleaned.Add(1)
 					cleanedCount++
 				}
 			}
@@ -74,7 +74,7 @@ func CleanUpIdleActors(p *Processor, stop <-chan struct{}) {
 
 		p.ActivityMutex.Unlock()
 		if cleanedCount > 0 {
-			p.LogFunc(logging.LevelDebug, "CLEANUP", "Cleaned up %d idle/useless IP states.", cleanedCount)
+			p.LogFunc(logging.LevelDebug, "CLEANUP", "Cleaned up %d idle/useless actor states.", cleanedCount)
 		}
 
 		// Signal for test synchronization, if the channel is set.

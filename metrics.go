@@ -24,7 +24,7 @@ type Metrics struct {
 	ParseErrors         atomic.Int64 `metric:"Parse Errors" dryrun:"true"`
 	ReorderedEntries    atomic.Int64 `metric:"Reordered Entries" dryrun:"true"`
 	WhitelistedHits     atomic.Int64 `metric:"Whitelisted Hits Skipped" dryrun:"true"`
-	ActivitiesCleaned   atomic.Int64 `metric:"Activities Cleaned" dryrun:"true"`
+	ActorsCleaned       atomic.Int64 `metric:"Actors Cleaned" dryrun:"true"`
 	BlockActions        atomic.Int64 `metric:"Block Actions Triggered" dryrun:"true"`
 	LogActions          atomic.Int64 `metric:"Log Actions Triggered" dryrun:"true"`
 	BlockerCmdsQueued   atomic.Int64 `metric:"Blocker Commands Queued" dryrun:"false"`

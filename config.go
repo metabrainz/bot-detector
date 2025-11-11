@@ -21,7 +21,7 @@ import (
 )
 
 // CheckAndRemoveWhitelistedBlocks iterates over all IPs currently marked as blocked
-// in the in-memory ActivityStore and unblocks them via HAProxy if they now fall
+// in the in-memory actor activity store and unblocks them via HAProxy if they now fall
 // within the newly loaded whitelist CIDRs.
 func CheckAndRemoveWhitelistedBlocks(p *Processor) {
 	if p.DryRun {
@@ -29,7 +29,7 @@ func CheckAndRemoveWhitelistedBlocks(p *Processor) {
 	}
 
 	// 1. Acquire locks
-	// The ActivityMutex must be held to safely iterate and modify the ActivityStore.
+	// The ActivityMutex must be held to safely iterate and modify the actor activity store.
 	p.ActivityMutex.Lock()
 	defer p.ActivityMutex.Unlock()
 
