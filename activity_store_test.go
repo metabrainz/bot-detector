@@ -102,8 +102,8 @@ func TestCleanUpIdleActivity_ImmediateShutdown(t *testing.T) {
 }
 
 func TestCleanUpIdleActivity_MinTimeSinceLastHit(t *testing.T) {
-	// This test specifically validates the cleanup logic for IPs that are no longer
-	// relevant for `min_time_since_last_hit` rules.
+	// This test specifically validates the cleanup logic for actors that are no longer
+	// relevant for `min_time_since_last_hit` rules because they have been idle for too long.
 
 	// 1. Setup
 	resetGlobalState()
@@ -118,9 +118,9 @@ func TestCleanUpIdleActivity_MinTimeSinceLastHit(t *testing.T) {
 
 	// 2. Create different activity states
 	now := time.Now()
-	// This IP was last seen 6 minutes ago, which is > MaxTimeSinceLastHit. It should be cleaned up.
+	// This actor was last seen 6 minutes ago, which is > MaxTimeSinceLastHit. It should be cleaned up.
 	actorUselessForTimeRule := Actor{IPInfo: NewIPInfo("192.0.2.10")}
-	// This IP was last seen 4 minutes ago, which is < MaxTimeSinceLastHit. It should be kept.
+	// This actor was last seen 4 minutes ago, which is < MaxTimeSinceLastHit. It should be kept.
 	actorStillRelevantForTimeRule := Actor{IPInfo: NewIPInfo("192.0.2.20")}
 
 	processor.ActivityMutex.Lock()

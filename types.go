@@ -214,7 +214,8 @@ type StepState struct {
 	LastMatchTime time.Time
 }
 
-// Actor is a comparable struct used as the key for the ActivityStore map.
+// Actor is a comparable struct used as the key for the ActivityStore map. It represents
+// the unique entity being tracked (e.g., an IP address or an IP+UserAgent combination).
 type Actor struct {
 	IPInfo IPInfo
 	UA     string // UserAgent. Empty string if tracking is IP-only.
@@ -231,8 +232,8 @@ func (tk Actor) String() string {
 
 // ActorActivity tracks state for a single actor (IP address or IP+UA combination) across all chains.
 type ActorActivity struct {
-	LastRequestTime time.Time // Time of the IP's most recent request.
+	LastRequestTime time.Time // Time of the actor's most recent request.
 	BlockedUntil    time.Time // Time when the block expires.
 	ChainProgress   map[string]StepState
-	IsBlocked       bool // Flag to skip chain checks if this key is blocked.
+	IsBlocked       bool // Flag to skip chain checks if this actor is blocked.
 }
