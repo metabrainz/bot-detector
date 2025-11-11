@@ -498,11 +498,11 @@ func TestDryRunLogProcessor_Decompression(t *testing.T) {
 
 func TestDryRunLogProcessor_TopN(t *testing.T) {
 	// This log content triggers two different chains with multiple actors.
-	// TopNTestChain:
-	//  - Actor 1.1.1.1: 3 hits, 1 completion, 1 reset (due to max_delay violation)
-	//  - Actor 2.2.2.2: 4 hits, 2 completions
-	// SecondChain (actor 3.3.3.3):
-	//  - Actor 3.3.3.3: 1 hit, 1 completion
+	// TopNTestChain (match_key: ip):
+	//  - Actor "1.1.1.1": 3 hits, 1 completion, 1 reset (due to max_delay violation)
+	//  - Actor "2.2.2.2": 4 hits, 2 completions
+	// SecondChain (match_key: ip):
+	//  - Actor "3.3.3.3": 1 hit, 1 completion
 	logContent := `
 test.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] "GET /step1 HTTP/1.1" 200 100 "-" "A"
 test.com 2.2.2.2 - - [01/Jan/2025:00:00:01 +0000] "GET /step1 HTTP/1.1" 200 100 "-" "B"
