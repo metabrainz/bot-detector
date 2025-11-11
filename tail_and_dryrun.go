@@ -3,10 +3,13 @@ package main
 import (
 	"bot-detector/internal/logging"
 	"bufio"
+	"compress/bzip2"
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
@@ -192,8 +195,27 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	}
 	defer file.Close()
 
+	var reader io.Reader = file
+
+	// Check for compressed file extensions and wrap the reader accordingly.
+	switch filepath.Ext(p.LogPath) {
+	case ".gz":
+		gzReader, err := gzip.NewReader(file)
+		if err != nil {
+			p.LogFunc(logging.LevelCritical, "FATAL", "Failed to create gzip reader for %s: %v", p.LogPath, err)
+			return
+		}
+		defer gzReader.Close()
+		reader = gzReader
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "Decompressing gzipped log file...")
+	case ".bz2":
+		// bzip2.NewReader takes an io.Reader, which our file handle satisfies.
+		reader = bzip2.NewReader(file)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "Decompressing bzip2 log file...")
+	}
+
 	// Use the shared line processing logic.
-	err = processFileLines(p, file, func(line string) {
+	err = processFileLines(p, reader, func(line string) {
 		p.ProcessLogLine(line)
 		p.Metrics.LinesProcessed.Add(1)
 	})
@@ -201,7 +223,6 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 		// Log the error if processing fails unexpectedly (e.g., config error).
 		p.LogFunc(logging.LevelError, "DRY_RUN_ERROR", "Error during file processing: %v", err)
 	}
-
 	// After processing all lines, flush any remaining entries in the buffer.
 	FlushEntryBuffer(p)
 	elapsedTime := time.Since(startTime)
