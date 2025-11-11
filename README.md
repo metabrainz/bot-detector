@@ -37,8 +37,8 @@ graph TD
         I -- Yes --> J[Advance Step Progress];
         J --> K{Chain Complete?};
         K -- No --> G;
-        K -- Yes --> L[Perform Action: Log or Block];
-        L --> M{on_match == "stop"?};
+        K -- Yes --> L[Perform Action: Log or Block]
+        L --> M{"on_match == 'stop'?"};
         M -- No --> G;
     end
 
