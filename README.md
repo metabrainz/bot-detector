@@ -386,33 +386,35 @@ The bot-detector holds the state of IPs in memory. To prevent memory from growin
 This diagram illustrates the journey of a single log entry as it's processed by the `bot-detector`.
 
 ```mermaid
-graph TD
-    A[New Log Line Read] --> B{Parse Log Line};
-    B --> C{Parse OK?};
-    C -- No --> C1[Log Parse Error & Stop];
-    C -- Yes --> D{Is Whitelisted?};
-    D -- Yes --> D1[Log Skip & Stop];
-    D -- No --> E{Pre-Check: Already Blocked?};
-    E -- Yes, and block is active --> E1[Log Skip & Stop];
-    E -- No, or block expired --> F[Start Chain Processing];
+graph TD;
+    A[New Log Line] --> B(Parse Log Line);
 
-    subgraph Chain Loop
-        direction LR
-        F --> G{For each Chain in order};
-        G --> H[Process against Chain];
-        H --> I{Step Conditions Match?};
-        I -- No --> G;
-        I -- Yes --> J[Advance Step Progress];
-        J --> K{Chain Complete?};
-        K -- No --> G;
-        K -- Yes --> L[Perform Action: Log or Block]
-        L --> M{"on_match == 'stop'?"};
-        M -- No --> G;
+    subgraph Pre-Processing
+        B -- OK --> C{Is Whitelisted?};
+        C -- Yes --> D[Log Skip & End];
+        C -- No --> E{Is Actor Blocked?};
+        E -- Yes, Active --> F[Log Skip & End];
+        E -- No, or Expired --> G[Start Chain Processing];
     end
 
-    M -- Yes --> Z[Stop Processing Chains];
-    G -- all chains processed --> Z;
-    Z --> Z1[Update Activity Timestamps & End];
+    B -- Fail --> H[Log Parse Error & End];
+
+    subgraph Chain Processing Loop
+        G --> Loop{For each Chain};
+        Loop -- Next Chain --> I(Process against Chain);
+        I --> J{Step Conditions Match?};
+        J -- No --> Loop;
+        J -- Yes --> K[Advance Step Progress];
+        K --> L{Chain Complete?};
+        L -- No --> Loop;
+        L -- Yes --> M[Perform Action: Log or Block];
+        M --> N{on_match == 'stop'?};
+        N -- Yes --> EndLoop[Stop Processing Chains];
+        N -- No --> Loop;
+    end
+
+    Loop -- All Chains Processed --> EndLoop;
+    EndLoop --> Z[Update Activity Timestamps & End];
 ```
 
 ## **Example config.yaml**
