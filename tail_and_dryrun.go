@@ -3,13 +3,13 @@ package main
 import (
 	"bot-detector/internal/logging"
 	"bufio"
+	"bytes"
 	"compress/bzip2"
 	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
@@ -195,11 +195,25 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	}
 	defer file.Close()
 
+	// --- Magic Number Detection ---
+	// Read the first few bytes to detect file type, then rewind.
+	magicBuf := make([]byte, 3)
+	bytesRead, err := file.Read(magicBuf)
+	if err != nil && err != io.EOF {
+		p.LogFunc(logging.LevelCritical, "FATAL", "Failed to read from log file %s for magic number detection: %v", p.LogPath, err)
+		return
+	}
+
+	// Rewind the file so the decompressor/reader starts from the beginning.
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		p.LogFunc(logging.LevelCritical, "FATAL", "Failed to seek to start of log file %s: %v", p.LogPath, err)
+		return
+	}
+
 	var reader io.Reader = file
 
-	// Check for compressed file extensions and wrap the reader accordingly.
-	switch filepath.Ext(p.LogPath) {
-	case ".gz":
+	// Check for gzip magic number: 1F 8B
+	if bytesRead >= 2 && bytes.Equal(magicBuf[:2], []byte{0x1f, 0x8b}) {
 		gzReader, err := gzip.NewReader(file)
 		if err != nil {
 			p.LogFunc(logging.LevelCritical, "FATAL", "Failed to create gzip reader for %s: %v", p.LogPath, err)
@@ -207,11 +221,10 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 		}
 		defer gzReader.Close()
 		reader = gzReader
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "Decompressing gzipped log file...")
-	case ".bz2":
-		// bzip2.NewReader takes an io.Reader, which our file handle satisfies.
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "Detected gzip format. Decompressing log file on the fly...")
+	} else if bytesRead >= 3 && bytes.Equal(magicBuf[:3], []byte{'B', 'Z', 'h'}) { // Check for bzip2 magic number: BZh
 		reader = bzip2.NewReader(file)
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "Decompressing bzip2 log file...")
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "Detected bzip2 format. Decompressing log file on the fly...")
 	}
 
 	// Use the shared line processing logic.

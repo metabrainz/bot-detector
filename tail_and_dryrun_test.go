@@ -428,7 +428,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			harness := newDryRunTestHarness(t)
+			harness := newDryRunTestHarness(t, nil)
 			tt.setupFunc(harness.tempLogFile)
 			done := make(chan struct{})
 
@@ -443,6 +443,55 @@ func TestDryRunLogProcessor(t *testing.T) {
 			if !strings.Contains(logOutput, tt.expectedLogContains) {
 				t.Errorf("Expected log output to contain '%s', but it did not.\nFull Log:\n%s", tt.expectedLogContains, logOutput)
 			}
+		})
+	}
+}
+
+func TestDryRunLogProcessor_Decompression(t *testing.T) {
+	expectedLines := []string{
+		"example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"",
+		"example.com 1.1.1.2 - - [01/Jan/2025:00:00:01 +0000] \"GET /2 HTTP/1.1\" 200 100 \"-\" \"-\"",
+	}
+
+	tests := []struct {
+		name                string
+		logFilePath         string // Path to the pre-compressed file in testdata/
+		expectedLogContains string
+	}{
+		{
+			name:                "Plain Text File",
+			logFilePath:         "testdata/plain.log",
+			expectedLogContains: "Starting dry-run mode",
+		},
+		{
+			name:                "Gzip Compressed File",
+			expectedLogContains: "Detected gzip format.",
+			logFilePath:         "testdata/compressed.log.gz",
+		},
+		{
+			name:                "Bzip2 Compressed File",
+			expectedLogContains: "Detected bzip2 format.",
+			logFilePath:         "testdata/compressed.log.bz2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			harness := newDryRunTestHarness(t, &AppConfig{
+				// This config is now passed to the helper function.
+				LogFormatRegex:  `^(?P<VHost>\S+) (?P<IP>\S+) - - \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) \S+" (?P<StatusCode>\S+) (?P<Size>\S+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"$`,
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+			})
+			harness.processor.LogPath = tt.logFilePath // Point to the pre-compressed file
+
+			done := make(chan struct{})
+			DryRunLogProcessor(harness.processor, done)
+			<-done
+
+			assertStringSlicesEqual(t, expectedLines, harness.processedLines)
+
+			logOutput := strings.Join(harness.capturedLogs, "\n")
+			assertContains(t, logOutput, tt.expectedLogContains)
 		})
 	}
 }
@@ -1084,5 +1133,20 @@ func assertNotContains(t *testing.T, output, substr string) {
 	t.Helper()
 	if strings.Contains(output, substr) {
 		t.Errorf("Expected output NOT to contain:\n%s\n\nBut it did. Full output:\n%s", substr, output)
+	}
+}
+
+// assertStringSlicesEqual is a helper for comparing slices of strings.
+func assertStringSlicesEqual(t *testing.T, expected, actual []string) {
+	t.Helper()
+	if len(expected) != len(actual) {
+		t.Errorf("Slice length mismatch. Expected %d, got %d.\nExpected: %v\nActual:   %v", len(expected), len(actual), expected, actual)
+		return
+	}
+	for i := range expected {
+		if expected[i] != actual[i] {
+			t.Errorf("Slice content mismatch at index %d.\nExpected: %s\nActual:   %s", i, expected[i], actual[i])
+			return
+		}
 	}
 }

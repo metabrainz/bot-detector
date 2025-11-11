@@ -101,17 +101,21 @@ type dryRunTestHarness struct {
 }
 
 // newDryRunTestHarness creates and initializes a test harness for DryRunLogProcessor.
-func newDryRunTestHarness(t *testing.T) *dryRunTestHarness {
+func newDryRunTestHarness(t *testing.T, config *AppConfig) *dryRunTestHarness {
 	t.Helper()
 
 	h := &dryRunTestHarness{t: t}
+
+	if config == nil {
+		config = &AppConfig{}
+	}
 
 	// Create temp file and set global path
 	tempDir := t.TempDir()
 	h.tempLogFile = filepath.Join(tempDir, "test_dryrun.log")
 
 	// Create processor with mock/capture functions
-	h.processor = newTestProcessor(&AppConfig{}, nil)
+	h.processor = newTestProcessor(config, nil)
 
 	// Use a custom LogFunc to capture logs and identify skipped lines.
 	// This needs to be done before setting ProcessLogLine, as ProcessLogLine

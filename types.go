@@ -88,6 +88,7 @@ type AppConfig struct {
 	OutOfOrderTolerance      time.Duration                     `config:"compare" summary:"out_of_order_tolerance"`
 	PollingInterval          time.Duration                     `config:"compare" summary:"poll_interval"`
 	TimestampFormat          string                            `config:"compare"`
+	LogFormatRegex           string                            `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error) // Mockable
 	WhitelistNets            []*net.IPNet                      `config:"compare"`
 }
