@@ -253,11 +253,15 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 
 // logTopActorsSummary displays the top actors that triggered hits for each chain during a dry run.
 func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, string, ...interface{})) {
-	if p.TopN <= 0 || len(p.TopActorsPerChain) == 0 {
-		return // Nothing to report.
+	if p.TopN <= 0 {
+		return // Top-N reporting is disabled.
 	}
 
 	logFunc(logging.LevelInfo, "STATS", "--- Top %d Actors per Chain (sorted by resets, then completions, then hits) ---", p.TopN)
+	if len(p.TopActorsPerChain) == 0 {
+		logFunc(logging.LevelInfo, "STATS", "  (No chain activity to report)")
+		return
+	}
 
 	// Get chain names and sort them for consistent output order.
 	var chainNames []string
