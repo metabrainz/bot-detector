@@ -290,7 +290,10 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 
 		if show {
 			if metricName := field.Tag.Get("metric"); metricName != "" {
-				if counter, ok := val.Field(i).Interface().(atomic.Int64); ok {
+				// We must work with a pointer to the atomic field to avoid copying a lock value.
+				// .Addr() gets the address, .Interface() gets it as an interface{},
+				// and then we type-assert it to the correct pointer type.
+				if counter, ok := val.Field(i).Addr().Interface().(*atomic.Int64); ok {
 					value := counter.Load()
 					// For specific metrics, add a percentage relative to total lines processed.
 					switch fieldName {
