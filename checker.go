@@ -108,6 +108,7 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 
 	// --- 2. Perform the action ---
 	if chain.Action == "block" {
+		p.Metrics.BlockActions.Add(1)
 		executeBlock(p, entry, chain)
 		// Update the in-memory state to reflect the block for both live and dry runs.
 		ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}
@@ -286,6 +287,7 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 	// Immediately skip processing if the IP is whitelisted. This is the primary guard.
 	if p.IsWhitelistedFunc(entry.IPInfo) {
 		p.LogFunc(logging.LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IPInfo.Address)
+		p.Metrics.WhitelistedHits.Add(1)
 		return
 	}
 

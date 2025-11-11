@@ -240,11 +240,15 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 
 	parseErrors := p.Metrics.ParseErrors.Load()
 	linesProcessed := p.Metrics.LinesProcessed.Load()
+	whitelistedHits := p.Metrics.WhitelistedHits.Load()
+	blockActions := p.Metrics.BlockActions.Load()
 	reorderedEntries := p.Metrics.ReorderedEntries.Load()
 
 	// --- Log Summary ---
 	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Dry-run finished.")
 	p.LogFunc(logging.LevelInfo, "METRICS", "Lines Processed: %d", linesProcessed)
+	p.LogFunc(logging.LevelInfo, "METRICS", "Whitelisted Hits Skipped: %d", whitelistedHits)
+	p.LogFunc(logging.LevelInfo, "METRICS", "Block Actions Triggered: %d", blockActions)
 	p.LogFunc(logging.LevelInfo, "METRICS", "Chains Completed: %d", totalChainsCompleted)
 	p.LogFunc(logging.LevelInfo, "METRICS", "Chains Reset: %d", totalChainsReset)
 	p.LogFunc(logging.LevelInfo, "METRICS", "Parse Errors: %d", parseErrors)
