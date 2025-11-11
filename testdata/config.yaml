@@ -36,11 +36,13 @@ chains:
     match_key: "ipv6" # Track by IPv6, steps will check UserAgent
     steps:
       - field_matches: # Using explicit regex for clarity
-          Path: "regex:^/ua/probe$"
-          UserAgent: "regex:^Mozilla/5\\.0 \\(UA1\\)$"
+          Path: "regex:^/ua/probe$" # This regex is simple, leave as is.
+          UserAgent: |-
+            regex:^Mozilla/5\.0 \(UA1\)$
       - field_matches: # Using exact match for path
           Path: "/ua/attack"
-          UserAgent: "regex:^Mozilla/5\\.0 \\(UA2\\)$"
+          UserAgent: |-
+            regex:^Mozilla/5\.0 \(UA2\)$
         max_delay: "5s" # Must occur within 5 seconds of the first step
 
   # --- 5. IP+UA with Common Referrer (10.0.0.5) - SUCCESS (LOG) ---
@@ -79,7 +81,8 @@ chains:
       - field_matches:
           Size:
             gte: 5000
-          IP: "regex:^1\\.2\\.3\\."
+          IP: |-
+            regex:^1\.2\.3\.
 
   # --- 8. Malformed Request Matching ---
   - name: "MalformedRequestChain"

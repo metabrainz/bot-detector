@@ -255,6 +255,12 @@ For more complex string matching, use a prefix.
     # To match a digit (\d), you must write \\d in the YAML file.
     Path: "regex:^/user/\\d+$"
     ```
+    > **Tip:** To avoid double-escaping backslashes in regular expressions, you can use a YAML literal block scalar (`|-`). This makes complex patterns much cleaner:
+    ```yaml
+    # This is equivalent to the above, but more readable.
+    Path: |-
+      regex:^/user/\d+$
+    ```
 *   **File-Based Matcher:** Loads a list of values from an external file. This can be used with any field that accepts string values (e.g., `Path`, `UserAgent`, `IP`). Each line in the file is treated as a separate value in a list (OR condition). 
     > **Path Resolution:** File paths are resolved relative to the directory of the main `config.yaml` file. Absolute paths are also supported.
 
