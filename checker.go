@@ -4,7 +4,6 @@ import (
 	"bot-detector/internal/logging"
 	"fmt"
 	"sort"
-	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -384,51 +383,48 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 	// If we've reached this point, the line was successfully parsed.
 	// This is a "valid hit" that will be processed against the chains.
 	p.Metrics.ValidHits.Add(1)
-	// Determine the most specific actor key required by any applicable chain.
-	primaryKeySpecificity := 0 // 0=none, 1=ip, 2=ip_ua
+
 	p.ConfigMutex.RLock()
 	chains := p.Chains
-	for _, chain := range chains {
-		if GetActor(&chain, entry).IPInfo.Address != "" { // Does this chain apply to this entry?
-			if strings.HasSuffix(chain.MatchKey, "_ua") {
-				primaryKeySpecificity = 2 // ip_ua is most specific
-				break
-			} else if primaryKeySpecificity < 1 {
-				primaryKeySpecificity = 1 // ip is less specific
-			}
-		}
-	}
 	p.ConfigMutex.RUnlock()
 
-	actor := Actor{IPInfo: entry.IPInfo, UA: ""}
-	if primaryKeySpecificity == 2 {
-		actor.UA = entry.UserAgent
-	}
-
-	// Perform pre-checks for existing blocks.
-	currentActivity, skip := preCheckActivity(p, entry, actor)
-	if skip {
-		return
-	}
-
-	// Defer the update of LastRequestTime. This is CRITICAL.
-	// It ensures that all time-based checks (like min_time_since_last_hit) for the current
-	// entry use the timestamp from the *previous* request. The current entry's timestamp
-	// only becomes the new LastRequestTime after all processing is complete.
-	defer func() {
-		if entry.Timestamp.After(currentActivity.LastRequestTime) {
-			currentActivity.LastRequestTime = entry.Timestamp
-		}
-	}()
-
-	// Capture the last request time *before* any potential updates.
-	// This is the correct value to use for all time-based checks for this entry.
-	previousRequestTime := currentActivity.LastRequestTime
+	// A set to keep track of activities that have been processed for this entry.
+	// This is crucial to ensure that LastRequestTime is updated only once per activity,
+	// even if multiple chains map to the same actor.
+	processedActivities := make(map[*ActorActivity]struct{})
 
 	// 2. Iterate over all configured chains.
 	for _, chain := range chains {
-		if stop := processChainForEntry(p, &chain, entry, currentActivity, previousRequestTime); stop {
+		actor := GetActor(&chain, entry)
+		if actor.IPInfo.Address == "" {
+			continue // Skip chain if actor could not be determined (e.g., IP version mismatch).
+		}
+
+		// Perform pre-checks for existing blocks.
+		currentActivity, skip := preCheckActivity(p, entry, actor)
+		if skip {
+			continue // Skip this chain for this actor, but continue to the next chain.
+		}
+
+		// Capture the last request time *before* any potential updates.
+		// This is the correct value to use for all time-based checks for this entry.
+		previousRequestTime := currentActivity.LastRequestTime
+
+		stop := processChainForEntry(p, &chain, entry, currentActivity, previousRequestTime)
+
+		// Mark this activity as processed for this entry.
+		processedActivities[currentActivity] = struct{}{}
+
+		if stop {
 			break // Stop processing other chains if requested.
+		}
+	}
+
+	// After all chains have been processed for this entry, update the LastRequestTime
+	// for all unique activities that were involved.
+	for activity := range processedActivities {
+		if entry.Timestamp.After(activity.LastRequestTime) {
+			activity.LastRequestTime = entry.Timestamp
 		}
 	}
 
