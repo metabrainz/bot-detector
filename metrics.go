@@ -11,11 +11,13 @@ type Metrics struct {
 	// Per-chain metrics are stored in sync.Maps for thread-safe access.
 	ChainsCompleted *sync.Map
 	ChainsReset     *sync.Map
+	ChainsHits      *sync.Map
 
 	// General counters with struct tags for metadata.
 	// `metric:"..."` is the display name.
 	// `dryrun:"true"` marks it for display in dry-run mode.
 	LinesProcessed      atomic.Int64 `metric:"Lines Processed" dryrun:"true"`
+	ValidHits           atomic.Int64 `metric:"Valid Hits" dryrun:"true"`
 	ParseErrors         atomic.Int64 `metric:"Parse Errors" dryrun:"true"`
 	ReorderedEntries    atomic.Int64 `metric:"Reordered Entries" dryrun:"true"`
 	WhitelistedHits     atomic.Int64 `metric:"Whitelisted Hits Skipped" dryrun:"true"`
@@ -36,5 +38,6 @@ func NewMetrics() *Metrics {
 		// for initializing chain counters at startup and incrementing them later.
 		ChainsCompleted: &sync.Map{},
 		ChainsReset:     &sync.Map{},
+		ChainsHits:      &sync.Map{},
 	}
 }

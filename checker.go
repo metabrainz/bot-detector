@@ -254,6 +254,13 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 		} // No match on this step, exit the `for {}` loop for this chain.
 
 		// --- STEP MATCHED ---
+		// Increment the total hits counter for this chain.
+		if val, ok := p.Metrics.ChainsHits.Load(chain.Name); ok {
+			if counter, ok := val.(*atomic.Int64); ok {
+				counter.Add(1)
+			}
+		}
+
 		state.CurrentStep++
 		state.LastMatchTime = entry.Timestamp
 
@@ -293,6 +300,9 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 		return
 	}
 
+	// If we've reached this point, the line was successfully parsed and was not whitelisted.
+	// This is a "valid hit" that will be processed against the chains.
+	p.Metrics.ValidHits.Add(1)
 	// Determine the most specific tracking key required by any applicable chain.
 	primaryKeySpecificity := 0 // 0=none, 1=ip, 2=ip_ua
 	p.ConfigMutex.RLock()

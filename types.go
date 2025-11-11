@@ -191,6 +191,7 @@ type BehavioralChain struct {
 	MatchKey                 string        // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
 	StepsYAML                []StepDefYAML // Store original YAML for accurate comparison
 	Steps                    []StepDef
+	MetricsHitsCounter       *atomic.Int64 // Counter for hits on this specific chain.
 	MetricsResetCounter      *atomic.Int64 // Counter for resets of this specific chain.
 	MetricsCounter           *atomic.Int64 // Counter for this specific chain.
 }

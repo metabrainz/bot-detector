@@ -109,6 +109,9 @@ func main() {
 	for _, chain := range p.Chains {
 		p.Metrics.ChainsReset.Store(chain.Name, chain.MetricsResetCounter)
 	}
+	for _, chain := range p.Chains {
+		p.Metrics.ChainsHits.Store(chain.Name, chain.MetricsHitsCounter)
+	}
 
 	// Log the initial configuration summary.
 	logConfigurationSummary(p)

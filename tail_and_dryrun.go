@@ -224,6 +224,7 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 	type chainMetric struct {
 		Name        string
 		Completions int64
+		Hits        int64
 		Resets      int64
 	}
 	var allChainMetrics []chainMetric
@@ -235,6 +236,13 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 		completedCounter, _ := value.(*atomic.Int64)
 		completions := completedCounter.Load()
 
+		var hits int64
+		if hitsVal, ok := p.Metrics.ChainsHits.Load(chainName); ok {
+			if hitsCounter, ok := hitsVal.(*atomic.Int64); ok {
+				hits = hitsCounter.Load()
+			}
+		}
+
 		var resets int64
 		if resetVal, ok := p.Metrics.ChainsReset.Load(chainName); ok {
 			if resetCounter, ok := resetVal.(*atomic.Int64); ok {
@@ -242,8 +250,8 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 			}
 		}
 
-		if completions > 0 || resets > 0 {
-			allChainMetrics = append(allChainMetrics, chainMetric{Name: chainName, Completions: completions, Resets: resets})
+		if completions > 0 || resets > 0 || hits > 0 {
+			allChainMetrics = append(allChainMetrics, chainMetric{Name: chainName, Completions: completions, Hits: hits, Resets: resets})
 			totalChainsCompleted += completions
 			totalChainsReset += resets
 		}
@@ -294,7 +302,7 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 	if len(allChainMetrics) > 0 {
 		logFunc(logging.LevelInfo, logTag, "--- Per-Chain Metrics ---")
 		for _, metric := range allChainMetrics {
-			logFunc(logging.LevelInfo, logTag, "  - %s: Completed: %d, Resets: %d", metric.Name, metric.Completions, metric.Resets)
+			logFunc(logging.LevelInfo, logTag, "  - %s: Hits: %d, Completed: %d, Resets: %d", metric.Name, metric.Hits, metric.Completions, metric.Resets)
 		}
 	}
 }

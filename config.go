@@ -793,6 +793,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		// Initialize a counter for this chain in the metrics map.
 		runtimeChain.MetricsCounter = new(atomic.Int64)
 		runtimeChain.MetricsResetCounter = new(atomic.Int64)
+		runtimeChain.MetricsHitsCounter = new(atomic.Int64)
 
 		// 3. Process Steps
 		for i, yamlStep := range yamlChain.Steps {
@@ -937,6 +938,10 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 	p.Metrics.ChainsReset = &sync.Map{}
 	for _, chain := range p.Chains {
 		p.Metrics.ChainsReset.Store(chain.Name, chain.MetricsResetCounter)
+	}
+	p.Metrics.ChainsHits = &sync.Map{}
+	for _, chain := range p.Chains {
+		p.Metrics.ChainsHits.Store(chain.Name, chain.MetricsHitsCounter)
 	}
 	logging.SetLogLevel(loadedCfg.LogLevel)
 	p.ConfigMutex.Unlock()
