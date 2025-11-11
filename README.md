@@ -306,6 +306,11 @@ For more complex string matching, use a prefix.
     Path: |-
       regex:^/user/\d+$
     ```
+*   **CIDR Block:** Matches if an IP address falls within the specified CIDR block. This prefix is **only valid for the `IP` field**.
+    ```yaml
+    # Matches any IP in the 192.168.1.0/24 subnet.
+    IP: "cidr:192.168.1.0/24"
+    ```
 *   **File-Based Matcher:** Loads a list of values from an external file. This can be used with any field that accepts string values (e.g., `Path`, `UserAgent`, `IP`). Each line in the file is treated as a separate value in a list (OR condition). 
     > **Path Resolution:** File paths are resolved relative to the directory of the main `config.yaml` file. Absolute paths are also supported.
 

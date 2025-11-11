@@ -253,7 +253,7 @@ func compileStringMatcher(chainName string, stepIndex int, field, value string, 
 
 	// If the value is exactly "file:" or "regex:", treat it as a literal string match.
 	// This is more intuitive than requiring "exact:file:".
-	if value == "file:" || value == "regex:" {
+	if value == "file:" || value == "regex:" || value == "cidr:" {
 		// Fall through to the default exact string match at the end of the function.
 	} else if strings.HasPrefix(value, "file:") {
 		relativeFilePath := strings.TrimPrefix(value, "file:")
@@ -291,6 +291,27 @@ func compileStringMatcher(chainName string, stepIndex int, field, value string, 
 				return false
 			}
 			return re.MatchString(fieldVal.(string))
+		}, nil
+	} else if strings.HasPrefix(value, "cidr:") {
+		if field != "IP" {
+			return nil, fmt.Errorf("chain '%s', step %d, field '%s': 'cidr:' matcher is only supported for the 'IP' field", chainName, stepIndex+1, field)
+		}
+		cidrStr := strings.TrimPrefix(value, "cidr:")
+		_, ipNet, err := net.ParseCIDR(cidrStr)
+		if err != nil {
+			return nil, fmt.Errorf("chain '%s', step %d, field '%s': invalid CIDR '%s' for 'cidr:' matcher: %w", chainName, stepIndex+1, field, cidrStr, err)
+		}
+		return func(entry *LogEntry) bool {
+			fieldVal := GetMatchValueIfType(field, entry, StringField)
+			if fieldVal == nil {
+				return false
+			}
+			ipStr := fieldVal.(string)
+			ip := net.ParseIP(ipStr)
+			if ip == nil {
+				return false
+			}
+			return ipNet.Contains(ip)
 		}, nil
 	}
 

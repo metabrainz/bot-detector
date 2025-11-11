@@ -299,7 +299,7 @@ chains:
 		"Out of Range (200)":          {entry: &LogEntry{StatusCode: 200}, expected: false},
 	}
 
-	runMatcherTest(t, yamlContent, testCases)
+	runMatcherTest(t, yamlContent, testCases, "")
 }
 
 func TestLoadConfigFromYAML_ObjectMatcher_Size(t *testing.T) {
@@ -325,7 +325,7 @@ chains:
 		"Out of Range (500)":           {entry: &LogEntry{Size: 500}, expected: false},
 	}
 
-	runMatcherTest(t, yamlContent, testCases)
+	runMatcherTest(t, yamlContent, testCases, "")
 }
 
 func TestLoadConfigFromYAML_ObjectMatcher_WithNot(t *testing.T) {
@@ -386,7 +386,7 @@ chains:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runMatcherTest(t, tt.yamlContent, tt.testCases)
+			runMatcherTest(t, tt.yamlContent, tt.testCases, "")
 		})
 	}
 }
@@ -448,7 +448,7 @@ chains:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runMatcherTest(t, tt.yamlContent, tt.testCases)
+			runMatcherTest(t, tt.yamlContent, tt.testCases, "")
 		})
 	}
 }
@@ -587,7 +587,83 @@ chains:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runMatcherTest(t, tt.yamlContent, tt.testCases)
+			runMatcherTest(t, tt.yamlContent, tt.testCases, "")
+		})
+	}
+}
+
+func TestLoadConfigFromYAML_CIDRMatcher(t *testing.T) {
+	tests := []struct {
+		name        string
+		yamlContent string
+		testCases   map[string]struct {
+			entry    *LogEntry
+			expected bool
+		}
+		expectError string
+	}{
+		{
+			name: "IPv4 CIDR Matcher",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "CIDRTest"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          IP: "cidr:192.168.1.0/24"`,
+			testCases: map[string]struct {
+				entry    *LogEntry
+				expected bool
+			}{
+				"IP in range":      {entry: &LogEntry{IPInfo: NewIPInfo("192.168.1.100")}, expected: true},
+				"IP not in range":  {entry: &LogEntry{IPInfo: NewIPInfo("192.168.2.1")}, expected: false},
+				"IP is network":    {entry: &LogEntry{IPInfo: NewIPInfo("192.168.1.0")}, expected: true},
+				"IP is broadcast":  {entry: &LogEntry{IPInfo: NewIPInfo("192.168.1.255")}, expected: true},
+				"Invalid entry IP": {entry: &LogEntry{IPInfo: NewIPInfo("not-an-ip")}, expected: false},
+			},
+		},
+		{
+			name: "IPv6 CIDR Matcher",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "CIDRTestIPv6"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          IP: "cidr:2001:db8:abcd:0012::/64"`,
+			testCases: map[string]struct {
+				entry    *LogEntry
+				expected bool
+			}{
+				"IPv6 in range":       {entry: &LogEntry{IPInfo: NewIPInfo("2001:db8:abcd:0012:dead:beef:cafe:babe")}, expected: true},
+				"IPv6 not in range":   {entry: &LogEntry{IPInfo: NewIPInfo("2001:db8:abcd:0013::1")}, expected: false},
+				"IPv6 is network":     {entry: &LogEntry{IPInfo: NewIPInfo("2001:db8:abcd:0012::")}, expected: true},
+				"IPv4 does not match": {entry: &LogEntry{IPInfo: NewIPInfo("192.168.1.1")}, expected: false},
+				"Invalid entry IP":    {entry: &LogEntry{IPInfo: NewIPInfo("not-an-ip")}, expected: false},
+			},
+		},
+		{
+			name: "Invalid CIDR in config",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "CIDRTest"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          IP: "cidr:192.168.1.0/33"`,
+			expectError: "invalid CIDR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runMatcherTest(t, tt.yamlContent, tt.testCases, tt.expectError)
 		})
 	}
 }
@@ -815,6 +891,17 @@ chains:
     steps: [ { field_matches: { "Path": "file:/path/to/nonexistent/file.txt" } } ]
 `,
 			expectedError: "", // Should NOT produce a fatal error
+		},
+		{
+			name: "CIDR on non-IP field",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    steps: [ { field_matches: { "Path": "cidr:192.168.1.0/24" } } ]
+`,
+			expectedError: "'cidr:' matcher is only supported for the 'IP' field",
 		},
 	}
 
@@ -1683,10 +1770,16 @@ chains:
 func runMatcherTest(t *testing.T, yamlContent string, testCases map[string]struct {
 	entry    *LogEntry
 	expected bool
-}) {
+}, expectError string) {
 	t.Helper()
 	tmpConfigPath := setupTestYAML(t, yamlContent)
 	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
+	if expectError != "" {
+		if err == nil || !strings.Contains(err.Error(), expectError) {
+			t.Fatalf("Expected error containing '%s', but got: %v", expectError, err)
+		}
+		return // Error was expected and occurred.
+	}
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 	}
@@ -1697,6 +1790,9 @@ func runMatcherTest(t *testing.T, yamlContent string, testCases map[string]struc
 			var val interface{}
 			if tc.entry != nil {
 				val = tc.entry.Path
+				if tc.entry.IPInfo.Address != "" {
+					val = tc.entry.IPInfo.Address
+				}
 				if tc.entry.StatusCode != 0 {
 					val = tc.entry.StatusCode
 				}
