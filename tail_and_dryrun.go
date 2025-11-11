@@ -185,51 +185,56 @@ func processFileLines(p *Processor, file io.Reader, lineProcessor func(line stri
 func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	defer close(done)
 
-	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Starting dry-run mode for log file: %s", p.LogPath)
-	startTime := time.Now()
+	var reader io.Reader
+	var logSource string
 
-	p.TopActorsPerChain = make(map[string]map[string]*ActorStats) // Initialize for this dry run.
-	file, err := osOpenFile(p.LogPath)
-	if err != nil {
-		p.LogFunc(logging.LevelCritical, "FATAL", "Failed to open log file %s: %v", p.LogPath, err)
-		return
-	}
-	defer file.Close()
-
-	// --- Magic Number Detection ---
-	// Read the first few bytes to detect file type, then rewind.
-	magicBuf := make([]byte, 3)
-	bytesRead, err := file.Read(magicBuf)
-	if err != nil && err != io.EOF {
-		p.LogFunc(logging.LevelCritical, "FATAL", "Failed to read from log file %s for magic number detection: %v", p.LogPath, err)
-		return
-	}
-
-	// Rewind the file so the decompressor/reader starts from the beginning.
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		p.LogFunc(logging.LevelCritical, "FATAL", "Failed to seek to start of log file %s: %v", p.LogPath, err)
-		return
-	}
-
-	var reader io.Reader = file
-
-	// Check for gzip magic number: 1F 8B
-	if bytesRead >= 2 && bytes.Equal(magicBuf[:2], []byte{0x1f, 0x8b}) {
-		gzReader, err := gzip.NewReader(file)
+	if p.LogPath != "" {
+		logSource = fmt.Sprintf("log file: %s", p.LogPath)
+		file, err := osOpenFile(p.LogPath)
 		if err != nil {
-			p.LogFunc(logging.LevelCritical, "FATAL", "Failed to create gzip reader for %s: %v", p.LogPath, err)
+			p.LogFunc(logging.LevelCritical, "FATAL", "Failed to open log file %s: %v", p.LogPath, err)
 			return
 		}
-		defer gzReader.Close()
-		reader = gzReader
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "Detected gzip format. Decompressing log file on the fly...")
-	} else if bytesRead >= 3 && bytes.Equal(magicBuf[:3], []byte{'B', 'Z', 'h'}) { // Check for bzip2 magic number: BZh
-		reader = bzip2.NewReader(file)
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "Detected bzip2 format. Decompressing log file on the fly...")
+		defer file.Close()
+
+		// --- Magic Number Detection for file-based input ---
+		magicBuf := make([]byte, 3)
+		bytesRead, err := file.Read(magicBuf)
+		if err != nil && err != io.EOF {
+			p.LogFunc(logging.LevelCritical, "FATAL", "Failed to read from log file %s for magic number detection: %v", p.LogPath, err)
+			return
+		}
+
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			p.LogFunc(logging.LevelCritical, "FATAL", "Failed to seek to start of log file %s: %v", p.LogPath, err)
+			return
+		}
+
+		reader = file
+		if bytesRead >= 2 && bytes.Equal(magicBuf[:2], []byte{0x1f, 0x8b}) {
+			gzReader, err := gzip.NewReader(file)
+			if err != nil {
+				p.LogFunc(logging.LevelCritical, "FATAL", "Failed to create gzip reader for %s: %v", p.LogPath, err)
+				return
+			}
+			defer gzReader.Close()
+			reader = gzReader
+			p.LogFunc(logging.LevelInfo, "DRY_RUN", "Detected gzip format. Decompressing log file on the fly...")
+		} else if bytesRead >= 3 && bytes.Equal(magicBuf[:3], []byte{'B', 'Z', 'h'}) {
+			reader = bzip2.NewReader(file)
+			p.LogFunc(logging.LevelInfo, "DRY_RUN", "Detected bzip2 format. Decompressing log file on the fly...")
+		}
+	} else {
+		logSource = "stdin"
+		reader = os.Stdin
 	}
 
+	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Starting dry-run mode from %s", logSource)
+	startTime := time.Now()
+	p.TopActorsPerChain = make(map[string]map[string]*ActorStats) // Initialize for this dry run.
+
 	// Use the shared line processing logic.
-	err = processFileLines(p, reader, func(line string) {
+	err := processFileLines(p, reader, func(line string) {
 		p.ProcessLogLine(line)
 		p.Metrics.LinesProcessed.Add(1)
 	})

@@ -47,12 +47,18 @@ The application is configured using a YAML file and a few command-line flags.
 
 #### **Dry Run Mode (Testing)**
 
-Use `-dry-run` to test your chains against a static log file. This will process the file once and log all match actions without attempting to connect to the configured blocking backend (even if chain action is block).
+Use `--dry-run` to test your chains against a static log file. This will process the file once and log all match actions without attempting to connect to the configured blocking backend (even if the chain action is `block`).
+
+If `--log-path` is provided, it will read from that file. If `--log-path` is omitted in dry-run mode, the application will read from standard input (`stdin`), allowing you to pipe log data directly into it.
 
 ```sh
+# Reading from a file
 ./bot-detector --dry-run \
   --log-path "test_access.log" \
   --config "config.yaml"
+
+# Reading from stdin
+cat test_access.log | ./bot-detector --dry-run --config "config.yaml"
 ```
 
 ## **Resilience and Logging**

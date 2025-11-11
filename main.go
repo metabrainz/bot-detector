@@ -35,7 +35,8 @@ func main() {
 	}
 
 	// Validate that required flags are provided.
-	if *cliFlags.LogPath == "" || *cliFlags.ConfigPath == "" {
+	// --log-path is required for live mode, but optional for dry-run (stdin). --config is always required.
+	if *cliFlags.ConfigPath == "" || (*cliFlags.LogPath == "" && !*cliFlags.DryRun) {
 		flag.Usage()
 		os.Exit(1)
 	}

@@ -20,7 +20,7 @@ type CLIFlagValues struct {
 // RegisterCLIFlags registers the command-line flags with the global flag set.
 func RegisterCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 	flags := &CLIFlagValues{}
-	flags.LogPath = fs.String("log-path", "", "Required. Path to the access log file to tail (or to read in dry-run mode).")
+	flags.LogPath = fs.String("log-path", "", "Path to the access log file. Required for live mode. If omitted in dry-run mode, reads from stdin.")
 	flags.ConfigPath = fs.String("config", "", "Required. Path to the YAML configuration file.")
 	flags.DryRun = fs.Bool("dry-run", false, "Optional. If true, runs in test mode, ignoring HAProxy and live logging.")
 	flags.ShowVersion = fs.Bool("version", false, "Optional. Print the application version and exit.")
