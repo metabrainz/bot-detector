@@ -78,8 +78,8 @@ func preCheckActivity(p *Processor, entry *LogEntry, trackingKey TrackingKey) (*
 
 // handleChainCompletion takes action when a chain is completed (log, block, etc.).
 // It updates the activity state and returns true if the chain was completed.
-// The caller is responsible for holding the ActivityMutex.
-func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity) {
+// It returns true if processing of other chains should be stopped.
+func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity) bool {
 	// Increment the counter for the specific chain that was completed.
 	// This is the equivalent of `chains_completed_total{chain="<name>"}`.
 	if val, ok := p.Metrics.ChainsCompleted.Load(chain.Name); ok {
@@ -127,6 +127,9 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 	} else if chain.Action == "log" {
 		p.Metrics.LogActions.Add(1)
 	}
+
+	// Return true if OnMatch is "stop" to halt further chain processing.
+	return chain.OnMatch == "stop"
 }
 
 // executeBlock calls the external blocker unless in DryRun mode.
@@ -194,11 +197,11 @@ func matchStepFields(step *StepDef, entry *LogEntry) bool {
 
 // processChainForEntry evaluates a single log entry against a single behavioral chain.
 // It manages state transitions (advancing, resetting) and triggers completion handling.
-// The caller is responsible for holding the ActivityMutex.
-func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity, previousRequestTime time.Time) {
+// It returns true if processing of other chains should be stopped.
+func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *BotActivity, previousRequestTime time.Time) bool {
 	// If GetTrackingKey returns an empty key, it's a mismatch for this chain (e.g., wrong IP version).
 	if GetTrackingKey(chain, entry).IPInfo.Address == "" {
-		return
+		return false
 	}
 
 	// Increment the counter for the match_key type.
@@ -264,8 +267,8 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 
 		// --- FIELD MATCHING ---
 		if !matchStepFields(&step, entry) {
-			break
-		} // No match on this step, exit the `for {}` loop for this chain.
+			break // No match on this step, exit the `for {}` loop for this chain.
+		}
 
 		// --- STEP MATCHED ---
 		// Increment the total hits counter for this chain.
@@ -280,8 +283,15 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 
 		// --- CHECK FOR CHAIN COMPLETION ---
 		if state.CurrentStep == len(chain.Steps) {
-			handleChainCompletion(p, chain, entry, currentActivity)
-			state.CurrentStep = 0 // Reset state after action is taken.
+			stopProcessing := handleChainCompletion(p, chain, entry, currentActivity)
+			// Reset state after action is taken. This is critical.
+			// By setting CurrentStep to 0, we ensure the state is cleaned up
+			// by the logic at the end of this function.
+			state.CurrentStep = 0
+			// We must also delete the progress here because the function returns early.
+			// The cleanup logic at the end of the function will not be reached.
+			delete(currentActivity.ChainProgress, chain.Name)
+			return stopProcessing
 		}
 
 		// If the chain did not complete, or if it completed and was reset,
@@ -299,6 +309,7 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 		// It's safe to call delete even if the key doesn't exist.
 		delete(currentActivity.ChainProgress, chain.Name)
 	}
+	return false
 }
 
 // checkChainsInternal is the core logic for checking an entry against all chains. It's a variable to allow mocking in tests.
@@ -360,7 +371,9 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 
 	// 2. Iterate over all configured chains.
 	for _, chain := range chains {
-		processChainForEntry(p, &chain, entry, currentActivity, previousRequestTime)
+		if stop := processChainForEntry(p, &chain, entry, currentActivity, previousRequestTime); stop {
+			break // Stop processing other chains if requested.
+		}
 	}
 
 }

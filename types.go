@@ -157,6 +157,7 @@ type BehavioralChainYAML struct {
 	Action        string        `yaml:"action"`
 	BlockDuration string        `yaml:"block_duration"`
 	MatchKey      string        `yaml:"match_key"`
+	OnMatch       string        `yaml:"on_match"`
 	Steps         []StepDefYAML `yaml:"steps"`
 }
 
@@ -189,6 +190,7 @@ type BehavioralChain struct {
 	BlockDuration            time.Duration
 	UsesDefaultBlockDuration bool          // True if the chain is using the global default_block_duration.
 	MatchKey                 string        // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
+	OnMatch                  string        // "stop" to halt processing of other chains on match.
 	StepsYAML                []StepDefYAML // Store original YAML for accurate comparison
 	Steps                    []StepDef
 	MetricsHitsCounter       *atomic.Int64 // Counter for hits on this specific chain.

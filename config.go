@@ -787,6 +787,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 			BlockDuration:            blockDuration,
 			UsesDefaultBlockDuration: usesDefault,
 			MatchKey:                 yamlChain.MatchKey,
+			OnMatch:                  yamlChain.OnMatch,
 			StepsYAML:                yamlChain.Steps, // Store the original YAML steps for comparison
 		}
 

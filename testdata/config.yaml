@@ -137,3 +137,24 @@ chains:
     match_key: "ip"
     steps:
       - field_matches: { Path: "/chain-order-test" }
+
+  # --- 13. OnMatch Stop Test ---
+  # This tests that `on_match: "stop"` prevents further chain processing for a hit.
+  # The log entry for /on-match-stop-test will trigger ChainA, then ChainB.
+  # Since ChainB has `on_match: "stop"`, processing will halt, and ChainC will NOT be evaluated.
+  - name: "OnMatchStop_ChainA_Log"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches: { Path: "/on-match-stop-test" }
+  - name: "OnMatchStop_ChainB_Stop"
+    action: "log"
+    match_key: "ip"
+    on_match: "stop" # This should stop processing after this chain.
+    steps:
+      - field_matches: { Path: "/on-match-stop-test" }
+  - name: "OnMatchStop_ChainC_Should_Not_Run"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches: { Path: "/on-match-stop-test" }
