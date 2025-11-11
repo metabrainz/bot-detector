@@ -15,6 +15,7 @@ type Metrics struct {
 	ChainsReset *sync.Map
 	// General counters.
 	ParseErrors      atomic.Int64
+	LinesProcessed   atomic.Int64
 	ReorderedEntries atomic.Int64
 }
 

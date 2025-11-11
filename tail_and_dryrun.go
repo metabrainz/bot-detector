@@ -182,7 +182,6 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 
 	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Starting dry-run mode for log file: %s", p.LogPath)
 	startTime := time.Now()
-	lineCount := 0
 
 	file, err := osOpenFile(p.LogPath)
 	if err != nil {
@@ -194,7 +193,7 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	// Use the shared line processing logic.
 	err = processFileLines(p, file, func(line string) {
 		p.ProcessLogLine(line)
-		lineCount++
+		p.Metrics.LinesProcessed.Add(1)
 	})
 	if err != nil {
 		// Log the error if processing fails unexpectedly (e.g., config error).
@@ -240,11 +239,12 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	})
 
 	parseErrors := p.Metrics.ParseErrors.Load()
+	linesProcessed := p.Metrics.LinesProcessed.Load()
 	reorderedEntries := p.Metrics.ReorderedEntries.Load()
 
 	// --- Log Summary ---
 	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Dry-run finished.")
-	p.LogFunc(logging.LevelInfo, "METRICS", "Lines Processed: %d", lineCount)
+	p.LogFunc(logging.LevelInfo, "METRICS", "Lines Processed: %d", linesProcessed)
 	p.LogFunc(logging.LevelInfo, "METRICS", "Chains Completed: %d", totalChainsCompleted)
 	p.LogFunc(logging.LevelInfo, "METRICS", "Chains Reset: %d", totalChainsReset)
 	p.LogFunc(logging.LevelInfo, "METRICS", "Parse Errors: %d", parseErrors)
@@ -252,7 +252,7 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	p.LogFunc(logging.LevelInfo, "METRICS", "Time Elapsed: %v", elapsedTime)
 
 	if elapsedTime.Seconds() > 0 {
-		linesPerSecond := float64(lineCount) / elapsedTime.Seconds()
+		linesPerSecond := float64(linesProcessed) / elapsedTime.Seconds()
 		p.LogFunc(logging.LevelInfo, "METRICS", "Rate: %.2f lines/sec", linesPerSecond)
 	} else {
 		p.LogFunc(logging.LevelInfo, "METRICS", "Rate: n/a (run too fast)")
