@@ -626,11 +626,12 @@ func TestDryRunMode(t *testing.T) {
 
 	// Create a processor (but don't start any background processes like ChainWatcher).
 	processor := &Processor{
-		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[TrackingKey]*BotActivity),
-		ConfigMutex:   &sync.RWMutex{},
-		Metrics:       NewMetrics(),
-		Chains:        loadedCfg.Chains,
+		ActivityMutex:     &sync.RWMutex{},
+		ActivityStore:     make(map[TrackingKey]*BotActivity),
+		TopActorsPerChain: make(map[string]map[string]*ActorStats),
+		ConfigMutex:       &sync.RWMutex{},
+		Metrics:           NewMetrics(),
+		Chains:            loadedCfg.Chains,
 		Config: &AppConfig{
 			OutOfOrderTolerance: 0, // Disable buffering for this specific test.
 			MaxTimeSinceLastHit: loadedCfg.MaxTimeSinceLastHit,

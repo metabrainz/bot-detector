@@ -106,6 +106,19 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 		}
 	}
 
+	// If in dry-run mode, record the completion for top actors summary.
+	if p.DryRun {
+		// The ActivityMutex is already held by the caller.
+		trackingKey := GetTrackingKey(chain, entry)
+		actorString := trackingKey.String()
+		if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
+			p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
+		}
+		if _, ok := p.TopActorsPerChain[chain.Name][actorString]; !ok {
+			p.TopActorsPerChain[chain.Name][actorString] = &ActorStats{}
+		}
+		p.TopActorsPerChain[chain.Name][actorString].Completions++
+	}
 	// --- 2. Perform the action ---
 	if chain.Action == "block" {
 		p.Metrics.BlockActions.Add(1)
@@ -258,6 +271,18 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 						counter.Add(1)
 					}
 				}
+				if p.DryRun {
+					// Re-create the tracking key specific to this chain to get the correct actor string.
+					trackingKey := GetTrackingKey(chain, entry)
+					actorString := trackingKey.String()
+					if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
+						p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
+					}
+					if _, ok := p.TopActorsPerChain[chain.Name][actorString]; !ok {
+						p.TopActorsPerChain[chain.Name][actorString] = &ActorStats{}
+					}
+					p.TopActorsPerChain[chain.Name][actorString].Resets++
+				}
 				p.LogFunc(logging.LevelDebug, "RESET", "Chain %s: MaxDelay %v exceeded. Resetting.", chain.Name, step.MaxDelayDuration)
 				state.CurrentStep = 0
 				continue // Restart check from step 0.
@@ -267,6 +292,18 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 					if counter, ok := val.(*atomic.Int64); ok {
 						counter.Add(1)
 					}
+				}
+				if p.DryRun {
+					// Re-create the tracking key specific to this chain to get the correct actor string.
+					trackingKey := GetTrackingKey(chain, entry)
+					actorString := trackingKey.String()
+					if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
+						p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
+					}
+					if _, ok := p.TopActorsPerChain[chain.Name][actorString]; !ok {
+						p.TopActorsPerChain[chain.Name][actorString] = &ActorStats{}
+					}
+					p.TopActorsPerChain[chain.Name][actorString].Resets++
 				}
 				p.LogFunc(logging.LevelDebug, "RESET", "Chain %s: MinDelay %v not met. Resetting.", chain.Name, step.MinDelayDuration)
 				state.CurrentStep = 0
@@ -285,6 +322,21 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 			if counter, ok := val.(*atomic.Int64); ok {
 				counter.Add(1)
 			}
+		}
+
+		// If in dry-run mode, record the actor hit for top actors summary.
+		// The ActivityMutex is already held by the caller (checkChainsWithLock).
+		if p.DryRun {
+			// Re-create the tracking key specific to this chain to get the correct actor string.
+			trackingKey := GetTrackingKey(chain, entry)
+			actorString := trackingKey.String()
+			if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
+				p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
+			}
+			if _, ok := p.TopActorsPerChain[chain.Name][actorString]; !ok {
+				p.TopActorsPerChain[chain.Name][actorString] = &ActorStats{}
+			}
+			p.TopActorsPerChain[chain.Name][actorString].Hits++
 		}
 
 		state.CurrentStep++

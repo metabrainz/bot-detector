@@ -107,6 +107,7 @@ This will produce a single executable named `bot-detector`.
 | **`--dry-run`** | `false` | Optional. If true, runs in test mode, ignoring the configured blocking backend and live logging. |
 | **`--version`** | `false` | Optional. Print the application version and exit. |
 | **`--reload-on-signal`** | (none) | Optional. If set to a signal name (e.g., `HUP`, `USR1`), disables the file watcher and reloads the configuration upon receiving that signal. |
+| **`--top-n`** | `0` | Optional. In dry-run mode, show top N actors per chain. Default is 0 (disabled). |
 
 ---
 

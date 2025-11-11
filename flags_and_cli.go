@@ -14,6 +14,7 @@ type CLIFlagValues struct {
 	DryRun         *bool
 	ShowVersion    *bool
 	ReloadOnSignal *string
+	TopN           *int
 }
 
 // RegisterCLIFlags registers the command-line flags with the global flag set.
@@ -23,7 +24,8 @@ func RegisterCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 	flags.ConfigPath = fs.String("config", "", "Required. Path to the YAML configuration file.")
 	flags.DryRun = fs.Bool("dry-run", false, "Optional. If true, runs in test mode, ignoring HAProxy and live logging.")
 	flags.ShowVersion = fs.Bool("version", false, "Optional. Print the application version and exit.")
-	flags.ReloadOnSignal = fs.String("reload-on-signal", "", "Optional. If set to a signal name (e.g., HUP, USR1), disables file watcher and reloads config on signal.")
+	flags.ReloadOnSignal = fs.String("reload-on-signal", "", "Optional. If set to a signal name (e.g., HUP, USR1), disables file watcher and reloads the configuration upon receiving that signal.")
+	flags.TopN = fs.Int("top-n", 0, "Optional. In dry-run mode, show top N actors per chain. Default is 0 (disabled).")
 	return flags
 }
 

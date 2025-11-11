@@ -96,6 +96,7 @@ func main() {
 		ConfigPath:     absConfigPath,
 		LogPath:        *cliFlags.LogPath,
 		ReloadOnSignal: *cliFlags.ReloadOnSignal,
+		TopN:           *cliFlags.TopN,
 	}
 	// TestSignals is intentionally left nil in production.
 	// Inject the HAProxyBlocker.

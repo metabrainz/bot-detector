@@ -188,6 +188,7 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Starting dry-run mode for log file: %s", p.LogPath)
 	startTime := time.Now()
 
+	p.TopActorsPerChain = make(map[string]map[string]*ActorStats) // Initialize for this dry run.
 	file, err := osOpenFile(p.LogPath)
 	if err != nil {
 		p.LogFunc(logging.LevelCritical, "FATAL", "Failed to open log file %s: %v", p.LogPath, err)
@@ -242,6 +243,59 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 
 	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Dry-run finished.")
 	logMetricsSummary(p, elapsedTime, p.LogFunc, "METRICS", "dryrun")
+	logTopActorsSummary(p, p.LogFunc)
+}
+
+// logTopActorsSummary displays the top actors that triggered hits for each chain during a dry run.
+func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, string, ...interface{})) {
+	if p.TopN <= 0 || len(p.TopActorsPerChain) == 0 {
+		return // Nothing to report.
+	}
+
+	logFunc(logging.LevelInfo, "DRY_RUN_STATS", "--- Top %d Actors per Chain (sorted by completions, then hits) ---", p.TopN)
+
+	// Get chain names and sort them for consistent output order.
+	var chainNames []string
+	for chainName := range p.TopActorsPerChain {
+		chainNames = append(chainNames, chainName)
+	}
+	sort.Strings(chainNames)
+
+	for _, chainName := range chainNames {
+		actorHits := p.TopActorsPerChain[chainName]
+		if len(actorHits) == 0 {
+			continue
+		}
+
+		type actorStat struct {
+			Actor string
+			Stats *ActorStats
+		}
+
+		var stats []actorStat
+		for actor, actorStats := range actorHits {
+			stats = append(stats, actorStat{Actor: actor, Stats: actorStats})
+		}
+
+		// Sort actors primarily by completions, then by hits (both descending).
+		sort.Slice(stats, func(i, j int) bool {
+			if stats[i].Stats.Completions != stats[j].Stats.Completions {
+				return stats[i].Stats.Completions > stats[j].Stats.Completions
+			}
+			return stats[i].Stats.Hits > stats[j].Stats.Hits // Secondary sort by hits
+		})
+
+		logFunc(logging.LevelInfo, "DRY_RUN_STATS", "  Chain: %s", chainName)
+		limit := p.TopN
+		for i, stat := range stats {
+			// Only show actors with at least one hit.
+			if i >= limit || stat.Stats.Hits == 0 {
+				break
+			}
+			logFunc(logging.LevelInfo, "DRY_RUN_STATS", "    - [%d hits, %d completions, %d resets] %s",
+				stat.Stats.Hits, stat.Stats.Completions, stat.Stats.Resets, stat.Actor)
+		}
+	}
 }
 
 // logMetricsSummary calculates and logs a summary of all application metrics.

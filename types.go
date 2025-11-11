@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	"fmt"
 	"net"
 	"os"
 	"regexp"
@@ -65,6 +66,8 @@ type Processor struct {
 	ConfigPath        string
 	LogPath           string
 	ReloadOnSignal    string
+	TopActorsPerChain map[string]map[string]*ActorStats // Dry-run only: tracks top actors per chain.
+	TopN              int                               // For dry-run stats: show top N actors.
 }
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
@@ -199,6 +202,13 @@ type BehavioralChain struct {
 	MetricsCounter           *atomic.Int64 // Counter for this specific chain.
 }
 
+// ActorStats holds hit and completion counts for a specific actor in a chain.
+type ActorStats struct {
+	Hits        int64
+	Completions int64
+	Resets      int64
+}
+
 type StepState struct {
 	CurrentStep   int
 	LastMatchTime time.Time
@@ -208,6 +218,15 @@ type StepState struct {
 type TrackingKey struct {
 	IPInfo IPInfo
 	UA     string // UserAgent. Empty string if tracking is IP-only.
+}
+
+// String provides a clean, readable representation of the TrackingKey for logging.
+func (tk TrackingKey) String() string {
+	// Use a separator that is unlikely to appear in a User-Agent string.
+	if tk.UA != "" {
+		return fmt.Sprintf("%s | %s", tk.IPInfo.Address, tk.UA)
+	}
+	return tk.IPInfo.Address
 }
 
 // BotActivity tracks state for a single IP address (or IP+UA combination) across all chains.
