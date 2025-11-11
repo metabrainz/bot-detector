@@ -278,7 +278,17 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 			continue
 		}
 
-		if show, _ := strconv.ParseBool(field.Tag.Get(filterTag)); show {
+		// Determine if the metric should be shown.
+		// If the filterTag is "metric", we show all fields that have a metric name.
+		// Otherwise, we check the boolean value of the specified filter tag (e.g., "dryrun").
+		show := false
+		if filterTag == "metric" {
+			show = field.Tag.Get("metric") != ""
+		} else {
+			show, _ = strconv.ParseBool(field.Tag.Get(filterTag))
+		}
+
+		if show {
 			if metricName := field.Tag.Get("metric"); metricName != "" {
 				if counter, ok := val.Field(i).Interface().(atomic.Int64); ok {
 					value := counter.Load()
@@ -311,6 +321,23 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 	} else {
 		logFunc(logging.LevelInfo, logTag, "Rate: n/a (run too fast)")
 	}
+
+	// --- Log Commands per Blocker ---
+	var cmdsPerBlockerMetrics []struct {
+		Addr  string
+		Count int64
+	}
+	p.Metrics.CmdsPerBlocker.Range(func(key, value interface{}) bool {
+		addr, _ := key.(string)
+		counter, _ := value.(*atomic.Int64)
+		if count := counter.Load(); count > 0 {
+			cmdsPerBlockerMetrics = append(cmdsPerBlockerMetrics, struct {
+				Addr  string
+				Count int64
+			}{addr, count})
+		}
+		return true
+	})
 
 	// --- Log Block Duration Hits ---
 	var blockDurationMetrics []struct {
@@ -353,6 +380,14 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 		}
 		return true
 	})
+
+	if len(cmdsPerBlockerMetrics) > 0 {
+		logFunc(logging.LevelInfo, logTag, "--- Commands Sent per Blocker ---")
+		sort.Slice(cmdsPerBlockerMetrics, func(i, j int) bool { return cmdsPerBlockerMetrics[i].Addr < cmdsPerBlockerMetrics[j].Addr })
+		for _, metric := range cmdsPerBlockerMetrics {
+			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Addr, metric.Count)
+		}
+	}
 
 	if len(blockDurationMetrics) > 0 {
 		logFunc(logging.LevelInfo, logTag, "--- Block Durations Triggered ---")

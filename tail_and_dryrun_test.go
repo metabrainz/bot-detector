@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -929,4 +930,159 @@ func TestLiveLogTailer_StatError(t *testing.T) {
 // Stat overrides the embedded os.File's Stat method to always return an error.
 func (f *statErrorFile) Stat() (os.FileInfo, error) {
 	return nil, errors.New("simulated stat error")
+}
+
+func TestLogMetricsSummary(t *testing.T) {
+	// --- Setup ---
+	// 1. Create a processor with some chains.
+	chains := []BehavioralChain{
+		{Name: "ChainA", MetricsCounter: new(atomic.Int64), MetricsResetCounter: new(atomic.Int64), MetricsHitsCounter: new(atomic.Int64)},
+		{Name: "ChainB", MetricsCounter: new(atomic.Int64), MetricsResetCounter: new(atomic.Int64), MetricsHitsCounter: new(atomic.Int64)},
+	}
+	p := newTestProcessor(&AppConfig{}, chains)
+
+	// 2. Manually set metric values.
+	p.Metrics.LinesProcessed.Store(1000)
+	p.Metrics.ValidHits.Store(500)
+	p.Metrics.ParseErrors.Store(10)     // 1% of total
+	p.Metrics.WhitelistedHits.Store(20) // 2% of total
+	p.Metrics.ReorderedEntries.Store(5)
+	p.Metrics.ActivitiesCleaned.Store(50)
+	p.Metrics.BlockerCmdsQueued.Store(6)
+	p.Metrics.BlockerCmdsDropped.Store(1)
+	p.Metrics.BlockerCmdsExecuted.Store(5)
+	p.Metrics.BlockerRetries.Store(2)
+
+	p.Metrics.BlockActions.Store(5)
+	p.Metrics.LogActions.Store(15)
+
+	// Per-chain metrics for ChainA
+	chains[0].MetricsHitsCounter.Store(50)  // 10% of valid hits
+	chains[0].MetricsCounter.Store(5)       // 50% of total completions
+	chains[0].MetricsResetCounter.Store(10) // 100% of total resets
+	p.Metrics.ChainsHits.Store("ChainA", chains[0].MetricsHitsCounter)
+	p.Metrics.ChainsCompleted.Store("ChainA", chains[0].MetricsCounter)
+	p.Metrics.ChainsReset.Store("ChainA", chains[0].MetricsResetCounter)
+
+	// Per-chain metrics for ChainB
+	chains[1].MetricsHitsCounter.Store(100) // 20% of valid hits
+	chains[1].MetricsCounter.Store(5)       // 50% of total completions
+	chains[1].MetricsResetCounter.Store(0)  // 0% of total resets
+	p.Metrics.ChainsHits.Store("ChainB", chains[1].MetricsHitsCounter)
+	p.Metrics.ChainsCompleted.Store("ChainB", chains[1].MetricsCounter)
+	p.Metrics.ChainsReset.Store("ChainB", chains[1].MetricsResetCounter)
+
+	// MatchKey Hits
+	p.Metrics.MatchKeyHits.Store("ip", new(atomic.Int64))
+	p.Metrics.MatchKeyHits.Store("ip_ua", new(atomic.Int64))
+	if val, ok := p.Metrics.MatchKeyHits.Load("ip"); ok {
+		val.(*atomic.Int64).Store(300)
+	}
+	if val, ok := p.Metrics.MatchKeyHits.Load("ip_ua"); ok {
+		val.(*atomic.Int64).Store(100)
+	}
+
+	// Block Durations
+	p.Metrics.BlockDurations.Store(5*time.Minute, new(atomic.Int64))
+	if val, ok := p.Metrics.BlockDurations.Load(5 * time.Minute); ok {
+		val.(*atomic.Int64).Store(5)
+	}
+
+	// Per-Blocker Commands
+	p.Metrics.CmdsPerBlocker.Store("127.0.0.1:9999", new(atomic.Int64))
+	if val, ok := p.Metrics.CmdsPerBlocker.Load("127.0.0.1:9999"); ok {
+		val.(*atomic.Int64).Store(5)
+	}
+
+	// 3. Capture log output.
+	var capturedLogs []string
+	logFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		capturedLogs = append(capturedLogs, fmt.Sprintf(format, args...))
+	}
+
+	// --- Act ---
+	logMetricsSummary(p, 100*time.Millisecond, logFunc, "METRICS", "metric") // Use "metric" tag to display all
+
+	// --- Assert ---
+	output := strings.Join(capturedLogs, "\n")
+
+	// Check general metrics with percentages
+	assertContains(t, output, "Lines Processed: 1000")
+	assertContains(t, output, "Valid Hits: 500 (50.00%)")
+	assertContains(t, output, "Parse Errors: 10 (1.00%)")
+	assertContains(t, output, "Whitelisted Hits Skipped: 20 (2.00%)")
+	assertContains(t, output, "Reordered Entries: 5")
+	assertContains(t, output, "Activities Cleaned: 50")
+	assertContains(t, output, "Blocker Commands Queued: 6")
+	assertContains(t, output, "Blocker Commands Dropped: 1")
+	assertContains(t, output, "Blocker Commands Executed: 5")
+	assertContains(t, output, "Blocker Retries: 2")
+
+	// Check combined action metrics
+	assertContains(t, output, "Actions Triggered: Block: 5, Log: 15")
+
+	// Check total chain metrics
+	assertContains(t, output, "Chains Completed: 10")
+	assertContains(t, output, "Chains Reset: 10")
+
+	// Check MatchKey hits with percentages
+	assertContains(t, output, "--- Match Key Hits (Total: 400) ---")
+	assertContains(t, output, "- ip: 300 (75.00%)")
+	assertContains(t, output, "- ip_ua: 100 (25.00%)")
+
+	// Check Block Durations
+	assertContains(t, output, "--- Block Durations Triggered ---")
+	assertContains(t, output, "- 5m0s: 5")
+
+	// Check Per-Blocker Commands
+	assertContains(t, output, "--- Commands Sent per Blocker ---")
+	assertContains(t, output, "- 127.0.0.1:9999: 5")
+
+	// Check Per-Chain metrics (sorted by name)
+	assertContains(t, output, "--- Per-Chain Metrics ---")
+	// ChainA: Hits: 50 (10%), Completed: 5 (50%), Resets: 10 (100%)
+	assertContains(t, output, "- ChainA: Hits: 50 (10.00%), Completed: 5 (50.00%), Resets: 10 (100.00%)")
+	// ChainB: Hits: 100 (20%), Completed: 5 (50%), Resets: 0 (0%)
+	assertContains(t, output, "- ChainB: Hits: 100 (20.00%), Completed: 5 (50.00%), Resets: 0 (0.00%)")
+}
+
+func TestLogMetricsSummary_Filter(t *testing.T) {
+	// This test specifically verifies that the filtering logic works.
+	// --- Setup ---
+	p := newTestProcessor(&AppConfig{}, nil)
+	p.Metrics.LinesProcessed.Store(100) // dryrun:"true"
+	p.Metrics.BlockerRetries.Store(5)   // dryrun:"false"
+
+	var capturedLogs []string
+	logFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		capturedLogs = append(capturedLogs, fmt.Sprintf(format, args...))
+	}
+
+	// --- Act ---
+	// Call with the "dryrun" filter.
+	logMetricsSummary(p, 10*time.Millisecond, logFunc, "METRICS", "dryrun")
+
+	// --- Assert ---
+	output := strings.Join(capturedLogs, "\n")
+
+	// The "true" metric should be present.
+	assertContains(t, output, "Lines Processed: 100")
+	// The "false" metric should NOT be present.
+	assertNotContains(t, output, "Blocker Retries")
+}
+
+// assertContains is a helper for testing log output.
+func assertContains(t *testing.T, output, substr string) {
+	t.Helper()
+	if !strings.Contains(output, substr) {
+		t.Errorf("Expected output to contain:\n%s\n\nBut it did not. Full output:\n%s", substr, output)
+	}
+}
+
+// assertNotContains is a helper for testing log output.
+func assertNotContains(t *testing.T, output, substr string) {
+	t.Helper()
+	if strings.Contains(output, substr) {
+		t.Errorf("Expected output NOT to contain:\n%s\n\nBut it did. Full output:\n%s", substr, output)
+	}
 }

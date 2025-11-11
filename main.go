@@ -11,7 +11,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -102,36 +101,7 @@ func main() {
 	// Inject the HAProxyBlocker.
 	haproxyBlocker := &HAProxyBlocker{P: p}
 	// Wrap the HAProxyBlocker with the RateLimitedBlocker.
-
-	// Initialize the per-chain metrics counters.
-	for _, chain := range p.Chains {
-		p.Metrics.ChainsCompleted.Store(chain.Name, chain.MetricsCounter)
-	}
-	for _, chain := range p.Chains {
-		p.Metrics.ChainsReset.Store(chain.Name, chain.MetricsResetCounter)
-	}
-	for _, chain := range p.Chains {
-		p.Metrics.ChainsHits.Store(chain.Name, chain.MetricsHitsCounter)
-	}
-	// Initialize the match key hit counters.
-	p.Metrics.MatchKeyHits = &sync.Map{}
-	matchKeys := []string{"ip", "ipv4", "ipv6", "ip_ua", "ipv4_ua", "ipv6_ua"}
-	for _, key := range matchKeys {
-		p.Metrics.MatchKeyHits.Store(key, new(atomic.Int64))
-	}
-	// Initialize the block duration counters.
-	p.Metrics.BlockDurations = &sync.Map{}
-	for duration := range loadedCfg.DurationToTableName {
-		p.Metrics.BlockDurations.Store(duration, new(atomic.Int64))
-	}
-	if loadedCfg.DefaultBlockDuration > 0 {
-		p.Metrics.BlockDurations.Store(loadedCfg.DefaultBlockDuration, new(atomic.Int64))
-	}
-	// Initialize the per-blocker command counters.
-	p.Metrics.CmdsPerBlocker = &sync.Map{}
-	for _, addr := range loadedCfg.BlockerAddresses {
-		p.Metrics.CmdsPerBlocker.Store(addr, new(atomic.Int64))
-	}
+	initializeMetrics(p, loadedCfg)
 
 	// Log the initial configuration summary.
 	logConfigurationSummary(p)

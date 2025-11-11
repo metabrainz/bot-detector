@@ -930,38 +930,7 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 	p.Chains = loadedCfg.Chains
 	p.Config = newAppConfig // Atomically swap the config pointer.
 	p.LogRegex = loadedCfg.LogFormatRegex
-	// Re-initialize the chain completion counters for the new set of chains.
-	p.Metrics.ChainsCompleted = &sync.Map{}
-	for _, chain := range p.Chains {
-		p.Metrics.ChainsCompleted.Store(chain.Name, chain.MetricsCounter)
-	}
-	p.Metrics.ChainsReset = &sync.Map{}
-	for _, chain := range p.Chains {
-		p.Metrics.ChainsReset.Store(chain.Name, chain.MetricsResetCounter)
-	}
-	p.Metrics.ChainsHits = &sync.Map{}
-	for _, chain := range p.Chains {
-		p.Metrics.ChainsHits.Store(chain.Name, chain.MetricsHitsCounter)
-	}
-	// Initialize the match key hit counters.
-	p.Metrics.MatchKeyHits = &sync.Map{}
-	matchKeys := []string{"ip", "ipv4", "ipv6", "ip_ua", "ipv4_ua", "ipv6_ua"}
-	for _, key := range matchKeys {
-		p.Metrics.MatchKeyHits.Store(key, new(atomic.Int64))
-	}
-	// Initialize the block duration counters.
-	p.Metrics.BlockDurations = &sync.Map{}
-	for duration := range loadedCfg.DurationToTableName {
-		p.Metrics.BlockDurations.Store(duration, new(atomic.Int64))
-	}
-	if loadedCfg.DefaultBlockDuration > 0 {
-		p.Metrics.BlockDurations.Store(loadedCfg.DefaultBlockDuration, new(atomic.Int64))
-	}
-	// Initialize the per-blocker command counters.
-	p.Metrics.CmdsPerBlocker = &sync.Map{}
-	for _, addr := range loadedCfg.BlockerAddresses {
-		p.Metrics.CmdsPerBlocker.Store(addr, new(atomic.Int64))
-	}
+	initializeMetrics(p, loadedCfg)
 
 	logging.SetLogLevel(loadedCfg.LogLevel)
 	p.ConfigMutex.Unlock()
@@ -1012,6 +981,42 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 
 	// Unblock any IPs that are now whitelisted.
 	CheckAndRemoveWhitelistedBlocks(p)
+}
+
+// initializeMetrics sets up all the metric counters based on the loaded configuration.
+// It resets and repopulates the metric maps, making it safe to call on both startup and reload.
+func initializeMetrics(p *Processor, loadedCfg *LoadedConfig) {
+	// Reset and initialize per-chain metrics.
+	p.Metrics.ChainsCompleted = &sync.Map{}
+	p.Metrics.ChainsReset = &sync.Map{}
+	p.Metrics.ChainsHits = &sync.Map{}
+	for _, chain := range p.Chains {
+		p.Metrics.ChainsCompleted.Store(chain.Name, chain.MetricsCounter)
+		p.Metrics.ChainsReset.Store(chain.Name, chain.MetricsResetCounter)
+		p.Metrics.ChainsHits.Store(chain.Name, chain.MetricsHitsCounter)
+	}
+
+	// Initialize match key hit counters.
+	p.Metrics.MatchKeyHits = &sync.Map{}
+	matchKeys := []string{"ip", "ipv4", "ipv6", "ip_ua", "ipv4_ua", "ipv6_ua"}
+	for _, key := range matchKeys {
+		p.Metrics.MatchKeyHits.Store(key, new(atomic.Int64))
+	}
+
+	// Initialize block duration counters.
+	p.Metrics.BlockDurations = &sync.Map{}
+	for duration := range loadedCfg.DurationToTableName {
+		p.Metrics.BlockDurations.Store(duration, new(atomic.Int64))
+	}
+	if loadedCfg.DefaultBlockDuration > 0 {
+		p.Metrics.BlockDurations.Store(loadedCfg.DefaultBlockDuration, new(atomic.Int64))
+	}
+
+	// Initialize per-blocker command counters.
+	p.Metrics.CmdsPerBlocker = &sync.Map{}
+	for _, addr := range loadedCfg.BlockerAddresses {
+		p.Metrics.CmdsPerBlocker.Store(addr, new(atomic.Int64))
+	}
 }
 
 // SignalReloader listens for a specific OS signal to trigger a configuration reload. //nolint:cyclop
