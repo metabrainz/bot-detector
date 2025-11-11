@@ -195,6 +195,14 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 		return
 	}
 
+	// Increment the counter for the match_key type.
+	// This gives us metrics on which keying strategies are most active.
+	if counter, ok := p.Metrics.MatchKeyHits.Load(chain.MatchKey); ok {
+		if c, ok := counter.(*atomic.Int64); ok {
+			c.Add(1)
+		}
+	}
+
 	// Get the current state for this chain.
 	state, exists := currentActivity.ChainProgress[chain.Name]
 	if !exists {

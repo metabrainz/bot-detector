@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -111,6 +112,12 @@ func main() {
 	}
 	for _, chain := range p.Chains {
 		p.Metrics.ChainsHits.Store(chain.Name, chain.MetricsHitsCounter)
+	}
+	// Initialize the match key hit counters.
+	p.Metrics.MatchKeyHits = &sync.Map{}
+	matchKeys := []string{"ip", "ipv4", "ipv6", "ip_ua", "ipv4_ua", "ipv6_ua"}
+	for _, key := range matchKeys {
+		p.Metrics.MatchKeyHits.Store(key, new(atomic.Int64))
 	}
 
 	// Log the initial configuration summary.

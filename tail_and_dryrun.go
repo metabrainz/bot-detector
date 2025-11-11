@@ -298,6 +298,18 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 		logFunc(logging.LevelInfo, logTag, "Rate: n/a (run too fast)")
 	}
 
+	// Log MatchKey Hits
+	logFunc(logging.LevelInfo, logTag, "--- Match Key Hits ---")
+	p.Metrics.MatchKeyHits.Range(func(key, value interface{}) bool {
+		matchKey, _ := key.(string)
+		counter, _ := value.(*atomic.Int64)
+		count := counter.Load()
+		if count > 0 {
+			logFunc(logging.LevelInfo, logTag, "  - %s: %d", matchKey, count)
+		}
+		return true
+	})
+
 	// Log the consolidated per-chain breakdown.
 	if len(allChainMetrics) > 0 {
 		logFunc(logging.LevelInfo, logTag, "--- Per-Chain Metrics ---")
