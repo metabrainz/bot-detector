@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -180,6 +181,12 @@ func executeCommandImpl(p *Processor, addr, ip, command string) error {
 			}
 
 			// Success
+			// Increment the counter for commands sent to this specific blocker address.
+			if counter, ok := p.Metrics.CmdsPerBlocker.Load(addr); ok {
+				if c, ok := counter.(*atomic.Int64); ok {
+					c.Add(1)
+				}
+			}
 			return nil
 		}
 

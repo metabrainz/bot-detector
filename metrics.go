@@ -13,6 +13,8 @@ type Metrics struct {
 	ChainsReset     *sync.Map
 	ChainsHits      *sync.Map
 	MatchKeyHits    *sync.Map
+	BlockDurations  *sync.Map
+	CmdsPerBlocker  *sync.Map
 
 	// General counters with struct tags for metadata.
 	// `metric:"..."` is the display name.
@@ -41,5 +43,7 @@ func NewMetrics() *Metrics {
 		ChainsReset:     &sync.Map{},
 		ChainsHits:      &sync.Map{},
 		MatchKeyHits:    &sync.Map{},
+		BlockDurations:  &sync.Map{},
+		CmdsPerBlocker:  &sync.Map{},
 	}
 }

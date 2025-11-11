@@ -312,6 +312,23 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 		logFunc(logging.LevelInfo, logTag, "Rate: n/a (run too fast)")
 	}
 
+	// --- Log Block Duration Hits ---
+	var blockDurationMetrics []struct {
+		Duration time.Duration
+		Count    int64
+	}
+	p.Metrics.BlockDurations.Range(func(key, value interface{}) bool {
+		duration, _ := key.(time.Duration)
+		counter, _ := value.(*atomic.Int64)
+		if count := counter.Load(); count > 0 {
+			blockDurationMetrics = append(blockDurationMetrics, struct {
+				Duration time.Duration
+				Count    int64
+			}{duration, count})
+		}
+		return true
+	})
+
 	// --- Log MatchKey Hits ---
 	var totalMatchKeyHits int64
 	p.Metrics.MatchKeyHits.Range(func(key, value interface{}) bool {
@@ -336,6 +353,14 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 		}
 		return true
 	})
+
+	if len(blockDurationMetrics) > 0 {
+		logFunc(logging.LevelInfo, logTag, "--- Block Durations Triggered ---")
+		sort.Slice(blockDurationMetrics, func(i, j int) bool { return blockDurationMetrics[i].Duration < blockDurationMetrics[j].Duration })
+		for _, metric := range blockDurationMetrics {
+			logFunc(logging.LevelInfo, logTag, "  - %v: %d", metric.Duration, metric.Count)
+		}
+	}
 
 	validHits := p.Metrics.ValidHits.Load()
 

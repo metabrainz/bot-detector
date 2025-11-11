@@ -109,6 +109,12 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 	// --- 2. Perform the action ---
 	if chain.Action == "block" {
 		p.Metrics.BlockActions.Add(1)
+		// Increment the counter for the specific block duration used.
+		if val, ok := p.Metrics.BlockDurations.Load(chain.BlockDuration); ok {
+			if counter, ok := val.(*atomic.Int64); ok {
+				counter.Add(1)
+			}
+		}
 		executeBlock(p, entry, chain)
 		// Update the in-memory state to reflect the block for both live and dry runs.
 		ipOnlyKey := TrackingKey{IPInfo: entry.IPInfo, UA: ""}

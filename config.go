@@ -949,6 +949,19 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 	for _, key := range matchKeys {
 		p.Metrics.MatchKeyHits.Store(key, new(atomic.Int64))
 	}
+	// Initialize the block duration counters.
+	p.Metrics.BlockDurations = &sync.Map{}
+	for duration := range loadedCfg.DurationToTableName {
+		p.Metrics.BlockDurations.Store(duration, new(atomic.Int64))
+	}
+	if loadedCfg.DefaultBlockDuration > 0 {
+		p.Metrics.BlockDurations.Store(loadedCfg.DefaultBlockDuration, new(atomic.Int64))
+	}
+	// Initialize the per-blocker command counters.
+	p.Metrics.CmdsPerBlocker = &sync.Map{}
+	for _, addr := range loadedCfg.BlockerAddresses {
+		p.Metrics.CmdsPerBlocker.Store(addr, new(atomic.Int64))
+	}
 
 	logging.SetLogLevel(loadedCfg.LogLevel)
 	p.ConfigMutex.Unlock()
