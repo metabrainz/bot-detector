@@ -261,6 +261,13 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 	typ := val.Type()
 	for i := 0; i < val.NumField(); i++ {
 		field := typ.Field(i)
+		fieldName := field.Name
+
+		// Skip individual action counters as they will be combined.
+		if fieldName == "BlockActions" || fieldName == "LogActions" {
+			continue
+		}
+
 		if show, _ := strconv.ParseBool(field.Tag.Get(filterTag)); show {
 			if metricName := field.Tag.Get("metric"); metricName != "" {
 				if counter, ok := val.Field(i).Interface().(atomic.Int64); ok {
@@ -270,6 +277,7 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 		}
 	}
 
+	logFunc(logging.LevelInfo, logTag, "Actions Triggered: Block: %d, Log: %d", p.Metrics.BlockActions.Load(), p.Metrics.LogActions.Load())
 	logFunc(logging.LevelInfo, logTag, "Chains Completed: %d", totalChainsCompleted)
 	logFunc(logging.LevelInfo, logTag, "Chains Reset: %d", totalChainsReset)
 

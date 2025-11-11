@@ -118,6 +118,8 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 
 		currentActivity.IsBlocked = true
 		currentActivity.BlockedUntil = ipActivity.BlockedUntil
+	} else if chain.Action == "log" {
+		p.Metrics.LogActions.Add(1)
 	}
 }
 

@@ -21,6 +21,7 @@ type Metrics struct {
 	WhitelistedHits     atomic.Int64 `metric:"Whitelisted Hits Skipped" dryrun:"true"`
 	ActivitiesCleaned   atomic.Int64 `metric:"Activities Cleaned" dryrun:"true"`
 	BlockActions        atomic.Int64 `metric:"Block Actions Triggered" dryrun:"true"`
+	LogActions          atomic.Int64 `metric:"Log Actions Triggered" dryrun:"true"`
 	BlockerCmdsQueued   atomic.Int64 `metric:"Blocker Commands Queued" dryrun:"false"`
 	BlockerCmdsDropped  atomic.Int64 `metric:"Blocker Commands Dropped" dryrun:"false"`
 	BlockerCmdsExecuted atomic.Int64 `metric:"Blocker Commands Executed" dryrun:"false"`
