@@ -745,7 +745,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 	var defaultBlockDuration time.Duration
 	if config.DefaultBlockDuration != "" {
 		var err error
-		defaultBlockDuration, err = time.ParseDuration(config.DefaultBlockDuration)
+		defaultBlockDuration, err = parseDuration(config.DefaultBlockDuration)
 		if err != nil {
 			return nil, fmt.Errorf("invalid block_duration format for default_block_duration: %w", err)
 		}
@@ -759,7 +759,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		usesDefault := false
 		if yamlChain.BlockDuration != "" {
 			var err error
-			blockDuration, err = time.ParseDuration(yamlChain.BlockDuration)
+			blockDuration, err = parseDuration(yamlChain.BlockDuration)
 			if err != nil {
 				return nil, fmt.Errorf("chain '%s': invalid block_duration format: %w", yamlChain.Name, err)
 			}
