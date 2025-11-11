@@ -1102,7 +1102,7 @@ func TestLogMetricsSummary(t *testing.T) {
 	p.Metrics.LinesProcessed.Store(1000)
 	p.Metrics.ValidHits.Store(500)
 	p.Metrics.ParseErrors.Store(10)     // 1% of total
-	p.Metrics.WhitelistedHits.Store(20) // 2% of total
+
 	p.Metrics.ReorderedEntries.Store(5)
 	p.Metrics.ActorsCleaned.Store(50)
 	p.Metrics.BlockerCmdsQueued.Store(6)
@@ -1167,7 +1167,7 @@ func TestLogMetricsSummary(t *testing.T) {
 	assertContains(t, output, "Lines Processed: 1000")
 	assertContains(t, output, "Valid Hits: 500 (50.00%)")
 	assertContains(t, output, "Parse Errors: 10 (1.00%)")
-	assertContains(t, output, "Whitelisted Hits Skipped: 20 (2.00%)")
+
 	assertContains(t, output, "Reordered Entries: 5")
 	assertContains(t, output, "Actors Cleaned: 50")
 	assertContains(t, output, "Blocker Commands Queued: 6")

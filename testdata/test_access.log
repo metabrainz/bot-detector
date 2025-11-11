@@ -1,8 +1,4 @@
-# ======================================================================================
-# === TEST CASE 1: Whitelisted IP (192.0.2.10) - SKIPPED
-# === EXPECTED LOG: SKIP: IP 192.0.2.10: Skipped (IP is whitelisted)
-# ===
-musicbrainz.org 192.0.2.10 - - [28/Oct/2025:17:00:01 +0000] "GET /whitelisted HTTP/1.1" 200 100 "-" "TestAgent"
+
 
 # ======================================================================================
 # === TEST CASE 2: Log Action Chain (10.0.0.1) - SUCCESS (LOG)

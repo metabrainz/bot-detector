@@ -379,12 +379,7 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 	// The original lock acquisition has been moved up to the caller.
 
 	// --- The original logic of the function remains, but without the lock/defer unlock ---
-	// Immediately skip processing if the actor is whitelisted. This is the primary guard.
-	if p.IsWhitelistedFunc(entry.IPInfo) {
-		p.LogFunc(logging.LevelDebug, "SKIP", "IP %s: Skipped (IP is whitelisted).", entry.IPInfo.Address)
-		p.Metrics.WhitelistedHits.Add(1)
-		return
-	}
+
 
 	// If we've reached this point, the line was successfully parsed and was not whitelisted.
 	// This is a "valid hit" that will be processed against the chains.

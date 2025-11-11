@@ -90,7 +90,7 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 		MaxTimeSinceLastHit:  loadedCfg.MaxTimeSinceLastHit,
 		OutOfOrderTolerance:  loadedCfg.OutOfOrderTolerance,
 		TimestampFormat:      loadedCfg.TimestampFormat,
-		WhitelistNets:        loadedCfg.WhitelistNets,
+
 		StatFunc: func(path string) (os.FileInfo, error) {
 			// For the purpose of this test, we only need to return a mock FileInfo
 			// that has a non-nil Sys() value. The actual values don't matter
@@ -117,7 +117,7 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 		LogPath:       logFilePath,
 		signalCh:      make(chan os.Signal, 1),
 	}
-	p.IsWhitelistedFunc = func(ipInfo IPInfo) bool { return IsIPWhitelisted(p, ipInfo) }
+
 	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
 	p.Blocker = &HAProxyBlocker{P: p} // Initialize the blocker to prevent nil pointer panic.
 

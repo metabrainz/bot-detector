@@ -1,8 +1,7 @@
 version: "1.0" # Stays 1.0 as we can make this change backward-compatible in logic
 log_level: "debug" # Set to debug for maximum visibility during dry-run testing
 out_of_order_tolerance: "5s" # Required for Test Case 5
-whitelist_cidrs:
-  - "192.0.2.10/32" # Whitelist for TEST CASE 1
+
 
 chains:
   # --- 1. Simple Log Chain (10.0.0.1) ---

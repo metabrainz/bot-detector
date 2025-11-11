@@ -280,49 +280,7 @@ func TestCheckChains_TimeDelayReset(t *testing.T) {
 }
 
 // TestCheckChains_WhitelistSkip tests that a whitelisted IP is skipped entirely.
-func TestCheckChains_WhitelistSkip(t *testing.T) {
-	// --- Setup ---
-	const targetIP = "192.0.2.1"
-	const whitelistedIP = "192.168.0.10"
 
-	h := newCheckerTestHarness(t, nil)
-	h.addChain(BehavioralChain{
-		Name:          "WhitelistTestChain",
-		MatchKey:      "ip",
-		Action:        "block",
-		BlockDuration: 10 * time.Minute,
-		StepsYAML:     []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/step/one"}}},
-	})
-
-	// Setup whitelisting using a mock function.
-	h.processor.IsWhitelistedFunc = func(ipInfo IPInfo) bool {
-		return ipInfo.Address == whitelistedIP
-	}
-
-	// --- Act & Assert 1: Whitelisted IP ---
-	whitelistedEntry := &LogEntry{
-		IPInfo:    NewIPInfo(whitelistedIP),
-		Timestamp: time.Now(),
-		Path:      "/step/one",
-	}
-	h.processEntry(whitelistedEntry)
-
-	if h.blockCalled {
-		t.Fatal("Blocker was called, but should be skipped for a whitelisted IP.")
-	}
-	// No activity should be created for a whitelisted IP.
-	h.assertChainProgressCleared("WhitelistTestChain", whitelistedEntry)
-
-	// --- Act & Assert 2: Non-whitelisted IP ---
-	nonWhitelistedEntry := &LogEntry{
-		IPInfo:    NewIPInfo(targetIP),
-		Timestamp: time.Now(),
-		Path:      "/step/one",
-	}
-	h.processEntry(nonWhitelistedEntry)
-
-	h.assertBlocked(nonWhitelistedEntry, true)
-}
 
 // TestCheckChains_LogAction tests that a chain with Action="log" clears the state but does not call the blocker.
 func TestCheckChains_LogAction(t *testing.T) {

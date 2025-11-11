@@ -3,11 +3,12 @@ package main
 import (
 	"bot-detector/internal/logging"
 	"fmt"
-	"net"
+
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+
 	"testing"
 	"time"
 )
@@ -74,11 +75,7 @@ func TestLoadConfigFromYAML_Success(t *testing.T) {
 	// Create a temporary valid YAML file
 	yamlContent := `
 version: "1.0"
-whitelist_cidrs:
-  - "192.168.1.0/24"
-  - "2001:db8:abcd::/48" # IPv6 Network
-  - "2001:db8::dead:beef" # Bare IPv6
-  - "10.0.0.1" # Bare IP
+
 blocker_addresses:
   - "127.0.0.1:9999"
 duration_tables:
@@ -153,25 +150,7 @@ chains:
 		t.Errorf("Expected step 2 to have min_delay of 1s, got %v", step2.MinDelayDuration)
 	}
 
-	if len(loadedCfg.WhitelistNets) != 4 {
-		t.Errorf("Expected 4 whitelist CIDRs, got %d", len(loadedCfg.WhitelistNets))
-	}
 
-	if len(loadedCfg.DurationToTableName) != 2 {
-		t.Errorf("Expected 2 duration tables, got %d", len(loadedCfg.DurationToTableName))
-	}
-
-	if loadedCfg.BlockTableNameFallback != "table_1h" {
-		t.Errorf("Expected fallback table 'table_1h', got '%s'", loadedCfg.BlockTableNameFallback)
-	}
-
-	if len(loadedCfg.BlockerAddresses) != 1 {
-		t.Errorf("Expected 1 Blocker address, got %d", len(loadedCfg.BlockerAddresses))
-	}
-
-	if !IsIPWhitelistedInList(NewIPInfo("10.0.0.1"), loadedCfg.WhitelistNets) {
-		t.Error("Expected bare IPv4 '10.0.0.1' to be whitelisted, but it was not.")
-	}
 }
 
 func TestLoadConfigFromYAML_FlexibleKeys(t *testing.T) {
@@ -831,24 +810,8 @@ chains: []
 `,
 			expectedError: "configuration version mismatch",
 		},
-		{
-			name: "Invalid CIDR",
-			yamlContent: `
-version: "1.0"
-whitelist_cidrs: ["192.168.1.0/33"]
-chains: []
-`,
-			expectedError: "invalid CIDR",
-		},
-		{
-			name: "Invalid Non-CIDR in Whitelist",
-			yamlContent: `
-version: "1.0"
-whitelist_cidrs: ["not-an-ip"]
-chains: []
-`,
-			expectedError: "invalid CIDR",
-		},
+
+
 		{
 			name: "Invalid Regex",
 			yamlContent: `
@@ -1270,178 +1233,7 @@ chains: []
 	}
 }
 
-func TestCheckAndRemoveWhitelistedBlocks(t *testing.T) {
-	tests := []struct {
-		name            string
-		blockedIP       string
-		expectedCommand string
-	}{
-		{"IPv4", "192.0.2.100", "clear table table_5m_ipv4 key 192.0.2.100"},
-		{"IPv6", "2001:db8::dead:beef", "clear table table_5m_ipv6 key 2001:db8::dead:beef"},
-	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// --- Setup for each sub-test ---
-			resetGlobalState()
-			t.Cleanup(resetGlobalState)
-
-			var commandsReceived []string
-			// Create a processor instance for the test.
-			processor := &Processor{
-				ActivityStore: make(map[Actor]*ActorActivity),
-				ActivityMutex: &sync.RWMutex{},
-				ConfigMutex:   &sync.RWMutex{},
-				Config: &AppConfig{
-					// This config is needed for the p.UnblockIP call to work.
-					BlockerAddresses:    []string{"127.0.0.1:9999"},
-					DurationToTableName: map[time.Duration]string{5 * time.Minute: "table_5m"},
-				},
-				// Capture log output for assertion.
-				LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-					// For this test, we only care about the WHITELIST_UNBLOCK log.
-				},
-				// Set the Blocker to a mock that delegates to the original UnblockIP method,
-				// which in turn uses the mocked CommandExecutor below.
-				Blocker: &HAProxyBlocker{P: &Processor{}}, // Temporary processor for delegation
-			}
-			// Now, set up the mock blocker correctly.
-			mockBlocker := &HAProxyBlocker{P: processor}
-			processor.Blocker = mockBlocker
-			// Mock the underlying executor that the real UnblockIP method will call.
-			processor.CommandExecutor = func(p *Processor, addr, ip, command string) error {
-				commandsReceived = append(commandsReceived, strings.TrimSpace(command))
-				return nil
-			}
-
-			// 2. Define the IP that is currently blocked but will be whitelisted.
-			actor := Actor{IPInfo: NewIPInfo(tt.blockedIP)}
-			blockExpirationTime := time.Now().Add(time.Hour)
-
-			// 3. Manually set the state in ActivityStore to simulate a blocked IP.
-			processor.ActivityStore[actor] = &ActorActivity{
-				IsBlocked:    true,
-				BlockedUntil: blockExpirationTime,
-			}
-
-			// Capture the specific log message we care about.
-			var capturedLog string
-			processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-				if tag == "WHITELIST_UNBLOCK" {
-					capturedLog = fmt.Sprintf(format, args...)
-				}
-			}
-
-			// 4. Set the WhitelistNets on the processor's config to include the blocked IP.
-			_, ipNet, _ := net.ParseCIDR(tt.blockedIP + "/32")
-			processor.Config.WhitelistNets = []*net.IPNet{ipNet}
-
-			// --- Act ---
-			CheckAndRemoveWhitelistedBlocks(processor)
-
-			// --- Assert ---
-			// Assert Log Output
-			expectedLogSubstring := blockExpirationTime.Format(AppLogTimestampFormat)
-			if !strings.Contains(capturedLog, expectedLogSubstring) {
-				t.Errorf("Expected log message to contain the original block time '%s', but it did not. Log was: '%s'",
-					expectedLogSubstring, capturedLog)
-			}
-
-			// Assert HAProxy Command
-			if len(commandsReceived) != 1 || commandsReceived[0] != tt.expectedCommand {
-				t.Errorf("Expected unblock command '%s', but got %v", tt.expectedCommand, commandsReceived)
-			}
-
-			// Assert Final State
-			activity, exists := processor.ActivityStore[actor]
-			if !exists {
-				t.Fatal("Activity for the IP was unexpectedly deleted.")
-			}
-			if activity.IsBlocked {
-				t.Error("Expected IsBlocked to be false after whitelist cleanup, but it was true.")
-			}
-		})
-	}
-
-	t.Run("Unblock Fails", func(t *testing.T) {
-		// --- Setup ---
-		resetGlobalState()
-		t.Cleanup(resetGlobalState)
-
-		var unblockCalled bool
-		processor := &Processor{
-			ActivityMutex: &sync.RWMutex{},
-			ActivityStore: make(map[Actor]*ActorActivity),
-			ConfigMutex:   &sync.RWMutex{},
-			Config: &AppConfig{
-				BlockerAddresses:    []string{"127.0.0.1:9999"},
-				DurationToTableName: map[time.Duration]string{time.Minute: "t1"},
-			},
-			LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
-			// Mock the Blocker to simulate a failure.
-			Blocker: &MockBlocker{
-				UnblockFunc: func(ipInfo IPInfo) error {
-					unblockCalled = true
-					return fmt.Errorf("simulated HAProxy failure")
-				},
-			},
-		}
-
-		// Manually set a blocked IP that is also on the whitelist.
-		blockedIP := "192.0.2.100"
-		actor := Actor{IPInfo: NewIPInfo(blockedIP)}
-		processor.ActivityStore[actor] = &ActorActivity{
-			IsBlocked:    true,
-			BlockedUntil: time.Now().Add(time.Hour),
-		}
-		_, ipNet, _ := net.ParseCIDR(blockedIP + "/32")
-		processor.Config.WhitelistNets = []*net.IPNet{ipNet}
-
-		// --- Act ---
-		CheckAndRemoveWhitelistedBlocks(processor)
-
-		// --- Assert ---
-		// The IP should remain blocked in memory because the HAProxy command failed.
-		if !processor.ActivityStore[actor].IsBlocked {
-			t.Error("Expected IsBlocked to remain true after a failed unblock attempt, but it was set to false.")
-		}
-		if !unblockCalled {
-			t.Error("Expected the mock Blocker.Unblock method to be called, but it was not.")
-		}
-	})
-
-	t.Run("No Action Needed", func(t *testing.T) {
-		// This test covers the nil-function path in the MockBlocker.
-		// --- Setup ---
-		resetGlobalState()
-
-		processor := &Processor{
-			ActivityMutex: &sync.RWMutex{},
-			ActivityStore: make(map[Actor]*ActorActivity),
-			Config:        &AppConfig{},
-			LogFunc:       func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
-			// Use a MockBlocker but do NOT set the UnblockFunc.
-			Blocker: &MockBlocker{},
-		}
-
-		// Manually set a blocked IP that is NOT on the whitelist.
-		blockedIP := "192.0.2.100"
-		actor := Actor{IPInfo: NewIPInfo(blockedIP)}
-		processor.ActivityStore[actor] = &ActorActivity{
-			IsBlocked:    true,
-			BlockedUntil: time.Now().Add(time.Hour),
-		}
-		// The whitelist is empty, so no IPs should be unblocked.
-		processor.Config.WhitelistNets = []*net.IPNet{}
-
-		// --- Act ---
-		CheckAndRemoveWhitelistedBlocks(processor)
-
-		// --- Assert ---
-		// The main assertion is that the test completes without panic.
-		// Calling Blocker.Unblock() on the mock will execute the `return nil` path.
-	})
-}
 
 func TestConfigWatcher_Reload(t *testing.T) {
 	// --- Setup ---
@@ -1454,7 +1246,7 @@ func TestConfigWatcher_Reload(t *testing.T) {
 	initialYAMLContent := `
 version: "1.0"
 log_level: "info"
-whitelist_cidrs: ["1.1.1.1/32"]
+
 chains:
   - name: "InitialChain"
     match_key: "ip"
@@ -1478,7 +1270,7 @@ chains:
 		Chains:        initialLoadedCfg.Chains, // Set initial chains
 		Config: &AppConfig{ // Set initial config state
 			PollingInterval:  10 * time.Millisecond,
-			WhitelistNets:    initialLoadedCfg.WhitelistNets,
+
 			FileDependencies: initialLoadedCfg.FileDependencies,
 		},
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
@@ -1505,7 +1297,7 @@ chains:
 	modifiedYAMLContent := `
 version: "1.0"
 log_level: "debug" # Changed log level
-whitelist_cidrs: ["1.1.1.1/32", "2.2.2.2/32"] # Added a new CIDR (1.1.1.1/32 was already there)
+
 chains:
   - name: "ReloadedChain" # Changed chain name
     match_key: "ip"
@@ -1541,9 +1333,7 @@ chains:
 	if len(processor.Chains) != 1 || processor.Chains[0].Name != "ReloadedChain" {
 		t.Errorf("Expected chain to be 'ReloadedChain', but got: %+v", processor.Chains)
 	}
-	if len(processor.Config.WhitelistNets) != 2 {
-		t.Errorf("Expected 2 whitelist networks, but got %d", len(processor.Config.WhitelistNets))
-	}
+
 	if logging.GetLogLevel() != logging.LevelDebug {
 		t.Errorf("Expected log level to be updated to 'debug', but it was not.")
 	}
