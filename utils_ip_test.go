@@ -52,7 +52,7 @@ func TestIsIPWhitelisted(t *testing.T) {
 	}
 }
 
-func TestGetTrackingKey(t *testing.T) {
+func TestGetActor(t *testing.T) {
 	// Dummy LogEntry for testing
 	baseEntry := &LogEntry{
 		IPInfo:    NewIPInfo("192.0.2.1"),
