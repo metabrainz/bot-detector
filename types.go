@@ -222,12 +222,12 @@ type Actor struct {
 }
 
 // String provides a clean, readable representation of the Actor for logging.
-func (tk Actor) String() string {
+func (a Actor) String() string {
 	// Use a separator that is unlikely to appear in a User-Agent string.
-	if tk.UA != "" {
-		return fmt.Sprintf("%s | %s", tk.IPInfo.Address, tk.UA)
+	if a.UA != "" {
+		return fmt.Sprintf("%s | %s", a.IPInfo.Address, a.UA)
 	}
-	return tk.IPInfo.Address
+	return a.IPInfo.Address
 }
 
 // ActorActivity tracks state for a single actor (IP address or IP+UA combination) across all chains.
