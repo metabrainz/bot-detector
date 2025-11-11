@@ -252,7 +252,7 @@ func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, st
 		return // Nothing to report.
 	}
 
-	logFunc(logging.LevelInfo, "DRY_RUN_STATS", "--- Top %d Actors per Chain (sorted by completions, then hits) ---", p.TopN)
+	logFunc(logging.LevelInfo, "DRY_RUN_STATS", "--- Top %d Actors per Chain (sorted by resets, then completions, then hits) ---", p.TopN)
 
 	// Get chain names and sort them for consistent output order.
 	var chainNames []string
@@ -277,12 +277,18 @@ func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, st
 			stats = append(stats, actorStat{Actor: actor, Stats: actorStats})
 		}
 
-		// Sort actors primarily by completions, then by hits (both descending).
+		// Sort actors primarily by resets, then by completions, then by hits (all descending).
 		sort.Slice(stats, func(i, j int) bool {
+			// Primary sort by Resets (descending)
+			if stats[i].Stats.Resets != stats[j].Stats.Resets {
+				return stats[i].Stats.Resets > stats[j].Stats.Resets
+			}
+			// Secondary sort by Completions (descending)
 			if stats[i].Stats.Completions != stats[j].Stats.Completions {
 				return stats[i].Stats.Completions > stats[j].Stats.Completions
 			}
-			return stats[i].Stats.Hits > stats[j].Stats.Hits // Secondary sort by hits
+			// Tertiary sort by Hits (descending)
+			return stats[i].Stats.Hits > stats[j].Stats.Hits
 		})
 
 		logFunc(logging.LevelInfo, "DRY_RUN_STATS", "  Chain: %s", chainName)

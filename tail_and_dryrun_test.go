@@ -496,6 +496,114 @@ func TestDryRunLogProcessor_Decompression(t *testing.T) {
 	}
 }
 
+func TestDryRunLogProcessor_TopN(t *testing.T) {
+	// This log content triggers two different chains with multiple actors.
+	// TopNTestChain:
+	//  - Actor 1.1.1.1: 3 hits, 1 completion, 1 reset (due to max_delay violation)
+	//  - Actor 2.2.2.2: 4 hits, 2 completions
+	// SecondChain (actor 3.3.3.3):
+	//  - Actor 3.3.3.3: 1 hit, 1 completion
+	logContent := `
+test.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] "GET /step1 HTTP/1.1" 200 100 "-" "A"
+test.com 2.2.2.2 - - [01/Jan/2025:00:00:01 +0000] "GET /step1 HTTP/1.1" 200 100 "-" "B"
+test.com 1.1.1.1 - - [01/Jan/2025:00:00:02 +0000] "GET /step2 HTTP/1.1" 200 100 "-" "A"
+test.com 2.2.2.2 - - [01/Jan/2025:00:00:03 +0000] "GET /step2 HTTP/1.1" 200 100 "-" "B"
+test.com 1.1.1.1 - - [01/Jan/2025:00:00:04 +0000] "GET /step1 HTTP/1.1" 200 100 "-" "A"
+test.com 3.3.3.3 - - [01/Jan/2025:00:00:05 +0000] "GET /other-chain-trigger HTTP/1.1" 200 100 "-" "C"
+test.com 2.2.2.2 - - [01/Jan/2025:00:00:06 +0000] "GET /step1 HTTP/1.1" 200 100 "-" "B"
+test.com 1.1.1.1 - - [01/Jan/2025:00:00:08 +0000] "GET /step2 HTTP/1.1" 200 100 "-" "A"
+test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 "-" "B"
+`
+
+	chain1 := BehavioralChain{
+		Name:     "TopNTestChain",
+		Action:   "log",
+		MatchKey: "ip",
+	}
+	// Correctly create matchers without capturing loop variables.
+	chain1.Steps = []StepDef{
+		{Matchers: []fieldMatcher{func(path string) func(e *LogEntry) bool { return func(e *LogEntry) bool { return e.Path == path } }("/step1")}},
+		{MaxDelayDuration: 3 * time.Second, Matchers: []fieldMatcher{func(path string) func(e *LogEntry) bool { return func(e *LogEntry) bool { return e.Path == path } }("/step2")}},
+	}
+
+	chain2 := BehavioralChain{
+		Name:     "SecondChain",
+		Action:   "log",
+		MatchKey: "ip",
+	}
+	chain2.Steps = []StepDef{
+		{Matchers: []fieldMatcher{func(path string) func(e *LogEntry) bool { return func(e *LogEntry) bool { return e.Path == path } }("/other-chain-trigger")}},
+	}
+
+	tests := []struct {
+		name              string
+		topN              int
+		expectStats       bool
+		expectInOutput    []string
+		expectNotInOutput []string
+	}{
+		{
+			name:              "TopN Disabled",
+			topN:              0,
+			expectStats:       false,
+			expectNotInOutput: []string{"--- Top 0 Actors per Chain ---"},
+		},
+		{
+			name:        "TopN Enabled (shows only top 1)",
+			topN:        1,
+			expectStats: true,
+			expectInOutput: []string{
+				"Top 1 Actors per Chain",
+				"Chain: SecondChain",
+				"[1 hits, 1 completions, 0 resets] 3.3.3.3",
+				"Chain: TopNTestChain",
+				"[3 hits, 1 completions, 1 resets] 1.1.1.1",
+			},
+			expectNotInOutput: []string{
+				"[4 hits, 2 completions, 0 resets] 2.2.2.2", // Actor 2 should be excluded from TopNTestChain's top 1
+			},
+		},
+		{
+			name:        "TopN Enabled (shows all)",
+			topN:        5,
+			expectStats: true,
+			expectInOutput: []string{
+				"Top 5 Actors per Chain",
+				"Chain: SecondChain",
+				"[1 hits, 1 completions, 0 resets] 3.3.3.3",
+				"Chain: TopNTestChain",
+				"[3 hits, 1 completions, 1 resets] 1.1.1.1",
+				"[4 hits, 2 completions, 0 resets] 2.2.2.2",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			harness := newDryRunTestHarness(t, &AppConfig{
+				LogFormatRegex:  `^(?P<VHost>\S+) (?P<IP>\S+) - - \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) \S+" (?P<StatusCode>\S+) (?P<Size>\S+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"$`,
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+			})
+			os.WriteFile(harness.tempLogFile, []byte(logContent), 0644)
+			harness.processor.Chains = []BehavioralChain{chain1, chain2}
+			harness.processor.TopN = tt.topN
+			harness.processor.DryRun = true // Explicitly set DryRun mode for this test.
+
+			done := make(chan struct{})
+			DryRunLogProcessor(harness.processor, done)
+			<-done
+
+			logOutput := strings.Join(harness.capturedLogs, "\n")
+			for _, s := range tt.expectInOutput {
+				assertContains(t, logOutput, s)
+			}
+			for _, s := range tt.expectNotInOutput {
+				assertNotContains(t, logOutput, s)
+			}
+		})
+	}
+}
+
 // TestLiveLogTailer_Success covers the happy path for the live tailer,
 // including initial startup, processing new lines, and handling log rotation.
 // NOTE: This test is named with a suffix to distinguish it from the error case tests below.
