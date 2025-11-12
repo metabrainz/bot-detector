@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -157,6 +158,18 @@ func (p *Processor) GenerateHTMLMetricsReport() string {
 	}
 	logMetricsSummary(p, time.Since(p.startTime), webLogFunc, "METRICS", "metric")
 	return report.String()
+}
+
+// --- ParserProvider Interface Implementation ---
+
+func (p *Processor) GetTimestampFormat() string {
+	return p.Config.TimestampFormat
+}
+
+func (p *Processor) GetLogRegex() *regexp.Regexp {
+	p.ConfigMutex.RLock()
+	defer p.ConfigMutex.RUnlock()
+	return p.LogRegex
 }
 
 // --- MetricsProvider Interface Implementation ---

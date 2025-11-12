@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
+	"bot-detector/internal/utils"
 	"fmt"
 
 	"os"
@@ -12,11 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 )
-
-// --- EXTERNAL INTERFACES ---
-
-// IPVersion is used internally to track whether an IP is v4 or v6.
-type IPVersion byte
 
 // FieldType indicates the native type of a field from a LogEntry.
 type FieldType int
@@ -187,7 +183,7 @@ type BehavioralChainYAML struct {
 
 type LogEntry struct {
 	Timestamp  time.Time // Actual time of the request (parsed from log, not time.Now()).
-	IPInfo     IPInfo
+	IPInfo     utils.IPInfo
 	Method     string
 	Path       string
 	Protocol   string
@@ -249,7 +245,7 @@ type StepState struct {
 // Actor is a comparable struct used as the key for the ActivityStore map. It represents
 // the unique entity being tracked (e.g., an IP address or an IP+UserAgent combination).
 type Actor struct {
-	IPInfo IPInfo
+	IPInfo utils.IPInfo
 	UA     string // UserAgent. Empty string if tracking is IP-only.
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
+	"bot-detector/internal/utils"
 	"bufio"
 	"bytes"
 	"fmt"
@@ -50,11 +51,11 @@ func TestCheckChains_BlockAction(t *testing.T) {
 			})
 
 			// --- Act ---
-			entry1 := &LogEntry{IPInfo: NewIPInfo(targetIP), UserAgent: "TestAgent", Timestamp: time.Now(), Path: "/step/one"}
+			entry1 := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), UserAgent: "TestAgent", Timestamp: time.Now(), Path: "/step/one"}
 			h.processEntry(entry1)
 			h.assertChainProgress("TwoStepBlocker", entry1, 1)
 
-			entry2 := &LogEntry{IPInfo: NewIPInfo(targetIP), UserAgent: "TestAgent", Timestamp: entry1.Timestamp.Add(2 * time.Second), Path: "/step/two"}
+			entry2 := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), UserAgent: "TestAgent", Timestamp: entry1.Timestamp.Add(2 * time.Second), Path: "/step/two"}
 			h.processEntry(entry2)
 
 			// --- Assert ---
@@ -102,7 +103,7 @@ func TestPreCheckActivity_StillBlocked(t *testing.T) {
 			// --- Setup ---
 			resetGlobalState()
 			const targetIP = "192.0.2.50"
-			actor := Actor{IPInfo: NewIPInfo(targetIP)}
+			actor := Actor{IPInfo: utils.NewIPInfo(targetIP)}
 			processor := newTestProcessor(nil, nil)
 
 			// Manually create a pre-existing, non-expired block state.
@@ -112,7 +113,7 @@ func TestPreCheckActivity_StillBlocked(t *testing.T) {
 				IsBlocked:       true,
 			}
 
-			entry := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: tt.entryTimestamp}
+			entry := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: tt.entryTimestamp}
 
 			// --- Act ---
 			// We call the unexported preCheckActivity directly to isolate the logic under test.
@@ -156,7 +157,7 @@ func TestCheckChains_UnknownAction(t *testing.T) {
 			})
 
 			entry := &LogEntry{
-				IPInfo:    NewIPInfo("192.0.2.1"),
+				IPInfo:    utils.NewIPInfo("192.0.2.1"),
 				Timestamp: time.Now(),
 				Path:      "/test",
 			}
@@ -266,14 +267,14 @@ func TestCheckChains_TimeDelayReset(t *testing.T) {
 			})
 
 			// --- Act ---
-			entry1 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: time.Now(), Path: "/step/one"}
+			entry1 := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: time.Now(), Path: "/step/one"}
 			h.processEntry(entry1)
 
 			// Assert 1: State is at step 1.
 			h.assertChainProgress("TimeResetChain", entry1, 1)
 
 			// Process the second request with the specified time offset.
-			entry2 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: entry1.Timestamp.Add(tt.step2TimeOffset), Path: "/step/two"}
+			entry2 := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: entry1.Timestamp.Add(tt.step2TimeOffset), Path: "/step/two"}
 			h.processEntry(entry2)
 
 			// --- Assert 2: The chain should have been reset.
@@ -302,14 +303,14 @@ func TestCheckChains_LogAction(t *testing.T) {
 	})
 
 	// --- Act ---
-	entry1 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: time.Now(), Path: "/step/one"}
+	entry1 := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: time.Now(), Path: "/step/one"}
 	h.processEntry(entry1)
 
 	// Assert 1: State is at step 1.
 	h.assertChainProgress("LogActionTestChain", entry1, 1)
 
 	// Process the second request (completion).
-	entry2 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: entry1.Timestamp.Add(2 * time.Second), Path: "/step/two"}
+	entry2 := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: entry1.Timestamp.Add(2 * time.Second), Path: "/step/two"}
 	h.processEntry(entry2)
 
 	// --- Assert 2 ---
@@ -335,7 +336,7 @@ func TestCheckChains_BlockExpiration(t *testing.T) {
 	})
 
 	// Manually create a pre-existing, EXPIRED block state.
-	actor := Actor{IPInfo: NewIPInfo(targetIP)}
+	actor := Actor{IPInfo: utils.NewIPInfo(targetIP)}
 	h.processor.ActivityStore[actor] = &ActorActivity{
 		LastRequestTime: time.Time{},                    // Not relevant for this test
 		BlockedUntil:    time.Now().Add(-1 * time.Hour), // Expired an hour ago
@@ -344,7 +345,7 @@ func TestCheckChains_BlockExpiration(t *testing.T) {
 
 	// --- Act ---
 	entry := &LogEntry{
-		IPInfo:    NewIPInfo(targetIP),
+		IPInfo:    utils.NewIPInfo(targetIP),
 		Timestamp: time.Now(),
 		Path:      "/test",
 	}
@@ -384,7 +385,7 @@ func TestCheckChains_IPVersionMismatch(t *testing.T) {
 
 			// --- Act ---
 			entry := &LogEntry{
-				IPInfo:    NewIPInfo(tt.entryIP),
+				IPInfo:    utils.NewIPInfo(tt.entryIP),
 				Timestamp: time.Now(),
 				Path:      "/test",
 			}
@@ -415,7 +416,7 @@ func TestCheckChains_IPAndUABlockOptimization(t *testing.T) {
 
 	// --- Act ---
 	entry := &LogEntry{
-		IPInfo:    NewIPInfo(targetIP),
+		IPInfo:    utils.NewIPInfo(targetIP),
 		UserAgent: targetUA,
 		Timestamp: time.Now(),
 		Path:      "/trigger",
@@ -426,7 +427,7 @@ func TestCheckChains_IPAndUABlockOptimization(t *testing.T) {
 	// Assert that the specific IP+UA key is blocked.
 	h.assertBlocked(entry, true)
 	// Assert that the general IP-only key is also blocked.
-	ipOnlyEntry := &LogEntry{IPInfo: NewIPInfo(targetIP), UserAgent: ""}
+	ipOnlyEntry := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), UserAgent: ""}
 	h.assertBlocked(ipOnlyEntry, true)
 }
 
@@ -456,7 +457,7 @@ func TestCheckChains_OnMatchStop(t *testing.T) {
 
 	// --- Act ---
 	entry := &LogEntry{
-		IPInfo:    NewIPInfo(targetIP),
+		IPInfo:    utils.NewIPInfo(targetIP),
 		Timestamp: time.Now(),
 		Path:      "/trigger",
 	}
@@ -504,7 +505,7 @@ func TestCheckChains_UnblockOnGoodActor(t *testing.T) {
 
 	// 3. Create the log entry for the good actor.
 	goodEntry := &LogEntry{
-		IPInfo:    NewIPInfo(goodIP),
+		IPInfo:    utils.NewIPInfo(goodIP),
 		Timestamp: time.Now(),
 		Path:      "/some/path",
 	}
@@ -593,7 +594,7 @@ func TestCheckChains_TimeRules(t *testing.T) {
 
 			// Prime the activity store with the specified last request time.
 			if tt.primingTimeOffset != 0 {
-				key := Actor{IPInfo: NewIPInfo("192.0.2.1")}
+				key := Actor{IPInfo: utils.NewIPInfo("192.0.2.1")}
 				// Use GetOrCreateActorActivityUnsafe to ensure ChainProgress map is initialized.
 				processor.ActivityMutex.Lock()
 				activity := GetOrCreateActorActivityUnsafe(processor.ActivityStore, key)
@@ -602,7 +603,7 @@ func TestCheckChains_TimeRules(t *testing.T) {
 			}
 
 			entry := &LogEntry{
-				IPInfo:    NewIPInfo("192.0.2.1"),
+				IPInfo:    utils.NewIPInfo("192.0.2.1"),
 				Timestamp: now,      // The current request always happens at our fixed "now".
 				Path:      "/step1", // This will match the first step
 			}
@@ -853,15 +854,15 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 			processor := newTestProcessor(&AppConfig{OutOfOrderTolerance: tt.tolerance, MaxTimeSinceLastHit: 1 * time.Minute}, chains)
 
 			// Manually create an activity to ensure the ChainProgress map is not nil.
-			key := Actor{IPInfo: NewIPInfo(targetIP)}
+			key := Actor{IPInfo: utils.NewIPInfo(targetIP)}
 			GetOrCreateActorActivityUnsafe(processor.ActivityStore, key)
 
 			// 1. Process a "newer" entry first to set the LastRequestTime.
-			newerEntry := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: now, Path: "/other-path"}
+			newerEntry := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: now, Path: "/other-path"}
 			CheckChains(processor, newerEntry)
 
 			// 2. Process the out-of-order entry.
-			outOfOrderEntry := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: now.Add(-tt.outOfOrderOffset), Path: "/step1"}
+			outOfOrderEntry := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: now.Add(-tt.outOfOrderOffset), Path: "/step1"}
 			CheckChains(processor, outOfOrderEntry)
 
 			// 3. Assert the outcome.
@@ -1149,18 +1150,18 @@ func TestOutOfOrder_ComplexScenario(t *testing.T) {
 	t.Cleanup(func() { checkChainsInternal = originalCheck })
 
 	// Define the 5 hits for the scenario.
-	hit1 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: baseTime, Path: "/hit1"}
-	hit2 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: baseTime.Add(1 * time.Second), Path: "/hit2"}
-	hit3 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: baseTime.Add(2 * time.Second), Path: "/hit3"}
-	hit4 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: baseTime, Path: "/hit4"}                       // Same timestamp as hit1
-	hit5 := &LogEntry{IPInfo: NewIPInfo(targetIP), Timestamp: baseTime.Add(-5 * time.Second), Path: "/hit5"} // Outside 4s tolerance
+	hit1 := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: baseTime, Path: "/hit1"}
+	hit2 := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: baseTime.Add(1 * time.Second), Path: "/hit2"}
+	hit3 := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: baseTime.Add(2 * time.Second), Path: "/hit3"}
+	hit4 := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: baseTime, Path: "/hit4"}                       // Same timestamp as hit1
+	hit5 := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: baseTime.Add(-5 * time.Second), Path: "/hit5"} // Outside 4s tolerance
 
 	// --- Act ---
 	// Process the hits in an order that forces buffering.
 	// 1. Manually set the state to simulate that hit3 was the last entry processed.
 	// This is the correct way to set up the test's preconditions.
 	p.ActivityMutex.Lock()
-	activity := GetOrCreateActorActivityUnsafe(p.ActivityStore, Actor{IPInfo: NewIPInfo(targetIP)})
+	activity := GetOrCreateActorActivityUnsafe(p.ActivityStore, Actor{IPInfo: utils.NewIPInfo(targetIP)})
 	activity.LastRequestTime = hit3.Timestamp
 	// Manually add hit3 to our list of processed entries, as we are starting from this state.
 	processedMutex.Lock()
@@ -1229,5 +1230,48 @@ func TestOutOfOrder_ComplexScenario(t *testing.T) {
 		if processedEntries[i].Path != expected.Path {
 			t.Errorf("Final processed order mismatch at index %d. Got path %s, want %s", i, processedEntries[i].Path, expected.Path)
 		}
+	}
+}
+
+func TestGetActor(t *testing.T) {
+	// Dummy LogEntry for testing
+	baseEntry := &LogEntry{
+		IPInfo:    utils.NewIPInfo("192.0.2.1"),
+		UserAgent: "TestAgent",
+	}
+
+	// Test cases for different MatchKeys and IP versions
+	tests := []struct {
+		name        string
+		matchKey    string
+		entry       *LogEntry
+		expectedKey Actor
+	}{
+		// --- Success Cases (Key returned) ---
+		{"Match: ip (IPv4)", "ip", baseEntry, Actor{IPInfo: utils.NewIPInfo("192.0.2.1"), UA: ""}},
+		{"Match: ip (IPv6)", "ip", &LogEntry{IPInfo: utils.NewIPInfo("2001:db8::1")}, Actor{IPInfo: utils.NewIPInfo("2001:db8::1"), UA: ""}},
+		{"Match: ipv4 (IPv4)", "ipv4", baseEntry, Actor{IPInfo: utils.NewIPInfo("192.0.2.1"), UA: ""}},
+		{"Match: ipv6 (IPv6)", "ipv6", &LogEntry{IPInfo: utils.NewIPInfo("2001:db8::1")}, Actor{IPInfo: utils.NewIPInfo("2001:db8::1"), UA: ""}},
+		{"Match: ip_ua (IPv4)", "ip_ua", baseEntry, Actor{IPInfo: utils.NewIPInfo("192.0.2.1"), UA: "TestAgent"}},
+		{"Match: ipv4_ua (IPv4)", "ipv4_ua", baseEntry, Actor{IPInfo: utils.NewIPInfo("192.0.2.1"), UA: "TestAgent"}},
+		{"Match: ipv6_ua (IPv6)", "ipv6_ua", &LogEntry{IPInfo: utils.NewIPInfo("2001:db8::1"), UserAgent: "TestAgent"}, Actor{IPInfo: utils.NewIPInfo("2001:db8::1"), UA: "TestAgent"}},
+
+		// --- Failure Cases (Empty Key is now expected) ---
+		{"Mismatch: ipv4 (is IPv6)", "ipv4", &LogEntry{IPInfo: utils.NewIPInfo("2001:db8::1")}, Actor{}},
+		{"Mismatch: ipv6 (is IPv4)", "ipv6", baseEntry, Actor{}},
+		{"Mismatch: Unknown MatchKey", "bad_key", baseEntry, Actor{IPInfo: utils.NewIPInfo("192.0.2.1")}}, // Unknown key defaults to 'ip'
+		{"Mismatch: ipv4_ua (is IPv6)", "ipv4_ua", &LogEntry{IPInfo: utils.NewIPInfo("2001:db8::1")}, Actor{}},
+		{"Mismatch: ipv6_ua (is IPv4)", "ipv6_ua", baseEntry, Actor{}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chain := &BehavioralChain{MatchKey: tt.matchKey}
+			result := GetActor(chain, tt.entry)
+
+			if result != tt.expectedKey {
+				t.Errorf("GetActor() got key %+v, want %+v", result, tt.expectedKey)
+			}
+		})
 	}
 }

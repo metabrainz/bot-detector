@@ -3,11 +3,50 @@ package main
 import (
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/utils"
 	"fmt"
 	"sort"
 	"sync/atomic"
 	"time"
 )
+
+// GetActor constructs the correct Actor key for a given log entry based on the chain's match_key.
+// It handles IP version filtering and decides whether to include the User-Agent in the key.
+// If the entry's IP version doesn't match the key (e.g., ipv4 vs ipv6), it returns an empty Actor.
+func GetActor(chain *BehavioralChain, entry *LogEntry) Actor {
+	ipVersion := entry.IPInfo.Version
+	useUA := false
+
+	switch chain.MatchKey {
+	case "ip":
+		// Any IP version is fine.
+	case "ipv4":
+		if ipVersion != utils.VersionIPv4 {
+			return Actor{} // Mismatch, return empty actor
+		}
+	case "ipv6":
+		if ipVersion != utils.VersionIPv6 {
+			return Actor{} // Mismatch, return empty actor
+		}
+	case "ip_ua":
+		useUA = true
+	case "ipv4_ua":
+		if ipVersion != utils.VersionIPv4 {
+			return Actor{}
+		}
+		useUA = true
+	case "ipv6_ua":
+		if ipVersion != utils.VersionIPv6 {
+			return Actor{}
+		}
+		useUA = true
+	}
+
+	if useUA {
+		return Actor{IPInfo: entry.IPInfo, UA: entry.UserAgent}
+	}
+	return Actor{IPInfo: entry.IPInfo}
+}
 
 // GetMatchValue retrieves the field value from a LogEntry based on the field name.
 func GetMatchValue(fieldName string, entry *LogEntry) (interface{}, FieldType, error) {
@@ -270,7 +309,7 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 		// Update the in-memory state to reflect the block for both live and dry runs.
 		ipOnlyActor := Actor{IPInfo: entry.IPInfo, UA: ""}
 		ipActivity := GetOrCreateActorActivityUnsafe(p.ActivityStore, ipOnlyActor)
-		ipActivity.IsBlocked = true                                               // Mark as blocked
+		ipActivity.IsBlocked = true                                               // Mark as blocked_
 		ipActivity.SkipInfo = SkipInfo{Type: SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
 		ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration)
 

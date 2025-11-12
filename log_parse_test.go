@@ -3,6 +3,8 @@ package main
 import (
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/parser"
+	"bot-detector/internal/utils"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -38,7 +40,7 @@ func TestParseLogLine(t *testing.T) {
 			expectError: false,
 			expected: &LogEntry{
 				Timestamp:  testTime,
-				IPInfo:     NewIPInfo("192.168.1.1"),
+				IPInfo:     utils.NewIPInfo("192.168.1.1"),
 				Path:       "/path/to/resource",
 				Method:     "GET",
 				Protocol:   "HTTP/1.1",
@@ -55,7 +57,7 @@ func TestParseLogLine(t *testing.T) {
 			expectError: false,
 			expected: &LogEntry{
 				Timestamp:  testTime,
-				IPInfo:     NewIPInfo("2001:db8::1"),
+				IPInfo:     utils.NewIPInfo("2001:db8::1"),
 				Path:       "/path/to/resource",
 				Method:     "GET",
 				Protocol:   "HTTP/1.1",
@@ -72,7 +74,7 @@ func TestParseLogLine(t *testing.T) {
 			expectError: false,
 			expected: &LogEntry{
 				Timestamp:  testTime,
-				IPInfo:     NewIPInfo("192.168.1.3"),
+				IPInfo:     utils.NewIPInfo("192.168.1.3"),
 				Path:       "/upload",
 				Method:     "PUT",
 				Protocol:   "HTTP/2.0",
@@ -89,7 +91,7 @@ func TestParseLogLine(t *testing.T) {
 			expectError: false,
 			expected: &LogEntry{
 				Timestamp:  testTime,
-				IPInfo:     NewIPInfo("192.168.1.4"),
+				IPInfo:     utils.NewIPInfo("192.168.1.4"),
 				Path:       "/aborted",
 				Method:     "GET",
 				Protocol:   "HTTP/1.1",
@@ -106,7 +108,7 @@ func TestParseLogLine(t *testing.T) {
 			expectError: false,
 			expected: &LogEntry{
 				Timestamp:  testTime,
-				IPInfo:     NewIPInfo("192.168.1.5"),
+				IPInfo:     utils.NewIPInfo("192.168.1.5"),
 				Path:       "/no-content",
 				Method:     "GET",
 				Protocol:   "HTTP/1.1",
@@ -123,7 +125,7 @@ func TestParseLogLine(t *testing.T) {
 			expectError: false,
 			expected: &LogEntry{
 				Timestamp:  testTime,
-				IPInfo:     NewIPInfo("192.168.1.6"),
+				IPInfo:     utils.NewIPInfo("192.168.1.6"),
 				Path:       "", // Should be empty
 				Method:     "",
 				Protocol:   "", // Should be empty
@@ -176,7 +178,23 @@ func TestParseLogLine(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a processor to call the method on.
 			p := newTestProcessor(&AppConfig{TimestampFormat: AccessLogTimeFormat}, nil)
-			entry, err := ParseLogLine(p, tt.line)
+			parsedEntry, err := parser.ParseLogLine(p, tt.line)
+
+			var entry *LogEntry
+			if parsedEntry != nil {
+				entry = &LogEntry{
+					Timestamp:  parsedEntry.Timestamp,
+					IPInfo:     utils.NewIPInfo(parsedEntry.IPInfo.Address),
+					Method:     parsedEntry.Method,
+					Path:       parsedEntry.Path,
+					Protocol:   parsedEntry.Protocol,
+					Referrer:   parsedEntry.Referrer,
+					StatusCode: parsedEntry.StatusCode,
+					Size:       parsedEntry.Size,
+					UserAgent:  parsedEntry.UserAgent,
+					VHost:      parsedEntry.VHost,
+				}
+			}
 
 			if tt.expectError {
 				if err == nil {
@@ -212,7 +230,23 @@ func TestParseLogLine_CustomRegex(t *testing.T) {
 	p.LogRegex = customRegex
 
 	// 4. Act: Parse the log line using the processor with the custom regex.
-	entry, err := ParseLogLine(p, customLogLine)
+	parsedEntry, err := parser.ParseLogLine(p, customLogLine)
+	if err != nil {
+		t.Fatalf("parser.ParseLogLine with custom regex failed unexpectedly: %v", err)
+	}
+
+	entry := &LogEntry{
+		Timestamp:  parsedEntry.Timestamp,
+		IPInfo:     utils.NewIPInfo(parsedEntry.IPInfo.Address),
+		Method:     parsedEntry.Method,
+		Path:       parsedEntry.Path,
+		Protocol:   parsedEntry.Protocol,
+		Referrer:   parsedEntry.Referrer,
+		StatusCode: parsedEntry.StatusCode,
+		Size:       parsedEntry.Size,
+		UserAgent:  parsedEntry.UserAgent,
+		VHost:      parsedEntry.VHost,
+	}
 
 	// 5. Assert: The parsing should succeed and the data should be correct.
 	if err != nil {
@@ -222,7 +256,7 @@ func TestParseLogLine_CustomRegex(t *testing.T) {
 	expectedTime, _ := time.Parse(AccessLogTimeFormat, "10/Nov/2025:13:55:36 +0000")
 	expectedEntry := &LogEntry{
 		Timestamp:  expectedTime,
-		IPInfo:     NewIPInfo("198.51.100.5"),
+		IPInfo:     utils.NewIPInfo("198.51.100.5"),
 		Method:     "GET",
 		Path:       "/custom/path",
 		Protocol:   "HTTP/1.1",
@@ -239,7 +273,10 @@ func TestParseLogLine_CustomRegex(t *testing.T) {
 
 	// 6. Control Assertion: Verify the default parser (processor with nil regex) FAILS.
 	defaultProcessor := newTestProcessor(&AppConfig{TimestampFormat: AccessLogTimeFormat}, nil)
-	_, defaultErr := ParseLogLine(defaultProcessor, customLogLine)
+	// We need to call the parser function directly for this control test.
+	// The processor's ProcessLogLine would handle the error internally.
+	_, defaultErr := parser.ParseLogLine(defaultProcessor, customLogLine)
+
 	if defaultErr == nil {
 		t.Error("Expected the default parser to fail on the custom log line, but it succeeded.")
 	}
@@ -285,7 +322,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 
 	ip := "192.0.2.1"
 	logLine := fmt.Sprintf(`www.example.com %s - userx [06/Nov/2025:09:00:00 +0100] "GET /1 HTTP/1.1" 200 1234 "-" "-"`, ip)
-	key := Actor{IPInfo: NewIPInfo(ip)}
+	key := Actor{IPInfo: utils.NewIPInfo(ip)}
 
 	// Set the CheckChainsFunc to the real method on the processor instance.
 	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
@@ -366,7 +403,7 @@ func TestGetMatchValue_UnknownField(t *testing.T) {
 
 func TestGetMatchValue_Success(t *testing.T) {
 	entry := &LogEntry{
-		IPInfo:     NewIPInfo("192.0.2.1"),
+		IPInfo:     utils.NewIPInfo("192.0.2.1"),
 		Path:       "/test/path",
 		Method:     "GET",
 		Protocol:   "HTTP/1.1",
@@ -407,7 +444,7 @@ func TestGetMatchValue_Success(t *testing.T) {
 
 func TestGetMatchValueIfType(t *testing.T) {
 	entry := &LogEntry{
-		IPInfo:     NewIPInfo("192.0.2.1"),
+		IPInfo:     utils.NewIPInfo("192.0.2.1"),
 		Path:       "/test/path",
 		StatusCode: 404,
 	}

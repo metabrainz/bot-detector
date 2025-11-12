@@ -3,6 +3,8 @@ package main
 import (
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
+	"bot-detector/internal/parser"
+	"bot-detector/internal/utils"
 	"fmt"
 
 	"os"
@@ -593,11 +595,11 @@ chains:
 				entry    *LogEntry
 				expected bool
 			}{
-				"IP in range":      {entry: &LogEntry{IPInfo: NewIPInfo("192.168.1.100")}, expected: true},
-				"IP not in range":  {entry: &LogEntry{IPInfo: NewIPInfo("192.168.2.1")}, expected: false},
-				"IP is network":    {entry: &LogEntry{IPInfo: NewIPInfo("192.168.1.0")}, expected: true},
-				"IP is broadcast":  {entry: &LogEntry{IPInfo: NewIPInfo("192.168.1.255")}, expected: true},
-				"Invalid entry IP": {entry: &LogEntry{IPInfo: NewIPInfo("not-an-ip")}, expected: false},
+				"IP in range":      {entry: &LogEntry{IPInfo: utils.NewIPInfo("192.168.1.100")}, expected: true},
+				"IP not in range":  {entry: &LogEntry{IPInfo: utils.NewIPInfo("192.168.2.1")}, expected: false},
+				"IP is network":    {entry: &LogEntry{IPInfo: utils.NewIPInfo("192.168.1.0")}, expected: true},
+				"IP is broadcast":  {entry: &LogEntry{IPInfo: utils.NewIPInfo("192.168.1.255")}, expected: true},
+				"Invalid entry IP": {entry: &LogEntry{IPInfo: utils.NewIPInfo("not-an-ip")}, expected: false},
 			},
 		},
 		{
@@ -615,11 +617,11 @@ chains:
 				entry    *LogEntry
 				expected bool
 			}{
-				"IPv6 in range":       {entry: &LogEntry{IPInfo: NewIPInfo("2001:db8:abcd:0012:dead:beef:cafe:babe")}, expected: true},
-				"IPv6 not in range":   {entry: &LogEntry{IPInfo: NewIPInfo("2001:db8:abcd:0013::1")}, expected: false},
-				"IPv6 is network":     {entry: &LogEntry{IPInfo: NewIPInfo("2001:db8:abcd:0012::")}, expected: true},
-				"IPv4 does not match": {entry: &LogEntry{IPInfo: NewIPInfo("192.168.1.1")}, expected: false},
-				"Invalid entry IP":    {entry: &LogEntry{IPInfo: NewIPInfo("not-an-ip")}, expected: false},
+				"IPv6 in range":       {entry: &LogEntry{IPInfo: utils.NewIPInfo("2001:db8:abcd:0012:dead:beef:cafe:babe")}, expected: true},
+				"IPv6 not in range":   {entry: &LogEntry{IPInfo: utils.NewIPInfo("2001:db8:abcd:0013::1")}, expected: false},
+				"IPv6 is network":     {entry: &LogEntry{IPInfo: utils.NewIPInfo("2001:db8:abcd:0012::")}, expected: true},
+				"IPv4 does not match": {entry: &LogEntry{IPInfo: utils.NewIPInfo("192.168.1.1")}, expected: false},
+				"Invalid entry IP":    {entry: &LogEntry{IPInfo: utils.NewIPInfo("not-an-ip")}, expected: false},
 			},
 		},
 		{
@@ -1097,13 +1099,25 @@ chains: []
 	}
 
 	// Now, test the parsing with this regex.
-	p := &Processor{
-		LogRegex: loadedCfg.LogFormatRegex,
-		Config:   &AppConfig{TimestampFormat: loadedCfg.TimestampFormat},
-	}
+	// Use the test helper to create a properly initialized processor.
+	p := newTestProcessor(&AppConfig{TimestampFormat: loadedCfg.TimestampFormat}, nil)
+	p.LogRegex = loadedCfg.LogFormatRegex
+
 	logLine := `example.com 192.0.2.1 - - [01/Jan/2025:12:00:00 +0000] "GET /path HTTP/1.1" 200 123 "http://a.real.referrer" "TestAgent/1.0"`
 
-	entry, err := ParseLogLine(p, logLine)
+	parsedEntry, err := parser.ParseLogLine(p, logLine)
+	if err != nil {
+		t.Fatalf("parser.ParseLogLine failed: %v", err)
+	}
+	entry := &LogEntry{
+		Timestamp: parsedEntry.Timestamp,
+		IPInfo:    utils.NewIPInfo(parsedEntry.IPInfo.Address),
+		Method:    parsedEntry.Method,
+		Path:      parsedEntry.Path,
+		Protocol:  parsedEntry.Protocol,
+		Referrer:  parsedEntry.Referrer,
+		UserAgent: parsedEntry.UserAgent,
+	}
 	if err != nil {
 		t.Fatalf("ParseLogLine failed with a valid regex missing an optional group: %v", err)
 	}
@@ -1156,13 +1170,23 @@ chains: []
 	}
 
 	// Now, test the parsing with this config.
-	p := &Processor{
-		LogRegex: loadedCfg.LogFormatRegex,
-		Config:   &AppConfig{TimestampFormat: loadedCfg.TimestampFormat},
-	}
+	p := newTestProcessor(&AppConfig{TimestampFormat: loadedCfg.TimestampFormat}, nil)
+	p.LogRegex = loadedCfg.LogFormatRegex
+
 	logLine := `192.0.2.1 [2025-01-01T12:00:00Z] /test`
 
-	entry, err := ParseLogLine(p, logLine)
+	parsedEntry, err := parser.ParseLogLine(p, logLine)
+	if err != nil {
+		t.Fatalf("parser.ParseLogLine failed: %v", err)
+	}
+	entry := &LogEntry{
+		Timestamp: parsedEntry.Timestamp,
+		IPInfo:    utils.NewIPInfo(parsedEntry.IPInfo.Address),
+		Method:    parsedEntry.Method,
+		Path:      parsedEntry.Path,
+		Protocol:  parsedEntry.Protocol,
+		Referrer:  parsedEntry.Referrer,
+	}
 	if err != nil {
 		t.Fatalf("ParseLogLine failed with a custom timestamp format: %v", err)
 	}
@@ -1644,7 +1668,7 @@ good_actors:
 	}
 
 	// Test the compiled matchers
-	googleIPEntry := &LogEntry{IPInfo: NewIPInfo("8.8.8.8"), UserAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"}
+	googleIPEntry := &LogEntry{IPInfo: utils.NewIPInfo("8.8.8.8"), UserAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"}
 
 	// The IP matcher should match
 	if !googlebotDef.IPMatchers[0](googleIPEntry) {

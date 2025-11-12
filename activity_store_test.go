@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/utils"
 	"testing"
 	"time"
 )
@@ -21,11 +22,11 @@ func TestCleanUpIdleActivity(t *testing.T) {
 
 	// 2. Create different activity states
 	now := time.Now()
-	actorUseless := Actor{IPInfo: NewIPInfo("192.0.2.1")}     // Will be older than MaxTimeSinceLastHit
-	actorStillUseful := Actor{IPInfo: NewIPInfo("192.0.2.2")} // Will be recent
-	actorIdle := Actor{IPInfo: NewIPInfo("192.0.2.3")}        // Will be older than IdleTimeout
-	actorBlocked := Actor{IPInfo: NewIPInfo("192.0.2.4")}     // Blocked, should not be cleaned up
-	actorStaleChain := Actor{IPInfo: NewIPInfo("192.0.2.5")}  // Has chain progress, but it's stale
+	actorUseless := Actor{IPInfo: utils.NewIPInfo("192.0.2.1")}     // Will be older than MaxTimeSinceLastHit
+	actorStillUseful := Actor{IPInfo: utils.NewIPInfo("192.0.2.2")} // Will be recent
+	actorIdle := Actor{IPInfo: utils.NewIPInfo("192.0.2.3")}        // Will be older than IdleTimeout
+	actorBlocked := Actor{IPInfo: utils.NewIPInfo("192.0.2.4")}     // Blocked, should not be cleaned up
+	actorStaleChain := Actor{IPInfo: utils.NewIPInfo("192.0.2.5")}  // Has chain progress, but it's stale
 
 	processor.ActivityMutex.Lock()
 	processor.ActivityStore[actorUseless] = &ActorActivity{LastRequestTime: now.Add(-60 * time.Millisecond)}
@@ -119,9 +120,9 @@ func TestCleanUpIdleActivity_MinTimeSinceLastHit(t *testing.T) {
 	// 2. Create different activity states
 	now := time.Now()
 	// This actor was last seen 6 minutes ago, which is > MaxTimeSinceLastHit. It should be cleaned up.
-	actorUselessForTimeRule := Actor{IPInfo: NewIPInfo("192.0.2.10")}
+	actorUselessForTimeRule := Actor{IPInfo: utils.NewIPInfo("192.0.2.10")}
 	// This actor was last seen 4 minutes ago, which is < MaxTimeSinceLastHit. It should be kept.
-	actorStillRelevantForTimeRule := Actor{IPInfo: NewIPInfo("192.0.2.20")}
+	actorStillRelevantForTimeRule := Actor{IPInfo: utils.NewIPInfo("192.0.2.20")}
 
 	processor.ActivityMutex.Lock()
 	processor.ActivityStore[actorUselessForTimeRule] = &ActorActivity{LastRequestTime: now.Add(-6 * time.Minute)}
