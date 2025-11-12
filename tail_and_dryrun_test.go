@@ -1189,7 +1189,7 @@ func TestLogMetricsSummary(t *testing.T) {
 
 	// Check Block Durations
 	assertContains(t, output, "--- Block Durations Triggered ---")
-	assertContains(t, output, "- 5m0s: 5")
+	assertContains(t, output, "- 5m: 5")
 
 	// Check Per-Blocker Commands
 	assertContains(t, output, "--- Commands Sent per Blocker ---")

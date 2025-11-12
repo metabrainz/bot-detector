@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	"bot-detector/internal/utils"
 	"bufio"
 	"bytes"
 	"compress/bzip2"
@@ -554,7 +555,7 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 		logFunc(logging.LevelInfo, logTag, "--- Block Durations Triggered ---")
 		sort.Slice(blockDurationMetrics, func(i, j int) bool { return blockDurationMetrics[i].Duration < blockDurationMetrics[j].Duration })
 		for _, metric := range blockDurationMetrics {
-			logFunc(logging.LevelInfo, logTag, "  - %v: %d", metric.Duration, metric.Count)
+			logFunc(logging.LevelInfo, logTag, "  - %s: %d", utils.FormatDuration(metric.Duration), metric.Count)
 		}
 	}
 
