@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
 	"bufio"
 	"bytes"
@@ -236,7 +237,7 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 
 	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Starting dry-run mode from %s", logSource)
 	startTime := time.Now()
-	p.TopActorsPerChain = make(map[string]map[string]*ActorStats) // Initialize for this dry run.
+	p.TopActorsPerChain = make(map[string]map[string]*store.ActorStats) // Initialize for this dry run.
 
 	// Use the shared line processing logic.
 	err := processFileLines(p, reader, func(line string) {
@@ -282,7 +283,7 @@ func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, st
 
 		type actorStat struct {
 			Actor string
-			Stats *ActorStats
+			Stats *store.ActorStats
 		}
 
 		var stats []actorStat

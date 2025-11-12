@@ -3,6 +3,7 @@ package main
 import (
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
+	"bot-detector/internal/store"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -185,7 +186,7 @@ chains:
 	// 3. Create the processor with the initial config.
 	processor := &Processor{
 		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[Actor]*ActorActivity),
+		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        initialLoadedCfg.Chains,

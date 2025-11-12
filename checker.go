@@ -3,6 +3,7 @@ package main
 import (
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
 	"fmt"
 	"sort"
@@ -91,14 +92,14 @@ func GetMatchValueIfType(fieldName string, entry *LogEntry, expectedType FieldTy
 
 // preCheckActivity performs initial checks on an actor before processing against chains.
 // It returns the relevant ActorActivity and a boolean indicating if further processing should be skipped.
-// The caller is responsible for locking/unlocking the ActivityMutex. It returns the SkipInfo if applicable.
-func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*ActorActivity, bool, SkipInfo) {
+// The caller is responsible for locking/unlocking the ActivityMutex. It returns the store.SkipInfo if applicable.
+func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*store.ActorActivity, bool, store.SkipInfo) {
 	// 2. Get or create actor activity and check for existing blocks.
-	activity := GetOrCreateActorActivityUnsafe(p.ActivityStore, actor)
+	activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 
 	// If a skip reason is already set (e.g., from a previous good_actor match),
 	// honor it and skip immediately.
-	if activity.SkipInfo.Type == SkipTypeGoodActor {
+	if activity.SkipInfo.Type == utils.SkipTypeGoodActor {
 		return activity, true, activity.SkipInfo
 	}
 
@@ -107,7 +108,7 @@ func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*ActorActivit
 			// Block has expired, clear it and proceed.
 			p.LogFunc(logging.LevelInfo, "EXPIRE", "Chain-specific block expired for actor %s (UA: %s).", actor.IPInfo.Address, actor.UA)
 			activity.IsBlocked = false
-			activity.SkipInfo = SkipInfo{} // Clear the skip info.
+			activity.SkipInfo = store.SkipInfo{} // Clear the skip info.
 			activity.BlockedUntil = time.Time{}
 		} else {
 			// Still blocked, update timestamp and skip.
@@ -115,15 +116,14 @@ func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*ActorActivit
 				activity.LastRequestTime = entry.Timestamp
 			}
 			// Only log the skip message the first time.
-			if activity.SkipInfo.Type != SkipTypeBlocked { // This ensures we only log once per block.
+			if activity.SkipInfo.Type != utils.SkipTypeBlocked { // This ensures we only log once per block.
 				// The source is already set when the block was applied.
 				p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (blocked:%s).", actor.IPInfo.Address, entry.UserAgent, activity.SkipInfo.Source)
 			}
 			return activity, true, activity.SkipInfo
 		}
 	}
-
-	return activity, false, SkipInfo{} // No skip, return empty SkipInfo
+	return activity, false, store.SkipInfo{} // No skip, return empty SkipInfo
 }
 
 // isGoodActor checks if a log entry matches any of the configured "good actor" definitions.
@@ -232,7 +232,7 @@ func handleOutOfOrder(p *Processor, entry *LogEntry) (buffered bool) {
 
 	// We use a simple 'ip' key here as a proxy for the activity's last seen time.
 	actor := Actor{IPInfo: entry.IPInfo}
-	actorActivity := GetOrCreateActorActivityUnsafe(p.ActivityStore, actor)
+	actorActivity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 	lastRequestTime := actorActivity.LastRequestTime
 
 	// If the entry is older than the last request we've seen for this IP,
@@ -256,7 +256,7 @@ func handleOutOfOrder(p *Processor, entry *LogEntry) (buffered bool) {
 // handleChainCompletion takes action when a chain is completed (log, block, etc.).
 // It updates the actor's state and returns true if the chain was completed.
 // It returns true if processing of other chains should be stopped for this log entry.
-func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *ActorActivity) bool {
+func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *store.ActorActivity) bool {
 	// Increment the counter for the specific chain that was completed.
 	// This is the equivalent of `chains_completed_total{chain="<name>"}`.
 	if val, ok := p.Metrics.ChainsCompleted.Load(chain.Name); ok {
@@ -289,10 +289,10 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 		actor := GetActor(chain, entry)
 		actorString := actor.String()
 		if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
-			p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
+			p.TopActorsPerChain[chain.Name] = make(map[string]*store.ActorStats)
 		}
 		if _, ok := p.TopActorsPerChain[chain.Name][actorString]; !ok {
-			p.TopActorsPerChain[chain.Name][actorString] = &ActorStats{}
+			p.TopActorsPerChain[chain.Name][actorString] = &store.ActorStats{}
 		}
 		p.TopActorsPerChain[chain.Name][actorString].Completions++
 	}
@@ -307,14 +307,14 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 		}
 		executeBlock(p, entry, chain)
 		// Update the in-memory state to reflect the block for both live and dry runs.
-		ipOnlyActor := Actor{IPInfo: entry.IPInfo, UA: ""}
-		ipActivity := GetOrCreateActorActivityUnsafe(p.ActivityStore, ipOnlyActor)
-		ipActivity.IsBlocked = true                                               // Mark as blocked_
-		ipActivity.SkipInfo = SkipInfo{Type: SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
+		ipOnlyActor := store.Actor(Actor{IPInfo: entry.IPInfo, UA: ""})
+		ipActivity := store.GetOrCreateUnsafe(p.ActivityStore, ipOnlyActor)
+		ipActivity.IsBlocked = true                                                           // Mark as blocked_
+		ipActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
 		ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration)
 
-		currentActivity.IsBlocked = true                                               // Mark as blocked
-		currentActivity.SkipInfo = SkipInfo{Type: SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
+		currentActivity.IsBlocked = true                                                           // Mark as blocked
+		currentActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
 		currentActivity.BlockedUntil = ipActivity.BlockedUntil
 	} else if chain.Action == "log" {
 		p.Metrics.LogActions.Add(1)
@@ -434,10 +434,10 @@ func handleTimeRuleReset(p *Processor, chain *BehavioralChain, entry *LogEntry, 
 		actor := GetActor(chain, entry)
 		actorString := actor.String()
 		if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
-			p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
+			p.TopActorsPerChain[chain.Name] = make(map[string]*store.ActorStats)
 		}
 		if _, ok := p.TopActorsPerChain[chain.Name][actorString]; !ok {
-			p.TopActorsPerChain[chain.Name][actorString] = &ActorStats{}
+			p.TopActorsPerChain[chain.Name][actorString] = &store.ActorStats{}
 		}
 		p.TopActorsPerChain[chain.Name][actorString].Resets++
 	}
@@ -461,7 +461,7 @@ func checkInterStepTimeRules(p *Processor, chain *BehavioralChain, entry *LogEnt
 // processChainForEntry evaluates a single log entry against a single behavioral chain.
 // It manages state transitions (advancing, resetting) and triggers completion handling.
 // It returns true if processing of other chains should be stopped for this entry.
-func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *ActorActivity, previousRequestTime time.Time) bool {
+func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *store.ActorActivity, previousRequestTime time.Time) bool {
 	// If GetActor returns an empty actor, it's a mismatch for this chain (e.g., wrong IP version).
 	if GetActor(chain, entry).IPInfo.Address == "" {
 		return false
@@ -479,7 +479,7 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 	state, exists := currentActivity.ChainProgress[chain.Name]
 	if !exists {
 		// Initialize state if it's the first time we're seeing this actor for this chain.
-		state = StepState{CurrentStep: 0, LastMatchTime: time.Time{}}
+		state = store.StepState{CurrentStep: 0, LastMatchTime: time.Time{}}
 	}
 
 	// Use a loop to handle step progression and potential resets within a single log entry.
@@ -531,10 +531,10 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 			actor := GetActor(chain, entry)
 			actorString := actor.String()
 			if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
-				p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
+				p.TopActorsPerChain[chain.Name] = make(map[string]*store.ActorStats)
 			}
 			if _, ok := p.TopActorsPerChain[chain.Name][actorString]; !ok {
-				p.TopActorsPerChain[chain.Name][actorString] = &ActorStats{}
+				p.TopActorsPerChain[chain.Name][actorString] = &store.ActorStats{}
 			}
 			p.TopActorsPerChain[chain.Name][actorString].Hits++
 		}
@@ -591,7 +591,7 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 	// A set to keep track of activities that have been processed for this entry.
 	// This is crucial to ensure that LastRequestTime is updated only once per activity,
 	// even if multiple chains map to the same actor.
-	processedActivities := make(map[*ActorActivity]struct{})
+	processedActivities := make(map[*store.ActorActivity]struct{})
 
 	// 2. Iterate over all configured chains.
 	for _, chain := range chains {
@@ -662,11 +662,11 @@ func CheckChains(p *Processor, entry *LogEntry) {
 	// 1. First, check if the entry is a good actor. This will set the SkipInfo on the actor's activity.
 	isGood, goodActorRuleName := isGoodActor(p, entry)
 	if isGood {
-		activity := GetOrCreateActorActivityUnsafe(p.ActivityStore, actor)
+		activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 
 		// Only log the skip message and set the state the first time.
-		if activity.SkipInfo.Type == SkipTypeNone {
-			activity.SkipInfo = SkipInfo{Type: SkipTypeGoodActor, Source: goodActorRuleName}
+		if activity.SkipInfo.Type == utils.SkipTypeNone {
+			activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeGoodActor, Source: goodActorRuleName}
 			p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (good_actor:%s).", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName)
 		}
 
@@ -681,7 +681,7 @@ func CheckChains(p *Processor, entry *LogEntry) {
 		if unblockEnabled {
 			// Use the existing activity for the IP-only actor.
 			// The lock is already held by the caller (CheckChains).
-			activity := GetOrCreateActorActivityUnsafe(p.ActivityStore, actor)
+			activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 
 			// Check if the cooldown has passed or if it has never been unblocked.
 			if activity.LastUnblockTime.IsZero() || time.Since(activity.LastUnblockTime) > unblockCooldown {
@@ -702,11 +702,11 @@ func CheckChains(p *Processor, entry *LogEntry) {
 	// This is the single point where we increment the per-reason skip metrics for all skips.
 	_, skip, skipInfo := preCheckActivity(p, entry, actor)
 	if skip {
-		if skipInfo.Type != SkipTypeNone {
+		if skipInfo.Type != utils.SkipTypeNone {
 			var reasonStr string
 			// Construct the reason string based on SkipInfo.Type for logging and metrics.
 			// This ensures consistency and avoids string parsing.
-			if skipInfo.Type == SkipTypeGoodActor {
+			if skipInfo.Type == utils.SkipTypeGoodActor {
 				reasonStr = fmt.Sprintf("good_actor:%s", skipInfo.Source)
 				p.Metrics.GoodActorsSkipped.Add(1)
 				if val, ok := p.Metrics.GoodActorHits.Load(skipInfo.Source); ok { // This map is pre-populated
@@ -714,7 +714,7 @@ func CheckChains(p *Processor, entry *LogEntry) {
 						counter.Add(1)
 					}
 				}
-			} else if skipInfo.Type == SkipTypeBlocked {
+			} else if skipInfo.Type == utils.SkipTypeBlocked {
 				reasonStr = fmt.Sprintf("blocked:%s", skipInfo.Source)
 			}
 

@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
+	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
 	"fmt"
 
@@ -23,16 +24,6 @@ const (
 	UnsupportedField
 )
 
-// SkipType defines the reason an actor's log entry was skipped.
-type SkipType byte
-
-const (
-	// SkipTypeNone is the zero value, indicating no skip.
-	SkipTypeNone SkipType = iota
-	SkipTypeGoodActor
-	SkipTypeBlocked
-)
-
 // TestSignals holds channels used exclusively for test synchronization.
 // This struct is nil in production.
 type TestSignals struct {
@@ -48,7 +39,7 @@ type TestSignals struct {
 // making it easy to mock/stub external calls and manage state in tests.
 type Processor struct {
 	ActivityMutex *sync.RWMutex
-	ActivityStore map[Actor]*ActorActivity
+	ActivityStore map[store.Actor]*store.ActorActivity
 	Blocker       blocker.Blocker
 	ConfigMutex   *sync.RWMutex
 	Metrics       *metrics.Metrics
@@ -67,10 +58,10 @@ type Processor struct {
 	signalOooBufferFlush func()
 	TestSignals          *TestSignals // Test-only signals for synchronization.
 	ConfigPath           string
-	LogPath              string
+	LogPath              string `test:"-"`
 	ReloadOnSignal       string
-	TopActorsPerChain    map[string]map[string]*ActorStats // Dry-run only: tracks top actors per chain.
-	TopN                 int                               // For dry-run stats: show top N actors.
+	TopActorsPerChain    map[string]map[string]*store.ActorStats // Dry-run only: tracks top actors per chain.
+	TopN                 int                                     // For dry-run stats: show top N actors.
 	startTime            time.Time
 }
 
@@ -194,6 +185,35 @@ type LogEntry struct {
 	VHost      string
 }
 
+// Actor is a comparable struct used as the key for the ActivityStore map. It represents
+// the unique entity being tracked (e.g., an IP address or an IP+UserAgent combination).
+type Actor struct {
+	IPInfo utils.IPInfo
+	UA     string // UserAgent. Empty string if tracking is IP-only.
+}
+
+// String provides a clean, readable representation of the Actor for logging.
+func (a Actor) String() string {
+	// Use a separator that is unlikely to appear in a User-Agent string.
+	if a.UA != "" {
+		return fmt.Sprintf("%s | %s", a.IPInfo.Address, a.UA)
+	}
+	return a.IPInfo.Address
+}
+
+// SkipInfo holds structured information about why an actor was skipped.
+type SkipInfo struct {
+	Type   utils.SkipType
+	Source string // The name of the good_actor rule or the blocking chain.
+}
+
+// StepState holds the progress of an actor within a single behavioral chain.
+type StepState struct {
+	CurrentStep   int
+	LastMatchTime time.Time
+}
+
+// StepDef holds the compiled definition of a single step in a behavioral chain.
 type StepDef struct {
 	Order               int
 	Matchers            []fieldMatcher // Pre-compiled matcher functions for performance.
@@ -202,6 +222,7 @@ type StepDef struct {
 	MinTimeSinceLastHit time.Duration
 }
 
+// BehavioralChain holds the compiled definition of a single behavioral chain.
 type BehavioralChain struct {
 	Name                     string
 	Action                   string
@@ -222,48 +243,4 @@ type GoodActorDef struct {
 	Name       string
 	IPMatchers []fieldMatcher // A list of matchers for the IP field (OR logic within the list)
 	UAMatchers []fieldMatcher // A list of matchers for the UserAgent field (OR logic within the list)
-}
-
-// SkipInfo holds structured information about why an actor was skipped.
-type SkipInfo struct {
-	Type   SkipType
-	Source string // The name of the good_actor rule or the blocking chain.
-}
-
-// ActorStats holds hit and completion counts for a specific actor in a chain.
-type ActorStats struct {
-	Hits        int64
-	Completions int64
-	Resets      int64
-}
-
-type StepState struct {
-	CurrentStep   int
-	LastMatchTime time.Time
-}
-
-// Actor is a comparable struct used as the key for the ActivityStore map. It represents
-// the unique entity being tracked (e.g., an IP address or an IP+UserAgent combination).
-type Actor struct {
-	IPInfo utils.IPInfo
-	UA     string // UserAgent. Empty string if tracking is IP-only.
-}
-
-// String provides a clean, readable representation of the Actor for logging.
-func (a Actor) String() string {
-	// Use a separator that is unlikely to appear in a User-Agent string.
-	if a.UA != "" {
-		return fmt.Sprintf("%s | %s", a.IPInfo.Address, a.UA)
-	}
-	return a.IPInfo.Address
-}
-
-// ActorActivity tracks state for a single actor (IP address or IP+UA combination) across all chains.
-type ActorActivity struct {
-	LastRequestTime time.Time // Time of the actor's most recent request.
-	BlockedUntil    time.Time // Time when the block expires.
-	LastUnblockTime time.Time // New: Tracks the last time an unblock command was issued for this actor.
-	ChainProgress   map[string]StepState
-	IsBlocked       bool // Flag to skip chain checks if this actor is blocked.
-	SkipInfo        SkipInfo
 }

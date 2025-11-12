@@ -7,6 +7,7 @@ import (
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/server"
+	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
 	"flag"
 	"fmt"
@@ -90,8 +91,8 @@ func main() {
 	// Initialize the Processor instance.
 	p := &Processor{
 		ActivityMutex:        &sync.RWMutex{},
-		TopActorsPerChain:    make(map[string]map[string]*ActorStats),
-		ActivityStore:        make(map[Actor]*ActorActivity),
+		TopActorsPerChain:    make(map[string]map[string]*store.ActorStats),
+		ActivityStore:        make(map[store.Actor]*store.ActorActivity),
 		ConfigMutex:          &sync.RWMutex{},
 		Metrics:              metrics.NewMetrics(),
 		Chains:               loadedCfg.Chains,
@@ -172,6 +173,50 @@ func (p *Processor) GetLogRegex() *regexp.Regexp {
 	return p.LogRegex
 }
 
+// --- StoreProvider Interface Implementation ---
+
+func (p *Processor) GetCleanupInterval() time.Duration {
+	return p.Config.CleanupInterval
+}
+
+func (p *Processor) GetIdleTimeout() time.Duration {
+	return p.Config.IdleTimeout
+}
+
+func (p *Processor) GetMaxTimeSinceLastHit() time.Duration {
+	return p.Config.MaxTimeSinceLastHit
+}
+
+func (p *Processor) GetTopN() int {
+	return p.TopN
+}
+
+func (p *Processor) GetTopActorsPerChain() map[string]map[string]*store.ActorStats {
+	return p.TopActorsPerChain
+}
+
+func (p *Processor) GetActivityStore() map[store.Actor]*store.ActorActivity {
+	return p.ActivityStore
+}
+
+func (p *Processor) GetActivityMutex() *sync.RWMutex {
+	return p.ActivityMutex
+}
+
+func (p *Processor) GetTestSignals() *store.TestSignals {
+	if p.TestSignals == nil {
+		return nil
+	}
+	// Convert main.TestSignals to store.TestSignals
+	return &store.TestSignals{
+		CleanupDoneSignal: p.TestSignals.CleanupDoneSignal,
+	}
+}
+
+func (p *Processor) IncrementActorsCleaned() {
+	p.Metrics.ActorsCleaned.Add(1)
+}
+
 // --- MetricsProvider Interface Implementation ---
 
 func (p *Processor) IncrementBlockerCmdsQueued() {
@@ -249,7 +294,7 @@ func start(p *Processor) {
 			} else {
 				go ConfigWatcher(p, stopWatcher)
 			}
-			go CleanUpIdleActors(p, stopWatcher)
+			go store.CleanUpIdleActors(p, stopWatcher)
 			go entryBufferWorker(p, stopWatcher)
 			go server.Start(p)
 		}

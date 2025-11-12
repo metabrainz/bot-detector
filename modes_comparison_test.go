@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
+	"bot-detector/internal/store"
 	"bufio"
 	"bytes"
 	"fmt"
@@ -107,7 +108,7 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 	// Initialize the processor.
 	p := &Processor{
 		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[Actor]*ActorActivity),
+		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		Metrics:       metrics.NewMetrics(),
 		ConfigMutex:   &sync.RWMutex{},
 		Chains:        loadedCfg.Chains,

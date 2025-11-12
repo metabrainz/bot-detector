@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/parser"
+	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
 	"fmt"
 
@@ -1229,7 +1230,7 @@ chains:
 	// 3. Create the processor with the initial config.
 	processor := &Processor{
 		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[Actor]*ActorActivity),
+		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        initialLoadedCfg.Chains, // Set initial chains
@@ -1421,7 +1422,7 @@ chains:
 	var logMutex sync.Mutex
 	processor := &Processor{
 		ConfigMutex: &sync.RWMutex{},
-		Chains:      initialLoadedCfg.Chains,
+		Chains:      initialLoadedCfg.Chains, // This is fine, as it's a local type
 		Config:      &AppConfig{},
 		TestSignals: &TestSignals{
 			ForceCheckSignal: make(chan struct{}, 1),

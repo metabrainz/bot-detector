@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/parser"
+	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
 	"fmt"
 	"reflect"
@@ -332,7 +333,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 
 	// Assertion 1: Check the DryRun store. The activity should exist and be blocked.
 	p.ActivityMutex.RLock()
-	dryRunActivity, exists := p.ActivityStore[key]
+	dryRunActivity, exists := p.ActivityStore[store.Actor(key)]
 	p.ActivityMutex.RUnlock()
 
 	if !exists {

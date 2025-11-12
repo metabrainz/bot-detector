@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
+	"bot-detector/internal/store"
 	"flag"
 	"fmt"
 	"io"
@@ -74,7 +75,7 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 	}
 	p := &Processor{
 		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[Actor]*ActorActivity),
+		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		// Blocker will be set below
 		ConfigMutex:       &sync.RWMutex{},
 		Metrics:           metrics.NewMetrics(),
@@ -82,7 +83,7 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 		Config:            config,
 		LogFunc:           func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 		EntryBuffer:       make([]*LogEntry, 0),
-		TopActorsPerChain: make(map[string]map[string]*ActorStats),
+		TopActorsPerChain: make(map[string]map[string]*store.ActorStats),
 
 		NowFunc: time.Now, // Default to real time for tests unless overridden.
 	}
@@ -234,7 +235,7 @@ func (h *checkerTestHarness) assertChainProgress(chainName string, entry *LogEnt
 	key := GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
-	activity, exists := h.processor.ActivityStore[key]
+	activity, exists := h.processor.ActivityStore[store.Actor(key)]
 	if !exists || activity.ChainProgress[chainName].CurrentStep != expectedStep {
 		h.t.Errorf("Expected chain '%s' to be at step %d, but it was not. Activity: %+v", chainName, expectedStep, activity)
 	}
@@ -246,7 +247,7 @@ func (h *checkerTestHarness) assertBlocked(entry *LogEntry, expected bool) { //n
 	key := GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
-	activity, exists := h.processor.ActivityStore[key]
+	activity, exists := h.processor.ActivityStore[store.Actor(key)]
 	if !exists && expected {
 		h.t.Errorf("Expected activity for key %+v to exist and be blocked, but it doesn't exist.", key)
 		return
@@ -262,7 +263,7 @@ func (h *checkerTestHarness) assertChainProgressCleared(chainName string, entry 
 	key := GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
-	activity, exists := h.processor.ActivityStore[key]
+	activity, exists := h.processor.ActivityStore[store.Actor(key)]
 	if exists && len(activity.ChainProgress) != 0 {
 		h.t.Errorf("Expected ChainProgress to be cleared for key %+v, but it has %d entries: %v", key, len(activity.ChainProgress), activity.ChainProgress)
 	}
