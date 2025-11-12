@@ -56,11 +56,18 @@ func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*ActorActivit
 	// 2. Get or create actor activity and check for existing blocks.
 	activity := GetOrCreateActorActivityUnsafe(p.ActivityStore, actor)
 
+	// If a skip reason is already set (e.g., from a previous good_actor match),
+	// honor it and skip immediately.
+	if activity.SkipReason != "" && !activity.IsBlocked {
+		return activity, true // Skip processing
+	}
+
 	if activity.IsBlocked {
 		if time.Now().After(activity.BlockedUntil) {
 			// Block has expired, clear it and proceed.
 			p.LogFunc(logging.LevelInfo, "EXPIRE", "Chain-specific block expired for actor %s (UA: %s).", actor.IPInfo.Address, actor.UA)
 			activity.IsBlocked = false
+			activity.BlockingChain = ""
 			activity.SkipReason = "" // Clear the skip reason as well.
 			activity.BlockedUntil = time.Time{}
 		} else {
@@ -70,7 +77,7 @@ func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*ActorActivit
 			}
 			// Only log the skip message the first time.
 			if activity.SkipReason == "" {
-				activity.SkipReason = "Already blocked in memory by a chain"
+				activity.SkipReason = fmt.Sprintf("blocked:%s", activity.BlockingChain)
 				p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (%s).", actor.IPInfo.Address, actor.UA, activity.SkipReason)
 			}
 			return activity, true // Skip processing
@@ -89,11 +96,6 @@ func isGoodActor(p *Processor, entry *LogEntry) bool {
 		return false
 	}
 
-	// To check/update the skip reason, we need the actor's activity.
-	// We use a simple IP-based actor key for this check.
-	actor := Actor{IPInfo: entry.IPInfo}
-	activity := GetOrCreateActorActivityUnsafe(p.ActivityStore, actor)
-
 	for _, def := range goodActors {
 		// A rule with no matchers is invalid and should be skipped.
 		if len(def.IPMatchers) == 0 && len(def.UAMatchers) == 0 {
@@ -107,9 +109,15 @@ func isGoodActor(p *Processor, entry *LogEntry) bool {
 
 		// For a rule to apply, all defined matchers must succeed.
 		if ipMatch && uaMatch {
+			// This actor is a good actor. Get its specific activity to log the skip reason.
+			// We use a simple IP-based actor key for this check, as the good_actor rule applies to the IP.
+			// This is a simplification; a more complex system might key this differently.
+			actor := Actor{IPInfo: entry.IPInfo}
+			activity := GetOrCreateActorActivityUnsafe(p.ActivityStore, actor)
+
 			// Only log the skip message the first time.
 			if activity.SkipReason == "" {
-				activity.SkipReason = fmt.Sprintf("Matched good actor rule '%s'", def.Name)
+				activity.SkipReason = fmt.Sprintf("good_actor:%s", def.Name)
 				p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (%s).", entry.IPInfo.Address, entry.UserAgent, activity.SkipReason)
 			}
 			return true
@@ -175,9 +183,11 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 		ipOnlyActor := Actor{IPInfo: entry.IPInfo, UA: ""}
 		ipActivity := GetOrCreateActorActivityUnsafe(p.ActivityStore, ipOnlyActor)
 		ipActivity.IsBlocked = true
+		ipActivity.BlockingChain = chain.Name
 		ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration)
 
 		currentActivity.IsBlocked = true
+		currentActivity.BlockingChain = chain.Name
 		currentActivity.BlockedUntil = ipActivity.BlockedUntil
 	} else if chain.Action == "log" {
 		p.Metrics.LogActions.Add(1)

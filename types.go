@@ -244,6 +244,7 @@ type ActorActivity struct {
 	LastRequestTime time.Time // Time of the actor's most recent request.
 	BlockedUntil    time.Time // Time when the block expires.
 	ChainProgress   map[string]StepState
-	IsBlocked       bool // Flag to skip chain checks if this actor is blocked.
+	IsBlocked       bool   // Flag to skip chain checks if this actor is blocked.
+	BlockingChain   string // Name of the chain that caused the block.
 	SkipReason      string
 }
