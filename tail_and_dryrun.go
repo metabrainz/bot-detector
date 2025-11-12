@@ -140,6 +140,11 @@ func delayOrShutdown(p *Processor, delay time.Duration, signalCh <-chan os.Signa
 		return false // Delay completed
 	case s := <-signalCh:
 		p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
+		// Re-broadcast the signal so other listeners (like in main()) can also receive it.
+		// This is crucial for a coordinated shutdown.
+		if p.signalCh != nil {
+			p.signalCh <- s
+		}
 		return true // Shutdown signal received
 	}
 }
