@@ -361,6 +361,51 @@ func getOnMatchSuffix(chain *BehavioralChain) string {
 	return ""
 }
 
+// checkFirstStepTimeRule validates the `min_time_since_last_hit` rule for the first step of a chain.
+// It returns true if the rule passes, and false otherwise.
+func checkFirstStepTimeRule(step *StepDef, timeSinceLastHit time.Duration, previousRequestTime time.Time) bool {
+	if step.MinTimeSinceLastHit > 0 {
+		// The rule is active. It fails if the actor has been seen before (`!IsZero`)
+		// and the time since the last hit is less than or equal to the minimum required.
+		if !previousRequestTime.IsZero() && timeSinceLastHit <= step.MinTimeSinceLastHit {
+			return false // Condition not met: actor was seen too recently.
+		}
+	}
+	return true // Rule passes (or is not configured).
+}
+
+// checkInterStepTimeRules validates `max_delay` and `min_delay` rules between steps.
+// It returns true if the chain should be reset due to a time rule violation.
+func checkInterStepTimeRules(p *Processor, chain *BehavioralChain, entry *LogEntry, step *StepDef, timeSinceLastStepHit time.Duration) bool {
+	if step.MaxDelayDuration > 0 && timeSinceLastStepHit > step.MaxDelayDuration {
+		if val, ok := p.Metrics.ChainsReset.Load(chain.Name); ok {
+			if counter, ok := val.(*atomic.Int64); ok {
+				counter.Add(1)
+			}
+		}
+		if p.DryRun {
+			actor := GetActor(chain, entry)
+			actorString := actor.String()
+			if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
+				p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
+			}
+			if _, ok := p.TopActorsPerChain[chain.Name][actorString]; !ok {
+				p.TopActorsPerChain[chain.Name][actorString] = &ActorStats{}
+			}
+			p.TopActorsPerChain[chain.Name][actorString].Resets++
+		}
+		p.LogFunc(logging.LevelDebug, "RESET", "Chain %s: MaxDelay %v exceeded. Resetting.", chain.Name, step.MaxDelayDuration)
+		return true // Reset the chain.
+	}
+	if step.MinDelayDuration > 0 && timeSinceLastStepHit < step.MinDelayDuration {
+		// This logic is identical to the MaxDelayDuration failure case.
+		// In a future refactor, this could be further consolidated.
+		p.LogFunc(logging.LevelDebug, "RESET", "Chain %s: MinDelay %v not met. Resetting.", chain.Name, step.MinDelayDuration)
+		return true // Reset the chain.
+	}
+	return false // No reset needed.
+}
+
 // processChainForEntry evaluates a single log entry against a single behavioral chain.
 // It manages state transitions (advancing, resetting) and triggers completion handling.
 // It returns true if processing of other chains should be stopped for this entry.
@@ -401,55 +446,14 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 		timeSinceLastStepHit := entry.Timestamp.Sub(state.LastMatchTime)
 
 		if isFirstStep {
-			// First-step specific checks
-			if step.MinTimeSinceLastHit > 0 {
-				if !previousRequestTime.IsZero() && timeSinceLastHit <= step.MinTimeSinceLastHit {
-					break // Condition not met: IP is new or was seen too recently.
-				}
+			if !checkFirstStepTimeRule(&step, timeSinceLastHit, previousRequestTime) {
+				break // First step time rule failed, stop processing this chain.
 			}
 		} else {
-			// Inter-step (2nd step onwards) checks
-			if step.MaxDelayDuration > 0 && timeSinceLastStepHit > step.MaxDelayDuration {
-				if val, ok := p.Metrics.ChainsReset.Load(chain.Name); ok {
-					if counter, ok := val.(*atomic.Int64); ok {
-						counter.Add(1)
-					}
-				}
-				if p.DryRun {
-					// Re-create the actor specific to this chain to get the correct actor string.
-					actor := GetActor(chain, entry)
-					actorString := actor.String()
-					if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
-						p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
-					}
-					if _, ok := p.TopActorsPerChain[chain.Name][actorString]; !ok {
-						p.TopActorsPerChain[chain.Name][actorString] = &ActorStats{}
-					}
-					p.TopActorsPerChain[chain.Name][actorString].Resets++
-				}
-				p.LogFunc(logging.LevelDebug, "RESET", "Chain %s: MaxDelay %v exceeded. Resetting.", chain.Name, step.MaxDelayDuration)
-				state.CurrentStep = 0
-				continue // Restart check from step 0.
-			}
-			if step.MinDelayDuration > 0 && timeSinceLastStepHit < step.MinDelayDuration {
-				if val, ok := p.Metrics.ChainsReset.Load(chain.Name); ok {
-					if counter, ok := val.(*atomic.Int64); ok {
-						counter.Add(1)
-					}
-				}
-				if p.DryRun {
-					// Re-create the actor specific to this chain to get the correct actor string.
-					actor := GetActor(chain, entry)
-					actorString := actor.String()
-					if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
-						p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
-					}
-					if _, ok := p.TopActorsPerChain[chain.Name][actorString]; !ok {
-						p.TopActorsPerChain[chain.Name][actorString] = &ActorStats{}
-					}
-					p.TopActorsPerChain[chain.Name][actorString].Resets++
-				}
-				p.LogFunc(logging.LevelDebug, "RESET", "Chain %s: MinDelay %v not met. Resetting.", chain.Name, step.MinDelayDuration)
+			// Inter-step (2nd+ step) time checks.
+			if checkInterStepTimeRules(p, chain, entry, &step, timeSinceLastStepHit) {
+				// The checkInterStepTimeRules function handles logging and metrics.
+				// It returns true if a reset is needed.
 				state.CurrentStep = 0
 				continue // Restart check from step 0.
 			}
