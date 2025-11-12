@@ -71,7 +71,7 @@ func (b *HAProxyBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 	}
 
 	// 4. Execute concurrently
-	return b.executeCommandsConcurrently(ipInfo.Address, targets)
+	return b.executeCommandsConcurrently(ipInfo.Address, targets, "block")
 }
 
 // Unblock removes an IP from all configured HAProxy stick tables.
@@ -126,7 +126,7 @@ func (b *HAProxyBlocker) Unblock(ipInfo IPInfo) error {
 	}
 
 	// 3. Execute concurrently
-	return b.executeCommandsConcurrently(ipInfo.Address, targets)
+	return b.executeCommandsConcurrently(ipInfo.Address, targets, "unblock")
 }
 
 // executeCommandImpl connects to a single HAProxy instance over TCP/Unix and executes the command.
@@ -200,12 +200,12 @@ func executeCommandImpl(p *Processor, addr, ip, command string) error {
 
 // executeHAProxyCommandsConcurrently handles the concurrent execution of multiple commands
 // against HAProxy instances.
-func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[string]map[string]string) error {
+func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[string]map[string]string, commandType string) error {
 	p := b.P
 	addresses := p.Config.BlockerAddresses
 
 	if len(addresses) == 0 {
-		p.LogFunc(logging.LevelWarning, "SKIP_COMMAND", "HAProxy addresses list is empty. Skipping command for IP %s.", ip)
+		p.LogFunc(logging.LevelWarning, "SKIP_COMMAND", "HAProxy addresses list is empty. Skipping '%s' command for IP %s.", commandType, ip)
 		return nil
 	}
 
@@ -254,7 +254,7 @@ func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[stri
 	// are not silently ignored by the caller.
 	if numErrs := len(errs); numErrs > 0 {
 		p.LogFunc(logging.LevelWarning, "HAPROXY_WARN", "One or more HAProxy instances failed to process command for IP %s. Total failures: %d", ip, numErrs)
-		return fmt.Errorf("%d HAProxy commands failed for IP %s", numErrs, ip)
+		return fmt.Errorf("%d HAProxy '%s' commands failed for IP %s", numErrs, commandType, ip)
 	}
 
 	return nil

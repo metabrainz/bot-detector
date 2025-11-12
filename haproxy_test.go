@@ -181,7 +181,7 @@ func TestUnblockIP_ErrorTolerance_Mocked(t *testing.T) {
 	if err == nil {
 		t.Fatal("UnblockIP was expected to return an error due to a failed instance, but it returned nil.")
 	}
-	if !strings.Contains(err.Error(), "2 HAProxy commands failed") {
+	if !strings.Contains(err.Error(), "2 HAProxy 'unblock' commands failed") {
 		t.Errorf("Expected error message to indicate 2 failures, but got: %v", err)
 	}
 
