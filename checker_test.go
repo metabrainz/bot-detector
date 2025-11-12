@@ -114,7 +114,7 @@ func TestPreCheckActivity_StillBlocked(t *testing.T) {
 			// --- Act ---
 			// We call the unexported preCheckActivity directly to isolate the logic under test.
 			processor.ActivityMutex.Lock()
-			_, skip := preCheckActivity(processor, entry, actor)
+			_, skip, _ := preCheckActivity(processor, entry, actor)
 			processor.ActivityMutex.Unlock()
 
 			// --- Assert ---

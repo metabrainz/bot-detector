@@ -13,6 +13,8 @@ type Metrics struct {
 	ChainsReset     *sync.Map
 	ChainsHits      *sync.Map
 	MatchKeyHits    *sync.Map
+	GoodActorHits   *sync.Map
+	SkipsByReason   *sync.Map
 	BlockDurations  *sync.Map
 	CmdsPerBlocker  *sync.Map
 
@@ -44,6 +46,8 @@ func NewMetrics() *Metrics {
 		ChainsReset:     &sync.Map{},
 		ChainsHits:      &sync.Map{},
 		MatchKeyHits:    &sync.Map{},
+		GoodActorHits:   &sync.Map{},
+		SkipsByReason:   &sync.Map{},
 		BlockDurations:  &sync.Map{},
 		CmdsPerBlocker:  &sync.Map{},
 	}

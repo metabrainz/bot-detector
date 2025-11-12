@@ -462,11 +462,45 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 		return true
 	})
 
+	// --- Log Skips by Reason ---
+	var skipsByReasonMetrics []struct {
+		Reason string
+		Count  int64
+	}
+	p.Metrics.SkipsByReason.Range(func(key, value interface{}) bool {
+		reason, _ := key.(string)
+		counter, _ := value.(*atomic.Int64)
+		if count := counter.Load(); count > 0 {
+			skipsByReasonMetrics = append(skipsByReasonMetrics, struct {
+				Reason string
+				Count  int64
+			}{reason, count})
+		}
+		return true
+	})
+
 	// --- Log MatchKey Hits ---
 	var totalMatchKeyHits int64
 	p.Metrics.MatchKeyHits.Range(func(key, value interface{}) bool {
 		if counter, ok := value.(*atomic.Int64); ok {
 			totalMatchKeyHits += counter.Load()
+		}
+		return true
+	})
+
+	// --- Log Good Actor Hits ---
+	var goodActorHitsMetrics []struct {
+		Name  string
+		Count int64
+	}
+	p.Metrics.GoodActorHits.Range(func(key, value interface{}) bool {
+		name, _ := key.(string)
+		counter, _ := value.(*atomic.Int64)
+		if count := counter.Load(); count > 0 {
+			goodActorHitsMetrics = append(goodActorHitsMetrics, struct {
+				Name  string
+				Count int64
+			}{name, count})
 		}
 		return true
 	})
@@ -492,6 +526,22 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 		sort.Slice(cmdsPerBlockerMetrics, func(i, j int) bool { return cmdsPerBlockerMetrics[i].Addr < cmdsPerBlockerMetrics[j].Addr })
 		for _, metric := range cmdsPerBlockerMetrics {
 			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Addr, metric.Count)
+		}
+	}
+
+	if len(skipsByReasonMetrics) > 0 {
+		logFunc(logging.LevelInfo, logTag, "--- Skips by Reason ---")
+		sort.Slice(skipsByReasonMetrics, func(i, j int) bool { return skipsByReasonMetrics[i].Reason < skipsByReasonMetrics[j].Reason })
+		for _, metric := range skipsByReasonMetrics {
+			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Reason, metric.Count)
+		}
+	}
+
+	if len(goodActorHitsMetrics) > 0 {
+		logFunc(logging.LevelInfo, logTag, "--- Good Actor Hits ---")
+		sort.Slice(goodActorHitsMetrics, func(i, j int) bool { return goodActorHitsMetrics[i].Name < goodActorHitsMetrics[j].Name })
+		for _, metric := range goodActorHitsMetrics {
+			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Name, metric.Count)
 		}
 	}
 
