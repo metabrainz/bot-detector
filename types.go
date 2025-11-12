@@ -25,6 +25,16 @@ const (
 	UnsupportedField
 )
 
+// SkipType defines the reason an actor's log entry was skipped.
+type SkipType byte
+
+const (
+	// SkipTypeNone is the zero value, indicating no skip.
+	SkipTypeNone SkipType = iota
+	SkipTypeGoodActor
+	SkipTypeBlocked
+)
+
 // TestSignals holds channels used exclusively for test synchronization.
 // This struct is nil in production.
 type TestSignals struct {
@@ -211,6 +221,12 @@ type GoodActorDef struct {
 	UAMatchers []fieldMatcher // A list of matchers for the UserAgent field (OR logic within the list)
 }
 
+// SkipInfo holds structured information about why an actor was skipped.
+type SkipInfo struct {
+	Type   SkipType
+	Source string // The name of the good_actor rule or the blocking chain.
+}
+
 // ActorStats holds hit and completion counts for a specific actor in a chain.
 type ActorStats struct {
 	Hits        int64
@@ -244,7 +260,6 @@ type ActorActivity struct {
 	LastRequestTime time.Time // Time of the actor's most recent request.
 	BlockedUntil    time.Time // Time when the block expires.
 	ChainProgress   map[string]StepState
-	IsBlocked       bool   // Flag to skip chain checks if this actor is blocked.
-	BlockingChain   string // Name of the chain that caused the block.
-	SkipReason      string
+	IsBlocked       bool // Flag to skip chain checks if this actor is blocked.
+	SkipInfo        SkipInfo
 }
