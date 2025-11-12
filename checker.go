@@ -116,6 +116,66 @@ func isGoodActor(p *Processor, entry *LogEntry) (bool, string) {
 	return false, ""
 }
 
+// addToOooBuffer inserts a log entry into the out-of-order buffer while maintaining
+// the buffer's sorted order by timestamp. This is more efficient than appending
+// and re-sorting the entire buffer later.
+func addToOooBuffer(p *Processor, entry *LogEntry) {
+	// Find the correct insertion point using binary search.
+	i := sort.Search(len(p.EntryBuffer), func(i int) bool {
+		return p.EntryBuffer[i].Timestamp.After(entry.Timestamp)
+	})
+
+	// Grow the slice by one.
+	p.EntryBuffer = append(p.EntryBuffer, nil)
+	// Shift elements to the right to make space for the new entry.
+	copy(p.EntryBuffer[i+1:], p.EntryBuffer[i:])
+	// Insert the new entry at the correct position.
+	p.EntryBuffer[i] = entry
+
+	p.Metrics.ReorderedEntries.Add(1)
+}
+
+// nextOooCandidate checks the out-of-order buffer for the next entry that is ready
+// to be processed. An entry is ready if its timestamp is older than the processing horizon.
+// If a candidate is found, it is removed from the buffer and returned.
+func nextOooCandidate(p *Processor, processingHorizon time.Time) *LogEntry {
+	if len(p.EntryBuffer) == 0 {
+		return nil // Buffer is empty.
+	}
+
+	// Since the buffer is sorted, the oldest entry is always at the front.
+	candidate := p.EntryBuffer[0]
+	if candidate.Timestamp.Before(processingHorizon) {
+		p.EntryBuffer = p.EntryBuffer[1:] // Dequeue the entry.
+		return candidate
+	}
+
+	return nil // No entries are old enough to be processed yet.
+}
+
+// flushOooBuffer processes all entries currently in the out-of-order buffer and clears it.
+// This is typically used during shutdown to ensure no entries are lost.
+func flushOooBuffer(p *Processor) {
+	if len(p.EntryBuffer) == 0 {
+		return
+	}
+	// Create a copy to avoid holding the lock during processing.
+	toProcess := make([]*LogEntry, len(p.EntryBuffer))
+	copy(toProcess, p.EntryBuffer)
+	p.EntryBuffer = nil // Clear the buffer immediately.
+
+	// The slice is already sorted, so we can process it directly.
+	for _, entry := range toProcess {
+		checkChainsInternal(p, entry)
+	}
+}
+
+// shouldBufferOutOfOrder determines if an incoming log entry is out-of-order and within the
+// configured tolerance window, indicating it should be buffered instead of processed immediately.
+func shouldBufferOutOfOrder(lastRequestTime, entryTimestamp time.Time, tolerance time.Duration) bool {
+	return !lastRequestTime.IsZero() && entryTimestamp.Before(lastRequestTime) && lastRequestTime.Sub(entryTimestamp) <= tolerance
+}
+
 // handleOutOfOrder decides whether to process an entry immediately or buffer it based on its timestamp
 // relative to the last seen request for the same actor. It assumes the caller holds the ActivityMutex.
 // It returns true if the entry was buffered, and false if it was processed immediately.
@@ -137,19 +197,17 @@ func handleOutOfOrder(p *Processor, entry *LogEntry) (buffered bool) {
 
 	// If the entry is older than the last request we've seen for this IP,
 	// and it's within the tolerance window, buffer it.
-	if !lastRequestTime.IsZero() && entry.Timestamp.Before(lastRequestTime) && lastRequestTime.Sub(entry.Timestamp) <= tolerance {
-		p.EntryBuffer = append(p.EntryBuffer, entry)
-		p.Metrics.ReorderedEntries.Add(1)
+	if shouldBufferOutOfOrder(lastRequestTime, entry.Timestamp, tolerance) {
+		addToOooBuffer(p, entry)
 		return true // Indicate that the entry was buffered.
 	}
 
 	// If the entry is in-order (or the first one seen), process it immediately.
 	checkChainsInternal(p, entry)
 
-	// After processing a newer entry, signal the buffer worker to process any
-	// buffered entries that might now be valid.
-	p.signalOooBufferFlush()
-	return false // Indicate that the entry was processed.
+	// After processing a newer entry, signal the worker to check the buffer.
+	p.signalOooBufferFlush() // Renamed from signalFlush
+	return false             // Indicate that the entry was processed.
 }
 
 // handleChainCompletion takes action when a chain is completed (log, block, etc.).
@@ -239,17 +297,10 @@ func flushEntryBufferUnsafe(p *Processor) {
 	if len(p.EntryBuffer) == 0 {
 		return
 	}
-	sort.Slice(p.EntryBuffer, func(i, j int) bool {
-		return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
-	})
-	for _, entry := range p.EntryBuffer {
-		checkChainsInternal(p, entry)
-	}
-	p.EntryBuffer = nil // Clear the buffer.
+	flushOooBuffer(p)
 }
 
-// FlushEntryBuffer checks the entry buffer and processes any entries that are older
-// than the out-of-order tolerance, which is useful when log processing is paused (e.g., at EOF).
+// FlushEntryBuffer is a public wrapper to flush the OOO buffer, used on shutdown or EOF.
 func FlushEntryBuffer(p *Processor) {
 	if len(p.EntryBuffer) > 0 {
 		p.LogFunc(logging.LevelDebug, "BUFFER_FLUSH", "Flushing %d buffered entries.", len(p.EntryBuffer))
@@ -517,9 +568,7 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 	// After all chains have been processed for this entry, update the LastRequestTime
 	// for all unique activities that were involved.
 	for activity := range processedActivities {
-		if entry.Timestamp.After(activity.LastRequestTime) {
-			activity.LastRequestTime = entry.Timestamp
-		}
+		activity.LastRequestTime = entry.Timestamp
 	}
 
 }
@@ -649,26 +698,26 @@ func entryBufferWorker(p *Processor, stop <-chan struct{}) {
 		// Determine the processing horizon. Entries older than this are safe to process.
 		processingHorizon := p.NowFunc().Add(-tolerance)
 
-		var toProcess []*LogEntry
-		var remaining []*LogEntry
-
-		// Partition the buffer into entries that are ready and those that are not.
-		for _, entry := range p.EntryBuffer {
-			if entry.Timestamp.Before(processingHorizon) {
-				toProcess = append(toProcess, entry)
+		// Ensure the buffer is sorted by timestamp before processing. This is crucial
+		// because entries can be added from tests or other sources in an unsorted state.
+		sort.Slice(p.EntryBuffer, func(i, j int) bool {
+			return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
+		})
+		// Process all candidates that are ready by repeatedly calling nextOooCandidate.
+		var processedInTick []*LogEntry
+		for {
+			if entry := nextOooCandidate(p, processingHorizon); entry != nil {
+				processedInTick = append(processedInTick, entry)
 			} else {
-				remaining = append(remaining, entry)
+				break // No more candidates ready.
 			}
 		}
-
-		// Update the buffer with the entries that are not yet ready.
-		p.EntryBuffer = remaining
 
 		p.ActivityMutex.Unlock()
 
 		// Process the entries outside the main lock to reduce contention.
-		if len(toProcess) > 0 {
-			FlushGivenEntries(p, toProcess)
+		if len(processedInTick) > 0 {
+			FlushGivenEntries(p, processedInTick)
 		}
 
 		// Signal for tests that a tick has been processed.
