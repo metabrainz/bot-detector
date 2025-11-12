@@ -377,33 +377,37 @@ func checkFirstStepTimeRule(step *StepDef, timeSinceLastHit time.Duration, previ
 	return true // Rule passes (or is not configured).
 }
 
+// handleTimeRuleReset logs the reason for a chain reset and updates metrics.
+// This helper is used by checkInterStepTimeRules to reduce code duplication.
+func handleTimeRuleReset(p *Processor, chain *BehavioralChain, entry *LogEntry, reason string, value time.Duration) {
+	if val, ok := p.Metrics.ChainsReset.Load(chain.Name); ok {
+		if counter, ok := val.(*atomic.Int64); ok {
+			counter.Add(1)
+		}
+	}
+	if p.DryRun {
+		actor := GetActor(chain, entry)
+		actorString := actor.String()
+		if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
+			p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
+		}
+		if _, ok := p.TopActorsPerChain[chain.Name][actorString]; !ok {
+			p.TopActorsPerChain[chain.Name][actorString] = &ActorStats{}
+		}
+		p.TopActorsPerChain[chain.Name][actorString].Resets++
+	}
+	p.LogFunc(logging.LevelDebug, "RESET", "Chain %s: %s %v. Resetting.", chain.Name, reason, value)
+}
+
 // checkInterStepTimeRules validates `max_delay` and `min_delay` rules between steps.
 // It returns true if the chain should be reset due to a time rule violation.
 func checkInterStepTimeRules(p *Processor, chain *BehavioralChain, entry *LogEntry, step *StepDef, timeSinceLastStepHit time.Duration) bool {
 	if step.MaxDelayDuration > 0 && timeSinceLastStepHit > step.MaxDelayDuration {
-		if val, ok := p.Metrics.ChainsReset.Load(chain.Name); ok {
-			if counter, ok := val.(*atomic.Int64); ok {
-				counter.Add(1)
-			}
-		}
-		if p.DryRun {
-			actor := GetActor(chain, entry)
-			actorString := actor.String()
-			if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
-				p.TopActorsPerChain[chain.Name] = make(map[string]*ActorStats)
-			}
-			if _, ok := p.TopActorsPerChain[chain.Name][actorString]; !ok {
-				p.TopActorsPerChain[chain.Name][actorString] = &ActorStats{}
-			}
-			p.TopActorsPerChain[chain.Name][actorString].Resets++
-		}
-		p.LogFunc(logging.LevelDebug, "RESET", "Chain %s: MaxDelay %v exceeded. Resetting.", chain.Name, step.MaxDelayDuration)
+		handleTimeRuleReset(p, chain, entry, "MaxDelay exceeded", step.MaxDelayDuration)
 		return true // Reset the chain.
 	}
 	if step.MinDelayDuration > 0 && timeSinceLastStepHit < step.MinDelayDuration {
-		// This logic is identical to the MaxDelayDuration failure case.
-		// In a future refactor, this could be further consolidated.
-		p.LogFunc(logging.LevelDebug, "RESET", "Chain %s: MinDelay %v not met. Resetting.", chain.Name, step.MinDelayDuration)
+		handleTimeRuleReset(p, chain, entry, "MinDelay not met", step.MinDelayDuration)
 		return true // Reset the chain.
 	}
 	return false // No reset needed.
