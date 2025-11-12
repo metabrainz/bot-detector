@@ -205,9 +205,12 @@ func handleOutOfOrder(p *Processor, entry *LogEntry) (buffered bool) {
 	// If the entry is in-order (or the first one seen), process it immediately.
 	checkChainsInternal(p, entry)
 
-	// After processing a newer entry, signal the worker to check the buffer.
-	p.signalOooBufferFlush() // Renamed from signalFlush
-	return false             // Indicate that the entry was processed.
+	// After processing a newer entry, signal the worker to check the buffer,
+	// but only if there are entries in the buffer to process.
+	if len(p.EntryBuffer) > 0 {
+		p.signalOooBufferFlush()
+	}
+	return false // Indicate that the entry was processed.
 }
 
 // handleChainCompletion takes action when a chain is completed (log, block, etc.).
