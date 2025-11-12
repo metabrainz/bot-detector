@@ -164,18 +164,16 @@ func TestRateLimitedBlocker_Stop(t *testing.T) {
 	// Wait for the first command to ensure the worker is running.
 	h.waitForCommands(1)
 
-	// Queue another command.
-	h.rlb.Block(ip, 5*time.Minute)
-
 	// Stop the worker immediately. This is safe to call multiple times.
 	h.rlb.Stop()
 
-	// Give a moment to see if any more commands get processed after stopping.
-	time.Sleep(50 * time.Millisecond)
+	// Now that Stop() waits, we can be sure no more commands will be processed.
+	// Try to queue another command. It should be ignored because the queue channel
+	// is not being read from anymore.
+	h.rlb.Block(ip, 5*time.Minute)
 
-	// At most one command should have been processed if the timing was just right,
-	// but no more than that.
-	if h.blockCount.Load() > 1 {
-		t.Errorf("Expected at most 1 block to be processed after stopping, got %d", h.blockCount.Load())
+	// Only the first command should have been processed.
+	if h.blockCount.Load() != 1 {
+		t.Errorf("Expected exactly 1 block to be processed after stopping, got %d", h.blockCount.Load())
 	}
 }
