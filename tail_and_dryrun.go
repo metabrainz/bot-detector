@@ -689,6 +689,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			}
 
 			p.ProcessLogLine(line)
+			p.Metrics.LinesProcessed.Add(1)
 		}
 	}
 }
