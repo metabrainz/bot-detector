@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	metrics "bot-detector/internal/metrics"
 	"bufio"
 	"bytes"
 	"fmt"
@@ -589,7 +590,7 @@ func TestDryRunMode(t *testing.T) {
 		ActivityStore:     make(map[Actor]*ActorActivity),
 		TopActorsPerChain: make(map[string]map[string]*ActorStats),
 		ConfigMutex:       &sync.RWMutex{},
-		Metrics:           NewMetrics(),
+		Metrics:           metrics.NewMetrics(),
 		Chains:            loadedCfg.Chains,
 		Config: &AppConfig{
 			OutOfOrderTolerance: 0, // Disable buffering for this specific test.

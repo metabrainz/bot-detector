@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	metrics "bot-detector/internal/metrics"
 	"bufio"
 	"bytes"
 	"fmt"
@@ -106,7 +107,7 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 	p := &Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[Actor]*ActorActivity),
-		Metrics:       NewMetrics(),
+		Metrics:       metrics.NewMetrics(),
 		ConfigMutex:   &sync.RWMutex{},
 		Chains:        loadedCfg.Chains,
 		Config:        appConfig,

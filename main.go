@@ -4,6 +4,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	metrics "bot-detector/internal/metrics"
 	"flag"
 	"fmt"
 	"log"
@@ -85,7 +86,7 @@ func main() {
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[Actor]*ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
-		Metrics:       NewMetrics(),
+		Metrics:       metrics.NewMetrics(),
 		Chains:        loadedCfg.Chains,
 		CommandExecutor: func(p *Processor, addr, ip, command string) error {
 			return executeCommandImpl(p, addr, ip, command)

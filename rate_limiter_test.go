@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	metrics "bot-detector/internal/metrics"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -40,7 +41,7 @@ func newRateLimiterTestHarness(t *testing.T, queueSize, commandsPerSecond int) *
 	}
 	h.processor = &Processor{
 		LogFunc: logging.LogOutput,
-		Metrics: NewMetrics(), // Initialize the Metrics struct
+		Metrics: metrics.NewMetrics(), // Initialize the Metrics struct
 	}
 	h.rlb = NewRateLimitedBlocker(h.processor, h.mockBlocker, queueSize, commandsPerSecond)
 	t.Cleanup(h.rlb.Stop)
@@ -132,7 +133,7 @@ func TestRateLimitedBlocker_ZeroRate(t *testing.T) {
 	}
 	processor := &Processor{
 		LogFunc: logging.LogOutput,
-		Metrics: NewMetrics(),
+		Metrics: metrics.NewMetrics(),
 	}
 
 	queueSize := 10

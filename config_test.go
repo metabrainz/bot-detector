@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	metrics "bot-detector/internal/metrics"
 	"fmt"
 
 	"os"
@@ -1262,7 +1263,7 @@ chains:
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[Actor]*ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
-		Metrics:       NewMetrics(),
+		Metrics:       metrics.NewMetrics(),
 		Chains:        initialLoadedCfg.Chains, // Set initial chains
 		Config: &AppConfig{ // Set initial config state
 			PollingInterval: 10 * time.Millisecond,

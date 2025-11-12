@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	metrics "bot-detector/internal/metrics"
 	"flag"
 	"fmt"
 	"io"
@@ -75,7 +76,7 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 		ActivityStore: make(map[Actor]*ActorActivity),
 		// Blocker will be set below
 		ConfigMutex:       &sync.RWMutex{},
-		Metrics:           NewMetrics(),
+		Metrics:           metrics.NewMetrics(),
 		Chains:            chains,
 		Config:            config,
 		LogFunc:           func(level logging.LogLevel, tag string, format string, args ...interface{}) {},

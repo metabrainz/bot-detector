@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	metrics "bot-detector/internal/metrics"
 	"fmt"
 
 	"os"
@@ -59,7 +60,7 @@ type Processor struct {
 	ActivityStore   map[Actor]*ActorActivity
 	Blocker         Blocker
 	ConfigMutex     *sync.RWMutex
-	Metrics         *Metrics
+	Metrics         *metrics.Metrics
 	Chains          []BehavioralChain
 	CommandExecutor func(p *Processor, addr, ip, command string) error // The function that executes the backend command
 	Config          *AppConfig

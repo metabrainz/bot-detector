@@ -1,4 +1,4 @@
-package main
+package metrics_test
 
 import (
 	"testing"
@@ -6,7 +6,7 @@ import (
 
 func TestNewMetrics(t *testing.T) {
 	// Act
-	m := NewMetrics()
+	m := metrics.NewMetrics()
 
 	// Assert
 	if m == nil {

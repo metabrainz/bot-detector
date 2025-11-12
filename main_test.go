@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	metrics "bot-detector/internal/metrics"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -186,7 +187,7 @@ chains:
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[Actor]*ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
-		Metrics:       NewMetrics(),
+		Metrics:       metrics.NewMetrics(),
 		Chains:        initialLoadedCfg.Chains,
 		Config:        &AppConfig{},
 		signalCh:      make(chan os.Signal, 1), // Initialize the signal channel
