@@ -403,7 +403,7 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 		if isFirstStep {
 			// First-step specific checks
 			if step.MinTimeSinceLastHit > 0 {
-				if previousRequestTime.IsZero() || timeSinceLastHit <= step.MinTimeSinceLastHit {
+				if !previousRequestTime.IsZero() && timeSinceLastHit <= step.MinTimeSinceLastHit {
 					break // Condition not met: IP is new or was seen too recently.
 				}
 			}

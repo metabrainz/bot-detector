@@ -516,10 +516,10 @@ func TestCheckChains_TimeRules(t *testing.T) {
 			shouldChainProgress: true,
 		},
 		{
-			name: "min_time_since_last_hit FAILURE - IP never seen before",
+			name: "min_time_since_last_hit SUCCESS - IP never seen before",
 			// Zero time indicates the IP has never been seen, so the rule doesn't match.
 			primingTimeOffset:   0,
-			shouldChainProgress: false,
+			shouldChainProgress: true,
 		},
 	}
 
