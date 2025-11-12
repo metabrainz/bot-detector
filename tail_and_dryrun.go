@@ -11,9 +11,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"reflect"
 	"sort"
-	"strconv"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -318,6 +317,37 @@ func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, st
 	}
 }
 
+// metricItem is a generic struct to hold data collected from a sync.Map.
+type metricItem struct {
+	Key   string
+	Count int64
+}
+
+// collectMetricsFromMap is a helper to gather and sort metrics from a sync.Map.
+func collectMetricsFromMap(m *sync.Map) []metricItem {
+	var items []metricItem
+	m.Range(func(key, value interface{}) bool {
+		if k, ok := key.(string); ok {
+			if counter, ok := value.(*atomic.Int64); ok {
+				if count := counter.Load(); count > 0 {
+					items = append(items, metricItem{Key: k, Count: count})
+				}
+			}
+		}
+		return true
+	})
+	sort.Slice(items, func(i, j int) bool { return items[i].Key < items[j].Key })
+	return items
+}
+
+// formatPercentage calculates and formats a percentage string.
+func formatPercentage(value, total int64) string {
+	if total == 0 {
+		return "0.00%"
+	}
+	return fmt.Sprintf("%.2f%%", (float64(value)/float64(total))*100)
+}
+
 // logMetricsSummary calculates and logs a summary of all application metrics.
 // It is a generic function that can be used in different contexts (e.g., dry-run, periodic live summary).
 //
@@ -327,7 +357,7 @@ func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, st
 //   - logFunc: The logging function to use for output.
 //   - logTag: The tag to use for each log line (e.g., "METRICS").
 //   - filterTag: The struct tag to filter which general metrics to display (e.g., "dryrun").
-func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag, filterTag string) {
+func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag, filterTag string) { //nolint:cyclop
 	// --- Metrics Calculation ---
 	type chainMetric struct {
 		Name        string
@@ -374,49 +404,34 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 	// --- Log Summary ---
 	linesProcessed := p.Metrics.LinesProcessed.Load()
 
-	// Display general metrics based on struct tags.
-	val := reflect.ValueOf(p.Metrics).Elem()
-	typ := val.Type()
-	for i := 0; i < val.NumField(); i++ {
-		field := typ.Field(i)
-		fieldName := field.Name
+	// Define general metrics to display, replacing the complex reflection logic.
+	generalMetrics := []struct {
+		Name        string
+		Counter     *atomic.Int64
+		Show        bool
+		ShowPercent bool
+	}{
+		{"Lines Processed", &p.Metrics.LinesProcessed, true, false},
+		{"Valid Hits", &p.Metrics.ValidHits, true, true},
+		{"Parse Errors", &p.Metrics.ParseErrors, true, true},
+		{"Good Actors Skipped", &p.Metrics.GoodActorsSkipped, true, false},
+		{"Reordered Entries", &p.Metrics.ReorderedEntries, true, false},
+		{"Actors Cleaned", &p.Metrics.ActorsCleaned, true, false},
+		{"Blocker Commands Queued", &p.Metrics.BlockerCmdsQueued, filterTag == "metric", false},
+		{"Blocker Commands Dropped", &p.Metrics.BlockerCmdsDropped, filterTag == "metric", false},
+		{"Blocker Commands Executed", &p.Metrics.BlockerCmdsExecuted, filterTag == "metric", false},
+		{"Blocker Retries", &p.Metrics.BlockerRetries, filterTag == "metric", false},
+	}
 
-		// Skip individual action counters as they will be combined.
-		if fieldName == "BlockActions" || fieldName == "LogActions" {
+	for _, metric := range generalMetrics {
+		if !metric.Show {
 			continue
 		}
-
-		// Determine if the metric should be shown.
-		// If the filterTag is "metric", we show all fields that have a metric name.
-		// Otherwise, we check the boolean value of the specified filter tag (e.g., "dryrun").
-		show := false
-		if filterTag == "metric" {
-			show = field.Tag.Get("metric") != ""
+		value := metric.Counter.Load()
+		if metric.ShowPercent && linesProcessed > 0 {
+			logFunc(logging.LevelInfo, logTag, "%s: %d (%s)", metric.Name, value, formatPercentage(value, linesProcessed))
 		} else {
-			show, _ = strconv.ParseBool(field.Tag.Get(filterTag))
-		}
-
-		if show {
-			if metricName := field.Tag.Get("metric"); metricName != "" {
-				// We must work with a pointer to the atomic field to avoid copying a lock value.
-				// .Addr() gets the address, .Interface() gets it as an interface{},
-				// and then we type-assert it to the correct pointer type.
-				if counter, ok := val.Field(i).Addr().Interface().(*atomic.Int64); ok {
-					value := counter.Load()
-					// For specific metrics, add a percentage relative to total lines processed.
-					switch fieldName {
-					case "ValidHits", "ParseErrors":
-						if linesProcessed > 0 {
-							percentage := (float64(value) / float64(linesProcessed)) * 100
-							logFunc(logging.LevelInfo, logTag, "%s: %d (%.2f%%)", metricName, value, percentage)
-						} else {
-							logFunc(logging.LevelInfo, logTag, "%s: %d", metricName, value)
-						}
-					default:
-						logFunc(logging.LevelInfo, logTag, "%s: %d", metricName, value)
-					}
-				}
-			}
+			logFunc(logging.LevelInfo, logTag, "%s: %d", metric.Name, value)
 		}
 	}
 
@@ -434,24 +449,10 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 	}
 
 	// --- Log Commands per Blocker ---
-	var cmdsPerBlockerMetrics []struct {
-		Addr  string
-		Count int64
-	}
-	p.Metrics.CmdsPerBlocker.Range(func(key, value interface{}) bool {
-		addr, _ := key.(string)
-		counter, _ := value.(*atomic.Int64)
-		if count := counter.Load(); count > 0 {
-			cmdsPerBlockerMetrics = append(cmdsPerBlockerMetrics, struct {
-				Addr  string
-				Count int64
-			}{addr, count})
-		}
-		return true
-	})
+	cmdsPerBlockerMetrics := collectMetricsFromMap(p.Metrics.CmdsPerBlocker)
 
 	// --- Log Block Duration Hits ---
-	var blockDurationMetrics []struct {
+	var blockDurationMetrics []struct { // Keep this separate due to time.Duration key
 		Duration time.Duration
 		Count    int64
 	}
@@ -468,85 +469,41 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 	})
 
 	// --- Log Skips by Reason ---
-	var skipsByReasonMetrics []struct {
-		Reason string
-		Count  int64
-	}
-	p.Metrics.SkipsByReason.Range(func(key, value interface{}) bool {
-		reason, _ := key.(string)
-		counter, _ := value.(*atomic.Int64)
-		if count := counter.Load(); count > 0 {
-			skipsByReasonMetrics = append(skipsByReasonMetrics, struct {
-				Reason string
-				Count  int64
-			}{reason, count})
-		}
-		return true
-	})
+	skipsByReasonMetrics := collectMetricsFromMap(p.Metrics.SkipsByReason)
 
 	// --- Log MatchKey Hits ---
+	matchKeyHitsMetrics := collectMetricsFromMap(p.Metrics.MatchKeyHits)
 	var totalMatchKeyHits int64
-	p.Metrics.MatchKeyHits.Range(func(key, value interface{}) bool {
-		if counter, ok := value.(*atomic.Int64); ok {
-			totalMatchKeyHits += counter.Load()
-		}
-		return true
-	})
+	for _, item := range matchKeyHitsMetrics {
+		totalMatchKeyHits += item.Count
+	}
 
 	// --- Log Good Actor Hits ---
-	var goodActorHitsMetrics []struct {
-		Name  string
-		Count int64
-	}
-	p.Metrics.GoodActorHits.Range(func(key, value interface{}) bool {
-		name, _ := key.(string)
-		counter, _ := value.(*atomic.Int64)
-		if count := counter.Load(); count > 0 {
-			goodActorHitsMetrics = append(goodActorHitsMetrics, struct {
-				Name  string
-				Count int64
-			}{name, count})
-		}
-		return true
-	})
+	goodActorHitsMetrics := collectMetricsFromMap(p.Metrics.GoodActorHits)
 
 	logFunc(logging.LevelInfo, logTag, "--- Match Key Hits (Total: %d) ---", totalMatchKeyHits)
-	p.Metrics.MatchKeyHits.Range(func(key, value interface{}) bool {
-		matchKey, _ := key.(string)
-		counter, _ := value.(*atomic.Int64)
-		count := counter.Load()
-		if count > 0 {
-			if totalMatchKeyHits > 0 {
-				percentage := (float64(count) / float64(totalMatchKeyHits)) * 100
-				logFunc(logging.LevelInfo, logTag, "  - %s: %d (%.2f%%)", matchKey, count, percentage)
-			} else {
-				logFunc(logging.LevelInfo, logTag, "  - %s: %d", matchKey, count)
-			}
-		}
-		return true
-	})
+	for _, metric := range matchKeyHitsMetrics {
+		logFunc(logging.LevelInfo, logTag, "  - %s: %d (%s)", metric.Key, metric.Count, formatPercentage(metric.Count, totalMatchKeyHits))
+	}
 
 	if len(cmdsPerBlockerMetrics) > 0 {
 		logFunc(logging.LevelInfo, logTag, "--- Commands Sent per Blocker ---")
-		sort.Slice(cmdsPerBlockerMetrics, func(i, j int) bool { return cmdsPerBlockerMetrics[i].Addr < cmdsPerBlockerMetrics[j].Addr })
 		for _, metric := range cmdsPerBlockerMetrics {
-			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Addr, metric.Count)
+			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Key, metric.Count)
 		}
 	}
 
 	if len(skipsByReasonMetrics) > 0 {
 		logFunc(logging.LevelInfo, logTag, "--- Skips by Reason ---")
-		sort.Slice(skipsByReasonMetrics, func(i, j int) bool { return skipsByReasonMetrics[i].Reason < skipsByReasonMetrics[j].Reason })
 		for _, metric := range skipsByReasonMetrics {
-			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Reason, metric.Count)
+			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Key, metric.Count)
 		}
 	}
 
 	if len(goodActorHitsMetrics) > 0 {
 		logFunc(logging.LevelInfo, logTag, "--- Good Actor Hits ---")
-		sort.Slice(goodActorHitsMetrics, func(i, j int) bool { return goodActorHitsMetrics[i].Name < goodActorHitsMetrics[j].Name })
 		for _, metric := range goodActorHitsMetrics {
-			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Name, metric.Count)
+			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Key, metric.Count)
 		}
 	}
 
@@ -565,18 +522,11 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 		logFunc(logging.LevelInfo, logTag, "--- Per-Chain Metrics ---")
 		for _, metric := range allChainMetrics {
 			if validHits > 0 {
-				// Hits percentage is relative to total valid hits for the run.
-				hitsPct := (float64(metric.Hits) / float64(validHits)) * 100
-				// Completions and Resets percentages are relative to their respective totals.
-				var completionsPct, resetsPct float64
-				if totalChainsCompleted > 0 {
-					completionsPct = (float64(metric.Completions) / float64(totalChainsCompleted)) * 100
-				}
-				if totalChainsReset > 0 {
-					resetsPct = (float64(metric.Resets) / float64(totalChainsReset)) * 100
-				}
-				logFunc(logging.LevelInfo, logTag, "  - %s: Hits: %d (%.2f%%), Completed: %d (%.2f%%), Resets: %d (%.2f%%)",
-					metric.Name, metric.Hits, hitsPct, metric.Completions, completionsPct, metric.Resets, resetsPct)
+				hitsPctStr := formatPercentage(metric.Hits, validHits)
+				completionsPctStr := formatPercentage(metric.Completions, totalChainsCompleted)
+				resetsPctStr := formatPercentage(metric.Resets, totalChainsReset)
+				logFunc(logging.LevelInfo, logTag, "  - %s: Hits: %d (%s), Completed: %d (%s), Resets: %d (%s)",
+					metric.Name, metric.Hits, hitsPctStr, metric.Completions, completionsPctStr, metric.Resets, resetsPctStr)
 			} else {
 				logFunc(logging.LevelInfo, logTag, "  - %s: Hits: %d, Completed: %d, Resets: %d",
 					metric.Name, metric.Hits, metric.Completions, metric.Resets)
