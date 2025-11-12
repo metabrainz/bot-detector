@@ -30,9 +30,16 @@ func startMetricsServer(p *Processor) {
 
 	// Listen for shutdown signal to gracefully close the server.
 	go func() {
-		<-p.signalCh
+		s := <-p.signalCh
 		p.LogFunc(logging.LevelInfo, "HTTP_SERVER", "Shutting down metrics web server.")
 		server.Close()
+
+		// Re-broadcast the signal so other listeners (like LiveLogTailer) can also receive it.
+		// This is a non-blocking send to avoid deadlocking if the channel is full.
+		select {
+		case p.signalCh <- s:
+		default:
+		}
 	}()
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
