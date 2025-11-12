@@ -833,16 +833,6 @@ chains:
 			expectedError: "match_key cannot be empty",
 		},
 		{
-			name: "Block Action Missing Duration",
-			yamlContent: `
-version: "1.0"
-chains:
-  - name: "Test"
-    action: "block" # No block_duration and no default
-`,
-			expectedError: "block_duration is missing or zero",
-		},
-		{
 			name: "Object Matcher with Non-Integer Value",
 			yamlContent: `
 version: "1.0"
@@ -934,6 +924,17 @@ func TestLoadConfigFromYAML_Warnings(t *testing.T) {
 		yamlContent     string
 		expectedWarning string
 	}{
+		{
+			name: "Block Action Missing Duration",
+			yamlContent: `
+version: "1.0"
+chains:
+  - name: "Test"
+    match_key: "ip"
+    action: "block" # No block_duration and no default
+`,
+			expectedWarning: "chain 'Test' has action 'block' but block_duration is missing or zero and no default is set. This chain will be skipped.",
+		},
 		{
 			name: "Block Duration without any Duration Tables",
 			yamlContent: `

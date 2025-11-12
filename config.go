@@ -818,8 +818,8 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 
 		// 4. Enforce that 'block' actions must have a non-zero duration.
 		if yamlChain.Action == "block" && blockDuration == 0 {
-			// This is now a non-fatal warning. The chain will be loaded but will be ineffective.
-			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "chain '%s' has action 'block' but block_duration is missing or zero. This chain will be skipped.", yamlChain.Name)
+			// This is a non-fatal warning. The chain will not be loaded.
+			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "chain '%s' has action 'block' but block_duration is missing or zero and no default is set. This chain will be skipped.", yamlChain.Name)
 			// Skip adding this invalid chain to the list of new chains.
 			continue
 		}
