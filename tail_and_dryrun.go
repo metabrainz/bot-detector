@@ -443,7 +443,7 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 	logFunc(logging.LevelInfo, logTag, "Chains Completed: %d", totalChainsCompleted)
 	logFunc(logging.LevelInfo, logTag, "Chains Reset: %d", totalChainsReset)
 
-	logFunc(logging.LevelInfo, logTag, "Time Elapsed: %v", elapsedTime)
+	logFunc(logging.LevelInfo, logTag, "Time Elapsed: %v", elapsedTime.Round(time.Second))
 
 	if elapsedTime.Seconds() > 0 {
 		linesPerSecond := float64(linesProcessed) / elapsedTime.Seconds()
