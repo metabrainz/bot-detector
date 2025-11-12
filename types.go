@@ -245,4 +245,5 @@ type ActorActivity struct {
 	BlockedUntil    time.Time // Time when the block expires.
 	ChainProgress   map[string]StepState
 	IsBlocked       bool // Flag to skip chain checks if this actor is blocked.
+	SkipReason      string
 }
