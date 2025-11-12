@@ -1,6 +1,7 @@
 package metrics_test
 
 import (
+	"bot-detector/internal/metrics"
 	"testing"
 )
 
