@@ -163,3 +163,12 @@ musicbrainz.org 8.8.8.8 - - [28/Oct/2025:17:08:01 +0000] "GET /block/step2 HTTP/
 # ===
 musicbrainz.org 8.8.8.8 - - [28/Oct/2025:17:09:00 +0000] "GET /block/step1 HTTP/1.1" 200 100 "-" "SomeOtherAgent"
 musicbrainz.org 8.8.8.8 - - [28/Oct/2025:17:09:01 +0000] "GET /block/step2 HTTP/1.1" 200 100 "-" "SomeOtherAgent"
+
+# ======================================================================================
+# === TEST CASE 21: Good Actor Skip (IP from file-based regex)
+# === (NO EXPECTED LOG for this chain)
+# === This actor's IP (192.168.1.100) matches the regex in `good_actors_ips.txt`.
+# === It should be skipped before any chain processing.
+# ===
+musicbrainz.org 192.168.1.100 - - [28/Oct/2025:17:10:00 +0000] "GET /block/step1 HTTP/1.1" 200 100 "-" "GoodActorRegexIP"
+musicbrainz.org 192.168.1.100 - - [28/Oct/2025:17:10:01 +0000] "GET /block/step2 HTTP/1.1" 200 100 "-" "GoodActorRegexIP"

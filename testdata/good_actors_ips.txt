@@ -1,0 +1,3 @@
+# List of trusted IP networks for good_actors
+cidr:10.10.10.0/24
+regex:^192\.168\.1\..*

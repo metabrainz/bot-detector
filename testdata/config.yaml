@@ -4,7 +4,7 @@ out_of_order_tolerance: "5s" # Required for Test Case 5
 
 good_actors:
   our_network:
-    IP: "cidr:10.10.10.0/24"
+    IP: "file:good_actors_ips.txt"
   monitoring_agent:
     UserAgent: "regex:(?i)HealthCheck"
   known_bot:
