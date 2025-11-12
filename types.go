@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
 	"fmt"
@@ -45,26 +46,19 @@ type TestSignals struct {
 	ForceCheckSignal  chan struct{}
 }
 
-// Blocker defines the interface for external IP blocking services (e.g., HAProxy).
-type Blocker interface {
-	Block(ipInfo IPInfo, duration time.Duration) error
-	Unblock(ipInfo IPInfo) error
-}
-
 // --- DEPENDENCY CONTAINER ---
 
 // Processor holds all necessary dependencies and state for log processing,
 // making it easy to mock/stub external calls and manage state in tests.
 type Processor struct {
-	ActivityMutex   *sync.RWMutex
-	ActivityStore   map[Actor]*ActorActivity
-	Blocker         Blocker
-	ConfigMutex     *sync.RWMutex
-	Metrics         *metrics.Metrics
-	Chains          []BehavioralChain
-	CommandExecutor func(p *Processor, addr, ip, command string) error // The function that executes the backend command
-	Config          *AppConfig
-	DryRun          bool
+	ActivityMutex *sync.RWMutex
+	ActivityStore map[Actor]*ActorActivity
+	Blocker       blocker.Blocker
+	ConfigMutex   *sync.RWMutex
+	Metrics       *metrics.Metrics
+	Chains        []BehavioralChain
+	Config        *AppConfig
+	DryRun        bool
 
 	EntryBuffer          []*LogEntry    // Buffer for holding out-of-order entries.
 	oooBufferFlushSignal chan struct{}  // Signal to the entryBufferWorker to flush the OOO buffer immediately.

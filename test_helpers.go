@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
 	"flag"
@@ -46,12 +47,12 @@ func resetGlobalState() {
 
 // MockBlocker implements the Blocker interface for testing, allowing Block() calls to be intercepted.
 type MockBlocker struct {
-	BlockFunc   func(ipInfo IPInfo, duration time.Duration) error
-	UnblockFunc func(ipInfo IPInfo) error
+	BlockFunc   func(ipInfo blocker.IPInfo, duration time.Duration) error
+	UnblockFunc func(ipInfo blocker.IPInfo) error
 }
 
 // Block calls the stored mock function to simulate the blocking action.
-func (m *MockBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
+func (m *MockBlocker) Block(ipInfo blocker.IPInfo, duration time.Duration) error {
 	if m.BlockFunc != nil {
 		return m.BlockFunc(ipInfo, duration)
 	}
@@ -59,7 +60,7 @@ func (m *MockBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 }
 
 // Unblock calls the stored mock function to simulate the unblocking action.
-func (m *MockBlocker) Unblock(ipInfo IPInfo) error {
+func (m *MockBlocker) Unblock(ipInfo blocker.IPInfo) error {
 	if m.UnblockFunc != nil {
 		return m.UnblockFunc(ipInfo)
 	}
@@ -85,9 +86,9 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 
 		NowFunc: time.Now, // Default to real time for tests unless overridden.
 	}
-	// Create a real HAProxyBlocker and link it to the processor.
-	blocker := &HAProxyBlocker{P: p}
-	p.Blocker = blocker
+	// Create a real HAProxyBlocker using the new package constructor.
+	haproxyBlocker := blocker.NewHAProxyBlocker(p, false) // dryRun is false by default for tests.
+	p.Blocker = haproxyBlocker
 	// Initialize signalFlush to prevent nil pointer dereference in tests.
 	p.oooBufferFlushSignal = make(chan struct{}, 1)
 	p.signalOooBufferFlush = p.doSignalOooBufferFlush
@@ -163,7 +164,7 @@ type checkerTestHarness struct {
 	blockCalled   bool
 	unblockCalled bool
 	blockCallArgs struct {
-		ipInfo   IPInfo
+		ipInfo   blocker.IPInfo
 		duration time.Duration
 	}
 	capturedLogs []string
@@ -179,13 +180,13 @@ func newCheckerTestHarness(t *testing.T, config *AppConfig) *checkerTestHarness 
 
 	// Setup a mock blocker to intercept calls.
 	mockBlocker := &MockBlocker{
-		BlockFunc: func(ipInfo IPInfo, duration time.Duration) error {
+		BlockFunc: func(ipInfo blocker.IPInfo, duration time.Duration) error {
 			h.blockCalled = true
 			h.blockCallArgs.ipInfo = ipInfo
 			h.blockCallArgs.duration = duration
 			return nil
 		},
-		UnblockFunc: func(ipInfo IPInfo) error {
+		UnblockFunc: func(ipInfo blocker.IPInfo) error {
 			h.unblockCalled = true
 			return nil
 		},

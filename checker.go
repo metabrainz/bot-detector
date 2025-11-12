@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	"fmt"
 	"sort"
@@ -289,7 +290,12 @@ func executeBlock(p *Processor, entry *LogEntry, chain *BehavioralChain) {
 	if p.DryRun {
 		return
 	}
-	if err := p.Blocker.Block(entry.IPInfo, chain.BlockDuration); err != nil {
+	// Convert main.IPInfo to blocker.IPInfo before calling the blocker.
+	blockerIPInfo := blocker.IPInfo{
+		Address: entry.IPInfo.Address,
+		Version: byte(entry.IPInfo.Version),
+	}
+	if err := p.Blocker.Block(blockerIPInfo, chain.BlockDuration); err != nil {
 		// Error is logged inside Block, no action needed here.
 	}
 }
@@ -641,8 +647,13 @@ func CheckChains(p *Processor, entry *LogEntry) {
 			// Check if the cooldown has passed or if it has never been unblocked.
 			if activity.LastUnblockTime.IsZero() || time.Since(activity.LastUnblockTime) > unblockCooldown {
 				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s. Issuing unblock command.", entry.IPInfo.Address)
+				// Convert main.IPInfo to blocker.IPInfo before calling the blocker.
+				blockerIPInfo := blocker.IPInfo{
+					Address: entry.IPInfo.Address,
+					Version: byte(entry.IPInfo.Version),
+				}
 				// The blocker's Unblock method is non-blocking and rate-limited.
-				p.Blocker.Unblock(entry.IPInfo)
+				p.Blocker.Unblock(blockerIPInfo)
 				activity.LastUnblockTime = time.Now()
 			}
 		}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
 	"bufio"
@@ -124,7 +125,7 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 	p.signalOooBufferFlush = p.doSignalOooBufferFlush
 
 	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
-	p.Blocker = &HAProxyBlocker{P: p} // Initialize the blocker to prevent nil pointer panic.
+	p.Blocker = blocker.NewHAProxyBlocker(p, dryRun) // Initialize the blocker to prevent nil pointer panic.
 
 	lineProcessedCh := make(chan struct{}, 100) // Buffered channel to prevent blocking
 	p.ProcessLogLine = func(line string) {

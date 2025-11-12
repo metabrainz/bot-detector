@@ -1,0 +1,313 @@
+package blocker_test
+
+import (
+	"bot-detector/internal/blocker"
+	"bot-detector/internal/logging"
+	"bufio"
+	"fmt"
+	"net"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// mockHAProxyProvider implements the HAProxyProvider interface for testing.
+type mockHAProxyProvider struct {
+	blockerAddresses       []string
+	durationTables         map[time.Duration]string
+	blockTableNameFallback string
+	blockerMaxRetries      int
+	blockerRetryDelay      time.Duration
+	blockerDialTimeout     time.Duration
+	retries                atomic.Int32
+	cmdsPerBlocker         sync.Map
+	logs                   []string
+	logMutex               sync.Mutex
+}
+
+func (m *mockHAProxyProvider) Log(level logging.LogLevel, tag string, format string, v ...interface{}) {
+	m.logMutex.Lock()
+	defer m.logMutex.Unlock()
+	m.logs = append(m.logs, fmt.Sprintf(format, v...))
+}
+func (m *mockHAProxyProvider) GetBlockerAddresses() []string { return m.blockerAddresses }
+func (m *mockHAProxyProvider) GetDurationTables() map[time.Duration]string {
+	return m.durationTables
+}
+func (m *mockHAProxyProvider) GetBlockTableNameFallback() string    { return m.blockTableNameFallback }
+func (m *mockHAProxyProvider) GetBlockerMaxRetries() int            { return m.blockerMaxRetries }
+func (m *mockHAProxyProvider) GetBlockerRetryDelay() time.Duration  { return m.blockerRetryDelay }
+func (m *mockHAProxyProvider) GetBlockerDialTimeout() time.Duration { return m.blockerDialTimeout }
+func (m *mockHAProxyProvider) IncrementBlockerRetries()             { m.retries.Add(1) }
+func (m *mockHAProxyProvider) IncrementCmdsPerBlocker(addr string) {
+	val, _ := m.cmdsPerBlocker.LoadOrStore(addr, new(atomic.Int32))
+	val.(*atomic.Int32).Add(1)
+}
+
+func newMockHAProxyProvider() *mockHAProxyProvider {
+	return &mockHAProxyProvider{
+		blockerAddresses:   []string{"127.0.0.1:9999"},
+		durationTables:     make(map[time.Duration]string),
+		blockerMaxRetries:  1,
+		blockerRetryDelay:  1 * time.Millisecond,
+		blockerDialTimeout: 100 * time.Millisecond,
+	}
+}
+
+// haproxyTestHarness encapsulates the setup for HAProxy blocker tests.
+type haproxyTestHarness struct {
+	t            *testing.T
+	mockProvider *mockHAProxyProvider
+	blocker      *blocker.HAProxyBlocker
+	mu           sync.Mutex
+	commands     []string
+}
+
+func newHAProxyTestHarness(t *testing.T) *haproxyTestHarness {
+	t.Helper()
+	h := &haproxyTestHarness{t: t}
+	h.mockProvider = newMockHAProxyProvider()
+	h.blocker = blocker.NewHAProxyBlocker(h.mockProvider, false)
+
+	// Override the executor to capture commands instead of making network calls.
+	h.blocker.Executor = func(addr, ip, command string) error {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.commands = append(h.commands, strings.TrimSpace(command))
+		return nil
+	}
+	return h
+}
+
+func TestHAProxyBlocker_Block(t *testing.T) {
+	h := newHAProxyTestHarness(t)
+	h.mockProvider.durationTables[10*time.Minute] = "table_10m"
+
+	ipInfo := blocker.IPInfo{Address: "192.0.2.1", Version: 4}
+	duration := 10 * time.Minute
+
+	err := h.blocker.Block(ipInfo, duration)
+	if err != nil {
+		t.Fatalf("Block() failed unexpectedly: %v", err)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.commands) != 1 {
+		t.Fatalf("Expected 1 command, got %d", len(h.commands))
+	}
+	expectedCmd := "set table table_10m_ipv4 key 192.0.2.1 data.gpc0 1"
+	if h.commands[0] != expectedCmd {
+		t.Errorf("Expected command '%s', got '%s'", expectedCmd, h.commands[0])
+	}
+}
+
+func TestHAProxyBlocker_Unblock(t *testing.T) {
+	h := newHAProxyTestHarness(t)
+	h.mockProvider.durationTables[10*time.Minute] = "table_10m"
+	h.mockProvider.blockTableNameFallback = "table_long"
+
+	ipInfo := blocker.IPInfo{Address: "192.0.2.1", Version: 4}
+
+	err := h.blocker.Unblock(ipInfo)
+	if err != nil {
+		t.Fatalf("Unblock() failed unexpectedly: %v", err)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	expectedCmds := map[string]struct{}{
+		"clear table table_10m_ipv4 key 192.0.2.1":  {},
+		"clear table table_long_ipv4 key 192.0.2.1": {},
+	}
+
+	if len(h.commands) != len(expectedCmds) {
+		t.Fatalf("Expected %d unblock commands, got %d", len(expectedCmds), len(h.commands))
+	}
+
+	for _, cmd := range h.commands {
+		if _, ok := expectedCmds[cmd]; !ok {
+			t.Errorf("Received unexpected unblock command: %s", cmd)
+		}
+	}
+}
+
+func TestHAProxyBlocker_Block_Fallback(t *testing.T) {
+	h := newHAProxyTestHarness(t)
+	h.mockProvider.durationTables[5*time.Minute] = "table_5m"
+	h.mockProvider.blockTableNameFallback = "table_fallback"
+
+	ipInfo := blocker.IPInfo{Address: "192.0.2.5", Version: 4}
+	unconfiguredDuration := 30 * time.Minute
+
+	err := h.blocker.Block(ipInfo, unconfiguredDuration)
+	if err != nil {
+		t.Fatalf("Block() failed unexpectedly: %v", err)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.commands) != 1 {
+		t.Fatalf("Expected 1 command, got %d", len(h.commands))
+	}
+	expectedCmd := "set table table_fallback_ipv4 key 192.0.2.5 data.gpc0 1"
+	if h.commands[0] != expectedCmd {
+		t.Errorf("Expected command to use fallback table '%s', but got: '%s'", expectedCmd, h.commands[0])
+	}
+}
+
+func TestHAProxyBlocker_ErrorTolerance(t *testing.T) {
+	h := newHAProxyTestHarness(t)
+	h.mockProvider.blockerAddresses = []string{"working:9999", "failing:9999"}
+	h.mockProvider.durationTables[1*time.Minute] = "table_1m"
+
+	// Override executor to simulate one failure.
+	h.blocker.Executor = func(addr, ip, command string) error {
+		if strings.HasPrefix(addr, "failing") {
+			return fmt.Errorf("connection refused")
+		}
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.commands = append(h.commands, command)
+		return nil
+	}
+
+	ipInfo := blocker.IPInfo{Address: "2001:db8::1", Version: 6}
+
+	err := h.blocker.Unblock(ipInfo)
+	if err == nil {
+		t.Fatal("Expected an error due to a failed instance, but got nil.")
+	}
+	if !strings.Contains(err.Error(), "1 HAProxy 'unblock' commands failed") {
+		t.Errorf("Expected error message about 1 failure, but got: %v", err)
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.commands) != 1 {
+		t.Errorf("Expected 1 successful command, but got %d", len(h.commands))
+	}
+}
+
+// --- Low-Level Network Tests for executeCommandImpl ---
+
+// startMockServer sets up a temporary TCP server on a random port for testing.
+func startMockServer(t *testing.T, handler func(net.Conn)) (net.Listener, string, func()) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to listen: %v", err)
+	}
+	addr := l.Addr().String()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		conn, err := l.Accept()
+		if err != nil {
+			return // Expected when the listener is closed.
+		}
+		defer conn.Close()
+		handler(conn)
+	}()
+
+	return l, addr, func() {
+		l.Close()
+		wg.Wait()
+	}
+}
+
+func TestExecuteCommandImpl_Success(t *testing.T) {
+	// Start a server that returns an empty response (success).
+	_, addr, closeFn := startMockServer(t, func(conn net.Conn) {
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		_, _ = conn.Write([]byte(" \n")) // Success response
+	})
+	defer closeFn()
+
+	h := newNetworkTestHarness(t)
+	h.mockProvider.blockerAddresses = []string{addr}
+
+	// We are testing the real implementation via the Executor field.
+	err := h.blocker.Executor(addr, "192.0.2.1", "test command\n")
+	if err != nil {
+		t.Fatalf("Expected success, got error: %v", err)
+	}
+}
+
+func TestExecuteCommandImpl_HAProxyError(t *testing.T) {
+	// Start a server that returns a specific HAProxy error message.
+	_, addr, closeFn := startMockServer(t, func(conn net.Conn) {
+		reader := bufio.NewReader(conn)
+		_, _ = reader.ReadString('\n')
+		_, _ = conn.Write([]byte("No such table: foo\n"))
+	})
+	defer closeFn()
+
+	h := newNetworkTestHarness(t)
+	h.mockProvider.blockerAddresses = []string{addr}
+
+	err := h.blocker.Executor(addr, "192.0.2.1", "test command\n")
+	if err == nil {
+		t.Fatal("Expected an HAProxy command execution error, got nil")
+	}
+	expectedErrMsg := "HAProxy command execution failed for IP 192.0.2.1 (Response: No such table: foo)"
+	if !strings.Contains(err.Error(), expectedErrMsg) {
+		t.Errorf("Error mismatch.\nExpected: %s\nGot: %v", expectedErrMsg, err)
+	}
+}
+
+func TestExecuteCommandImpl_ConnectErrorWithRetry(t *testing.T) {
+	// Use an unroutable address to guarantee a connection error.
+	addr := "127.0.0.1:65535"
+
+	h := newNetworkTestHarness(t)
+	h.mockProvider.blockerAddresses = []string{addr}
+	h.mockProvider.blockerMaxRetries = 3 // Set retries for the test
+
+	err := h.blocker.Executor(addr, "192.0.2.1", "test command\n")
+
+	if err == nil {
+		t.Fatal("Expected a connection error after retries, got nil")
+	}
+	expectedErrMsg := "failed to connect to HAProxy instance"
+	if !strings.Contains(err.Error(), expectedErrMsg) {
+		t.Errorf("Error mismatch.\nExpected: %s\nGot: %v", expectedErrMsg, err)
+	}
+
+	// Verify that retries were attempted.
+	if h.mockProvider.retries.Load() != int32(h.mockProvider.blockerMaxRetries-1) {
+		t.Errorf("Expected %d retries, but got %d", h.mockProvider.blockerMaxRetries-1, h.mockProvider.retries.Load())
+	}
+}
+
+func TestExecuteCommandImpl_WriteError(t *testing.T) {
+	// Start a server that closes the connection immediately after accept.
+	_, addr, closeFn := startMockServer(t, func(conn net.Conn) {
+		conn.Close()
+	})
+	defer closeFn()
+
+	h := newNetworkTestHarness(t)
+	h.mockProvider.blockerAddresses = []string{addr}
+
+	err := h.blocker.Executor(addr, "192.0.2.1", "test command\n")
+	if err == nil {
+		t.Fatal("Expected an error after retries, got nil")
+	}
+}
+
+// newNetworkTestHarness creates a harness specifically for testing the network implementation.
+// It does NOT override the command executor.
+func newNetworkTestHarness(t *testing.T) *haproxyTestHarness {
+	t.Helper()
+	h := &haproxyTestHarness{t: t}
+	h.mockProvider = newMockHAProxyProvider()
+	h.blocker = blocker.NewHAProxyBlocker(h.mockProvider, false)
+	return h
+}

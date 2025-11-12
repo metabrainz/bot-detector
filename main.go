@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/server"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -86,15 +88,12 @@ func main() {
 
 	// Initialize the Processor instance.
 	p := &Processor{
-		ActivityMutex:     &sync.RWMutex{},
-		TopActorsPerChain: make(map[string]map[string]*ActorStats),
-		ActivityStore:     make(map[Actor]*ActorActivity),
-		ConfigMutex:       &sync.RWMutex{},
-		Metrics:           metrics.NewMetrics(),
-		Chains:            loadedCfg.Chains,
-		CommandExecutor: func(p *Processor, addr, ip, command string) error {
-			return executeCommandImpl(p, addr, ip, command)
-		},
+		ActivityMutex:        &sync.RWMutex{},
+		TopActorsPerChain:    make(map[string]map[string]*ActorStats),
+		ActivityStore:        make(map[Actor]*ActorActivity),
+		ConfigMutex:          &sync.RWMutex{},
+		Metrics:              metrics.NewMetrics(),
+		Chains:               loadedCfg.Chains,
 		Config:               appConfig,
 		LogRegex:             loadedCfg.LogFormatRegex,
 		DryRun:               *cliFlags.DryRun,
@@ -111,16 +110,11 @@ func main() {
 	// TestSignals is intentionally left nil in production.
 	// Set up the signalOooBufferFlush field to call the method.
 	p.signalOooBufferFlush = p.doSignalOooBufferFlush
-	haproxyBlocker := &HAProxyBlocker{P: p}
-	// Wrap the HAProxyBlocker with the RateLimitedBlocker.
 	initializeMetrics(p, loadedCfg)
 
-	// Log the initial configuration summary.
-	logConfigurationSummary(p)
-	// At startup, log details for all loaded chains.
-	logChainDetails(p, p.Chains, "Loaded chains")
+	haproxyBlocker := blocker.NewHAProxyBlocker(p, p.DryRun)
+	rateLimitedBlocker := blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.BlockerCommandQueueSize, p.Config.BlockerCommandsPerSecond)
 
-	rateLimitedBlocker := NewRateLimitedBlocker(p, haproxyBlocker, p.Config.BlockerCommandQueueSize, p.Config.BlockerCommandsPerSecond)
 	p.Blocker = rateLimitedBlocker
 	defer rateLimitedBlocker.Stop() // Ensure the rate limiter worker is stopped on exit.
 
@@ -128,6 +122,11 @@ func main() {
 
 	// Assign the real implementation for ProcessLogLine, which no longer uses line numbers.
 	p.ProcessLogLine = func(line string) { processLogLineInternal(p, line) }
+
+	// Log the initial configuration summary.
+	logConfigurationSummary(p)
+	// At startup, log details for all loaded chains.
+	logChainDetails(p, p.Chains, "Loaded chains")
 
 	start(p)
 }
@@ -158,6 +157,56 @@ func (p *Processor) GenerateHTMLMetricsReport() string {
 	}
 	logMetricsSummary(p, time.Since(p.startTime), webLogFunc, "METRICS", "metric")
 	return report.String()
+}
+
+// --- MetricsProvider Interface Implementation ---
+
+func (p *Processor) IncrementBlockerCmdsQueued() {
+	p.Metrics.BlockerCmdsQueued.Add(1)
+}
+
+func (p *Processor) IncrementBlockerCmdsDropped() {
+	p.Metrics.BlockerCmdsDropped.Add(1)
+}
+
+func (p *Processor) IncrementBlockerCmdsExecuted() {
+	p.Metrics.BlockerCmdsExecuted.Add(1)
+}
+
+// --- HAProxyProvider Interface Implementation ---
+
+func (p *Processor) GetBlockerAddresses() []string {
+	return p.Config.BlockerAddresses
+}
+
+func (p *Processor) GetDurationTables() map[time.Duration]string {
+	return p.Config.DurationToTableName
+}
+
+func (p *Processor) GetBlockTableNameFallback() string {
+	return p.Config.BlockTableNameFallback
+}
+
+func (p *Processor) GetBlockerMaxRetries() int {
+	return p.Config.BlockerMaxRetries
+}
+
+func (p *Processor) GetBlockerRetryDelay() time.Duration {
+	return p.Config.BlockerRetryDelay
+}
+
+func (p *Processor) GetBlockerDialTimeout() time.Duration {
+	return p.Config.BlockerDialTimeout
+}
+
+func (p *Processor) IncrementBlockerRetries() {
+	p.Metrics.BlockerRetries.Add(1)
+}
+
+func (p *Processor) IncrementCmdsPerBlocker(addr string) {
+	if val, ok := p.Metrics.CmdsPerBlocker.Load(addr); ok {
+		val.(*atomic.Int64).Add(1)
+	}
 }
 
 // start is the unexported function that contains the main application logic,
