@@ -84,6 +84,24 @@ func (b *RateLimitedBlocker) Unblock(ipInfo IPInfo) error {
 // Stop stops the command queue worker.
 func (b *RateLimitedBlocker) Stop() {
 	b.stopOnce.Do(func() {
+		// Graceful shutdown: process any remaining commands in the queue.
+		remaining := len(b.CommandQueue)
+		if remaining > 0 {
+			b.P.LogFunc(logging.LevelInfo, "RATE_LIMITER", "Shutting down. Processing %d remaining commands in queue...", remaining)
+			for i := 0; i < remaining; i++ {
+				cmd := <-b.CommandQueue
+				b.P.LogFunc(logging.LevelDebug, "RATE_LIMITER", "Executing %s command for IP %s during shutdown.", cmd.Action, cmd.IPInfo.Address)
+				var err error
+				if cmd.Action == "block" {
+					err = b.WrappedBlocker.Block(cmd.IPInfo, cmd.Duration)
+				} else {
+					err = b.WrappedBlocker.Unblock(cmd.IPInfo)
+				}
+				if err != nil {
+					b.P.LogFunc(logging.LevelError, "RATE_LIMITER", "Error executing %s command for IP %s during shutdown: %v", cmd.Action, cmd.IPInfo.Address, err)
+				}
+			}
+		}
 		close(b.StopChannel)
 	})
 }
@@ -105,6 +123,8 @@ func (b *RateLimitedBlocker) commandQueueWorker(commandsPerSecond int) {
 			b.P.LogFunc(logging.LevelInfo, "RATE_LIMITER", "Stopping command queue worker.")
 			return
 		case <-ticker.C:
+			// The ticker has fired. Attempt a non-blocking read from the command queue.
+			// This structure ensures that the StopChannel is always prioritized.
 			select {
 			case cmd := <-b.CommandQueue:
 				b.P.LogFunc(logging.LevelDebug, "RATE_LIMITER", "Executing %s command for IP %s.", cmd.Action, cmd.IPInfo.Address)
@@ -119,7 +139,7 @@ func (b *RateLimitedBlocker) commandQueueWorker(commandsPerSecond int) {
 					b.P.LogFunc(logging.LevelError, "RATE_LIMITER", "Error executing %s command for IP %s: %v", cmd.Action, cmd.IPInfo.Address, err)
 				}
 			default:
-				// No command in queue, continue.
+				// No command in queue, continue and wait for the next tick or stop signal.
 			}
 		}
 	}
