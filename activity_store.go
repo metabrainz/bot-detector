@@ -66,6 +66,14 @@ func CleanUpIdleActors(p *Processor, stop <-chan struct{}) {
 
 				if isIdle || isUselessForTimeRule {
 					delete(p.ActivityStore, key)
+
+					// Also clean up this actor from the TopN stats map to prevent memory leaks.
+					if p.TopN > 0 {
+						actorString := key.String()
+						for _, chainStats := range p.TopActorsPerChain {
+							delete(chainStats, actorString)
+						}
+					}
 					p.Metrics.ActorsCleaned.Add(1)
 					cleanedCount++
 				}
