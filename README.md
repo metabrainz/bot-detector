@@ -142,6 +142,7 @@ The file is structured as a top-level map containing a single key, chains, which
 | :---- | :---- | :---- |
 | **version** | string | The configuration version. Must match a supported version (e.g., "1.0"). |
 | **chains** | array of object | The list of behavioral chains to be loaded. |
+| **good_actors** | map | Optional. A map of trusted actors to skip from all processing. |
 | **log_level** | string | Optional. Set minimum log level: `critical`, `error`, `warning`, `info`, `debug`. Default: `warning`. |
 | **poll_interval** | string | Optional. Interval to check this file for changes. Default: `5s`. A minimum of `1s` is enforced. |
 | **cleanup_interval**| string | Optional. Interval to run the routine that cleans up idle IP state. Default: `1m`. |
@@ -180,6 +181,47 @@ If `log_format_regex` is not specified, the application expects lines to follow 
 
 Example:
 `www.example.com 192.168.1.1 - - [02/Jan/2006:15:04:05 -0700] "GET /path HTTP/1.1" 200 1234 "http://referrer.com" "MyBrowser/1.0"`
+
+## **`good_actors` (Trusted Actor Skipping)**
+
+You can define a set of "good actors" that should always be skipped from all behavioral chain processing. This is useful for allow-listing trusted IP addresses or User-Agents, such as internal monitoring services, known friendly bots, or office networks.
+
+When a log entry matches a `good_actors` rule, it is immediately ignored, and no chains are evaluated for it.
+
+The `good_actors` key is a map where each entry has a custom name and a definition containing an `IP` and/or `UserAgent` matcher.
+
+*   If only `IP` is defined, any entry with a matching IP is skipped.
+*   If only `UserAgent` is defined, any entry with a matching User-Agent is skipped.
+*   If **both** `IP` and `UserAgent` are defined, it creates an **AND** condition. The entry is only skipped if **both** the IP and User-Agent match the rule. This is useful for preventing IP spoofing of trusted bots.
+
+The values for `IP` and `UserAgent` use the same powerful syntax as `field_matches`, supporting simple strings, `regex:`, `cidr:`, `file:`, and lists.
+
+### Example `good_actors` Configuration
+
+```yaml
+good_actors:
+  # Actors from our internal network are always trusted.
+  # This uses a file containing a list of CIDR blocks.
+  our_network:
+    IP: "file:./internal_ips.txt"
+
+  # A specific monitoring service that should be ignored.
+  # This uses a case-insensitive regex to match the User-Agent.
+  monitoring_agent:
+    UserAgent: "regex:(?i)HealthCheck"
+
+  # A known, trusted bot that is only considered trusted if BOTH its IP and User-Agent match.
+  # This prevents spoofing from other IPs that might use the same User-Agent.
+  known_friendly_bot:
+    IP: "8.8.8.8"
+    UserAgent: "regex:(?i)FriendlyBot"
+
+  # A list of specific partner server IPs can also be provided directly.
+  partner_servers:
+    IP:
+      - "203.0.113.10"
+      - "203.0.113.11"
+```
 
 ## **BehavioralChain Definition (Top Level)**
 
@@ -396,13 +438,15 @@ This diagram illustrates the journey of a single log entry as it's processed by 
 graph TD;
     A[New Log Line] --> B(Parse Log Line);
 
+    B -- Fail --> H[Log Parse Error & End];
+
     subgraph Pre-Processing
-        B -- OK --> E{Is Actor Blocked?};
-        E -- Yes, Active --> F[Log Skip & End];
+        B -- OK --> D{Is Good Actor?};
+        D -- Yes --> F_good[Log Skip & End];
+        D -- No --> E{Is Actor Already Blocked?};
+        E -- Yes, Active --> F_blocked[Log Skip & End];
         E -- No, or Expired --> G[Start Chain Processing];
     end
-
-    B -- Fail --> H[Log Parse Error & End];
 
     subgraph Chain Processing Loop
         G --> Loop{For each Chain};
