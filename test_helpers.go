@@ -87,6 +87,9 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 	// Create a real HAProxyBlocker and link it to the processor.
 	blocker := &HAProxyBlocker{P: p}
 	p.Blocker = blocker
+	// Initialize signalFlush to prevent nil pointer dereference in tests.
+	p.oooBufferFlushSignal = make(chan struct{}, 1)
+	p.signalOooBufferFlush = p.doSignalOooBufferFlush
 	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
 	return p
 }

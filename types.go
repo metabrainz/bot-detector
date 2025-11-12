@@ -65,19 +65,21 @@ type Processor struct {
 	Config          *AppConfig
 	DryRun          bool
 
-	EntryBuffer       []*LogEntry    // Buffer for holding out-of-order entries.
-	LogRegex          *regexp.Regexp // The currently active log parsing regex.
-	CheckChainsFunc   func(entry *LogEntry)
-	signalCh          chan os.Signal
-	LogFunc           func(level logging.LogLevel, tag string, format string, v ...interface{})
-	ProcessLogLine    func(line string)
-	NowFunc           func() time.Time // Mockable time function.
-	TestSignals       *TestSignals     // Test-only signals for synchronization.
-	ConfigPath        string
-	LogPath           string
-	ReloadOnSignal    string
-	TopActorsPerChain map[string]map[string]*ActorStats // Dry-run only: tracks top actors per chain.
-	TopN              int                               // For dry-run stats: show top N actors.
+	EntryBuffer          []*LogEntry    // Buffer for holding out-of-order entries.
+	oooBufferFlushSignal chan struct{}  // Signal to the entryBufferWorker to flush the OOO buffer immediately.
+	LogRegex             *regexp.Regexp // The currently active log parsing regex.
+	CheckChainsFunc      func(entry *LogEntry)
+	signalCh             chan os.Signal
+	LogFunc              func(level logging.LogLevel, tag string, format string, v ...interface{})
+	ProcessLogLine       func(line string)
+	NowFunc              func() time.Time // Mockable time function.
+	signalOooBufferFlush func()
+	TestSignals          *TestSignals // Test-only signals for synchronization.
+	ConfigPath           string
+	LogPath              string
+	ReloadOnSignal       string
+	TopActorsPerChain    map[string]map[string]*ActorStats // Dry-run only: tracks top actors per chain.
+	TopN                 int                               // For dry-run stats: show top N actors.
 }
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.

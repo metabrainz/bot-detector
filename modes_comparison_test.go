@@ -118,6 +118,10 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 		signalCh:      make(chan os.Signal, 1),
 	}
 
+	// Initialize the flush signal channel and function to prevent nil pointer dereference.
+	p.oooBufferFlushSignal = make(chan struct{}, 1)
+	p.signalOooBufferFlush = p.doSignalOooBufferFlush
+
 	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
 	p.Blocker = &HAProxyBlocker{P: p} // Initialize the blocker to prevent nil pointer panic.
 

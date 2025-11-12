@@ -881,12 +881,16 @@ func newBufferWorkerTestHarness(t *testing.T, tolerance time.Duration) *bufferWo
 	// Create a processor with a mock checkChainsInternal function to capture processed entries.
 	p := newTestProcessor(&AppConfig{OutOfOrderTolerance: tolerance}, nil)
 	h.processor = p
+	p.signalOooBufferFlush = p.doSignalOooBufferFlush
 
 	// Replace the internal check function with our mock.
 	h.originalCheck = checkChainsInternal
 	checkChainsInternal = func(p *Processor, entry *LogEntry) {
 		h.processMutex.Lock()
 		defer h.processMutex.Unlock()
+		// Call the original function to ensure state (like LastRequestTime) is updated correctly.
+		h.originalCheck(p, entry)
+		// Now, capture the entry for test verification.
 		h.processed = append(h.processed, entry)
 	}
 

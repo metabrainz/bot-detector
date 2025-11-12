@@ -89,19 +89,21 @@ func main() {
 		CommandExecutor: func(p *Processor, addr, ip, command string) error {
 			return executeCommandImpl(p, addr, ip, command)
 		},
-		Config:         appConfig,
-		LogRegex:       loadedCfg.LogFormatRegex,
-		DryRun:         *cliFlags.DryRun,
-		signalCh:       make(chan os.Signal, 1),
-		LogFunc:        logging.LogOutput,
-		NowFunc:        time.Now, // Use the real time.Now in production.
-		ConfigPath:     absConfigPath,
-		LogPath:        *cliFlags.LogPath,
-		ReloadOnSignal: *cliFlags.ReloadOnSignal,
-		TopN:           *cliFlags.TopN,
+		Config:               appConfig,
+		LogRegex:             loadedCfg.LogFormatRegex,
+		DryRun:               *cliFlags.DryRun,
+		oooBufferFlushSignal: make(chan struct{}, 1), // Buffered channel of size 1
+		signalCh:             make(chan os.Signal, 1),
+		LogFunc:              logging.LogOutput,
+		NowFunc:              time.Now, // Use the real time.Now in production.
+		ConfigPath:           absConfigPath,
+		LogPath:              *cliFlags.LogPath,
+		ReloadOnSignal:       *cliFlags.ReloadOnSignal,
+		TopN:                 *cliFlags.TopN,
 	}
 	// TestSignals is intentionally left nil in production.
-	// Inject the HAProxyBlocker.
+	// Set up the signalOooBufferFlush field to call the method.
+	p.signalOooBufferFlush = p.doSignalOooBufferFlush
 	haproxyBlocker := &HAProxyBlocker{P: p}
 	// Wrap the HAProxyBlocker with the RateLimitedBlocker.
 	initializeMetrics(p, loadedCfg)

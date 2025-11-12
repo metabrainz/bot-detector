@@ -116,6 +116,42 @@ func isGoodActor(p *Processor, entry *LogEntry) (bool, string) {
 	return false, ""
 }
 
+// handleOutOfOrder decides whether to process an entry immediately or buffer it based on its timestamp
+// relative to the last seen request for the same actor. It assumes the caller holds the ActivityMutex.
+// It returns true if the entry was buffered, and false if it was processed immediately.
+func handleOutOfOrder(p *Processor, entry *LogEntry) (buffered bool) {
+	p.ConfigMutex.RLock()
+	tolerance := p.Config.OutOfOrderTolerance
+	p.ConfigMutex.RUnlock()
+
+	if tolerance == 0 {
+		// If tolerance is zero, process immediately without any buffering logic.
+		checkChainsInternal(p, entry)
+		return false
+	}
+
+	// We use a simple 'ip' key here as a proxy for the activity's last seen time.
+	actor := Actor{IPInfo: entry.IPInfo}
+	actorActivity := GetOrCreateActorActivityUnsafe(p.ActivityStore, actor)
+	lastRequestTime := actorActivity.LastRequestTime
+
+	// If the entry is older than the last request we've seen for this IP,
+	// and it's within the tolerance window, buffer it.
+	if !lastRequestTime.IsZero() && entry.Timestamp.Before(lastRequestTime) && lastRequestTime.Sub(entry.Timestamp) <= tolerance {
+		p.EntryBuffer = append(p.EntryBuffer, entry)
+		p.Metrics.ReorderedEntries.Add(1)
+		return true // Indicate that the entry was buffered.
+	}
+
+	// If the entry is in-order (or the first one seen), process it immediately.
+	checkChainsInternal(p, entry)
+
+	// After processing a newer entry, signal the buffer worker to process any
+	// buffered entries that might now be valid.
+	p.signalOooBufferFlush()
+	return false // Indicate that the entry was processed.
+}
+
 // handleChainCompletion takes action when a chain is completed (log, block, etc.).
 // It updates the actor's state and returns true if the chain was completed.
 // It returns true if processing of other chains should be stopped for this log entry.
@@ -221,6 +257,21 @@ func FlushEntryBuffer(p *Processor) {
 	p.ActivityMutex.Lock()
 	defer p.ActivityMutex.Unlock()
 	flushEntryBufferUnsafe(p)
+}
+
+// FlushGivenEntries processes a slice of entries in chronological order.
+// It acquires the necessary lock and calls the internal processing function.
+func FlushGivenEntries(p *Processor, entries []*LogEntry) {
+	// Sort the entries to be processed by timestamp to ensure strict chronological order.
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Timestamp.Before(entries[j].Timestamp)
+	})
+
+	p.ActivityMutex.Lock()
+	defer p.ActivityMutex.Unlock()
+	for _, entry := range entries {
+		checkChainsInternal(p, entry)
+	}
 }
 
 // entryBufferWorker is a background goroutine that processes log entries from the buffer
@@ -481,13 +532,20 @@ func checkChainsWithLock(p *Processor, entry *LogEntry) {
 	checkChainsInternal(p, entry)
 }
 
+// doSignalOooBufferFlush sends a non-blocking signal to the entryBufferWorker to trigger an immediate flush.
+func (p *Processor) doSignalOooBufferFlush() {
+	select {
+	case p.oooBufferFlushSignal <- struct{}{}: // Send a signal if the channel is not full.
+	default: // Channel is full, a flush is already pending. Do nothing.
+	}
+}
+
 // CheckChains is the entry point for processing a log entry.
 // If out-of-order tolerance is configured, it buffers the entry. Otherwise, it processes immediately.
 func CheckChains(p *Processor, entry *LogEntry) {
-	// 1. Check if the entry matches a "good actor" definition.
-	p.ConfigMutex.RLock()
-	tolerance := p.Config.OutOfOrderTolerance
-	p.ConfigMutex.RUnlock()
+	// This function now acts as a gatekeeper, performing pre-checks before handing
+	// off to the out-of-order handler. The logic for buffering or immediate processing
+	// is now encapsulated in handleOutOfOrder.
 
 	p.ActivityMutex.Lock()
 	defer p.ActivityMutex.Unlock()
@@ -539,34 +597,8 @@ func CheckChains(p *Processor, entry *LogEntry) {
 		return // Skip all further processing for this entry.
 	}
 
-	// We use a simple 'ip' key here as a proxy for the activity's last seen time.
-	// A more complex implementation might find the most specific key, but this is sufficient.
-	if tolerance == 0 {
-		// If tolerance is zero, process immediately without any buffering logic.
-		// Note: The good_actor check has already been performed above.
-		checkChainsInternal(p, entry)
-		return
-	}
-
-	actorActivity := GetOrCreateActorActivityUnsafe(p.ActivityStore, actor)
-	lastRequestTime := actorActivity.LastRequestTime
-
-	// If the entry is older than the last request we've seen for this IP,
-	// and it's within the tolerance window, buffer it.
-	if !lastRequestTime.IsZero() && entry.Timestamp.Before(lastRequestTime) && lastRequestTime.Sub(entry.Timestamp) <= tolerance {
-		p.EntryBuffer = append(p.EntryBuffer, entry)
-		p.Metrics.ReorderedEntries.Add(1)
-		// Do not process it now. It will be processed by the worker or a subsequent newer entry.
-		return
-	}
-
-	// If the entry is in-order (or the first one seen), process it immediately.
-	checkChainsInternal(p, entry)
-
-	// After processing a newer entry, re-process any buffered entries that might now be valid.
-	// This is the key logic that was missing.
-	// We call the unsafe version because we already hold the lock.
-	flushEntryBufferUnsafe(p) // This call is now valid as the function is defined above.
+	// Delegate to the out-of-order handler, which will decide to buffer or process.
+	handleOutOfOrder(p, entry) // This now calls p.signalOooBufferFlush() internally.
 }
 
 // entryBufferWorker is a background goroutine that processes log entries from the buffer
@@ -600,44 +632,49 @@ func entryBufferWorker(p *Processor, stop <-chan struct{}) {
 			// On shutdown, process all remaining entries in the buffer immediately.
 			FlushEntryBuffer(p) // Use the public, locking version.
 			return
+
+		case <-p.oooBufferFlushSignal:
+			// An immediate flush was requested by a newer log entry.
+			p.LogFunc(logging.LevelDebug, "BUFFER_WORKER", "Immediate flush triggered.")
+			// Fall through to process the buffer.
+
 		case <-ticker.C:
-			p.ActivityMutex.Lock()
+			// Ticker fired, time to process the buffer.
+		}
 
-			// Determine the processing horizon. Entries older than this are safe to process.
-			processingHorizon := p.NowFunc().Add(-tolerance)
+		// --- Buffer Processing Logic ---
+		// This block is executed on a ticker or an immediate flush signal.
+		p.ActivityMutex.Lock()
 
-			var toProcess []*LogEntry
-			var remaining []*LogEntry
+		// Determine the processing horizon. Entries older than this are safe to process.
+		processingHorizon := p.NowFunc().Add(-tolerance)
 
-			// Partition the buffer into entries that are ready and those that are not.
-			for _, entry := range p.EntryBuffer {
-				if entry.Timestamp.Before(processingHorizon) {
-					toProcess = append(toProcess, entry)
-				} else {
-					remaining = append(remaining, entry)
-				}
+		var toProcess []*LogEntry
+		var remaining []*LogEntry
+
+		// Partition the buffer into entries that are ready and those that are not.
+		for _, entry := range p.EntryBuffer {
+			if entry.Timestamp.Before(processingHorizon) {
+				toProcess = append(toProcess, entry)
+			} else {
+				remaining = append(remaining, entry)
 			}
+		}
 
-			// Update the buffer with the entries that are not yet ready.
-			p.EntryBuffer = remaining
+		// Update the buffer with the entries that are not yet ready.
+		p.EntryBuffer = remaining
 
-			// Sort the entries to be processed by timestamp to ensure strict chronological order.
-			sort.Slice(toProcess, func(i, j int) bool {
-				return toProcess[i].Timestamp.Before(toProcess[j].Timestamp)
-			})
+		p.ActivityMutex.Unlock()
 
-			// Process the sorted entries. The lock is already held.
-			for _, entry := range toProcess {
-				checkChainsInternal(p, entry)
-			}
-			p.ActivityMutex.Unlock()
+		// Process the entries outside the main lock to reduce contention.
+		if len(toProcess) > 0 {
+			FlushGivenEntries(p, toProcess)
+		}
 
-			// Signal for tests that a tick has been processed.
-			// This is done after unlocking to avoid holding the lock while signaling.
-			if IsTesting() {
-				// Use a very specific tag that the test harness can listen for.
-				p.LogFunc(logging.LevelDebug, "BUFFER_WORKER_TICK_DONE", "Tick processed.")
-			}
+		// Signal for tests that a tick has been processed.
+		if IsTesting() {
+			// Use a very specific tag that the test harness can listen for.
+			p.LogFunc(logging.LevelDebug, "BUFFER_WORKER_TICK_DONE", "Tick processed.")
 		}
 	}
 }
