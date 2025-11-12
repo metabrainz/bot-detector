@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	"bot-detector/internal/utils"
 	"bufio"
 	"bytes"
 	"errors"
@@ -487,56 +488,6 @@ func compileNotMatcher(chainName string, stepIndex int, field string, value inte
 	}, nil
 }
 
-// parseDuration extends time.ParseDuration to support 'd' for days and 'w' for weeks.
-// It converts these units to hours ('h') before parsing, as Go's standard parser
-// does not support them.
-func parseDuration(durationStr string) (time.Duration, error) {
-	// Regex to find numbers (including decimals) followed by 'w' or 'd' units.
-	re := regexp.MustCompile(`(\d*\.?\d+)([wd])`)
-
-	var totalHours float64
-	var lastUnit rune
-	var hasCustomUnit bool
-
-	// Find all 'w' and 'd' matches to calculate total hours and check order.
-	matches := re.FindAllStringSubmatch(durationStr, -1)
-	for _, match := range matches {
-		hasCustomUnit = true
-		valueStr := match[1]
-		unit := rune(match[2][0])
-
-		value, err := strconv.ParseFloat(valueStr, 64)
-		if err != nil {
-			// This is unlikely if the regex is correct, but handle it.
-			return 0, fmt.Errorf("invalid number in duration: %s", valueStr)
-		}
-
-		// Check if units are in descending order of magnitude (w then d).
-		if lastUnit != 0 && unit == 'w' && lastUnit == 'd' {
-			return 0, fmt.Errorf("invalid duration: units must be in descending order of magnitude")
-		}
-
-		switch unit {
-		case 'w':
-			totalHours += value * 7 * 24
-		case 'd':
-			totalHours += value * 24
-		}
-		lastUnit = unit
-	}
-
-	// Remove the 'w' and 'd' parts from the original string.
-	remainingStr := re.ReplaceAllString(durationStr, "")
-
-	// Prepend the calculated hours to the remaining standard Go duration string.
-	finalStr := remainingStr
-	if hasCustomUnit {
-		finalStr = fmt.Sprintf("%fh%s", totalHours, remainingStr)
-	}
-
-	return time.ParseDuration(finalStr)
-}
-
 // normalizeYAMLKeys recursively traverses a yaml.Node tree and converts all
 // mapping keys to lowercase. This allows for case-insensitive YAML configuration.
 func normalizeYAMLKeys(node *yaml.Node) {
@@ -800,7 +751,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 	var defaultBlockDuration time.Duration
 	if config.DefaultBlockDuration != "" {
 		var err error
-		defaultBlockDuration, err = parseDuration(config.DefaultBlockDuration)
+		defaultBlockDuration, err = utils.ParseDuration(config.DefaultBlockDuration)
 		if err != nil {
 			return nil, fmt.Errorf("invalid block_duration format for default_block_duration: %w", err)
 		}
@@ -822,7 +773,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		blockDurationStr := yamlChain.BlockDuration // Keep original string for logging
 		if yamlChain.BlockDuration != "" {
 			var err error
-			blockDuration, err = parseDuration(yamlChain.BlockDuration)
+			blockDuration, err = utils.ParseDuration(yamlChain.BlockDuration)
 			if err != nil {
 				return nil, fmt.Errorf("chain '%s': invalid block_duration format: %w", yamlChain.Name, err)
 			}
