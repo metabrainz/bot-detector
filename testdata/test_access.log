@@ -1,5 +1,3 @@
-
-
 # ======================================================================================
 # === TEST CASE 2: Log Action Chain (10.0.0.1) - SUCCESS (LOG)
 # === EXPECTED LOG: DRY_RUN: LOG! Chain: SimpleLogChain completed by IP 10.0.0.1. Action set to 'log' (DryRun)
@@ -172,3 +170,12 @@ musicbrainz.org 8.8.8.8 - - [28/Oct/2025:17:09:01 +0000] "GET /block/step2 HTTP/
 # ===
 musicbrainz.org 192.168.1.100 - - [28/Oct/2025:17:10:00 +0000] "GET /block/step1 HTTP/1.1" 200 100 "-" "GoodActorRegexIP"
 musicbrainz.org 192.168.1.100 - - [28/Oct/2025:17:10:01 +0000] "GET /block/step2 HTTP/1.1" 200 100 "-" "GoodActorRegexIP"
+
+# ======================================================================================
+# === TEST CASE 22: Blocked IP Skips
+# === These entries should be skipped because the IPs were blocked earlier.
+# ===
+musicbrainz.org 10.0.0.2 - - [28/Oct/2025:17:00:06 +0000] "GET /blocked/resource HTTP/1.1" 200 100 "-" "TestAgent"
+musicbrainz.org 10.0.0.2 - - [28/Oct/2025:17:00:07 +0000] "GET /another/blocked/resource HTTP/1.1" 200 100 "-" "TestAgent"
+musicbrainz.org 10.0.0.13 - - [28/Oct/2025:17:04:01 +0000] "GET /blocked/chain-order HTTP/1.1" 200 100 "-" "ChainOrderBot"
+musicbrainz.org 10.0.0.13 - - [28/Oct/2025:17:04:02 +0000] "GET /another/blocked/chain-order HTTP/1.1" 200 100 "-" "ChainOrderBot"

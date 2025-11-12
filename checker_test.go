@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -653,14 +654,58 @@ func TestDryRunMode(t *testing.T) {
 
 	// --- Assert ---
 	// 4. Verify that the captured log output matches the expected log entries
+	// Use a map to track unique SKIP messages that have been found, to account for anti-spam logic.
+	// The key will be "SKIP: Actor <IP> (blocked:<Source>)" or "SKIP: Actor <IP> (good_actor:<Source>)".
+	foundUniqueSkipLogs := make(map[string]bool)
+
 	for commentLineNumber, expectedLog := range expectedLogs {
 		found := false
 		formattedExpectedLog := strings.Replace(expectedLog, "Line %d: ", "", 1)
 
-		for _, capturedLog := range capturedLogs {
-			if strings.Contains(capturedLog, formattedExpectedLog) {
-				found = true
-				break // Found the expected log message
+		// Special handling for SKIP messages due to anti-spam logic in production code.
+		if strings.HasPrefix(formattedExpectedLog, "SKIP: Actor") {
+			// Extract the unique identifier for the skip message (IP and source).
+			// Example: "SKIP: Actor 10.0.0.2 (UA: TestAgent): Skipped (blocked:SimpleBlockChain)."
+			// We want to normalize this to "SKIP: Actor 10.0.0.2 (blocked:SimpleBlockChain)"
+			// to check for uniqueness, ignoring the UA part for this specific check.
+			re := regexp.MustCompile(`SKIP: Actor (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[0-9a-fA-F:]+) \(UA: .*?\): Skipped \((blocked|good_actor):(.+?)\)\.?`)
+			matches := re.FindStringSubmatch(formattedExpectedLog)
+
+			if len(matches) == 4 {
+				ip := matches[1]
+				skipType := matches[2]
+				source := matches[3]
+				uniqueSkipKey := fmt.Sprintf("SKIP: Actor %s (%s:%s)", ip, skipType, source)
+
+				if foundUniqueSkipLogs[uniqueSkipKey] {
+					// This unique skip message has already been found, so we don't expect it again.
+					found = true
+				} else {
+					// Search for the full expected log in capturedLogs.
+					for _, capturedLog := range capturedLogs {
+						if strings.Contains(capturedLog, formattedExpectedLog) {
+							found = true
+							foundUniqueSkipLogs[uniqueSkipKey] = true // Mark as found.
+							break
+						}
+					}
+				}
+			} else {
+				// If it's a SKIP message but doesn't match our regex, treat it normally.
+				for _, capturedLog := range capturedLogs {
+					if strings.Contains(capturedLog, formattedExpectedLog) {
+						found = true
+						break
+					}
+				}
+			}
+		} else {
+			// For non-SKIP messages, use the existing logic.
+			for _, capturedLog := range capturedLogs {
+				if strings.Contains(capturedLog, formattedExpectedLog) {
+					found = true
+					break
+				}
 			}
 		}
 

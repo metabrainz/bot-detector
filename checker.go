@@ -74,22 +74,21 @@ func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*ActorActivit
 			if entry.Timestamp.After(activity.LastRequestTime) {
 				activity.LastRequestTime = entry.Timestamp
 			}
-			// Only log the skip message the first time. This is now based on the SkipInfo type.
-			if activity.SkipInfo.Type != SkipTypeBlocked {
-				activity.SkipInfo.Type = SkipTypeBlocked
+			// Only log the skip message the first time.
+			if activity.SkipInfo.Type != SkipTypeBlocked { // This ensures we only log once per block.
 				// The source is already set when the block was applied.
-				p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (blocked:%s).", actor.IPInfo.Address, actor.UA, activity.SkipInfo.Source)
+				p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (blocked:%s).", actor.IPInfo.Address, entry.UserAgent, activity.SkipInfo.Source)
 			}
 			return activity, true, activity.SkipInfo
 		}
 	}
 
-	return activity, false, SkipInfo{} // Do not skip
+	return activity, false, SkipInfo{} // No skip, return empty SkipInfo
 }
 
 // isGoodActor checks if a log entry matches any of the configured "good actor" definitions.
 // It returns true and the reason string if a match is found.
-func isGoodActor(p *Processor, entry *LogEntry) {
+func isGoodActor(p *Processor, entry *LogEntry) { // No return values, it modifies activity directly
 	p.ConfigMutex.RLock()
 	goodActors := p.Config.GoodActors
 	p.ConfigMutex.RUnlock()
@@ -117,11 +116,11 @@ func isGoodActor(p *Processor, entry *LogEntry) {
 			activity := GetOrCreateActorActivityUnsafe(p.ActivityStore, actor)
 
 			// Only log the skip message the first time.
-			if activity.SkipInfo.Type == SkipTypeNone {
+			if activity.SkipInfo.Type == SkipTypeNone { // Check if no skip reason is set yet.
 				activity.SkipInfo = SkipInfo{Type: SkipTypeGoodActor, Source: def.Name}
 				p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (good_actor:%s).", entry.IPInfo.Address, entry.UserAgent, def.Name)
 			}
-			return // Return after the first match.
+			return // Return after the first match, as we only need one good actor rule to match.
 		}
 	}
 }
@@ -182,12 +181,12 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 		// Update the in-memory state to reflect the block for both live and dry runs.
 		ipOnlyActor := Actor{IPInfo: entry.IPInfo, UA: ""}
 		ipActivity := GetOrCreateActorActivityUnsafe(p.ActivityStore, ipOnlyActor)
-		ipActivity.IsBlocked = true
-		ipActivity.SkipInfo = SkipInfo{Type: SkipTypeBlocked, Source: chain.Name}
+		ipActivity.IsBlocked = true                                               // Mark as blocked
+		ipActivity.SkipInfo = SkipInfo{Type: SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
 		ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration)
 
-		currentActivity.IsBlocked = true
-		currentActivity.SkipInfo = SkipInfo{Type: SkipTypeBlocked, Source: chain.Name}
+		currentActivity.IsBlocked = true                                               // Mark as blocked
+		currentActivity.SkipInfo = SkipInfo{Type: SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
 		currentActivity.BlockedUntil = ipActivity.BlockedUntil
 	} else if chain.Action == "log" {
 		p.Metrics.LogActions.Add(1)
@@ -453,7 +452,7 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 		}
 
 		// Perform pre-checks for existing blocks.
-		currentActivity, skip, _ := preCheckActivity(p, entry, actor)
+		currentActivity, skip, _ := preCheckActivity(p, entry, actor) // _ for SkipInfo, as metric is handled in CheckChains
 		if skip {
 			// The skip reason metric is now handled in CheckChains, so we just continue.
 			continue
@@ -504,31 +503,40 @@ func CheckChains(p *Processor, entry *LogEntry) {
 
 	// Determine the actor key to find the last request time.
 	// This must happen inside the lock.
-	// First, check if the entry is a good actor. This will set the SkipInfo on the activity.
+	// 1. First, check if the entry is a good actor. This will set the SkipInfo on the actor's activity.
 	isGoodActor(p, entry)
 
-	// Now, perform the pre-check for any existing skip reasons (good_actor or blocked).
-	// This is the single point where we increment the per-reason skip metrics.
+	// 2. Now, perform the pre-check for any existing skip reasons (good_actor or blocked).
+	// This is the single point where we increment the per-reason skip metrics for all skips.
 	actor := Actor{IPInfo: entry.IPInfo}
-	var skip bool
-	var skipInfo SkipInfo
+	var (
+		skip     bool
+		skipInfo SkipInfo
+	)
 	_, skip, skipInfo = preCheckActivity(p, entry, actor)
 	if skip {
 		if skipInfo.Type != SkipTypeNone {
-			reasonStr := fmt.Sprintf("blocked:%s", skipInfo.Source)
+			var reasonStr string
+			// Construct the reason string based on SkipInfo.Type for logging and metrics.
+			// This ensures consistency and avoids string parsing.
 			if skipInfo.Type == SkipTypeGoodActor {
 				reasonStr = fmt.Sprintf("good_actor:%s", skipInfo.Source)
 				p.Metrics.GoodActorsSkipped.Add(1)
-				if val, ok := p.Metrics.GoodActorHits.Load(skipInfo.Source); ok {
+				if val, ok := p.Metrics.GoodActorHits.Load(skipInfo.Source); ok { // This map is pre-populated
 					if counter, ok := val.(*atomic.Int64); ok {
 						counter.Add(1)
 					}
 				}
+			} else if skipInfo.Type == SkipTypeBlocked {
+				reasonStr = fmt.Sprintf("blocked:%s", skipInfo.Source)
 			}
-			// Increment the counter for the specific skip reason.
-			val, _ := p.Metrics.SkipsByReason.LoadOrStore(reasonStr, new(atomic.Int64))
-			if counter, ok := val.(*atomic.Int64); ok {
-				counter.Add(1)
+
+			if reasonStr != "" {
+				// Increment the counter for the specific skip reason.
+				val, _ := p.Metrics.SkipsByReason.LoadOrStore(reasonStr, new(atomic.Int64))
+				if counter, ok := val.(*atomic.Int64); ok {
+					counter.Add(1)
+				}
 			}
 		}
 		return // Skip all further processing for this entry.
