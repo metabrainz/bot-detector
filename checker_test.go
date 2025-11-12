@@ -476,6 +476,67 @@ func TestCheckChains_OnMatchStop(t *testing.T) {
 	}
 }
 
+// TestCheckChains_UnblockOnGoodActor verifies the "unblock on good actor" feature,
+// including the initial unblock action and the subsequent cooldown period.
+func TestCheckChains_UnblockOnGoodActor(t *testing.T) {
+	// --- Setup ---
+	const goodIP = "10.0.0.1"
+	const cooldown = 100 * time.Millisecond
+
+	// 1. Create a harness with the unblock feature enabled and a short cooldown.
+	h := newCheckerTestHarness(t, &AppConfig{
+		UnblockOnGoodActor: true,
+		UnblockCooldown:    cooldown,
+	})
+
+	// 2. Define a "good actor" rule directly in the processor's config.
+	// This simulates loading a `good_actors` block from YAML.
+	goodActorMatcher, err := compileStringMatcher("good_actor_test", 0, "IP", goodIP, &[]string{}, "")
+	if err != nil {
+		t.Fatalf("Failed to compile good actor matcher: %v", err)
+	}
+	h.processor.Config.GoodActors = []GoodActorDef{
+		{
+			Name:       "test_good_ips",
+			IPMatchers: []fieldMatcher{goodActorMatcher},
+		},
+	}
+
+	// 3. Create the log entry for the good actor.
+	goodEntry := &LogEntry{
+		IPInfo:    NewIPInfo(goodIP),
+		Timestamp: time.Now(),
+		Path:      "/some/path",
+	}
+
+	// --- Act 1: Initial Detection ---
+	h.processEntry(goodEntry)
+
+	// --- Assert 1: Unblock command should be sent ---
+	if !h.unblockCalled {
+		t.Fatal("Expected Unblock() to be called on the first good actor match, but it was not.")
+	}
+	h.unblockCalled = false // Reset for the next assertion.
+
+	// --- Act 2: Cooldown Period ---
+	// Process the same entry again immediately.
+	h.processEntry(goodEntry)
+
+	// --- Assert 2: Unblock command should NOT be sent ---
+	if h.unblockCalled {
+		t.Fatal("Unblock() was called during the cooldown period, but it should have been skipped.")
+	}
+
+	// --- Act 3: After Cooldown ---
+	time.Sleep(cooldown + 20*time.Millisecond) // Wait for the cooldown to expire.
+	h.processEntry(goodEntry)
+
+	// --- Assert 3: Unblock command should be sent again ---
+	if !h.unblockCalled {
+		t.Fatal("Expected Unblock() to be called again after the cooldown expired, but it was not.")
+	}
+}
+
 // TestCheckChains_TimeRules provides focused tests for the new time-based rules,
 // especially the first-step-only `first_hit_since` logic.
 func TestCheckChains_TimeRules(t *testing.T) {

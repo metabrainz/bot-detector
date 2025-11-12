@@ -106,6 +106,8 @@ type AppConfig struct {
 	OutOfOrderTolerance      time.Duration                     `config:"compare" summary:"out_of_order_tolerance"`
 	PollingInterval          time.Duration                     `config:"compare" summary:"poll_interval"`
 	TimestampFormat          string                            `config:"compare"`
+	UnblockOnGoodActor       bool                              `config:"compare"`
+	UnblockCooldown          time.Duration                     `config:"compare"`
 	LogFormatRegex           string                            `config:"compare"`
 	HTTPListenAddr           string                            `config:"compare" summary:"http_listen_addr"`
 	StatFunc                 func(string) (os.FileInfo, error) // Mockable
@@ -136,6 +138,8 @@ type LoadedConfig struct {
 	OutOfOrderTolerance      time.Duration            `config:"compare"`
 	PollingInterval          time.Duration            `config:"compare"`
 	TimestampFormat          string                   `config:"compare"`
+	UnblockOnGoodActor       bool                     `config:"compare"`
+	UnblockCooldown          time.Duration            `config:"compare"`
 	HTTPListenAddr           string                   `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error)
 }
@@ -164,6 +168,8 @@ type ChainConfig struct {
 	OutOfOrderTolerance      string                            `yaml:"out_of_order_tolerance"`
 	PollingInterval          string                            `yaml:"poll_interval"`
 	TimestampFormat          string                            `yaml:"timestamp_format"`
+	UnblockOnGoodActor       bool                              `yaml:"unblock_on_good_actor"`
+	UnblockCooldown          string                            `yaml:"unblock_cooldown"`
 }
 
 type StepDefYAML struct {
@@ -266,6 +272,7 @@ func (a Actor) String() string {
 type ActorActivity struct {
 	LastRequestTime time.Time // Time of the actor's most recent request.
 	BlockedUntil    time.Time // Time when the block expires.
+	LastUnblockTime time.Time // New: Tracks the last time an unblock command was issued for this actor.
 	ChainProgress   map[string]StepState
 	IsBlocked       bool // Flag to skip chain checks if this actor is blocked.
 	SkipInfo        SkipInfo

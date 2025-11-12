@@ -620,6 +620,28 @@ func CheckChains(p *Processor, entry *LogEntry) {
 			activity.SkipInfo = SkipInfo{Type: SkipTypeGoodActor, Source: goodActorRuleName}
 			p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (good_actor:%s).", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName)
 		}
+
+		// --- UNBLOCK ON GOOD ACTOR LOGIC ---
+		// This logic is placed here to ensure it runs for every good actor match,
+		// even if the skip message has already been logged.
+		p.ConfigMutex.RLock()
+		unblockEnabled := p.Config.UnblockOnGoodActor
+		unblockCooldown := p.Config.UnblockCooldown
+		p.ConfigMutex.RUnlock()
+
+		if unblockEnabled {
+			// Use the existing activity for the IP-only actor.
+			// The lock is already held by the caller (CheckChains).
+			activity := GetOrCreateActorActivityUnsafe(p.ActivityStore, actor)
+
+			// Check if the cooldown has passed or if it has never been unblocked.
+			if activity.LastUnblockTime.IsZero() || time.Since(activity.LastUnblockTime) > unblockCooldown {
+				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s. Issuing unblock command.", entry.IPInfo.Address)
+				// The blocker's Unblock method is non-blocking and rate-limited.
+				p.Blocker.Unblock(entry.IPInfo)
+				activity.LastUnblockTime = time.Now()
+			}
+		}
 	}
 
 	// 2. Now, perform the pre-check for any existing skip reasons (good_actor or blocked).

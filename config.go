@@ -42,6 +42,8 @@ var yamlKeyAliases = map[string]string{
 	"blockercommandqueuesize":  "blocker_command_queue_size",
 	"blockercommandspersecond": "blocker_commands_per_second",
 	"httplistenaddr":           "http_listen_addr",
+	"unblockongoodactor":       "unblock_on_good_actor",
+	"unblockcooldown":          "unblock_cooldown",
 
 	"durationtables": "duration_tables",
 
@@ -660,6 +662,12 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		outOfOrderToleranceStr = config.OutOfOrderTolerance
 	}
 
+	// Parse unblock settings
+	unblockCooldownStr := DefaultUnblockCooldown
+	if config.UnblockCooldown != "" {
+		unblockCooldownStr = config.UnblockCooldown
+	}
+
 	// Validate line_ending
 	switch lineEndingStr {
 	case "lf", "crlf", "cr":
@@ -688,6 +696,10 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 	outOfOrderTolerance, err = time.ParseDuration(outOfOrderToleranceStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid out_of_order_tolerance format: %w", err)
+	}
+	unblockCooldown, err := time.ParseDuration(unblockCooldownStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid unblock_cooldown format: %w", err)
 	}
 
 	// Parse custom timestamp format if provided, otherwise use default.
@@ -967,6 +979,8 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		PollingInterval:          pollingInterval,
 		HTTPListenAddr:           config.HTTPListenAddr,
 		TimestampFormat:          timestampFormat,
+		UnblockOnGoodActor:       config.UnblockOnGoodActor,
+		UnblockCooldown:          unblockCooldown,
 	}, nil
 }
 
@@ -1010,6 +1024,8 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 		PollingInterval:          loadedCfg.PollingInterval,
 		HTTPListenAddr:           loadedCfg.HTTPListenAddr,
 		TimestampFormat:          loadedCfg.TimestampFormat,
+		UnblockOnGoodActor:       loadedCfg.UnblockOnGoodActor,
+		UnblockCooldown:          loadedCfg.UnblockCooldown,
 
 		StatFunc: oldConfig.StatFunc, // Preserve mockable functions
 	}

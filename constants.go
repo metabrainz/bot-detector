@@ -43,4 +43,5 @@ const (
 	DefaultBlockerDialTimeout       = 5 * time.Second
 	DefaultBlockerCommandQueueSize  = 1000 // Default queue size
 	DefaultBlockerCommandsPerSecond = 10   // Default rate limit
+	DefaultUnblockCooldown          = "5m"
 )
