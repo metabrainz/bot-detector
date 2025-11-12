@@ -80,6 +80,7 @@ type Processor struct {
 	ReloadOnSignal       string
 	TopActorsPerChain    map[string]map[string]*ActorStats // Dry-run only: tracks top actors per chain.
 	TopN                 int                               // For dry-run stats: show top N actors.
+	startTime            time.Time
 }
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
@@ -105,6 +106,7 @@ type AppConfig struct {
 	PollingInterval          time.Duration                     `config:"compare" summary:"poll_interval"`
 	TimestampFormat          string                            `config:"compare"`
 	LogFormatRegex           string                            `config:"compare"`
+	HTTPListenAddr           string                            `config:"compare" summary:"http_listen_addr"`
 	StatFunc                 func(string) (os.FileInfo, error) // Mockable
 
 }
@@ -133,6 +135,7 @@ type LoadedConfig struct {
 	OutOfOrderTolerance      time.Duration            `config:"compare"`
 	PollingInterval          time.Duration            `config:"compare"`
 	TimestampFormat          string                   `config:"compare"`
+	HTTPListenAddr           string                   `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error)
 }
 
@@ -153,6 +156,7 @@ type ChainConfig struct {
 	BlockerCommandQueueSize  int                               `yaml:"blocker_command_queue_size"`
 	BlockerCommandsPerSecond int                               `yaml:"blocker_commands_per_second"`
 	IdleTimeout              string                            `yaml:"idle_timeout"`
+	HTTPListenAddr           string                            `yaml:"http_listen_addr"`
 	LineEnding               string                            `yaml:"line_ending"`
 	LogLevel                 string                            `yaml:"log_level"`
 	LogFormatRegex           string                            `yaml:"log_format_regex"`

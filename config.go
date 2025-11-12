@@ -41,6 +41,7 @@ var yamlKeyAliases = map[string]string{
 	"blockerdialtimeout":       "blocker_dial_timeout",
 	"blockercommandqueuesize":  "blocker_command_queue_size",
 	"blockercommandspersecond": "blocker_commands_per_second",
+	"httplistenaddr":           "http_listen_addr",
 
 	"durationtables": "duration_tables",
 
@@ -961,6 +962,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		MaxTimeSinceLastHit:      maxTimeSinceLastHit,
 		OutOfOrderTolerance:      outOfOrderTolerance,
 		PollingInterval:          pollingInterval,
+		HTTPListenAddr:           config.HTTPListenAddr,
 		TimestampFormat:          timestampFormat,
 	}, nil
 }
@@ -1003,6 +1005,7 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 		MaxTimeSinceLastHit:      loadedCfg.MaxTimeSinceLastHit,
 		OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
 		PollingInterval:          loadedCfg.PollingInterval,
+		HTTPListenAddr:           loadedCfg.HTTPListenAddr,
 		TimestampFormat:          loadedCfg.TimestampFormat,
 
 		StatFunc: oldConfig.StatFunc, // Preserve mockable functions

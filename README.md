@@ -157,6 +157,7 @@ The file is structured as a top-level map containing a single key, chains, which
 | **blocker_retry_delay** | string | Optional. Duration to wait between retry attempts. Default: `200ms`. |
 | **blocker_dial_timeout** | string | Optional. Timeout for establishing a connection to a blocker socket. Default: `5s`. |
 | **blocker_command_queue_size** | int | Optional. The maximum number of commands that can be queued for the blocker. Default: `1000`. |
+| **http_listen_addr** | string | Optional. If set (e.g., `"127.0.0.1:8080"`), starts a web server on this address to display live metrics. Disabled by default. |
 | **blocker_commands_per_second** | int | Optional. The maximum number of commands per second to send to the blocker. Default: `10`. |
 
 #### A Note on Durations

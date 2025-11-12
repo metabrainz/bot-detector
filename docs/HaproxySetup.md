@@ -222,6 +222,10 @@ blocker_dial_timeout: "5s"
 blocker_command_queue_size: 1000
 blocker_commands_per_second: 10
 
+# --- Metrics Web Server (Optional) ---
+# If set, the application will serve a live metrics page on this address.
+http_listen_addr: "127.0.0.1:8080"
+
 
 # ... chains definitions ...
 ```

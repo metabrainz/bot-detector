@@ -75,6 +75,7 @@ func main() {
 		OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
 		PollingInterval:          loadedCfg.PollingInterval,
 		TimestampFormat:          loadedCfg.TimestampFormat,
+		HTTPListenAddr:           loadedCfg.HTTPListenAddr,
 		StatFunc:                 defaultStatFunc, // Initialize StatFunc to prevent nil pointer panic.
 
 	}
@@ -101,6 +102,7 @@ func main() {
 		ReloadOnSignal:       *cliFlags.ReloadOnSignal,
 		TopN:                 *cliFlags.TopN,
 	}
+	p.startTime = p.NowFunc() // Record the start time.
 	// TestSignals is intentionally left nil in production.
 	// Set up the signalOooBufferFlush field to call the method.
 	p.signalOooBufferFlush = p.doSignalOooBufferFlush
@@ -154,6 +156,7 @@ func start(p *Processor) {
 			}
 			go CleanUpIdleActors(p, stopWatcher)
 			go entryBufferWorker(p, stopWatcher)
+			go startMetricsServer(p)
 		}
 		// Listen for OS signals on the processor's channel
 		signal.Notify(p.signalCh, syscall.SIGINT, syscall.SIGTERM)
