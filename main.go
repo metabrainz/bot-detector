@@ -85,11 +85,12 @@ func main() {
 
 	// Initialize the Processor instance.
 	p := &Processor{
-		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[Actor]*ActorActivity),
-		ConfigMutex:   &sync.RWMutex{},
-		Metrics:       metrics.NewMetrics(),
-		Chains:        loadedCfg.Chains,
+		ActivityMutex:     &sync.RWMutex{},
+		TopActorsPerChain: make(map[string]map[string]*ActorStats),
+		ActivityStore:     make(map[Actor]*ActorActivity),
+		ConfigMutex:       &sync.RWMutex{},
+		Metrics:           metrics.NewMetrics(),
+		Chains:            loadedCfg.Chains,
 		CommandExecutor: func(p *Processor, addr, ip, command string) error {
 			return executeCommandImpl(p, addr, ip, command)
 		},

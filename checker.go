@@ -244,7 +244,7 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 	}
 
 	// If in dry-run mode, record the completion for top actors summary.
-	if p.DryRun {
+	if p.TopN > 0 {
 		// The ActivityMutex is already held by the caller.
 		actor := GetActor(chain, entry)
 		actorString := actor.String()
@@ -385,7 +385,7 @@ func handleTimeRuleReset(p *Processor, chain *BehavioralChain, entry *LogEntry, 
 			counter.Add(1)
 		}
 	}
-	if p.DryRun {
+	if p.TopN > 0 {
 		actor := GetActor(chain, entry)
 		actorString := actor.String()
 		if _, ok := p.TopActorsPerChain[chain.Name]; !ok {
@@ -481,7 +481,7 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 
 		// If in dry-run mode, record the actor hit for top actors summary.
 		// The ActivityMutex is already held by the caller (checkChainsWithLock).
-		if p.DryRun {
+		if p.TopN > 0 {
 			// Re-create the actor specific to this chain to get the correct actor string.
 			actor := GetActor(chain, entry)
 			actorString := actor.String()

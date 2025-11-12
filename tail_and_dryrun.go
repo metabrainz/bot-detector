@@ -254,10 +254,9 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 
 	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Dry-run finished.")
 	logMetricsSummary(p, elapsedTime, p.LogFunc, "METRICS", "dryrun")
-	logTopActorsSummary(p, p.LogFunc)
 }
 
-// logTopActorsSummary displays the top actors that triggered hits for each chain during a dry run.
+// logTopActorsSummary displays the top N actors per chain if the feature is enabled.
 func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, string, ...interface{})) {
 	if p.TopN <= 0 {
 		return // Top-N reporting is disabled.
@@ -584,6 +583,9 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 			}
 		}
 	}
+
+	// Finally, log the top actors summary if enabled.
+	logTopActorsSummary(p, logFunc)
 }
 
 // LiveLogTailer continuously tails a log file, handling rotation and truncation.

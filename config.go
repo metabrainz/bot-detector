@@ -1078,6 +1078,11 @@ func initializeMetrics(p *Processor, loadedCfg *LoadedConfig) {
 	for _, addr := range loadedCfg.BlockerAddresses {
 		p.Metrics.CmdsPerBlocker.Store(addr, new(atomic.Int64))
 	}
+	// Initialize good actor hit counters.
+	p.Metrics.GoodActorHits = &sync.Map{}
+	for _, goodActor := range loadedCfg.GoodActors {
+		p.Metrics.GoodActorHits.Store(goodActor.Name, new(atomic.Int64))
+	}
 }
 
 // SignalReloader listens for a specific OS signal to trigger a configuration reload. //nolint:cyclop
