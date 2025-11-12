@@ -301,7 +301,11 @@ func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, st
 				return stats[i].Stats.Completions > stats[j].Stats.Completions
 			}
 			// Tertiary sort by Hits (descending)
-			return stats[i].Stats.Hits > stats[j].Stats.Hits
+			if stats[i].Stats.Hits != stats[j].Stats.Hits {
+				return stats[i].Stats.Hits > stats[j].Stats.Hits
+			}
+			// Final sort by Actor string (ascending) for stability.
+			return stats[i].Actor < stats[j].Actor
 		})
 
 		logFunc(logging.LevelInfo, "STATS", "  Chain: %s", chainName)
