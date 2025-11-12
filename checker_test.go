@@ -281,7 +281,6 @@ func TestCheckChains_TimeDelayReset(t *testing.T) {
 
 // TestCheckChains_WhitelistSkip tests that a whitelisted IP is skipped entirely.
 
-
 // TestCheckChains_LogAction tests that a chain with Action="log" clears the state but does not call the blocker.
 func TestCheckChains_LogAction(t *testing.T) {
 	// --- Setup ---
@@ -594,7 +593,6 @@ func TestDryRunMode(t *testing.T) {
 			OutOfOrderTolerance: 0, // Disable buffering for this specific test.
 			MaxTimeSinceLastHit: loadedCfg.MaxTimeSinceLastHit,
 			TimestampFormat:     loadedCfg.TimestampFormat,
-
 		},
 		DryRun:  true,                                                                            // Simulate dry-run mode
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {}, // Will be replaced

@@ -1101,7 +1101,7 @@ func TestLogMetricsSummary(t *testing.T) {
 	// 2. Manually set metric values.
 	p.Metrics.LinesProcessed.Store(1000)
 	p.Metrics.ValidHits.Store(500)
-	p.Metrics.ParseErrors.Store(10)     // 1% of total
+	p.Metrics.ParseErrors.Store(10) // 1% of total
 
 	p.Metrics.ReorderedEntries.Store(5)
 	p.Metrics.ActorsCleaned.Store(50)

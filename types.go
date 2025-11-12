@@ -45,15 +45,15 @@ type Blocker interface {
 // Processor holds all necessary dependencies and state for log processing,
 // making it easy to mock/stub external calls and manage state in tests.
 type Processor struct {
-	ActivityMutex     *sync.RWMutex
-	ActivityStore     map[Actor]*ActorActivity
-	Blocker           Blocker
-	ConfigMutex       *sync.RWMutex
-	Metrics           *Metrics
-	Chains            []BehavioralChain
-	CommandExecutor   func(p *Processor, addr, ip, command string) error // The function that executes the backend command
-	Config            *AppConfig
-	DryRun            bool
+	ActivityMutex   *sync.RWMutex
+	ActivityStore   map[Actor]*ActorActivity
+	Blocker         Blocker
+	ConfigMutex     *sync.RWMutex
+	Metrics         *Metrics
+	Chains          []BehavioralChain
+	CommandExecutor func(p *Processor, addr, ip, command string) error // The function that executes the backend command
+	Config          *AppConfig
+	DryRun          bool
 
 	EntryBuffer       []*LogEntry    // Buffer for holding out-of-order entries.
 	LogRegex          *regexp.Regexp // The currently active log parsing regex.
@@ -72,6 +72,7 @@ type Processor struct {
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
 type AppConfig struct {
+	GoodActors               []GoodActorDef                    `config:"compare"`
 	BlockTableNameFallback   string                            `config:"compare"` // This is derived, but comparing is harmless and simple.
 	CleanupInterval          time.Duration                     `config:"compare" summary:"cleanup_interval"`
 	DurationToTableName      map[time.Duration]string          `config:"compare" summary:"duration_tables"`
@@ -98,6 +99,7 @@ type AppConfig struct {
 
 // LoadedConfig encapsulates all configuration data loaded from the YAML file.
 type LoadedConfig struct {
+	GoodActors               []GoodActorDef           `config:"compare"`
 	BlockTableNameFallback   string                   `config:"compare"`
 	Chains                   []BehavioralChain        // Not compared here
 	CleanupInterval          time.Duration            `config:"compare"`
@@ -120,32 +122,31 @@ type LoadedConfig struct {
 	PollingInterval          time.Duration            `config:"compare"`
 	TimestampFormat          string                   `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error)
-
 }
 
 // --- YAML DATA STRUCTURES ---
 
 type ChainConfig struct {
-	Version                  string                `yaml:"version"`
-	Chains                   []BehavioralChainYAML `yaml:"chains"`
-	CleanupInterval          string                `yaml:"cleanup_interval"`
-	DefaultBlockDuration     string                `yaml:"default_block_duration"`
-	DurationTables           map[string]string     `yaml:"duration_tables"`
-	EOFPollingDelay          string                `yaml:"eof_polling_delay"`
-	BlockerAddresses         []string              `yaml:"blocker_addresses"`
-	BlockerDialTimeout       string                `yaml:"blocker_dial_timeout"`
-	BlockerMaxRetries        int                   `yaml:"blocker_max_retries"`
-	BlockerRetryDelay        string                `yaml:"blocker_retry_delay"`
-	BlockerCommandQueueSize  int                   `yaml:"blocker_command_queue_size"`
-	BlockerCommandsPerSecond int                   `yaml:"blocker_commands_per_second"`
-	IdleTimeout              string                `yaml:"idle_timeout"`
-	LineEnding               string                `yaml:"line_ending"`
-	LogLevel                 string                `yaml:"log_level"`
-	LogFormatRegex           string                `yaml:"log_format_regex"`
-	OutOfOrderTolerance      string                `yaml:"out_of_order_tolerance"`
-	PollingInterval          string                `yaml:"poll_interval"`
-	TimestampFormat          string                `yaml:"timestamp_format"`
-
+	GoodActors               map[string]map[string]interface{} `yaml:"good_actors"`
+	Version                  string                            `yaml:"version"`
+	Chains                   []BehavioralChainYAML             `yaml:"chains"`
+	CleanupInterval          string                            `yaml:"cleanup_interval"`
+	DefaultBlockDuration     string                            `yaml:"default_block_duration"`
+	DurationTables           map[string]string                 `yaml:"duration_tables"`
+	EOFPollingDelay          string                            `yaml:"eof_polling_delay"`
+	BlockerAddresses         []string                          `yaml:"blocker_addresses"`
+	BlockerDialTimeout       string                            `yaml:"blocker_dial_timeout"`
+	BlockerMaxRetries        int                               `yaml:"blocker_max_retries"`
+	BlockerRetryDelay        string                            `yaml:"blocker_retry_delay"`
+	BlockerCommandQueueSize  int                               `yaml:"blocker_command_queue_size"`
+	BlockerCommandsPerSecond int                               `yaml:"blocker_commands_per_second"`
+	IdleTimeout              string                            `yaml:"idle_timeout"`
+	LineEnding               string                            `yaml:"line_ending"`
+	LogLevel                 string                            `yaml:"log_level"`
+	LogFormatRegex           string                            `yaml:"log_format_regex"`
+	OutOfOrderTolerance      string                            `yaml:"out_of_order_tolerance"`
+	PollingInterval          string                            `yaml:"poll_interval"`
+	TimestampFormat          string                            `yaml:"timestamp_format"`
 }
 
 type StepDefYAML struct {
@@ -201,6 +202,13 @@ type BehavioralChain struct {
 	MetricsHitsCounter       *atomic.Int64 // Counter for hits on this specific chain.
 	MetricsResetCounter      *atomic.Int64 // Counter for resets of this specific chain.
 	MetricsCounter           *atomic.Int64 // Counter for this specific chain.
+}
+
+// GoodActorDef represents a single compiled definition from the good_actors config.
+type GoodActorDef struct {
+	Name       string
+	IPMatchers []fieldMatcher // A list of matchers for the IP field (OR logic within the list)
+	UAMatchers []fieldMatcher // A list of matchers for the UserAgent field (OR logic within the list)
 }
 
 // ActorStats holds hit and completion counts for a specific actor in a chain.

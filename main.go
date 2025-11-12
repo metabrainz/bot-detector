@@ -114,8 +114,7 @@ func main() {
 	p.Blocker = rateLimitedBlocker
 	defer rateLimitedBlocker.Stop() // Ensure the rate limiter worker is stopped on exit.
 
-
-	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }                  // Assign the real method to the function field.
+	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) } // Assign the real method to the function field.
 
 	// Assign the real implementation for ProcessLogLine, which no longer uses line numbers.
 	p.ProcessLogLine = func(line string) { processLogLineInternal(p, line) }

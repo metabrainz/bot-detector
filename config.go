@@ -42,7 +42,7 @@ var yamlKeyAliases = map[string]string{
 	"blockercommandqueuesize":  "blocker_command_queue_size",
 	"blockercommandspersecond": "blocker_commands_per_second",
 
-	"durationtables":           "duration_tables",
+	"durationtables": "duration_tables",
 
 	// Chain-level keys
 	"blockduration": "block_duration",
@@ -69,8 +69,6 @@ var yamlKeyAliases = map[string]string{
 	"size":        "Size",
 	"vhost":       "VHost",
 }
-
-
 
 // logConfigurationSummary logs the key-value pairs of the current application configuration.
 // This is useful for visibility on startup and after a configuration reload.
@@ -722,8 +720,6 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		customLogRegex = re
 	}
 
-
-
 	// --- PARSE DURATION TABLES ---
 	newDurationTables := make(map[time.Duration]string, len(config.DurationTables))
 	longestDuration := 0 * time.Second
@@ -894,6 +890,47 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		newChains = append(newChains, runtimeChain)
 	}
 
+	// --- PARSE GOOD ACTORS ---
+	var newGoodActors []GoodActorDef
+	for name, definition := range config.GoodActors {
+		def := GoodActorDef{Name: name}
+
+		// Iterate over the definition map to find IP and UserAgent keys case-insensitively.
+		for key, value := range definition {
+			switch strings.ToLower(key) {
+			case "ip":
+				// Ensure the value is a list for consistent processing
+				var ipList []interface{}
+				if list, isList := value.([]interface{}); isList {
+					ipList = list
+				} else {
+					ipList = []interface{}{value}
+				}
+				matcher, err := compileListMatcher(fmt.Sprintf("good_actor '%s'", name), 0, "IP", ipList, &fileDependencies, configDir)
+				if err != nil {
+					return nil, err
+				}
+				def.IPMatchers = []fieldMatcher{matcher}
+			case "useragent":
+				var uaList []interface{}
+				if list, isList := value.([]interface{}); isList {
+					uaList = list
+				} else {
+					uaList = []interface{}{value}
+				}
+				matcher, err := compileListMatcher(fmt.Sprintf("good_actor '%s'", name), 0, "UserAgent", uaList, &fileDependencies, configDir)
+				if err != nil {
+					return nil, err
+				}
+				def.UAMatchers = []fieldMatcher{matcher}
+			}
+		}
+
+		if len(def.IPMatchers) > 0 || len(def.UAMatchers) > 0 {
+			newGoodActors = append(newGoodActors, def)
+		}
+	}
+
 	// Find the maximum min_time_since_last_hit duration across all chains for cleanup optimization.
 	var maxTimeSinceLastHit time.Duration
 	for _, chain := range newChains {
@@ -903,6 +940,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 	}
 
 	return &LoadedConfig{
+		GoodActors:               newGoodActors,
 		BlockTableNameFallback:   newFallbackName,
 		Chains:                   newChains,
 		DefaultBlockDuration:     defaultBlockDuration,
@@ -924,7 +962,6 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		OutOfOrderTolerance:      outOfOrderTolerance,
 		PollingInterval:          pollingInterval,
 		TimestampFormat:          timestampFormat,
-
 	}, nil
 }
 
@@ -947,6 +984,7 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 
 	// Create a new AppConfig from the loaded configuration.
 	newAppConfig := &AppConfig{
+		GoodActors:               loadedCfg.GoodActors,
 		BlockTableNameFallback:   loadedCfg.BlockTableNameFallback,
 		CleanupInterval:          loadedCfg.CleanupInterval,
 		DefaultBlockDuration:     loadedCfg.DefaultBlockDuration,
@@ -967,7 +1005,7 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 		PollingInterval:          loadedCfg.PollingInterval,
 		TimestampFormat:          loadedCfg.TimestampFormat,
 
-		StatFunc:                 oldConfig.StatFunc, // Preserve mockable functions
+		StatFunc: oldConfig.StatFunc, // Preserve mockable functions
 	}
 
 	// Update the processor's state with the new config.
@@ -1023,7 +1061,6 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 	if len(removed) > 0 {
 		logChainDetails(p, removed, "Removed chains:")
 	}
-
 
 }
 

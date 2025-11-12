@@ -82,7 +82,7 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 		EntryBuffer:       make([]*LogEntry, 0),
 		TopActorsPerChain: make(map[string]map[string]*ActorStats),
 
-		NowFunc:           time.Now, // Default to real time for tests unless overridden.
+		NowFunc: time.Now, // Default to real time for tests unless overridden.
 	}
 	// Create a real HAProxyBlocker and link it to the processor.
 	blocker := &HAProxyBlocker{P: p}
@@ -261,4 +261,14 @@ func (h *checkerTestHarness) assertChainProgressCleared(chainName string, entry 
 	if exists && len(activity.ChainProgress) != 0 {
 		h.t.Errorf("Expected ChainProgress to be cleared for key %+v, but it has %d entries: %v", key, len(activity.ChainProgress), activity.ChainProgress)
 	}
+}
+
+// compileMatchersForTest is a test helper to compile a single matcher for a given field and value.
+func compileMatchersForTest(t *testing.T, field, value string) []fieldMatcher {
+	t.Helper()
+	matcher, err := compileStringMatcher("test_chain", 0, field, value, &[]string{}, "")
+	if err != nil {
+		t.Fatalf("Failed to compile matcher for test: %v", err)
+	}
+	return []fieldMatcher{matcher}
 }

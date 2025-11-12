@@ -71,7 +71,3 @@ func GetActor(chain *BehavioralChain, entry *LogEntry) Actor {
 
 	return actor
 }
-
-
-
-

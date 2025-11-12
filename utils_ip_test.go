@@ -1,12 +1,8 @@
 package main
 
 import (
-
-
 	"testing"
 )
-
-
 
 func TestGetActor(t *testing.T) {
 	// Dummy LogEntry for testing
@@ -55,8 +51,6 @@ func TestGetActor(t *testing.T) {
 		})
 	}
 }
-
-
 
 // TestGetIPVersion_Malformed covers the edge case where a string is not a valid
 // IP but is parsed by net.ParseIP into a non-standard byte slice.

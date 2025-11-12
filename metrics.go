@@ -19,10 +19,11 @@ type Metrics struct {
 	// General counters with struct tags for metadata.
 	// `metric:"..."` is the display name.
 	// `dryrun:"true"` marks it for display in dry-run mode.
-	LinesProcessed      atomic.Int64 `metric:"Lines Processed" dryrun:"true"`
-	ValidHits           atomic.Int64 `metric:"Valid Hits" dryrun:"true"`
-	ParseErrors         atomic.Int64 `metric:"Parse Errors" dryrun:"true"`
-	ReorderedEntries    atomic.Int64 `metric:"Reordered Entries" dryrun:"true"`
+	LinesProcessed    atomic.Int64 `metric:"Lines Processed" dryrun:"true"`
+	ValidHits         atomic.Int64 `metric:"Valid Hits" dryrun:"true"`
+	ParseErrors       atomic.Int64 `metric:"Parse Errors" dryrun:"true"`
+	GoodActorsSkipped atomic.Int64 `metric:"Good Actors Skipped" dryrun:"true"`
+	ReorderedEntries  atomic.Int64 `metric:"Reordered Entries" dryrun:"true"`
 
 	ActorsCleaned       atomic.Int64 `metric:"Actors Cleaned" dryrun:"true"`
 	BlockActions        atomic.Int64 `metric:"Block Actions Triggered" dryrun:"true"`

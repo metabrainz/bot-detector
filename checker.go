@@ -75,6 +75,36 @@ func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*ActorActivit
 	return activity, false // Do not skip
 }
 
+// isGoodActor checks if a log entry matches any of the configured "good actor" definitions.
+func isGoodActor(p *Processor, entry *LogEntry) bool {
+	p.ConfigMutex.RLock()
+	goodActors := p.Config.GoodActors
+	p.ConfigMutex.RUnlock()
+
+	for _, def := range goodActors {
+		ipMatch := len(def.IPMatchers) == 0 // If no IP matchers, it's a match by default
+		if len(def.IPMatchers) > 0 {
+			if def.IPMatchers[0](entry) {
+				ipMatch = true
+			}
+		}
+
+		uaMatch := len(def.UAMatchers) == 0 // If no UA matchers, it's a match by default
+		if len(def.UAMatchers) > 0 {
+			if def.UAMatchers[0](entry) {
+				uaMatch = true
+			}
+		}
+
+		// If both IP and UA rules exist, both must match. Otherwise, only one needs to.
+		if ipMatch && uaMatch {
+			p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (Matched good actor rule '%s').", entry.IPInfo.Address, entry.UserAgent, def.Name)
+			return true
+		}
+	}
+	return false
+}
+
 // handleChainCompletion takes action when a chain is completed (log, block, etc.).
 // It updates the actor's state and returns true if the chain was completed.
 // It returns true if processing of other chains should be stopped for this log entry.
@@ -379,7 +409,6 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 
 	// --- The original logic of the function remains, but without the lock/defer unlock ---
 
-
 	// If we've reached this point, the line was successfully parsed.
 	// This is a "valid hit" that will be processed against the chains.
 	p.Metrics.ValidHits.Add(1)
@@ -441,6 +470,12 @@ func checkChainsWithLock(p *Processor, entry *LogEntry) {
 // CheckChains is the entry point for processing a log entry.
 // If out-of-order tolerance is configured, it buffers the entry. Otherwise, it processes immediately.
 func CheckChains(p *Processor, entry *LogEntry) {
+	// 1. Check if the entry matches a "good actor" definition.
+	if isGoodActor(p, entry) {
+		p.Metrics.GoodActorsSkipped.Add(1)
+		return // Skip all further processing for this entry.
+	}
+
 	p.ConfigMutex.RLock()
 	tolerance := p.Config.OutOfOrderTolerance
 	p.ConfigMutex.RUnlock()

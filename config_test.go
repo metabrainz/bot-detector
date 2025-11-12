@@ -150,7 +150,6 @@ chains:
 		t.Errorf("Expected step 2 to have min_delay of 1s, got %v", step2.MinDelayDuration)
 	}
 
-
 }
 
 func TestLoadConfigFromYAML_FlexibleKeys(t *testing.T) {
@@ -811,7 +810,6 @@ chains: []
 			expectedError: "configuration version mismatch",
 		},
 
-
 		{
 			name: "Invalid Regex",
 			yamlContent: `
@@ -1233,8 +1231,6 @@ chains: []
 	}
 }
 
-
-
 func TestConfigWatcher_Reload(t *testing.T) {
 	// --- Setup ---
 	// This test involves loading configs which can be noisy.
@@ -1269,7 +1265,7 @@ chains:
 		Metrics:       NewMetrics(),
 		Chains:        initialLoadedCfg.Chains, // Set initial chains
 		Config: &AppConfig{ // Set initial config state
-			PollingInterval:  10 * time.Millisecond,
+			PollingInterval: 10 * time.Millisecond,
 
 			FileDependencies: initialLoadedCfg.FileDependencies,
 		},
@@ -1649,5 +1645,68 @@ func runMatcherTest(t *testing.T, yamlContent string, testCases map[string]struc
 				t.Errorf("Matcher returned %v, expected %v for entry value '%v'", got, tc.expected, val)
 			}
 		})
+	}
+}
+
+func TestLoadConfigFromYAML_GoodActors(t *testing.T) {
+	// --- Setup ---
+	// Create a temporary file for the file-based matcher.
+	tempDir := t.TempDir()
+	ipListPath := filepath.Join(tempDir, "google_ips.txt")
+	if err := os.WriteFile(ipListPath, []byte("cidr:8.8.8.0/24"), 0644); err != nil {
+		t.Fatalf("Failed to write temp ip list file: %v", err)
+	}
+
+	yamlContent := fmt.Sprintf(`
+version: "1.0"
+good_actors:
+  our_network:
+    IP:
+      - "cidr:10.10.10.0/24"
+      - "127.0.0.1"
+  googlebot:
+    IP: "file:%s"
+    UserAgent: "regex:(?i)googlebot"
+  free_agent:
+    UserAgent: "neverblocked"
+`, ipListPath)
+
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	t.Cleanup(resetGlobalState)
+
+	// --- Act ---
+	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromYAML() returned an unexpected error: %v", err)
+	}
+
+	// --- Assert ---
+	if len(loadedCfg.GoodActors) != 3 {
+		t.Fatalf("Expected 3 good actor definitions to be loaded, got %d", len(loadedCfg.GoodActors))
+	}
+
+	// Find the 'googlebot' definition for detailed testing
+	var googlebotDef GoodActorDef
+	for _, def := range loadedCfg.GoodActors {
+		if def.Name == "googlebot" {
+			googlebotDef = def
+			break
+		}
+	}
+
+	if googlebotDef.Name == "" {
+		t.Fatal("Could not find 'googlebot' good actor definition.")
+	}
+
+	// Test the compiled matchers
+	googleIPEntry := &LogEntry{IPInfo: NewIPInfo("8.8.8.8"), UserAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"}
+
+	// The IP matcher should match
+	if !googlebotDef.IPMatchers[0](googleIPEntry) {
+		t.Error("Googlebot IP matcher failed for a matching IP.")
+	}
+	// The UserAgent matcher should match
+	if !googlebotDef.UAMatchers[0](googleIPEntry) {
+		t.Error("Googlebot UserAgent matcher failed for a matching UserAgent.")
 	}
 }
