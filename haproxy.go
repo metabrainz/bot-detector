@@ -248,10 +248,14 @@ func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[stri
 	wg.Wait()
 	close(errs)
 
-	// Final Error Check (Logging only)
+	// Final Error Check.
+	// If any of the commands failed, we log a warning and return an aggregated error.
+	// This ensures that partial failures (e.g., one HAProxy instance being down)
+	// are not silently ignored by the caller.
 	if numErrs := len(errs); numErrs > 0 {
-		p.LogFunc(logging.LevelWarning, "HAPROXY_WARN", "One or more HAProxy instances failed to process command for IP %s. Total failures: %d", ip, len(errs))
+		p.LogFunc(logging.LevelWarning, "HAPROXY_WARN", "One or more HAProxy instances failed to process command for IP %s. Total failures: %d", ip, numErrs)
 		return fmt.Errorf("%d HAProxy commands failed for IP %s", numErrs, ip)
 	}
+
 	return nil
 }
