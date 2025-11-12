@@ -13,7 +13,7 @@ import (
 // metrics and configuration from the main application.
 type MetricsProvider interface {
 	GetListenAddr() string
-	GenerateMetricsReport() string
+	GenerateHTMLMetricsReport() string
 	GetShutdownChannel() chan os.Signal
 	Log(level logging.LogLevel, tag string, format string, v ...interface{})
 }
@@ -59,7 +59,7 @@ func Start(p MetricsProvider) {
 func metricsPageHandler(p MetricsProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Generate the report using the provider.
-		reportContent := p.GenerateMetricsReport()
+		reportContent := p.GenerateHTMLMetricsReport()
 
 		// Format the output as a simple, pre-formatted HTML page.
 		html := fmt.Sprintf(`<!DOCTYPE html>

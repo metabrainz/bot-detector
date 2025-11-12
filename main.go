@@ -6,6 +6,7 @@ import (
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/server"
+	"bot-detector/internal/utils"
 	"flag"
 	"fmt"
 	"log"
@@ -148,11 +149,12 @@ func (p *Processor) Log(level logging.LogLevel, tag string, format string, v ...
 	p.LogFunc(level, tag, format, v...)
 }
 
-// GenerateMetricsReport creates the full metrics report as a string.
-func (p *Processor) GenerateMetricsReport() string {
+// GenerateHTMLMetricsReport creates the full metrics report as an HTML-safe string.
+func (p *Processor) GenerateHTMLMetricsReport() string {
 	var report strings.Builder
 	webLogFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-		report.WriteString(fmt.Sprintf(format, args...) + "\n")
+		// Sanitize the formatted string before writing it to the HTML report.
+		report.WriteString(utils.ForHTML(fmt.Sprintf(format, args...)) + "\n")
 	}
 	logMetricsSummary(p, time.Since(p.startTime), webLogFunc, "METRICS", "metric")
 	return report.String()

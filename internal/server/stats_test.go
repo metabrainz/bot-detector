@@ -37,7 +37,7 @@ func (m *mockMetricsProvider) GetListenAddr() string {
 	return m.listenAddr
 }
 
-func (m *mockMetricsProvider) GenerateMetricsReport() string {
+func (m *mockMetricsProvider) GenerateHTMLMetricsReport() string {
 	return m.reportContent
 }
 

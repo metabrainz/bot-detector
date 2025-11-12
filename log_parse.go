@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	"bot-detector/internal/utils"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -74,14 +75,14 @@ func ParseLogLine(p *Processor, line string) (*LogEntry, error) {
 	return &LogEntry{
 		Timestamp:  timestamp, // Keep timestamp first as it's the primary time axis.
 		IPInfo:     ipInfo,
-		Method:     getMatch("Method", matches, regexToUse),
-		Path:       getMatch("Path", matches, regexToUse),
-		Protocol:   getMatch("Protocol", matches, regexToUse),
-		Referrer:   getMatch("Referrer", matches, regexToUse),
+		Method:     utils.ForLog(getMatch("Method", matches, regexToUse)),
+		Path:       utils.ForLog(getMatch("Path", matches, regexToUse)),
+		Protocol:   utils.ForLog(getMatch("Protocol", matches, regexToUse)),
+		Referrer:   utils.ForLog(getMatch("Referrer", matches, regexToUse)),
 		StatusCode: statusCode,
-		UserAgent:  getMatch("UserAgent", matches, regexToUse),
+		UserAgent:  utils.ForLog(getMatch("UserAgent", matches, regexToUse)),
 		Size:       size,
-		VHost:      getMatch("VHost", matches, regexToUse),
+		VHost:      utils.ForLog(getMatch("VHost", matches, regexToUse)),
 	}, nil
 }
 
