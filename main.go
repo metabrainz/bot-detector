@@ -5,12 +5,14 @@ package main
 import (
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
+	"bot-detector/internal/server"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -128,6 +130,33 @@ func main() {
 	start(p)
 }
 
+// --- MetricsProvider Interface Implementation ---
+
+// GetListenAddr returns the HTTP listen address from the config.
+func (p *Processor) GetListenAddr() string {
+	return p.Config.HTTPListenAddr
+}
+
+// GetShutdownChannel returns the channel used for shutdown signals.
+func (p *Processor) GetShutdownChannel() chan os.Signal {
+	return p.signalCh
+}
+
+// Log is a wrapper around the processor's LogFunc to satisfy the interface.
+func (p *Processor) Log(level logging.LogLevel, tag string, format string, v ...interface{}) {
+	p.LogFunc(level, tag, format, v...)
+}
+
+// GenerateMetricsReport creates the full metrics report as a string.
+func (p *Processor) GenerateMetricsReport() string {
+	var report strings.Builder
+	webLogFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		report.WriteString(fmt.Sprintf(format, args...) + "\n")
+	}
+	logMetricsSummary(p, time.Since(p.startTime), webLogFunc, "METRICS", "metric")
+	return report.String()
+}
+
 // start is the unexported function that contains the main application logic,
 // which is called by the tests and the main function.
 func start(p *Processor) {
@@ -157,7 +186,7 @@ func start(p *Processor) {
 			}
 			go CleanUpIdleActors(p, stopWatcher)
 			go entryBufferWorker(p, stopWatcher)
-			go startMetricsServer(p)
+			go server.Start(p)
 		}
 		// Listen for OS signals on the processor's channel
 		signal.Notify(p.signalCh, syscall.SIGINT, syscall.SIGTERM)
