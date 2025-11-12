@@ -39,9 +39,6 @@ func FormatDuration(d time.Duration) string {
 	for _, u := range units {
 		if remaining >= u.unit {
 			val := remaining / u.unit
-			if b.Len() > 0 {
-				b.WriteString("") // No separator needed for Go duration format
-			}
 			b.WriteString(fmt.Sprintf("%d%s", val, u.sym))
 			remaining %= u.unit
 		}

@@ -23,8 +23,9 @@ func TestFormatDuration(t *testing.T) {
 
 		// Canonical conversions
 		{name: "Canonical hour (60m)", input: 60 * time.Minute, expected: "1h"},
-		{name:="Canonical day (24h)", input: 24 * time.Hour, expected: "1d"},
+		{name: "Canonical day (24h)", input: 24 * time.Hour, expected: "1d"},
 		{name: "Canonical week (7d)", input: 7 * 24 * time.Hour, expected: "1w"},
+		{name: "Canonical week from hours (168h)", input: 168 * time.Hour, expected: "1w"},
 		{name: "Canonical minute (60s)", input: 60 * time.Second, expected: "1m"},
 
 		// Combinations
@@ -34,32 +35,37 @@ func TestFormatDuration(t *testing.T) {
 
 		// Complex combination with all units
 		{
-			name: "Complex combination",
-			input: (1*7*24+2*24+3)*time.Hour + 4*time.Minute + 5*time.Second,
+			name:     "Complex combination",
+			input:    (1*7*24+2*24+3)*time.Hour + 4*time.Minute + 5*time.Second,
 			expected: "1w2d3h4m5s",
 		},
 
 		// Omission of zero-value units
 		{
-			name: "Omit zero minutes",
-			input: 1*time.Hour + 5*time.Second,
+			name:     "Omit zero minutes",
+			input:    1*time.Hour + 5*time.Second,
 			expected: "1h5s",
 		},
 		{
-			name: "Omit zero hours",
-			input: 1*24*time.Hour + 10*time.Minute,
+			name:     "Omit zero hours",
+			input:    1*24*time.Hour + 10*time.Minute,
 			expected: "1d10m",
+		},
+		{
+			name:     "Handle remainder from hours to days (25h)",
+			input:    25 * time.Hour,
+			expected: "1d1h",
 		},
 
 		// Sub-second units
 		{
-			name: "Milliseconds",
-			input: 123 * time.Millisecond,
+			name:     "Milliseconds",
+			input:    123 * time.Millisecond,
 			expected: "123ms",
 		},
 		{
-			name: "Seconds and milliseconds",
-			input: 1*time.Second + 50*time.Millisecond,
+			name:     "Seconds and milliseconds",
+			input:    1*time.Second + 50*time.Millisecond,
 			expected: "1s50ms",
 		},
 	}
