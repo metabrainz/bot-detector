@@ -810,6 +810,13 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 	fileDependencies := []string{}
 
 	for _, yamlChain := range config.Chains {
+		// Check if the chain is explicitly disabled via the action field.
+		if strings.HasPrefix(yamlChain.Action, "!") {
+			// Log at debug level for visibility without cluttering the default output.
+			logging.LogOutput(logging.LevelDebug, "CONFIG_SKIP", "Skipping disabled chain '%s' (action: %s)", yamlChain.Name, yamlChain.Action)
+			continue // Skip this chain entirely.
+		}
+
 		var blockDuration time.Duration
 		usesDefault := false
 		blockDurationStr := yamlChain.BlockDuration // Keep original string for logging

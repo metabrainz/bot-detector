@@ -234,7 +234,7 @@ Each item in the chains array must conform to the following structure:
 | :---- | :---- | :---- | :---- |
 | **name** | string | Yes | A unique, descriptive name for the chain (e.g., API-Abuse-Low-Agent). |
 | **steps** | array of object | Yes | The sequential list of steps that define the malicious pattern. |
-| **action** | string | Yes | The action to take when the chain is successfully completed by an IP. **Must be one of:** `block` or `log`. |
+| **action** | string | Yes | The action to take when the chain is successfully completed. Must be one of: `block` or `log`. To temporarily disable a chain, prefix the action with `!` (e.g., `!block`). The chain will be ignored. |
 | **block_duration** | string | No | The duration for which the IP should be blocked if action is `block`. Format: Go duration string (e.g., "5m", "1h", "30m", "1h30m"). |
 | **match_key** | string | Yes | The key used to track activity. This determines if behavior is tracked per IP address, per IP version, or per unique client (IP + User-Agent). See the table below for all possible values. |
 | **on_match** | string | No | Optional. If set to `"stop"`, no further behavioral chains will be processed for the current log entry after this chain completes. This can be used to optimize performance or enforce exclusive matching. |
