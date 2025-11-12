@@ -129,3 +129,37 @@ musicbrainz.org 10.0.0.13 - - [28/Oct/2025:17:04:00 +0000] "GET /chain-order-tes
 # === EXPECTED LOG: DRY_RUN: LOG! Chain: OnMatchStop_ChainA_Log completed by IP 10.0.0.14. Action set to 'log' (DryRun)
 # === EXPECTED LOG: DRY_RUN: LOG! Chain: OnMatchStop_ChainB_Stop completed by IP 10.0.0.14. Action set to 'log' (DryRun) (on_match: stop)
 musicbrainz.org 10.0.0.14 - - [28/Oct/2025:17:05:00 +0000] "GET /on-match-stop-test HTTP/1.1" 200 100 "-" "OnMatchBot"
+
+# ======================================================================================
+# === TEST CASE 17: Good Actor Skip (IP only)
+# === (NO EXPECTED LOG for this chain)
+# === This actor's IP (10.10.10.5) is in the good_actors `our_network` CIDR range.
+# === It should be skipped before any chain processing, even though it matches SimpleBlockChain.
+# ===
+musicbrainz.org 10.10.10.5 - - [28/Oct/2025:17:06:00 +0000] "GET /block/step1 HTTP/1.1" 200 100 "-" "GoodActorIP"
+musicbrainz.org 10.10.10.5 - - [28/Oct/2025:17:06:01 +0000] "GET /block/step2 HTTP/1.1" 200 100 "-" "GoodActorIP"
+
+# ======================================================================================
+# === TEST CASE 18: Good Actor Skip (UserAgent only)
+# === (NO EXPECTED LOG for this chain)
+# === This actor's UserAgent matches the good_actors `monitoring_agent` regex.
+# ===
+musicbrainz.org 10.0.0.20 - - [28/Oct/2025:17:07:00 +0000] "GET /block/step1 HTTP/1.1" 200 100 "-" "HealthCheck/1.0"
+musicbrainz.org 10.0.0.20 - - [28/Oct/2025:17:07:01 +0000] "GET /block/step2 HTTP/1.1" 200 100 "-" "HealthCheck/1.0"
+
+# ======================================================================================
+# === TEST CASE 19: Good Actor Skip (IP and UserAgent)
+# === (NO EXPECTED LOG for this chain)
+# === This actor's IP and UserAgent both match the `known_bot` definition.
+# ===
+musicbrainz.org 8.8.8.8 - - [28/Oct/2025:17:08:00 +0000] "GET /block/step1 HTTP/1.1" 200 100 "-" "KnownBot-Client/v3"
+musicbrainz.org 8.8.8.8 - - [28/Oct/2025:17:08:01 +0000] "GET /block/step2 HTTP/1.1" 200 100 "-" "KnownBot-Client/v3"
+
+# ======================================================================================
+# === TEST CASE 20: Good Actor (IP and UserAgent) - PARTIAL MATCH (FAILURE)
+# === EXPECTED LOG: DRY_RUN: BLOCK! Chain: SimpleBlockChain completed by IP 8.8.8.8. Blocking for 1h0m0s (DryRun)
+# === This actor's IP matches `known_bot`, but its UserAgent does not.
+# === Because both are required, it is NOT a good actor and should be processed normally.
+# ===
+musicbrainz.org 8.8.8.8 - - [28/Oct/2025:17:09:00 +0000] "GET /block/step1 HTTP/1.1" 200 100 "-" "SomeOtherAgent"
+musicbrainz.org 8.8.8.8 - - [28/Oct/2025:17:09:01 +0000] "GET /block/step2 HTTP/1.1" 200 100 "-" "SomeOtherAgent"

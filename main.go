@@ -56,6 +56,7 @@ func main() {
 
 	// Create the config struct from the loaded data.
 	appConfig := &AppConfig{
+		GoodActors:               loadedCfg.GoodActors,
 		BlockTableNameFallback:   loadedCfg.BlockTableNameFallback,
 		CleanupInterval:          loadedCfg.CleanupInterval,
 		DefaultBlockDuration:     loadedCfg.DefaultBlockDuration,

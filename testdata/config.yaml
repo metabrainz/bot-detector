@@ -2,6 +2,15 @@ version: "1.0" # Stays 1.0 as we can make this change backward-compatible in log
 log_level: "debug" # Set to debug for maximum visibility during dry-run testing
 out_of_order_tolerance: "5s" # Required for Test Case 5
 
+good_actors:
+  our_network:
+    IP: "cidr:10.10.10.0/24"
+  monitoring_agent:
+    UserAgent: "regex:(?i)HealthCheck"
+  known_bot:
+    IP: "8.8.8.8"
+    UserAgent: "regex:(?i)KnownBot"
+
 
 chains:
   # --- 1. Simple Log Chain (10.0.0.1) ---

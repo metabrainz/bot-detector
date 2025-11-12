@@ -82,21 +82,17 @@ func isGoodActor(p *Processor, entry *LogEntry) bool {
 	p.ConfigMutex.RUnlock()
 
 	for _, def := range goodActors {
-		ipMatch := len(def.IPMatchers) == 0 // If no IP matchers, it's a match by default
-		if len(def.IPMatchers) > 0 {
-			if def.IPMatchers[0](entry) {
-				ipMatch = true
-			}
+		// A rule with no matchers is invalid and should be skipped.
+		if len(def.IPMatchers) == 0 && len(def.UAMatchers) == 0 {
+			continue
 		}
 
-		uaMatch := len(def.UAMatchers) == 0 // If no UA matchers, it's a match by default
-		if len(def.UAMatchers) > 0 {
-			if def.UAMatchers[0](entry) {
-				uaMatch = true
-			}
-		}
+		// If a matcher is defined for a field, it must match.
+		// If a matcher is NOT defined, it is considered a match for that field.
+		ipMatch := (len(def.IPMatchers) == 0) || (def.IPMatchers[0](entry))
+		uaMatch := (len(def.UAMatchers) == 0) || (def.UAMatchers[0](entry))
 
-		// If both IP and UA rules exist, both must match. Otherwise, only one needs to.
+		// For a rule to apply, all defined matchers must succeed.
 		if ipMatch && uaMatch {
 			p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (Matched good actor rule '%s').", entry.IPInfo.Address, entry.UserAgent, def.Name)
 			return true
