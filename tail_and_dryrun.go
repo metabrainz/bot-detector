@@ -455,31 +455,9 @@ func collectMetricsSummaryData(p *Processor, elapsedTime time.Duration, filterTa
 func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag, filterTag string) {
 	data := collectMetricsSummaryData(p, elapsedTime, filterTag)
 
-	// --- Log Source ---
-	logFunc(logging.LevelInfo, logTag, "Log Source: %s", data.LogSource)
-
-	logFunc(logging.LevelInfo, logTag, "Lines Processed: %d", data.LinesProcessed)
-	for _, metric := range data.GeneralMetrics {
-		logFunc(logging.LevelInfo, logTag, "%s: %d (%s)", metric.Name, metric.Value, formatPercentage(metric.Value, data.LinesProcessed))
-	}
-
-	logFunc(logging.LevelInfo, logTag, "Actions Triggered: Block: %d, Log: %d", data.BlockActionsTriggered, data.LogActionsTriggered)
-	logFunc(logging.LevelInfo, logTag, "Chains Completed: %d", data.TotalChainsCompleted)
-	logFunc(logging.LevelInfo, logTag, "Chains Reset: %d", data.TotalChainsReset)
-
-	logFunc(logging.LevelInfo, logTag, "Time Elapsed: %v", elapsedTime.Round(time.Second))
-
-	if elapsedTime.Seconds() > 0 {
-		data.LinesPerSecond = float64(data.LinesProcessed) / elapsedTime.Seconds()
-		logFunc(logging.LevelInfo, logTag, "Rate: %.2f lines/sec", data.LinesPerSecond)
-	} else {
-		logFunc(logging.LevelInfo, logTag, "Rate: n/a (run too fast)")
-	}
-
-	// --- Log Commands per Blocker ---
+	// --- Collect all metrics data before printing ---
 	cmdsPerBlockerMetrics := collectMetricsFromMap(p.Metrics.CmdsPerBlocker)
 
-	// --- Log Block Duration Hits ---
 	var blockDurationMetrics []struct { // Keep this separate due to time.Duration key
 		Duration time.Duration
 		Count    int64
@@ -496,38 +474,46 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 		return true
 	})
 
-	// --- Log Skips by Reason ---
 	skipsByReasonMetrics := collectMetricsFromMap(p.Metrics.SkipsByReason)
-
-	// --- Log MatchKey Hits ---
 	matchKeyHitsMetrics := collectMetricsFromMap(p.Metrics.MatchKeyHits)
 	var totalMatchKeyHits int64
 	for _, item := range matchKeyHitsMetrics {
 		totalMatchKeyHits += item.Count
 	}
-
-	// --- Log Good Actor Hits ---
 	goodActorHitsMetrics := collectMetricsFromMap(p.Metrics.GoodActorHits)
 
-	logFunc(logging.LevelInfo, logTag, "--- Match Key Hits (Total: %d) ---", totalMatchKeyHits)
-	for _, metric := range matchKeyHitsMetrics {
-		logFunc(logging.LevelInfo, logTag, "  - %s: %d (%s)", metric.Key, metric.Count, formatPercentage(metric.Count, totalMatchKeyHits))
-	}
-
-	if len(cmdsPerBlockerMetrics) > 0 {
-		logFunc(logging.LevelInfo, logTag, "--- Commands Sent per Blocker ---")
-		for _, metric := range cmdsPerBlockerMetrics {
-			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Key, metric.Count)
+	// --- General Processing Statistics ---
+	logFunc(logging.LevelInfo, logTag, "--- General Processing Statistics ---")
+	logFunc(logging.LevelInfo, logTag, "Log Source: %s", data.LogSource)
+	logFunc(logging.LevelInfo, logTag, "Lines Processed: %d", data.LinesProcessed)
+	// Print Valid Hits, Parse Errors, Reordered Entries from GeneralMetrics
+	for _, metric := range data.GeneralMetrics {
+		if metric.Name == "Valid Hits" || metric.Name == "Parse Errors" || metric.Name == "Reordered Entries" {
+			logFunc(logging.LevelInfo, logTag, "%s: %d (%s)", metric.Name, metric.Value, formatPercentage(metric.Value, data.LinesProcessed))
 		}
 	}
+	logFunc(logging.LevelInfo, logTag, "Time Elapsed: %v", elapsedTime.Round(time.Second))
+	if elapsedTime.Seconds() > 0 {
+		data.LinesPerSecond = float64(data.LinesProcessed) / elapsedTime.Seconds()
+		logFunc(logging.LevelInfo, logTag, "Rate: %.2f lines/sec", data.LinesPerSecond)
+	} else {
+		logFunc(logging.LevelInfo, logTag, "Rate: n/a (run too fast)")
+	}
 
+	// --- Actor Statistics ---
+	logFunc(logging.LevelInfo, logTag, "--- Actor Statistics ---")
+	// Print Good Actors Skipped and Actors Cleaned from GeneralMetrics
+	for _, metric := range data.GeneralMetrics {
+		if metric.Name == "Good Actors Skipped" || metric.Name == "Actors Cleaned" {
+			logFunc(logging.LevelInfo, logTag, "%s: %d (%s)", metric.Name, metric.Value, formatPercentage(metric.Value, data.LinesProcessed))
+		}
+	}
 	if len(skipsByReasonMetrics) > 0 {
 		logFunc(logging.LevelInfo, logTag, "--- Skips by Reason ---")
 		for _, metric := range skipsByReasonMetrics {
 			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Key, metric.Count)
 		}
 	}
-
 	if len(goodActorHitsMetrics) > 0 {
 		logFunc(logging.LevelInfo, logTag, "--- Good Actor Hits ---")
 		for _, metric := range goodActorHitsMetrics {
@@ -535,11 +521,31 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 		}
 	}
 
+	// --- Chain and Action Statistics ---
+	logFunc(logging.LevelInfo, logTag, "--- Chain and Action Statistics ---")
+	logFunc(logging.LevelInfo, logTag, "Actions Triggered: Block: %d, Log: %d", data.BlockActionsTriggered, data.LogActionsTriggered)
+	logFunc(logging.LevelInfo, logTag, "Chains Completed: %d", data.TotalChainsCompleted)
+	logFunc(logging.LevelInfo, logTag, "Chains Reset: %d", data.TotalChainsReset)
+	for _, metric := range data.GeneralMetrics {
+		if metric.Name == "Blocker Commands Queued" || metric.Name == "Blocker Commands Dropped" || metric.Name == "Blocker Commands Executed" || metric.Name == "Blocker Retries" {
+			logFunc(logging.LevelInfo, logTag, "%s: %d", metric.Name, metric.Value)
+		}
+	}
+	logFunc(logging.LevelInfo, logTag, "--- Match Key Hits (Total: %d) ---", totalMatchKeyHits)
+	for _, metric := range matchKeyHitsMetrics {
+		logFunc(logging.LevelInfo, logTag, "  - %s: %d (%s)", metric.Key, metric.Count, formatPercentage(metric.Count, totalMatchKeyHits))
+	}
 	if len(blockDurationMetrics) > 0 {
 		logFunc(logging.LevelInfo, logTag, "--- Block Durations Triggered ---")
 		sort.Slice(blockDurationMetrics, func(i, j int) bool { return blockDurationMetrics[i].Duration < blockDurationMetrics[j].Duration })
 		for _, metric := range blockDurationMetrics {
 			logFunc(logging.LevelInfo, logTag, "  - %s: %d", utils.FormatDuration(metric.Duration), metric.Count)
+		}
+	}
+	if len(cmdsPerBlockerMetrics) > 0 {
+		logFunc(logging.LevelInfo, logTag, "--- Commands Sent per Blocker ---")
+		for _, metric := range cmdsPerBlockerMetrics {
+			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Key, metric.Count)
 		}
 	}
 
