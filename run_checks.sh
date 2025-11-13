@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Exit immediately if a command exits with a non-zero status.
-set -e
+set -ex
 
 # Run go vet
 echo "Running go vet..."
@@ -14,6 +14,10 @@ go test ./...
 # Run golangci-lint
 echo "Running golangci-lint..."
 golangci-lint run
+
+# Run go test -race
+echo "Running go test -race..."
+go test -race ./...
 
 # Run go build
 echo "Running go build..."
