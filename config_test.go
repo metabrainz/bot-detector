@@ -37,15 +37,15 @@ chains:
     steps:
       - max_delay: "10s" # Step 1
         field_matches:
-          Path: "/login"
+          path: "/login"
       - min_delay: "1s" # Step 2
         field_matches:
-          Path: "/login/confirm"
+          path: "/login/confirm"
   - name: "TestDefaultDurationChain"
     match_key: "ip"
     action: "block" # No block_duration, should use default
     steps:
-      - field_matches: { Path: "/default" }
+      - field_matches: { path: "/default" }
 `
 	tmpConfigPath := setupTestYAML(t, yamlContent)
 	t.Cleanup(resetGlobalState)
@@ -99,59 +99,7 @@ chains:
 
 }
 
-func TestLoadConfigFromYAML_FlexibleKeys(t *testing.T) {
-	// This test verifies that various key formats (camelCase, aliases, uppercase) are correctly parsed.
-	yamlContent := `
-version: "1.0"
-defaultBlockDuration: "1h" # camelCase alias for default_block_duration
 
-CHAINS: # UPPERCASE
-  - name: "FlexibleKeyTestChain"
-    matchKey: "ip_ua" # camelCase alias for match_key
-    ACTION: "block" # UPPERCASE
-    blockDuration: "15m" # camelCase alias for block_duration
-    steps:
-      - fieldMatches: # camelCase alias for field_matches
-          user_agent: "TestBot/1.0" # snake_case alias for UserAgent
-          status_code: 418 # snake_case alias for StatusCode
-`
-	tmpConfigPath := setupTestYAML(t, yamlContent)
-	t.Cleanup(resetGlobalState)
-
-	// --- Act ---
-	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
-
-	// --- Assert ---
-	if err != nil {
-		t.Fatalf("LoadConfigFromYAML() returned an unexpected error: %v", err)
-	}
-
-	// Check top-level camelCase key
-	if loadedCfg.DefaultBlockDuration != 1*time.Hour {
-		t.Errorf("Expected defaultBlockDuration of 1h, got %v", loadedCfg.DefaultBlockDuration)
-	}
-
-	if len(loadedCfg.Chains) != 1 {
-		t.Fatalf("Expected 1 chain to be loaded, got %d", len(loadedCfg.Chains))
-	}
-
-	chain := loadedCfg.Chains[0]
-	if chain.MatchKey != "ip_ua" {
-		t.Errorf("Expected matchKey 'ip_ua', got '%s'", chain.MatchKey)
-	}
-	if chain.Action != "block" {
-		t.Errorf("Expected ACTION 'block', got '%s'", chain.Action)
-	}
-	if chain.BlockDuration != 15*time.Minute {
-		t.Errorf("Expected blockDuration of 15m, got %v", chain.BlockDuration)
-	}
-
-	// Check step-level matchers compiled from aliased keys
-	matcher := chain.Steps[0].Matchers[0]
-	if !matcher(&LogEntry{UserAgent: "TestBot/1.0", StatusCode: 418}) {
-		t.Error("Matcher failed for entry that should have matched aliased field names (user_agent, status_code).")
-	}
-}
 
 func setupTestYAML(t *testing.T, content string) string {
 	t.Helper() // Mark this as a test helper function.
@@ -235,7 +183,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          StatusCode:
+          statuscode:
             gt: 400
             lte: 404
 `
@@ -264,7 +212,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          StatusCode:
+          statuscode:
             gte: 400
             lt: 500
 `
@@ -290,7 +238,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          Size:
+          size:
             gte: 1000
             lt: 2000
 `
@@ -327,7 +275,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          StatusCode:
+          statuscode:
             gte: 400
             lt: 500
             not: 404`,
@@ -350,7 +298,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          StatusCode:
+          statuscode:
             not: [403, 404]`,
 			testCases: map[string]struct {
 				entry    *LogEntry
@@ -389,7 +337,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          Path:
+          path:
             not: "regex:^/admin"`,
 			testCases: map[string]struct {
 				entry    *LogEntry
@@ -410,7 +358,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          Path:
+          path:
             not:
               - "/admin"
               - "regex:^/api/v1/public/"`,
@@ -451,7 +399,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          Path: "exact:regex:"`,
+          path: "exact:regex:"`,
 			testCases: map[string]struct {
 				entry    *LogEntry
 				expected bool
@@ -470,7 +418,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          Path: "regex:"`,
+          path: "regex:"`,
 			testCases: map[string]struct {
 				entry    *LogEntry
 				expected bool
@@ -489,7 +437,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          Path: "file:"`,
+          path: "file:"`,
 			testCases: map[string]struct {
 				entry    *LogEntry
 				expected bool
@@ -508,7 +456,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          Path: "regex:^/test"`,
+          path: "regex:^/test"`,
 			testCases: map[string]struct {
 				entry    *LogEntry
 				expected bool
@@ -528,7 +476,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          StatusCode: "4XX"`,
+          statuscode: "4XX"`,
 			testCases: map[string]struct {
 				entry    *LogEntry
 				expected bool
@@ -550,7 +498,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          StatusCode: "30X"`,
+          statuscode: "30X"`,
 			testCases: map[string]struct {
 				entry    *LogEntry
 				expected bool
@@ -591,7 +539,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          IP: "cidr:192.168.1.0/24"`,
+          ip: "cidr:192.168.1.0/24"`,
 			testCases: map[string]struct {
 				entry    *LogEntry
 				expected bool
@@ -613,7 +561,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          IP: "cidr:2001:db8:abcd:0012::/64"`,
+          ip: "cidr:2001:db8:abcd:0012::/64"`,
 			testCases: map[string]struct {
 				entry    *LogEntry
 				expected bool
@@ -635,7 +583,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          IP: "cidr:192.168.1.0/33"`,
+          ip: "cidr:192.168.1.0/33"`,
 			expectError: "invalid CIDR",
 		},
 	}
@@ -660,7 +608,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          Method: 123 # Using an integer value on a string field
+          method: 123 # Using an integer value on a string field
 `
 	tmpConfigPath := setupTestYAML(t, yamlContent)
 
@@ -764,7 +712,7 @@ version: "1.0"
 chains:
   - name: "Test"
     match_key: "ip"
-    steps: [ { field_matches: { "Path": "regex:/(" } } ]
+    steps: [ { field_matches: { "path": "regex:/(" } } ]
 `,
 			expectedError: "invalid regex",
 		},
@@ -785,7 +733,7 @@ version: "1.0"
 chains:
   - name: "Test"
     match_key: "ip"
-    steps: [ { field_matches: { "StatusCode": { gte: "400" } } } ]
+    steps: [ { field_matches: { "statuscode": { gte: "400" } } } ]
 `,
 			expectedError: "value for 'gte' must be an integer",
 		},
@@ -796,7 +744,7 @@ version: "1.0"
 chains:
   - name: "Test"
     match_key: "ip"
-    steps: [ { field_matches: { "StatusCode": { eq: 400 } } } ]
+    steps: [ { field_matches: { "statuscode": { eq: 400 } } } ]
 `,
 			expectedError: "unknown operator 'eq' in object matcher",
 		},
@@ -807,7 +755,7 @@ version: "1.0"
 chains:
   - name: "Test"
     match_key: "ip"
-    steps: [ { field_matches: { "StatusCode": {} } } ]
+    steps: [ { field_matches: { "statuscode": {} } } ]
 `,
 			expectedError: "object matcher must not be empty",
 		},
@@ -818,7 +766,7 @@ version: "1.0"
 chains:
   - name: "Test"
     match_key: "ip"
-    steps: [ { field_matches: { "StatusCode": true } } ]
+    steps: [ { field_matches: { "statuscode": true } } ]
 `,
 			expectedError: "unsupported value type 'bool'",
 		},
@@ -829,7 +777,7 @@ version: "1.0"
 chains:
   - name: "Test"
     match_key: "ip"
-    steps: [ { field_matches: { "Path": ["/good", { "gt": 1 }] } } ]
+    steps: [ { field_matches: { "path": ["/good", { "gt": 1 }] } } ]
 `,
 			expectedError: "chain 'Test', step 1: operator 'gt' is only supported for numeric fields, not 'Path'",
 		},
@@ -840,7 +788,7 @@ version: "1.0"
 chains:
   - name: "Test"
     match_key: "ip"
-    steps: [ { field_matches: { "Path": "file:/path/to/nonexistent/file.txt" } } ]
+    steps: [ { field_matches: { "path": "file:/path/to/nonexistent/file.txt" } } ]
 `,
 			expectedError: "", // Should NOT produce a fatal error
 		},
@@ -851,7 +799,7 @@ version: "1.0"
 chains:
   - name: "Test"
     match_key: "ip"
-    steps: [ { field_matches: { "Path": "cidr:192.168.1.0/24" } } ]
+    steps: [ { field_matches: { "path": "cidr:192.168.1.0/24" } } ]
 `,
 			expectedError: "'cidr:' matcher is only supported for the 'IP' field",
 		},
@@ -1217,7 +1165,7 @@ chains:
   - name: "InitialChain"
     match_key: "ip"
     action: "log"
-    steps: [{field_matches: {Path: "/initial"}}]
+    steps: [{field_matches: {path: "/initial"}}]
 `
 	tmpConfigPath := setupTestYAML(t, initialYAMLContent)
 
@@ -1268,7 +1216,7 @@ chains:
   - name: "ReloadedChain" # Changed chain name
     match_key: "ip"
     action: "log"
-    steps: [{field_matches: {Path: "/reloaded"}}]
+    steps: [{field_matches: {path: "/reloaded"}}]
 `
 	if err := os.WriteFile(tmpConfigPath, []byte(modifiedYAMLContent), 0644); err != nil {
 		t.Fatalf("Failed to write modified temp yaml file: %v", err)
@@ -1324,7 +1272,7 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          UserAgent: "file:%s"
+          useragent: "file:%s"
 `, agentFilePath)
 
 	tmpConfigPath := setupTestYAML(t, initialYAMLContent)
@@ -1400,7 +1348,6 @@ func TestConfigWatcher_ReloadFailure(t *testing.T) {
 	originalLogLevel := logging.GetLogLevel()
 	t.Cleanup(func() { logging.SetLogLevel(originalLogLevel.String()) })
 
-	// 1. Create a temporary YAML file with initial valid content.
 	initialYAMLContent := `
 version: "1.0"
 log_level: "info"
@@ -1408,7 +1355,7 @@ chains:
   - name: "InitialChain"
     match_key: "ip"
     action: "log"
-    steps: [{field_matches: {Path: "/initial"}}]
+    steps: [{field_matches: {path: "/initial"}}]
 `
 	tmpConfigPath := setupTestYAML(t, initialYAMLContent)
 	// 2. Load the initial configuration.
@@ -1460,7 +1407,7 @@ chains:
   - name: "InvalidRegexChain"
     match_key: "ip"
     action: "log"
-    steps: [{field_matches: {Path: "regex:("}}]
+    steps: [{field_matches: {path: "regex:("}}]
 `
 	if err := os.WriteFile(tmpConfigPath, []byte(invalidYAMLContent), 0644); err != nil {
 		t.Fatalf("Failed to write invalid YAML: %v", err)
@@ -1508,7 +1455,7 @@ chains:
   - name: "InitialChain"
     match_key: "ip"
     action: "log"
-    steps: [{field_matches: {Path: "/initial"}}]
+    steps: [{field_matches: {path: "/initial"}}]
 `
 	tmpConfigPath := setupTestYAML(t, initialYAMLContent)
 
