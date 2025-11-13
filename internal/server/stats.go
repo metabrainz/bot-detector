@@ -28,7 +28,10 @@ func Start(p MetricsProvider) {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", metricsPageHandler(p))
+	mux.HandleFunc("/stats", metricsPageHandler(p))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/stats", http.StatusFound) // 302 Found
+	})
 
 	p.Log(logging.LevelInfo, "HTTP_SERVER", "Starting metrics web server on http://%s", listenAddr)
 
