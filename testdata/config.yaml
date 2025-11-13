@@ -3,11 +3,11 @@ log_level: "debug" # Set to debug for maximum visibility during dry-run testing
 out_of_order_tolerance: "5s" # Required for Test Case 5
 
 good_actors:
-  our_network:
+  - name: "our_network"
     IP: "file:good_actors_ips.txt"
-  monitoring_agent:
+  - name: "monitoring_agent"
     UserAgent: "regex:(?i)HealthCheck"
-  known_bot:
+  - name: "known_bot"
     IP: "8.8.8.8"
     UserAgent: "regex:(?i)KnownBot"
 

@@ -164,28 +164,28 @@ type LoadedConfig struct {
 // --- YAML DATA STRUCTURES ---
 
 type ChainConfig struct {
-	GoodActors               map[string]map[string]interface{} `yaml:"good_actors"`
-	Version                  string                            `yaml:"version"`
-	Chains                   []BehavioralChainYAML             `yaml:"chains"`
-	CleanupInterval          string                            `yaml:"cleanup_interval"`
-	DefaultBlockDuration     string                            `yaml:"default_block_duration"`
-	DurationTables           map[string]string                 `yaml:"duration_tables"`
-	EOFPollingDelay          string                            `yaml:"eof_polling_delay"`
-	BlockerAddresses         []string                          `yaml:"blocker_addresses"`
-	BlockerDialTimeout       string                            `yaml:"blocker_dial_timeout"`
-	BlockerMaxRetries        int                               `yaml:"blocker_max_retries"`
-	BlockerRetryDelay        string                            `yaml:"blocker_retry_delay"`
-	BlockerCommandQueueSize  int                               `yaml:"blocker_command_queue_size"`
-	BlockerCommandsPerSecond int                               `yaml:"blocker_commands_per_second"`
-	IdleTimeout              string                            `yaml:"idle_timeout"`
-	LineEnding               string                            `yaml:"line_ending"`
-	LogLevel                 string                            `yaml:"log_level"`
-	LogFormatRegex           string                            `yaml:"log_format_regex"`
-	OutOfOrderTolerance      string                            `yaml:"out_of_order_tolerance"`
-	PollingInterval          string                            `yaml:"poll_interval"`
-	TimestampFormat          string                            `yaml:"timestamp_format"`
-	UnblockOnGoodActor       bool                              `yaml:"unblock_on_good_actor"`
-	UnblockCooldown          string                            `yaml:"unblock_cooldown"`
+	GoodActors               []map[string]interface{} `yaml:"good_actors"`
+	Version                  string                   `yaml:"version"`
+	Chains                   []BehavioralChainYAML    `yaml:"chains"`
+	CleanupInterval          string                   `yaml:"cleanup_interval"`
+	DefaultBlockDuration     string                   `yaml:"default_block_duration"`
+	DurationTables           map[string]string        `yaml:"duration_tables"`
+	EOFPollingDelay          string                   `yaml:"eof_polling_delay"`
+	BlockerAddresses         []string                 `yaml:"blocker_addresses"`
+	BlockerDialTimeout       string                   `yaml:"blocker_dial_timeout"`
+	BlockerMaxRetries        int                      `yaml:"blocker_max_retries"`
+	BlockerRetryDelay        string                   `yaml:"blocker_retry_delay"`
+	BlockerCommandQueueSize  int                      `yaml:"blocker_command_queue_size"`
+	BlockerCommandsPerSecond int                      `yaml:"blocker_commands_per_second"`
+	IdleTimeout              string                   `yaml:"idle_timeout"`
+	LineEnding               string                   `yaml:"line_ending"`
+	LogLevel                 string                   `yaml:"log_level"`
+	LogFormatRegex           string                   `yaml:"log_format_regex"`
+	OutOfOrderTolerance      string                   `yaml:"out_of_order_tolerance"`
+	PollingInterval          string                   `yaml:"poll_interval"`
+	TimestampFormat          string                   `yaml:"timestamp_format"`
+	UnblockOnGoodActor       bool                     `yaml:"unblock_on_good_actor"`
+	UnblockCooldown          string                   `yaml:"unblock_cooldown"`
 }
 
 type StepDefYAML struct {

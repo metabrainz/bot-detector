@@ -865,14 +865,22 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 
 	// --- PARSE GOOD ACTORS ---
 	var newGoodActors []GoodActorDef
-	for name, definition := range config.GoodActors {
+	for _, goodActorMap := range config.GoodActors {
+		nameVal, ok := goodActorMap["name"]
+		if !ok {
+			return nil, fmt.Errorf("a 'good_actors' entry is missing the required 'name' field")
+		}
+		name, ok := nameVal.(string)
+		if !ok {
+			return nil, fmt.Errorf("a 'good_actors' entry has a 'name' field that is not a string")
+		}
+
 		def := GoodActorDef{Name: name}
 
 		// Iterate over the definition map to find IP and UserAgent keys case-insensitively.
-		for key, value := range definition {
+		for key, value := range goodActorMap {
 			switch strings.ToLower(key) {
 			case "ip":
-				// Ensure the value is a list for consistent processing
 				var ipList []interface{}
 				if list, isList := value.([]interface{}); isList {
 					ipList = list
@@ -884,7 +892,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 					return nil, err
 				}
 				def.IPMatchers = []fieldMatcher{matcher}
-			case "useragent":
+			case "useragent", "user_agent":
 				var uaList []interface{}
 				if list, isList := value.([]interface{}); isList {
 					uaList = list

@@ -1630,15 +1630,15 @@ func TestLoadConfigFromYAML_GoodActors(t *testing.T) {
 	yamlContent := fmt.Sprintf(`
 version: "1.0"
 good_actors:
-  our_network:
-    IP:
+  - name: "our_network" # Use lowercase 'ip'
+    ip:
       - "cidr:10.10.10.0/24"
       - "127.0.0.1"
-  googlebot:
+  - name: "googlebot" # Use uppercase 'IP' and 'UserAgent'
     IP: "file:%s"
     UserAgent: "regex:(?i)googlebot"
-  free_agent:
-    UserAgent: "neverblocked"
+  - name: "free_agent" # Use lowercase 'useragent'
+    useragent: "neverblocked"
 `, ipListPath)
 
 	tmpConfigPath := setupTestYAML(t, yamlContent)
