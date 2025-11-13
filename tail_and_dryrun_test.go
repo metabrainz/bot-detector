@@ -658,6 +658,17 @@ func TestLiveLogTailer(t *testing.T) {
 	harness.processedLines = nil // Reset for next assertion
 	harness.logMutex.Unlock()
 
+	// Override LogFunc to signal when rotation is detected.
+	fileRotated := make(chan struct{}, 1)
+	originalLogFunc := harness.processor.LogFunc
+	// This must be set BEFORE starting the goroutine to avoid a race.
+	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		originalLogFunc(level, tag, format, args...) // Call original to preserve logging
+		if tag == "TAIL" && strings.Contains(fmt.Sprintf(format, args...), "Detected log file rotation") {
+			fileRotated <- struct{}{}
+		}
+	}
+
 	// --- Act 3: Simulate log rotation ---
 	if err := os.Rename(harness.tempLogFile, harness.tempLogFile+".rotated"); err != nil {
 		t.Fatalf("Failed to simulate log rotation (rename): %v", err)
@@ -665,16 +676,6 @@ func TestLiveLogTailer(t *testing.T) {
 	// Create a new file with the original name
 	if err := os.WriteFile(harness.tempLogFile, []byte("rotated line\n"), 0644); err != nil {
 		t.Fatalf("Failed to create new log file after rotation: %v", err)
-	}
-
-	// Override LogFunc to signal when rotation is detected.
-	fileRotated := make(chan struct{}, 1)
-	originalLogFunc := harness.processor.LogFunc
-	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-		originalLogFunc(level, tag, format, args...) // Call original to preserve logging
-		if tag == "TAIL" && strings.Contains(fmt.Sprintf(format, args...), "Detected log file rotation") {
-			fileRotated <- struct{}{}
-		}
 	}
 
 	// Wait for the tailer to detect the rotation and be ready for the new file.
@@ -1036,6 +1037,11 @@ func TestLiveLogTailer_StatError(t *testing.T) {
 	harness := newTailerTestHarness(t, &AppConfig{
 		PollingInterval: 10 * time.Millisecond,
 		EOFPollingDelay: 1 * time.Millisecond,
+		// This is the key fix: provide a StatFunc that always fails.
+		// This simulates the file disappearing after being opened.
+		StatFunc: func(s string) (os.FileInfo, error) {
+			return nil, os.ErrNotExist
+		},
 	})
 
 	// Override LogFunc to capture logs for this specific test.
@@ -1065,12 +1071,6 @@ func TestLiveLogTailer_StatError(t *testing.T) {
 	// --- Act ---
 	harness.start()
 	defer harness.stop()
-
-	// After the tailer starts, inject a stat function that will fail.
-	// This simulates the file disappearing *after* it was successfully opened.
-	harness.processor.Config.StatFunc = func(s string) (os.FileInfo, error) {
-		return nil, os.ErrNotExist
-	}
 
 	// The tailer will open the file, read EOF, then call hasFileBeenRotated,
 	// which will use our failing mock and log the error.
