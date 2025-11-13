@@ -294,6 +294,9 @@ func start(p *Processor) {
 			} else {
 				go ConfigWatcher(p, stopWatcher)
 			}
+			if p.TopN > 0 {
+				go cleanupTopActors(p, stopWatcher)
+			}
 			go store.CleanUpIdleActors(p, stopWatcher)
 			go entryBufferWorker(p, stopWatcher)
 			go server.Start(p)

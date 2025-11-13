@@ -576,6 +576,67 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 	logTopActorsSummary(p, logFunc)
 }
 
+// cleanupTopActors is a background goroutine that periodically cleans the TopActorsPerChain map
+// to prevent unbounded memory growth in live mode when TopN is enabled.
+func cleanupTopActors(p *Processor, stop <-chan struct{}) {
+	if p.TopN <= 0 {
+		p.LogFunc(logging.LevelDebug, "CLEANUP_TOPN", "Top-N cleanup routine is disabled (top-n <= 0).")
+		return // Cleanup is disabled.
+	}
+
+	p.ConfigMutex.RLock()
+	cleanupInterval := p.Config.CleanupInterval
+	p.ConfigMutex.RUnlock()
+
+	if cleanupInterval == 0 {
+		cleanupInterval = 1 * time.Minute // Default to 1 minute if not set.
+	}
+
+	p.LogFunc(logging.LevelDebug, "CLEANUP_TOPN", "Starting Top-N cleanup routine, running every %v.", cleanupInterval)
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-stop:
+			p.LogFunc(logging.LevelDebug, "CLEANUP_TOPN", "Stopping Top-N cleanup routine.")
+			return
+		case <-ticker.C:
+			p.LogFunc(logging.LevelDebug, "CLEANUP_TOPN", "Running Top-N cleanup...")
+			p.ActivityMutex.Lock()
+
+			for chainName, actors := range p.TopActorsPerChain {
+				if len(actors) <= p.TopN {
+					continue // No need to clean up if we're under the limit.
+				}
+
+				// Convert map to slice for sorting.
+				type actorStat struct {
+					Actor string
+					Stats *store.ActorStats
+				}
+				var statsList []actorStat
+				for actor, stats := range actors {
+					statsList = append(statsList, actorStat{Actor: actor, Stats: stats})
+				}
+
+				// Sort actors by activity (hits > completions > resets).
+				sort.Slice(statsList, func(i, j int) bool {
+					return statsList[i].Stats.IsMoreActiveThan(statsList[j].Stats)
+				})
+
+				// Create a new map with only the top N actors.
+				newActors := make(map[string]*store.ActorStats)
+				for i := 0; i < p.TopN && i < len(statsList); i++ {
+					newActors[statsList[i].Actor] = statsList[i].Stats
+				}
+				p.TopActorsPerChain[chainName] = newActors
+			}
+			p.ActivityMutex.Unlock()
+		}
+	}
+}
+
 // LiveLogTailer continuously tails a log file, handling rotation and truncation.
 func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- struct{}) {
 	var (
