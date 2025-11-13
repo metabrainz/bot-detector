@@ -142,8 +142,8 @@ The file is structured as a top-level map containing a single key, chains, which
 | Field | Type | Description |
 | :---- | :---- | :---- |
 | **version** | string | The configuration version. Must match a supported version (e.g., "1.0"). |
-| **chains** | array of object | The list of behavioral chains to be loaded. |
-| **good_actors** | map | Optional. A map of trusted actors to skip from all processing. |
+| **chains** | list of objects | The list of behavioral chains to be loaded. |
+| **good_actors** | list of objects | Optional. A list of trusted actors to skip from all processing. |
 | **log_level** | string | Optional. Set minimum log level: `critical`, `error`, `warning`, `info`, `debug`. Default: `warning`. |
 | **poll_interval** | string | Optional. Interval to check this file for changes. Default: `5s`. A minimum of `1s` is enforced. |
 | **cleanup_interval**| string | Optional. Interval to run the routine that cleans up idle IP state. Default: `1m`. |
@@ -191,7 +191,7 @@ You can define a set of "good actors" that should always be skipped from all beh
 
 When a log entry matches a `good_actors` rule, it is immediately ignored, and no chains are evaluated for it.
 
-The `good_actors` key is a map where each entry has a custom name and a definition containing an `IP` and/or `UserAgent` matcher.
+The `good_actors` key is a list of objects. Each object must have a unique `name` and a definition containing an `IP` and/or `UserAgent` matcher. The keys for `IP` and `UserAgent` are case-insensitive.
 
 *   If only `IP` is defined, any entry with a matching IP is skipped.
 *   If only `UserAgent` is defined, any entry with a matching User-Agent is skipped.
@@ -205,22 +205,22 @@ The values for `IP` and `UserAgent` use the same powerful syntax as `field_match
 good_actors:
   # Actors from our internal network are always trusted.
   # This uses a file containing a list of CIDR blocks.
-  our_network:
+  - name: "our_network"
     IP: "file:./internal_ips.txt"
 
   # A specific monitoring service that should be ignored.
   # This uses a case-insensitive regex to match the User-Agent.
-  monitoring_agent:
+  - name: "monitoring_agent"
     UserAgent: "regex:(?i)HealthCheck"
 
   # A known, trusted bot that is only considered trusted if BOTH its IP and User-Agent match.
   # This prevents spoofing from other IPs that might use the same User-Agent.
-  known_friendly_bot:
+  - name: "known_friendly_bot"
     IP: "8.8.8.8"
     UserAgent: "regex:(?i)FriendlyBot"
 
   # A list of specific partner server IPs can also be provided directly.
-  partner_servers:
+  - name: "partner_servers"
     IP:
       - "203.0.113.10"
       - "203.0.113.11"
