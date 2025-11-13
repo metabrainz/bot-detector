@@ -87,9 +87,8 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 
 		NowFunc: time.Now, // Default to real time for tests unless overridden.
 	}
-	// Create a real HAProxyBlocker using the new package constructor.
-	haproxyBlocker := blocker.NewHAProxyBlocker(p, false) // dryRun is false by default for tests.
-	p.Blocker = haproxyBlocker
+	// Use a no-op mock blocker by default for most tests.
+	p.Blocker = &MockBlocker{}
 	// Initialize signalFlush to prevent nil pointer dereference in tests.
 	p.oooBufferFlushSignal = make(chan struct{}, 1)
 	p.signalOooBufferFlush = p.doSignalOooBufferFlush
