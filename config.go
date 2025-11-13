@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -142,6 +144,173 @@ func compareConfigsByTag(oldCfg AppConfig, newCfg LoadedConfig) bool {
 	return false // No differences found in tagged fields.
 }
 
+// --- Dependency Graph for Cycle Detection ---
+
+const filePrefix = "file:"
+
+// depGraphNode represents a file in the dependency graph.
+type depGraphNode struct {
+	Path         string
+	Dependencies []*depGraphNode
+}
+
+// depGraph represents the dependency graph of configuration files.
+type depGraph struct {
+	Nodes map[string]*depGraphNode
+}
+
+// newDepGraph creates an empty dependency graph.
+func newDepGraph() *depGraph {
+	return &depGraph{
+		Nodes: make(map[string]*depGraphNode),
+	}
+}
+
+// addNode adds a new file (node) to the graph if it doesn't already exist.
+func (g *depGraph) addNode(path string) *depGraphNode {
+	if node, exists := g.Nodes[path]; exists {
+		return node
+	}
+	node := &depGraphNode{Path: path}
+	g.Nodes[path] = node
+	return node
+}
+
+// addEdge creates a dependency link from one file to another.
+func (g *depGraph) addEdge(fromPath, toPath string) {
+	fromNode := g.addNode(fromPath)
+	toNode := g.addNode(toPath)
+	fromNode.Dependencies = append(fromNode.Dependencies, toNode)
+}
+
+// findFileDirectives scans a file for `file:` directives without parsing other rules.
+func findFileDirectives(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		// If a file is missing during dependency scan, it's a critical error.
+		if errors.Is(err, syscall.ENOENT) {
+			return nil, fmt.Errorf("referenced file not found: %s", path)
+		}
+		return nil, err
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			logging.LogOutput(logging.LevelWarning, "FILE_CLOSE_ERROR", "Error closing file %s: %v", path, err)
+		}
+	}()
+
+	configDir := filepath.Dir(path)
+	var dependencies []string
+
+	// A recursive function to find "file:" strings in the parsed YAML data.
+	var findInNode func(node *yaml.Node)
+	findInNode = func(node *yaml.Node) {
+		switch node.Kind {
+		case yaml.DocumentNode:
+			for _, child := range node.Content {
+				findInNode(child)
+			}
+		case yaml.MappingNode:
+			// In a mapping node, content is a sequence of key, value, key, value...
+			// We only need to check the value nodes.
+			for i := 1; i < len(node.Content); i += 2 {
+				findInNode(node.Content[i])
+			}
+		case yaml.SequenceNode:
+			for _, child := range node.Content {
+				findInNode(child)
+			}
+		case yaml.ScalarNode:
+			if strings.HasPrefix(node.Value, filePrefix) {
+				relativeDepPath := strings.TrimSpace(strings.TrimPrefix(node.Value, filePrefix))
+				if relativeDepPath != "" {
+					var absoluteDepPath string
+					if filepath.IsAbs(relativeDepPath) {
+						absoluteDepPath = relativeDepPath
+					} else {
+						absoluteDepPath = filepath.Join(configDir, relativeDepPath)
+					}
+					dependencies = append(dependencies, absoluteDepPath)
+				}
+			}
+		}
+	}
+
+	// Try to parse as YAML first. If it fails, fall back to plain text scan.
+	var root yaml.Node
+	decoder := yaml.NewDecoder(file)
+	if err := decoder.Decode(&root); err == nil {
+		findInNode(&root)
+		return dependencies, nil
+	}
+
+	// Fallback for plain text files (e.g., good_actors_ips.txt).
+	// We must seek back to the start of the file.
+	// An *os.File always implements io.Seeker, so we can call Seek directly.
+	_, err = file.Seek(0, io.SeekStart)
+	if err != nil {
+		return nil, fmt.Errorf("failed to seek back to start of %s for plain text scan: %w", path, err)
+	}
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, filePrefix) {
+			relativeDepPath := strings.TrimSpace(strings.TrimPrefix(line, filePrefix))
+			if relativeDepPath != "" {
+				var absoluteDepPath string
+				if filepath.IsAbs(relativeDepPath) {
+					absoluteDepPath = relativeDepPath
+				} else {
+					absoluteDepPath = filepath.Join(configDir, relativeDepPath)
+				}
+				dependencies = append(dependencies, absoluteDepPath)
+			}
+		}
+	}
+	return dependencies, scanner.Err()
+}
+
+// detectCycle performs a DFS traversal to find cycles.
+func (g *depGraph) detectCycle() error {
+	visiting := make(map[string]bool)
+	visited := make(map[string]bool)
+
+	for path, node := range g.Nodes {
+		if !visited[path] {
+			if path, err := g.dfs(node, visiting, visited, nil); err != nil {
+				return fmt.Errorf("cyclic dependency detected: %s", strings.Join(path, " -> "))
+			}
+		}
+	}
+	return nil
+}
+
+// dfs is the recursive helper for cycle detection.
+func (g *depGraph) dfs(node *depGraphNode, visiting, visited map[string]bool, path []string) ([]string, error) {
+	// Create a new slice for the path to avoid modification by other branches.
+	newPath := make([]string, len(path)+1)
+	copy(newPath, path)
+	newPath[len(newPath)-1] = node.Path
+
+	visiting[node.Path] = true
+
+	for _, dep := range node.Dependencies {
+		if visiting[dep.Path] {
+			newPath = append(newPath, dep.Path)
+			return newPath, errors.New("cycle found")
+		}
+		if !visited[dep.Path] {
+			if p, err := g.dfs(dep, visiting, visited, newPath); err != nil {
+				return p, err
+			}
+		}
+	}
+	visiting[node.Path] = false
+	visited[node.Path] = true
+	return nil, nil
+}
+
 // --- New Matcher Compilation Logic ---
 
 // FileDependency represents a file that the configuration depends on.
@@ -217,7 +386,7 @@ func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]in
 func compileSingleMatcher(ctx MatcherContext, field string, value interface{}) (fieldMatcher, error) {
 	// Convert the incoming fieldName to its canonical PascalCase form for internal matching.
 	// This ensures that YAML keys like "ip" map correctly to LogEntry.IPInfo.
-	canonicalFieldName, ok := fieldNameCanonicalMap[strings.ToLower(field)]
+	canonicalFieldName, ok := FieldNameCanonicalMap[strings.ToLower(field)]
 	if !ok {
 		// If not found in the map, assume the fieldName is already canonical or unknown.
 		canonicalFieldName = field
@@ -557,6 +726,51 @@ func normalizeYAMLKeys(node *yaml.Node) {
 
 // LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
 func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
+	// --- PHASE 1: Build Dependency Graph and Detect Cycles ---
+	depGraph := newDepGraph()
+	scannedFiles := make(map[string]bool)
+
+	// Use a recursive function to build the graph. This helps trace the correct path for cycle detection.
+	var buildGraphRecursive func(currentFile string) error
+	buildGraphRecursive = func(currentFile string) error {
+		if scannedFiles[currentFile] {
+			return nil
+		}
+
+		// The main config file MUST exist. Dependencies can be missing.
+		if _, err := os.Stat(currentFile); os.IsNotExist(err) {
+			if currentFile == configPath {
+				return fmt.Errorf("failed to stat config file %s: %w", currentFile, err)
+			}
+			// For dependencies, this is not a fatal error for the graph building phase.
+			// The compilation phase will handle it as a warning.
+			return nil
+		}
+
+		scannedFiles[currentFile] = true
+		depGraph.addNode(currentFile)
+
+		// Errors from findFileDirectives are now considered non-fatal for this phase, so we ignore the error.
+		dependencies, _ := findFileDirectives(currentFile)
+
+		for _, dep := range dependencies {
+			depGraph.addEdge(currentFile, dep)
+			if err := buildGraphRecursive(dep); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if err := buildGraphRecursive(configPath); err != nil {
+		return nil, err
+	}
+
+	// --- PHASE 2: Detect Cycles ---
+	if err := depGraph.detectCycle(); err != nil {
+		return nil, err // Return the clear cycle error
+	}
+
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read YAML file %s: %w", configPath, err)
@@ -976,7 +1190,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		CleanupInterval:          cleanupInterval,
 		EOFPollingDelay:          eofPollingDelay,
 		DurationToTableName:      newDurationTables,
-		FileDependencies:         newFileDependencies, // Now using the map
+		FileDependencies:         newFileDependencies,
 		BlockerAddresses:         config.BlockerAddresses,
 		BlockerDialTimeout:       blockerDialTimeout,
 		BlockerMaxRetries:        blockerMaxRetries,
@@ -998,6 +1212,10 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 
 // logFileDependencyChanges logs changes in file dependencies between old and new configurations.
 func logFileDependencyChanges(p *Processor, oldDeps, newDeps map[string]*FileDependency) {
+	p.LogFunc(logging.LevelDebug, "CONFIG", "Debugging logFileDependencyChanges:")
+	p.LogFunc(logging.LevelDebug, "CONFIG", "  Old Dependencies: %+v", oldDeps)
+	p.LogFunc(logging.LevelDebug, "CONFIG", "  New Dependencies: %+v", newDeps)
+
 	var added, removed, modified []string
 
 	// Check for added or modified files
@@ -1081,6 +1299,7 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 	p.Chains = loadedCfg.Chains
 	p.Config = newAppConfig // Atomically swap the config pointer.
 	p.LogRegex = loadedCfg.LogFormatRegex
+	p.Config.LastModTime = time.Now() // Update LastModTime after a successful reload
 	initializeMetrics(p, loadedCfg)
 
 	logging.SetLogLevel(loadedCfg.LogLevel)
@@ -1266,6 +1485,10 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 		} else {
 			// 2. Check all file dependencies if YAML hasn't changed
 			for path, fileDep := range p.Config.FileDependencies {
+				p.LogFunc(logging.LevelDebug, "WATCH_DEBUG", "Checking file dependency: %s", path)
+				p.LogFunc(logging.LevelDebug, "WATCH_DEBUG", "  Old ModTime: %v", fileDep.ModTime)
+				p.LogFunc(logging.LevelDebug, "WATCH_DEBUG", "  Old Status: %v", fileDep.Status)
+
 				// If a file was previously missing or had an error, try to reload it.
 				if fileDep.Status == FileStatusMissing || fileDep.Status == FileStatusError {
 					isChanged = true
@@ -1276,12 +1499,14 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 
 				depInfo, err := os.Stat(path)
 				if err != nil {
+					p.LogFunc(logging.LevelDebug, "WATCH_DEBUG", "  Stat error: %v", err)
 					// If a file that was previously loaded is now missing, trigger a reload.
 					isChanged = true
 					changedFile = path
 					p.LogFunc(logging.LevelInfo, "WATCH", "Detected missing file dependency '%s'. Attempting reload...", path)
 					break
 				}
+				p.LogFunc(logging.LevelDebug, "WATCH_DEBUG", "  Current ModTime: %v", depInfo.ModTime())
 				if depInfo.ModTime().After(fileDep.ModTime) {
 					isChanged = true
 					changedFile = path

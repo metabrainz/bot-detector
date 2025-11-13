@@ -7,7 +7,6 @@ import (
 	"bot-detector/internal/utils"
 	"fmt"
 	"sort"
-	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -57,15 +56,7 @@ func GetMatchValue(fieldName string, entry *LogEntry) (interface{}, FieldType, e
 		entry = &LogEntry{} // Use a zero-value entry to get the type.
 	}
 
-	// Convert the incoming fieldName to its canonical PascalCase form for internal matching.
-	// This ensures that YAML keys like "ip" map correctly to LogEntry.IPInfo.
-	canonicalFieldName, ok := fieldNameCanonicalMap[strings.ToLower(fieldName)]
-	if !ok {
-		// If not found in the map, assume the fieldName is already canonical or unknown.
-		canonicalFieldName = fieldName
-	}
-
-	switch canonicalFieldName {
+	switch fieldName {
 	case "IP":
 		return entry.IPInfo.Address, StringField, nil
 	case "Path":
@@ -92,7 +83,7 @@ func GetMatchValue(fieldName string, entry *LogEntry) (interface{}, FieldType, e
 // GetMatchValueIfType retrieves a field's value only if it matches the expected type.
 // It returns the value, or nil if the type doesn't match or an error occurs.
 func GetMatchValueIfType(fieldName string, entry *LogEntry, expectedType FieldType) interface{} {
-	value, actualType, err := GetMatchValue(fieldName, entry)
+	value, actualType, err := GetMatchValue(fieldName, entry) //nolint:errcheck
 	if err != nil || actualType != expectedType {
 		return nil
 	}

@@ -43,6 +43,21 @@ type TestSignals struct {
 	ForceCheckSignal  chan struct{}
 }
 
+// FieldNameCanonicalMap maps lowercase YAML field names to their canonical PascalCase
+// equivalents in the LogEntry struct. This allows for case-insensitive configuration.
+var FieldNameCanonicalMap = map[string]string{
+	"ip":         "IP",
+	"path":       "Path",
+	"method":     "Method",
+	"protocol":   "Protocol",
+	"useragent":  "UserAgent",
+	"user_agent": "UserAgent",
+	"referrer":   "Referrer",
+	"statuscode": "StatusCode",
+	"size":       "Size",
+	"vhost":      "VHost",
+}
+
 // --- DEPENDENCY CONTAINER ---
 
 // Processor holds all necessary dependencies and state for log processing,
@@ -84,7 +99,7 @@ type AppConfig struct {
 	DurationToTableName      map[time.Duration]string          `config:"compare" summary:"duration_tables"`
 	DefaultBlockDuration     time.Duration                     `config:"compare" summary:"default_block_duration"`
 	EOFPollingDelay          time.Duration                     `config:"compare" summary:"eof_polling_delay"`
-	FileDependencies         map[string]*FileDependency        // List of file paths used in `file:` matchers.
+	FileDependencies         map[string]*FileDependency        // Map of file paths to their dependency status.
 	BlockerAddresses         []string                          `config:"compare" summary:"blocker_addresses"`
 	BlockerDialTimeout       time.Duration                     `config:"compare" summary:"blocker_dial_timeout"`
 	BlockerMaxRetries        int                               `config:"compare" summary:"blocker_max_retries"`
@@ -117,8 +132,8 @@ func (c *AppConfig) Clone() AppConfig {
 
 	// Deep copy slices and maps.
 	if c.GoodActors != nil {
-		clone.GoodActors = make([]GoodActorDef, len(c.GoodActors))
-		copy(clone.GoodActors, c.GoodActors) // GoodActorDef contains slices, so we need to copy them too.
+		clone.GoodActors = make([]GoodActorDef, len(c.GoodActors)) // GoodActorDef contains slices, so we need to copy them too.
+		copy(clone.GoodActors, c.GoodActors)
 		for i, def := range c.GoodActors {
 			if def.IPMatchers != nil {
 				clone.GoodActors[i].IPMatchers = make([]fieldMatcher, len(def.IPMatchers))
@@ -138,36 +153,44 @@ func (c *AppConfig) Clone() AppConfig {
 		}
 	}
 
+	if c.FileDependencies != nil {
+		clone.FileDependencies = make(map[string]*FileDependency, len(c.FileDependencies))
+		for k, v := range c.FileDependencies {
+			// FileDependency contains slices, but a shallow copy of the struct is sufficient here
+			// as the content is re-read on reload anyway.
+			clone.FileDependencies[k] = v
+		}
+	}
 	// Other slice types are just strings, which are immutable, so a shallow copy is fine.
 	return clone
 }
 
 // LoadedConfig encapsulates all configuration data loaded from the YAML file.
 type LoadedConfig struct {
-	GoodActors               []GoodActorDef             `config:"compare"`
-	BlockTableNameFallback   string                     `config:"compare"`
-	Chains                   []BehavioralChain          // Not compared here
-	CleanupInterval          time.Duration              `config:"compare"`
-	DefaultBlockDuration     time.Duration              `config:"compare"`
-	DurationToTableName      map[time.Duration]string   `config:"compare"`
-	EOFPollingDelay          time.Duration              `config:"compare"`
-	FileDependencies         map[string]*FileDependency // Not compared
-	BlockerAddresses         []string                   `config:"compare"`
-	BlockerDialTimeout       time.Duration              `config:"compare"`
-	BlockerMaxRetries        int                        `config:"compare"`
-	BlockerRetryDelay        time.Duration              `config:"compare"`
-	BlockerCommandQueueSize  int                        `config:"compare"`
-	BlockerCommandsPerSecond int                        `config:"compare"`
-	IdleTimeout              time.Duration              `config:"compare"`
-	LogLevel                 string                     `config:"compare"`
-	LineEnding               string                     `config:"compare"`
-	LogFormatRegex           *regexp.Regexp             // Not compared here
-	MaxTimeSinceLastHit      time.Duration              `config:"compare"`
-	OutOfOrderTolerance      time.Duration              `config:"compare"`
-	PollingInterval          time.Duration              `config:"compare"`
-	TimestampFormat          string                     `config:"compare"`
-	UnblockOnGoodActor       bool                       `config:"compare"`
-	UnblockCooldown          time.Duration              `config:"compare"`
+	GoodActors               []GoodActorDef           `config:"compare"`
+	BlockTableNameFallback   string                   `config:"compare"`
+	Chains                   []BehavioralChain        // Not compared here
+	CleanupInterval          time.Duration            `config:"compare"`
+	DefaultBlockDuration     time.Duration            `config:"compare"`
+	DurationToTableName      map[time.Duration]string `config:"compare"`
+	EOFPollingDelay          time.Duration            `config:"compare"`
+	FileDependencies         map[string]*FileDependency
+	BlockerAddresses         []string       `config:"compare"`
+	BlockerDialTimeout       time.Duration  `config:"compare"`
+	BlockerMaxRetries        int            `config:"compare"`
+	BlockerRetryDelay        time.Duration  `config:"compare"`
+	BlockerCommandQueueSize  int            `config:"compare"`
+	BlockerCommandsPerSecond int            `config:"compare"`
+	IdleTimeout              time.Duration  `config:"compare"`
+	LogLevel                 string         `config:"compare"`
+	LineEnding               string         `config:"compare"`
+	LogFormatRegex           *regexp.Regexp // Not compared here
+	MaxTimeSinceLastHit      time.Duration  `config:"compare"`
+	OutOfOrderTolerance      time.Duration  `config:"compare"`
+	PollingInterval          time.Duration  `config:"compare"`
+	TimestampFormat          string         `config:"compare"`
+	UnblockOnGoodActor       bool           `config:"compare"`
+	UnblockCooldown          time.Duration  `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error)
 }
 
@@ -217,20 +240,6 @@ type BehavioralChainYAML struct {
 
 // --- RUNTIME DATA STRUCTURES ---
 
-// fieldNameCanonicalMap maps lowercase snake_case field names to their canonical PascalCase form.
-var fieldNameCanonicalMap = map[string]string{
-	"ip":         "IP",
-	"path":       "Path",
-	"method":     "Method",
-	"protocol":   "Protocol",
-	"useragent":  "UserAgent",
-	"referrer":   "Referrer",
-	"statuscode": "StatusCode",
-	"size":       "Size",
-	"vhost":      "VHost",
-}
-
-// LogEntry represents a parsed log entry with structured data.
 type LogEntry struct {
 	Timestamp  time.Time // Actual time of the request (parsed from log, not time.Now()).
 	IPInfo     utils.IPInfo

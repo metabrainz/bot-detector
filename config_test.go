@@ -668,7 +668,7 @@ func TestLoadConfigFromYAML_Errors(t *testing.T) {
 		{
 			name:          "File Not Found",
 			yamlContent:   "", // No content, as the file won't be created
-			expectedError: "failed to read YAML file",
+			expectedError: "failed to stat config file",
 		},
 		{
 			name: "Unsupported Version",
