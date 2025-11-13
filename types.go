@@ -7,13 +7,23 @@ import (
 	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
 	"fmt"
-
+	"io"
 	"os"
 	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// fileOpener defines the function signature for opening a file, returning our interface.
+type fileOpener func(name string) (fileHandle, error)
+
+// fileHandle defines the interface for file operations needed by the tailer.
+type fileHandle interface {
+	io.ReadSeeker
+	io.Closer
+	Stat() (os.FileInfo, error)
+}
 
 // FieldType indicates the native type of a field from a LogEntry.
 type FieldType int
@@ -92,7 +102,7 @@ type AppConfig struct {
 	UnblockCooldown          time.Duration                     `config:"compare"`
 	LogFormatRegex           string                            `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error) // Mockable
-
+	FileOpener               fileOpener                        // Mockable
 }
 
 // Clone creates a deep copy of the AppConfig. This is crucial for safely comparing

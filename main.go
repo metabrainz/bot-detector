@@ -84,7 +84,9 @@ func main() {
 		PollingInterval:          loadedCfg.PollingInterval,
 		TimestampFormat:          loadedCfg.TimestampFormat,
 		StatFunc:                 defaultStatFunc, // Initialize StatFunc to prevent nil pointer panic.
-
+		FileOpener: func(name string) (fileHandle, error) {
+			return os.Open(name)
+		},
 	}
 
 	// Initialize the Processor instance.

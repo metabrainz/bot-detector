@@ -317,7 +317,7 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 	h.tempLogFile = filepath.Join(tempDir, "test.log")
 
 	// Create processor with mock/capture functions
-	h.processor = newTestProcessor(&AppConfig{}, nil) // Use newTestProcessor to ensure all fields are initialized.
+	h.processor = newTestProcessor(config, nil) // Use newTestProcessor to ensure all fields are initialized.
 	// Override the functions needed for this specific harness.
 	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		h.logMutex.Lock()
@@ -331,13 +331,7 @@ func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
 		h.processedLines = append(h.processedLines, line)
 		h.lineProcessed <- line
 	}
-	h.processor.Config = config
 	h.processor.LogPath = h.tempLogFile
-
-	// Ensure StatFunc is never nil to prevent panics in hasFileBeenRotated.
-	if config != nil && h.processor.Config.StatFunc == nil {
-		h.processor.Config.StatFunc = defaultStatFunc
-	}
 
 	return h
 }
@@ -835,17 +829,13 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 		info: mockInfo,
 	}
 
-	// Redirect os.Open to return our pipe's reader end.
-	originalOsOpenFile := osOpenFile
-	osOpenFile = func(name string) (fileHandle, error) { return mockHandle, nil }
-	t.Cleanup(func() {
-		osOpenFile = originalOsOpenFile
-	})
-
 	harness := newTailerTestHarness(t, &AppConfig{
 		PollingInterval: 10 * time.Millisecond,
 		// The StatFunc will now also return the same consistent mock FileInfo.
 		StatFunc: func(s string) (os.FileInfo, error) { return mockInfo, nil },
+		FileOpener: func(name string) (fileHandle, error) {
+			return mockHandle, nil
+		},
 	})
 
 	// Override LogFunc to signal when the read error is logged.
@@ -963,20 +953,16 @@ func TestLiveLogTailer_ShutdownDuringRetryDelay(t *testing.T) {
 // fails after a successful open, the tailer logs a warning and retries.
 func TestLiveLogTailer_InitialStatError(t *testing.T) {
 	// --- Setup ---
-	// Mock osOpenFile to return a file handle whose Stat() method is guaranteed to fail.
-	originalOsOpenFile := osOpenFile
-	osOpenFile = func(name string) (fileHandle, error) {
-		// Open a real file (dev/null is perfect) to get a valid *os.File handle.
-		f, err := os.Open(os.DevNull)
-		if err != nil {
-			t.Fatalf("Failed to open os.DevNull: %v", err)
-		}
-		return &statErrorFile{f}, nil // Wrap it in our struct that forces Stat() to fail.
-	}
-	t.Cleanup(func() { osOpenFile = originalOsOpenFile })
-
 	harness := newTailerTestHarness(t, &AppConfig{
 		PollingInterval: 10 * time.Millisecond,
+		FileOpener: func(name string) (fileHandle, error) {
+			// Open a real file (dev/null is perfect) to get a valid *os.File handle.
+			f, err := os.Open(os.DevNull)
+			if err != nil {
+				t.Fatalf("Failed to open os.DevNull: %v", err)
+			}
+			return &statErrorFile{f}, nil // Wrap it in our struct that forces Stat() to fail.
+		},
 	})
 
 	// Override LogFunc to capture the specific warning.

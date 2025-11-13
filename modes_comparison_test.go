@@ -103,6 +103,9 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 				sys:  &syscall.Stat_t{}, // Non-nil value to prevent panic
 			}, nil
 		},
+		FileOpener: func(name string) (fileHandle, error) {
+			return os.Open(name)
+		},
 	}
 
 	// Initialize the processor.

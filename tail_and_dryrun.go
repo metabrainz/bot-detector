@@ -19,20 +19,6 @@ import (
 	"time"
 )
 
-// fileOpener defines the function signature for opening a file, returning our interface.
-type fileOpener func(name string) (fileHandle, error)
-
-var osOpenFile fileOpener = func(name string) (fileHandle, error) {
-	return os.Open(name)
-}
-
-// fileHandle defines the interface for file operations needed by the tailer.
-type fileHandle interface {
-	io.ReadSeeker
-	io.Closer
-	Stat() (os.FileInfo, error)
-}
-
 // lineReader is a function type for reading lines.
 type lineReader func(reader *bufio.Reader, limit int) (string, error)
 
@@ -196,7 +182,7 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 
 	if p.LogPath != "" {
 		logSource = fmt.Sprintf("log file: %s", p.LogPath)
-		file, err := osOpenFile(p.LogPath)
+		file, err := p.Config.FileOpener(p.LogPath)
 		if err != nil {
 			p.LogFunc(logging.LevelCritical, "FATAL", "Failed to open log file %s: %v", p.LogPath, err)
 			return
@@ -665,7 +651,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 
 		p.LogFunc(logging.LevelInfo, "TAIL", "Starting log tailer on %s...", p.LogPath)
 
-		file, err := osOpenFile(p.LogPath)
+		file, err := p.Config.FileOpener(p.LogPath)
 		if err != nil {
 			// File not found on first attempt, wait and retry.
 			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", p.LogPath, err, ErrorRetryDelay)

@@ -87,6 +87,17 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 
 		NowFunc: time.Now, // Default to real time for tests unless overridden.
 	}
+	// Ensure StatFunc and FileOpener are never nil to prevent panics.
+	if p.Config != nil {
+		if p.Config.StatFunc == nil {
+			p.Config.StatFunc = defaultStatFunc
+		}
+		if p.Config.FileOpener == nil {
+			p.Config.FileOpener = func(name string) (fileHandle, error) {
+				return os.Open(name)
+			}
+		}
+	}
 	// Use a no-op mock blocker by default for most tests.
 	p.Blocker = &MockBlocker{}
 	// Initialize signalFlush to prevent nil pointer dereference in tests.
