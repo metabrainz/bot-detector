@@ -113,6 +113,7 @@ This will produce a single executable named `bot-detector`.
 | **`--dry-run`** | `false` | Optional. If true, runs in test mode, ignoring the configured blocking backend and live logging. |
 | **`--version`** | `false` | Optional. Print the application version and exit. |
 | **`--reload-on-signal`** | (none) | Optional. If set to a signal name (e.g., `HUP`, `USR1`), disables the file watcher and reloads the configuration upon receiving that signal. |
+| **`--http-listen-addr`** | `""` | Optional. If set (e.g., `"127.0.0.1:8080"`), starts a web server on this address to display live metrics. Disabled by default. |
 | **`--top-n`** | `0` | Optional. In dry-run mode, show top N actors per chain. Default is 0 (disabled). |
 
 ---
@@ -157,7 +158,6 @@ The file is structured as a top-level map containing a single key, chains, which
 | **blocker_retry_delay** | string | Optional. Duration to wait between retry attempts. Default: `200ms`. |
 | **blocker_dial_timeout** | string | Optional. Timeout for establishing a connection to a blocker socket. Default: `5s`. |
 | **blocker_command_queue_size** | int | Optional. The maximum number of commands that can be queued for the blocker. Default: `1000`. |
-| **http_listen_addr** | string | Optional. If set (e.g., `"127.0.0.1:8080"`), starts a web server on this address to display live metrics. Disabled by default. |
 | **unblock_on_good_actor** | boolean | Optional. If `true`, the application will issue an `unblock` command for an IP that matches a `good_actors` rule. Default: `false`. |
 | **unblock_cooldown** | string | Optional. The minimum time that must pass before another `unblock` command is sent for the same IP. Prevents command spam. Default: `5m`. |
 | **blocker_commands_per_second** | int | Optional. The maximum number of commands per second to send to the blocker. Default: `10`. |

@@ -61,7 +61,8 @@ type Processor struct {
 	LogPath              string `test:"-"`
 	ReloadOnSignal       string
 	TopActorsPerChain    map[string]map[string]*store.ActorStats // Dry-run only: tracks top actors per chain.
-	TopN                 int                                     // For dry-run stats: show top N actors.
+	HTTPListenAddr       string
+	TopN                 int // For dry-run stats: show top N actors.
 	startTime            time.Time
 }
 
@@ -90,7 +91,6 @@ type AppConfig struct {
 	UnblockOnGoodActor       bool                              `config:"compare"`
 	UnblockCooldown          time.Duration                     `config:"compare"`
 	LogFormatRegex           string                            `config:"compare"`
-	HTTPListenAddr           string                            `config:"compare" summary:"http_listen_addr"`
 	StatFunc                 func(string) (os.FileInfo, error) // Mockable
 
 }
@@ -121,7 +121,6 @@ type LoadedConfig struct {
 	TimestampFormat          string                   `config:"compare"`
 	UnblockOnGoodActor       bool                     `config:"compare"`
 	UnblockCooldown          time.Duration            `config:"compare"`
-	HTTPListenAddr           string                   `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error)
 }
 
@@ -142,7 +141,6 @@ type ChainConfig struct {
 	BlockerCommandQueueSize  int                               `yaml:"blocker_command_queue_size"`
 	BlockerCommandsPerSecond int                               `yaml:"blocker_commands_per_second"`
 	IdleTimeout              string                            `yaml:"idle_timeout"`
-	HTTPListenAddr           string                            `yaml:"http_listen_addr"`
 	LineEnding               string                            `yaml:"line_ending"`
 	LogLevel                 string                            `yaml:"log_level"`
 	LogFormatRegex           string                            `yaml:"log_format_regex"`

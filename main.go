@@ -83,7 +83,6 @@ func main() {
 		OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
 		PollingInterval:          loadedCfg.PollingInterval,
 		TimestampFormat:          loadedCfg.TimestampFormat,
-		HTTPListenAddr:           loadedCfg.HTTPListenAddr,
 		StatFunc:                 defaultStatFunc, // Initialize StatFunc to prevent nil pointer panic.
 
 	}
@@ -107,6 +106,7 @@ func main() {
 		LogPath:              *cliFlags.LogPath,
 		ReloadOnSignal:       *cliFlags.ReloadOnSignal,
 		TopN:                 *cliFlags.TopN,
+		HTTPListenAddr:       *cliFlags.HTTPListenAddr,
 	}
 	p.startTime = p.NowFunc() // Record the start time.
 	// TestSignals is intentionally left nil in production.
@@ -137,7 +137,7 @@ func main() {
 
 // GetListenAddr returns the HTTP listen address from the config.
 func (p *Processor) GetListenAddr() string {
-	return p.Config.HTTPListenAddr
+	return p.HTTPListenAddr
 }
 
 // GetShutdownChannel returns the channel used for shutdown signals.

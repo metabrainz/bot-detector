@@ -42,7 +42,6 @@ var yamlKeyAliases = map[string]string{
 	"blockerdialtimeout":       "blocker_dial_timeout",
 	"blockercommandqueuesize":  "blocker_command_queue_size",
 	"blockercommandspersecond": "blocker_commands_per_second",
-	"httplistenaddr":           "http_listen_addr",
 	"unblockongoodactor":       "unblock_on_good_actor",
 	"unblockcooldown":          "unblock_cooldown",
 
@@ -935,7 +934,6 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		MaxTimeSinceLastHit:      maxTimeSinceLastHit,
 		OutOfOrderTolerance:      outOfOrderTolerance,
 		PollingInterval:          pollingInterval,
-		HTTPListenAddr:           config.HTTPListenAddr,
 		TimestampFormat:          timestampFormat,
 		UnblockOnGoodActor:       config.UnblockOnGoodActor,
 		UnblockCooldown:          unblockCooldown,
@@ -980,7 +978,6 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 		MaxTimeSinceLastHit:      loadedCfg.MaxTimeSinceLastHit,
 		OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
 		PollingInterval:          loadedCfg.PollingInterval,
-		HTTPListenAddr:           loadedCfg.HTTPListenAddr,
 		TimestampFormat:          loadedCfg.TimestampFormat,
 		UnblockOnGoodActor:       loadedCfg.UnblockOnGoodActor,
 		UnblockCooldown:          loadedCfg.UnblockCooldown,
