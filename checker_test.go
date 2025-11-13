@@ -491,7 +491,15 @@ func TestCheckChains_UnblockOnGoodActor(t *testing.T) {
 
 	// 2. Define a "good actor" rule directly in the processor's config.
 	// This simulates loading a `good_actors` block from YAML.
-	goodActorMatcher, err := compileStringMatcher("good_actor_test", 0, "IP", goodIP, &[]string{}, "")
+	// Create a MatcherContext for the good actor.
+	goodActorCtx := MatcherContext{
+		ChainName:          "good_actor_test",
+		StepIndex:          0,
+		CanonicalFieldName: "IP",
+		FileDependencies:   &[]string{}, // Empty slice for this test
+		ConfigDir:          "",          // Empty for this test
+	}
+	goodActorMatcher, err := compileStringMatcher(goodActorCtx, goodIP)
 	if err != nil {
 		t.Fatalf("Failed to compile good actor matcher: %v", err)
 	}
@@ -546,8 +554,24 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		MatchKey: "ip",
 		Action:   "log",
 	}
-	matcher1, _ := compileStringMatcher(chain.Name, 0, "Path", "/step1", new([]string), "")
-	matcher2, _ := compileStringMatcher(chain.Name, 1, "Path", "/step2", new([]string), "")
+	// Create MatcherContexts for the chain steps.
+	ctx1 := MatcherContext{
+		ChainName:          chain.Name,
+		StepIndex:          0,
+		CanonicalFieldName: "Path",
+		FileDependencies:   new([]string),
+		ConfigDir:          "",
+	}
+	matcher1, _ := compileStringMatcher(ctx1, "/step1")
+
+	ctx2 := MatcherContext{
+		ChainName:          chain.Name,
+		StepIndex:          1,
+		CanonicalFieldName: "Path",
+		FileDependencies:   new([]string),
+		ConfigDir:          "",
+	}
+	matcher2, _ := compileStringMatcher(ctx2, "/step2")
 	chain.Steps = []StepDef{
 		{Order: 1, MinTimeSinceLastHit: 2 * time.Second, Matchers: []fieldMatcher{matcher1}},
 		{Order: 2, Matchers: []fieldMatcher{matcher2}},

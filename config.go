@@ -144,6 +144,15 @@ func compareConfigsByTag(oldCfg AppConfig, newCfg LoadedConfig) bool {
 
 // --- New Matcher Compilation Logic ---
 
+// MatcherContext holds common parameters needed during matcher compilation.
+type MatcherContext struct {
+	ChainName          string
+	StepIndex          int
+	CanonicalFieldName string
+	FileDependencies   *[]string
+	ConfigDir          string
+}
+
 // fieldMatcher is a function type that represents a compiled matching rule.
 // It takes a LogEntry and returns true if the entry satisfies the rule.
 type fieldMatcher func(entry *LogEntry) bool
@@ -151,9 +160,17 @@ type fieldMatcher func(entry *LogEntry) bool
 // compileMatchers parses the raw `field_matches` interface from YAML into a slice of efficient matcher functions.
 func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps *[]string, configDir string) ([]fieldMatcher, error) {
 	var matchers []fieldMatcher
+	// Create the initial MatcherContext for this chain and step.
+	ctx := MatcherContext{
+		ChainName:        chainName,
+		StepIndex:        stepIndex,
+		FileDependencies: fileDeps,
+		ConfigDir:        configDir,
+	}
+
 	for field, value := range fieldMatches {
 		// Field names are already normalized by normalizeYAMLKeys before this function is called.
-		matcher, err := compileSingleMatcher(chainName, stepIndex, field, value, fileDeps, configDir)
+		matcher, err := compileSingleMatcher(ctx, field, value)
 		if err != nil {
 			return nil, err // Propagate error up
 		}
@@ -163,7 +180,7 @@ func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]in
 }
 
 // compileSingleMatcher is a large switch that handles the different value "shapes" (string, int, list, map).
-func compileSingleMatcher(chainName string, stepIndex int, field string, value interface{}, fileDeps *[]string, configDir string) (fieldMatcher, error) {
+func compileSingleMatcher(ctx MatcherContext, field string, value interface{}) (fieldMatcher, error) {
 	// Convert the incoming fieldName to its canonical PascalCase form for internal matching.
 	// This ensures that YAML keys like "ip" map correctly to LogEntry.IPInfo.
 	canonicalFieldName, ok := fieldNameCanonicalMap[strings.ToLower(field)]
@@ -172,22 +189,26 @@ func compileSingleMatcher(chainName string, stepIndex int, field string, value i
 		canonicalFieldName = field
 	}
 
+	// Create a new context with the canonical field name for subsequent matchers.
+	subCtx := ctx
+	subCtx.CanonicalFieldName = canonicalFieldName
+
 	switch v := value.(type) {
 	case string:
-		return compileStringMatcher(chainName, stepIndex, canonicalFieldName, v, fileDeps, configDir) // Pass canonicalFieldName
+		return compileStringMatcher(subCtx, v)
 	case int:
-		return compileIntMatcher(canonicalFieldName, v), nil // Pass canonicalFieldName
+		return compileIntMatcher(subCtx, v), nil
 	case []interface{}:
-		return compileListMatcher(chainName, stepIndex, canonicalFieldName, v, fileDeps, configDir) // Pass canonicalFieldName
+		return compileListMatcher(subCtx, v)
 	case map[string]interface{}:
-		return compileObjectMatcher(chainName, stepIndex, canonicalFieldName, v, fileDeps, configDir) // Pass canonicalFieldName
+		return compileObjectMatcher(subCtx, v)
 	default:
-		return nil, fmt.Errorf("chain '%s', step %d, field '%s': unsupported value type '%T'", chainName, stepIndex+1, field, v)
+		return nil, fmt.Errorf("chain '%s', step %d, field '%s': unsupported value type '%T'", ctx.ChainName, ctx.StepIndex+1, field, v)
 	}
 }
 
 // readLinesFromFile is a helper to read a file into a slice of strings, ignoring comments and empty lines.
-func readLinesFromFile(path string) ([]string, error) {
+func ReadLinesFromFile(path string) ([]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -209,11 +230,11 @@ func readLinesFromFile(path string) ([]string, error) {
 }
 
 // compileStringMatcher handles string values, which can be exact, regex, glob, or status code patterns.
-func compileStringMatcher(chainName string, stepIndex int, canonicalFieldName, value string, fileDeps *[]string, configDir string) (fieldMatcher, error) {
+func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error) {
 	if strings.HasPrefix(value, "exact:") {
 		literalValue := strings.TrimPrefix(value, "exact:")
 		return func(entry *LogEntry) bool {
-			fieldVal := GetMatchValueIfType(canonicalFieldName, entry, StringField)
+			fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, StringField)
 			if fieldVal == nil {
 				return false
 			}
@@ -231,15 +252,15 @@ func compileStringMatcher(chainName string, stepIndex int, canonicalFieldName, v
 		if filepath.IsAbs(relativeFilePath) {
 			absoluteFilePath = relativeFilePath
 		} else {
-			absoluteFilePath = filepath.Join(configDir, relativeFilePath)
+			absoluteFilePath = filepath.Join(ctx.ConfigDir, relativeFilePath)
 		}
 
-		*fileDeps = append(*fileDeps, absoluteFilePath) // Track file for watching
-		lines, err := readLinesFromFile(absoluteFilePath)
+		*ctx.FileDependencies = append(*ctx.FileDependencies, absoluteFilePath) // Track file for watching
+		lines, err := ReadLinesFromFile(absoluteFilePath)
 		if err != nil {
 			// Log a warning but do not fail the entire config load.
 			// Treat the file as empty, effectively disabling this part of the rule.
-			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': failed to read file matcher '%s', it will be treated as empty: %v", chainName, stepIndex+1, canonicalFieldName, absoluteFilePath, err)
+			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': failed to read file matcher '%s', it will be treated as empty: %v", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, absoluteFilePath, err)
 			// Return a matcher for an empty list, which will never match. Do not return an error.
 			lines = []string{}
 		}
@@ -248,31 +269,31 @@ func compileStringMatcher(chainName string, stepIndex int, canonicalFieldName, v
 		for i, v := range lines {
 			interfaceSlice[i] = v
 		}
-		return compileListMatcher(chainName, stepIndex, canonicalFieldName, interfaceSlice, fileDeps, configDir)
+		return compileListMatcher(ctx, interfaceSlice)
 	} else if strings.HasPrefix(value, "regex:") {
 		pattern := strings.TrimPrefix(value, "regex:")
 		re, err := regexp.Compile(pattern)
 		if err != nil {
-			return nil, fmt.Errorf("chain '%s', step %d, field '%s': invalid regex '%s': %w", chainName, stepIndex+1, canonicalFieldName, pattern, err)
+			return nil, fmt.Errorf("chain '%s', step %d, field '%s': invalid regex '%s': %w", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, pattern, err)
 		}
 		return func(entry *LogEntry) bool {
-			fieldVal := GetMatchValueIfType(canonicalFieldName, entry, StringField)
+			fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, StringField)
 			if fieldVal == nil {
 				return false
 			}
 			return re.MatchString(fieldVal.(string))
 		}, nil
 	} else if strings.HasPrefix(value, "cidr:") {
-		if canonicalFieldName != "IP" {
-			return nil, fmt.Errorf("chain '%s', step %d, field '%s': 'cidr:' matcher is only supported for the 'IP' field", chainName, stepIndex+1, canonicalFieldName)
+		if ctx.CanonicalFieldName != "IP" {
+			return nil, fmt.Errorf("chain '%s', step %d, field '%s': 'cidr:' matcher is only supported for the 'IP' field", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName)
 		}
 		cidrStr := strings.TrimPrefix(value, "cidr:")
 		_, ipNet, err := net.ParseCIDR(cidrStr)
 		if err != nil {
-			return nil, fmt.Errorf("chain '%s', step %d, field '%s': invalid CIDR '%s' for 'cidr:' matcher: %w", chainName, stepIndex+1, canonicalFieldName, cidrStr, err)
+			return nil, fmt.Errorf("chain '%s', step %d, field '%s': invalid CIDR '%s' for 'cidr:' matcher: %w", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, cidrStr, err)
 		}
 		return func(entry *LogEntry) bool {
-			fieldVal := GetMatchValueIfType(canonicalFieldName, entry, StringField)
+			fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, StringField)
 			if fieldVal == nil {
 				return false
 			}
@@ -286,14 +307,14 @@ func compileStringMatcher(chainName string, stepIndex int, canonicalFieldName, v
 	}
 
 	// Special handling for status code patterns like "4XX"
-	if canonicalFieldName == "StatusCode" && strings.Contains(strings.ToUpper(value), "X") {
+	if ctx.CanonicalFieldName == "StatusCode" && strings.Contains(strings.ToUpper(value), "X") {
 		xIndex := strings.Index(strings.ToUpper(value), "X")
 		if xIndex > 0 {
 			prefix := value[:xIndex]
 			// Ensure the prefix is numeric before creating the matcher.
 			if _, err := strconv.Atoi(prefix); err == nil {
 				return func(entry *LogEntry) bool {
-					fieldVal := GetMatchValueIfType(canonicalFieldName, entry, IntField)
+					fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, IntField)
 					if fieldVal == nil {
 						return false
 					}
@@ -306,7 +327,7 @@ func compileStringMatcher(chainName string, stepIndex int, canonicalFieldName, v
 
 	// Default for string is exact match
 	return func(entry *LogEntry) bool {
-		fieldVal := GetMatchValueIfType(canonicalFieldName, entry, StringField)
+		fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, StringField)
 		if fieldVal == nil {
 			return false
 		}
@@ -315,9 +336,9 @@ func compileStringMatcher(chainName string, stepIndex int, canonicalFieldName, v
 }
 
 // compileIntMatcher handles exact integer matches.
-func compileIntMatcher(canonicalFieldName string, value int) fieldMatcher {
+func compileIntMatcher(ctx MatcherContext, value int) fieldMatcher {
 	return func(entry *LogEntry) bool {
-		fieldVal := GetMatchValueIfType(canonicalFieldName, entry, IntField)
+		fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, IntField)
 		if fieldVal == nil {
 			return false
 		}
@@ -326,10 +347,12 @@ func compileIntMatcher(canonicalFieldName string, value int) fieldMatcher {
 }
 
 // compileListMatcher handles lists, creating an OR condition over its items.
-func compileListMatcher(chainName string, stepIndex int, canonicalFieldName string, values []interface{}, fileDeps *[]string, configDir string) (fieldMatcher, error) {
+func compileListMatcher(ctx MatcherContext, values []interface{}) (fieldMatcher, error) {
 	var subMatchers []fieldMatcher
 	for _, item := range values {
-		matcher, err := compileSingleMatcher(chainName, stepIndex, canonicalFieldName, item, fileDeps, configDir)
+		// Pass the existing context to the sub-matcher.
+		// The canonicalFieldName is already set in ctx by compileSingleMatcher.
+		matcher, err := compileSingleMatcher(ctx, ctx.CanonicalFieldName, item)
 		if err != nil {
 			return nil, err // Error in a sub-matcher
 		}
@@ -347,7 +370,7 @@ func compileListMatcher(chainName string, stepIndex int, canonicalFieldName stri
 }
 
 // compileObjectMatcher handles map values, creating an AND condition for its sub-matchers.
-func compileObjectMatcher(chainName string, stepIndex int, canonicalFieldName string, obj map[string]interface{}, fileDeps *[]string, configDir string) (fieldMatcher, error) {
+func compileObjectMatcher(ctx MatcherContext, obj map[string]interface{}) (fieldMatcher, error) {
 	var subMatchers []fieldMatcher
 
 	for key, val := range obj {
@@ -356,11 +379,11 @@ func compileObjectMatcher(chainName string, stepIndex int, canonicalFieldName st
 
 		switch key {
 		case "gt", "gte", "lt", "lte":
-			matcher, err = compileRangeMatcher(chainName, stepIndex, canonicalFieldName, key, val)
+			matcher, err = compileRangeMatcher(ctx, key, val)
 		case "not":
-			matcher, err = compileNotMatcher(chainName, stepIndex, canonicalFieldName, val, fileDeps, configDir)
+			matcher, err = compileNotMatcher(ctx, val)
 		default:
-			return nil, fmt.Errorf("chain '%s', step %d, field '%s': unknown operator '%s' in object matcher", chainName, stepIndex+1, canonicalFieldName, key)
+			return nil, fmt.Errorf("chain '%s', step %d, field '%s': unknown operator '%s' in object matcher", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, key)
 		}
 		if err != nil {
 			return nil, err
@@ -384,23 +407,23 @@ func compileObjectMatcher(chainName string, stepIndex int, canonicalFieldName st
 }
 
 // compileRangeMatcher handles numeric range operators (gt, gte, lt, lte).
-func compileRangeMatcher(chainName string, stepIndex int, canonicalFieldName, op string, value interface{}) (fieldMatcher, error) {
+func compileRangeMatcher(ctx MatcherContext, op string, value interface{}) (fieldMatcher, error) {
 	num, ok := value.(int)
 	if !ok {
-		return nil, fmt.Errorf("chain '%s', step %d, field '%s': value for '%s' must be an integer, got %T", chainName, stepIndex+1, canonicalFieldName, op, value)
+		return nil, fmt.Errorf("chain '%s', step %d, field '%s': value for '%s' must be an integer, got %T", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, op, value)
 	}
 
 	// Validate that the field is a known numeric field at compile time.
 	// We can do this by calling GetMatchValue with a nil entry and checking the returned type.
-	_, fieldType, _ := GetMatchValue(canonicalFieldName, nil)
+	_, fieldType, _ := GetMatchValue(ctx.CanonicalFieldName, nil)
 	if fieldType != IntField {
 		// This error message is now more generic, which is good.
-		return nil, fmt.Errorf("chain '%s', step %d: operator '%s' is only supported for numeric fields, not '%s'", chainName, stepIndex+1, op, canonicalFieldName)
+		return nil, fmt.Errorf("chain '%s', step %d: operator '%s' is only supported for numeric fields, not '%s'", ctx.ChainName, ctx.StepIndex+1, op, ctx.CanonicalFieldName)
 	}
 
 	// Return a function that performs the comparison on the generic numeric field.
 	return func(entry *LogEntry) bool {
-		fieldVal := GetMatchValueIfType(canonicalFieldName, entry, IntField)
+		fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, IntField)
 		if fieldVal == nil {
 			return false
 		}
@@ -421,7 +444,7 @@ func compileRangeMatcher(chainName string, stepIndex int, canonicalFieldName, op
 }
 
 // compileNotMatcher handles the 'not' operator.
-func compileNotMatcher(chainName string, stepIndex int, canonicalFieldName string, value interface{}, fileDeps *[]string, configDir string) (fieldMatcher, error) {
+func compileNotMatcher(ctx MatcherContext, value interface{}) (fieldMatcher, error) {
 	// The value of 'not' can be a single item or a list of items.
 	// We can reuse the existing list and single matcher compilers.
 	var subMatcher fieldMatcher
@@ -429,10 +452,10 @@ func compileNotMatcher(chainName string, stepIndex int, canonicalFieldName strin
 
 	if values, ok := value.([]interface{}); ok {
 		// If it's a list, compile it as an OR-matcher.
-		subMatcher, err = compileListMatcher(chainName, stepIndex, canonicalFieldName, values, fileDeps, configDir)
+		subMatcher, err = compileListMatcher(ctx, values)
 	} else {
 		// Otherwise, compile it as a single matcher.
-		subMatcher, err = compileSingleMatcher(chainName, stepIndex, canonicalFieldName, value, fileDeps, configDir)
+		subMatcher, err = compileSingleMatcher(ctx, ctx.CanonicalFieldName, value)
 	}
 
 	if err != nil {
@@ -833,6 +856,14 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 
 		// Iterate over the definition map to find IP and UserAgent keys case-insensitively.
 		for key, value := range goodActorMap {
+			// Create a base context for good actors.
+			baseCtx := MatcherContext{
+				ChainName:        fmt.Sprintf("good_actor '%s'", name),
+				StepIndex:        0, // Good actors don't have steps, use 0 or a sentinel value
+				FileDependencies: &fileDependencies,
+				ConfigDir:        configDir,
+			}
+
 			switch strings.ToLower(key) {
 			case "ip":
 				var ipList []interface{}
@@ -841,7 +872,9 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 				} else {
 					ipList = []interface{}{value}
 				}
-				matcher, err := compileListMatcher(fmt.Sprintf("good_actor '%s'", name), 0, "IP", ipList, &fileDependencies, configDir)
+				ipCtx := baseCtx
+				ipCtx.CanonicalFieldName = "IP"
+				matcher, err := compileListMatcher(ipCtx, ipList)
 				if err != nil {
 					return nil, err
 				}
@@ -853,7 +886,9 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 				} else {
 					uaList = []interface{}{value}
 				}
-				matcher, err := compileListMatcher(fmt.Sprintf("good_actor '%s'", name), 0, "UserAgent", uaList, &fileDependencies, configDir)
+				uaCtx := baseCtx
+				uaCtx.CanonicalFieldName = "UserAgent"
+				matcher, err := compileListMatcher(uaCtx, uaList)
 				if err != nil {
 					return nil, err
 				}
