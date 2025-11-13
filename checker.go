@@ -584,17 +584,13 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 	// This is a "valid hit" that will be processed against the chains.
 	p.Metrics.ValidHits.Add(1)
 
-	p.ConfigMutex.RLock()
-	chains := p.Chains
-	p.ConfigMutex.RUnlock()
-
 	// A set to keep track of activities that have been processed for this entry.
 	// This is crucial to ensure that LastRequestTime is updated only once per activity,
 	// even if multiple chains map to the same actor.
 	processedActivities := make(map[*store.ActorActivity]struct{})
 
 	// 2. Iterate over all configured chains.
-	for _, chain := range chains {
+	for _, chain := range p.Chains {
 		actor := GetActor(&chain, entry)
 		if actor.IPInfo.Address == "" {
 			continue // Skip chain if actor could not be determined (e.g., IP version mismatch).
@@ -633,7 +629,10 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 // This is the new entry point for single, immediate processing.
 func checkChainsWithLock(p *Processor, entry *LogEntry) {
 	p.ActivityMutex.Lock()
+	// Lock config mutex to safely read p.Chains
+	p.ConfigMutex.RLock()
 	defer p.ActivityMutex.Unlock()
+	defer p.ConfigMutex.RUnlock()
 	checkChainsInternal(p, entry)
 }
 
