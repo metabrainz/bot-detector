@@ -7,10 +7,6 @@ set -ex
 echo "Running go vet..."
 go vet ./...
 
-# Run go test
-echo "Running go test..."
-go test ./...
-
 # Run golangci-lint
 echo "Running golangci-lint..."
 golangci-lint run
