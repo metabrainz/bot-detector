@@ -41,7 +41,9 @@ func Start(p MetricsProvider) {
 	go func() {
 		s := <-p.GetShutdownChannel()
 		p.Log(logging.LevelInfo, "HTTP_SERVER", "Shutting down metrics web server.")
-		server.Close()
+		if err := server.Close(); err != nil {
+			p.Log(logging.LevelError, "HTTP_SERVER", "Error closing metrics server: %v", err)
+		}
 
 		// Re-broadcast the signal so other listeners can also receive it.
 		select {

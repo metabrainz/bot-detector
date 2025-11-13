@@ -73,7 +73,7 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 			msg := fmt.Sprintf(format, args...)
 			// Remove the "(DryRun)" suffix to make outputs identical.
 			msg = strings.Replace(msg, " (DryRun)", "", 1)
-			logOutput.Write([]byte(fmt.Sprintf("%s: %s\n", normalizedTag, msg)))
+			_, _ = logOutput.Write([]byte(fmt.Sprintf("%s: %s\n", normalizedTag, msg)))
 		}
 	}
 
@@ -189,7 +189,9 @@ func TestDryRunVsLiveModeComparison(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create temp log file: %v", err)
 		}
-		defer file.Close()
+		defer func() {
+			_ = file.Close()
+		}()
 		if _, err := file.WriteString(cleanLogData.String()); err != nil {
 			t.Fatalf("Failed to write to temp log file: %v", err)
 		}
@@ -212,7 +214,7 @@ func TestDryRunVsLiveModeComparison(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create empty temp file for live mode: %v", err)
 	}
-	liveFile.Close() // Close it immediately, the tailer will open it.
+	_ = liveFile.Close() // Close it immediately, the tailer will open it.
 	liveLogPath, _ := filepath.Abs(liveFile.Name())
 
 	// 2. Setup the processor to watch the empty file.
@@ -238,8 +240,8 @@ func TestDryRunVsLiveModeComparison(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open live tailer log file for appending: %v", err)
 	}
-	f.WriteString(cleanLogData.String())
-	f.Close()
+	_, _ = f.WriteString(cleanLogData.String())
+	_ = f.Close()
 
 	// Wait for all lines to be processed by the live tailer.
 	// Count the actual number of lines that should be processed (non-empty, non-comment).

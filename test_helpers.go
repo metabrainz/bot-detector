@@ -267,13 +267,3 @@ func (h *checkerTestHarness) assertChainProgressCleared(chainName string, entry 
 		h.t.Errorf("Expected ChainProgress to be cleared for key %+v, but it has %d entries: %v", key, len(activity.ChainProgress), activity.ChainProgress)
 	}
 }
-
-// compileMatchersForTest is a test helper to compile a single matcher for a given field and value.
-func compileMatchersForTest(t *testing.T, field, value string) []fieldMatcher {
-	t.Helper()
-	matcher, err := compileStringMatcher("test_chain", 0, field, value, &[]string{}, "")
-	if err != nil {
-		t.Fatalf("Failed to compile matcher for test: %v", err)
-	}
-	return []fieldMatcher{matcher}
-}

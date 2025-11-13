@@ -211,12 +211,14 @@ func startMockServer(t *testing.T, handler func(net.Conn)) (net.Listener, string
 		if err != nil {
 			return // Expected when the listener is closed.
 		}
-		defer conn.Close()
+		defer func() {
+			_ = conn.Close()
+		}()
 		handler(conn)
 	}()
 
 	return l, addr, func() {
-		l.Close()
+		_ = l.Close()
 		wg.Wait()
 	}
 }
@@ -289,7 +291,7 @@ func TestExecuteCommandImpl_ConnectErrorWithRetry(t *testing.T) {
 func TestExecuteCommandImpl_WriteError(t *testing.T) {
 	// Start a server that closes the connection immediately after accept.
 	_, addr, closeFn := startMockServer(t, func(conn net.Conn) {
-		conn.Close()
+		_ = conn.Close()
 	})
 	defer closeFn()
 

@@ -139,7 +139,9 @@ func (b *HAProxyBlocker) executeCommandImpl(addr, ip, command string) error {
 			lastErr = fmt.Errorf("failed to connect to HAProxy instance %s: %w", addr, err)
 			continue
 		}
-		defer conn.Close()
+		defer func() {
+			_ = conn.Close()
+		}()
 
 		if _, err = conn.Write([]byte(command)); err != nil {
 			lastErr = fmt.Errorf("failed to send command to HAProxy instance %s: %w", addr, err)
@@ -147,7 +149,7 @@ func (b *HAProxyBlocker) executeCommandImpl(addr, ip, command string) error {
 		}
 
 		reader := bufio.NewReader(conn)
-		conn.SetReadDeadline(time.Now().Add(b.P.GetBlockerDialTimeout()))
+		_ = conn.SetReadDeadline(time.Now().Add(b.P.GetBlockerDialTimeout()))
 		response, err := reader.ReadString('\n')
 
 		if err == nil || (errors.Is(err, io.EOF) && response != "") {

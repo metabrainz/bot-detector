@@ -66,7 +66,7 @@ func TestServer_StartAndShutdown(t *testing.T) {
 		t.Fatalf("Failed to listen on a free port: %v", err)
 	}
 	addr := listener.Addr().String()
-	listener.Close() // Close it immediately; the server will re-bind it.
+	_ = listener.Close() // Close it immediately; the server will re-bind it.
 
 	mockProvider := newMockProvider(addr, "TEST METRICS REPORT")
 
@@ -92,7 +92,9 @@ func TestServer_StartAndShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to make GET request to metrics server: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("Expected status code 200, got %d", resp.StatusCode)

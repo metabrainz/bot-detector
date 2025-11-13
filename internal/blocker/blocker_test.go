@@ -79,7 +79,7 @@ func TestRateLimitedBlocker_BlockAndUnblock(t *testing.T) {
 	numBlockCommands := 5
 	for i := 0; i < numBlockCommands; i++ {
 		ip := blocker.IPInfo{Address: fmt.Sprintf("192.168.1.%d", i)}
-		h.rlb.Block(ip, 5*time.Minute)
+		_ = h.rlb.Block(ip, 5*time.Minute)
 	}
 
 	h.waitForCommands(numBlockCommands)
@@ -92,7 +92,7 @@ func TestRateLimitedBlocker_BlockAndUnblock(t *testing.T) {
 	numUnblockCommands := 3
 	for i := 0; i < numUnblockCommands; i++ {
 		ip := blocker.IPInfo{Address: fmt.Sprintf("192.168.2.%d", i)}
-		h.rlb.Unblock(ip)
+		_ = h.rlb.Unblock(ip)
 	}
 
 	h.waitForCommands(numUnblockCommands)
@@ -110,7 +110,7 @@ func TestRateLimitedBlocker_QueueFull(t *testing.T) {
 	numCommands := 3
 	for i := 0; i < numCommands; i++ {
 		ip := blocker.IPInfo{Address: fmt.Sprintf("192.168.1.%d", i)}
-		h.rlb.Block(ip, 5*time.Minute)
+		_ = h.rlb.Block(ip, 5*time.Minute)
 	}
 
 	// Give a moment for the non-blocking sends to complete.
@@ -131,13 +131,13 @@ func TestRateLimitedBlocker_Stop(t *testing.T) {
 	h := newRateLimiterTestHarness(t, 10, 100) // High rate
 
 	ip := blocker.IPInfo{Address: "192.168.1.1"}
-	h.rlb.Block(ip, 5*time.Minute)
+	_ = h.rlb.Block(ip, 5*time.Minute)
 
 	h.waitForCommands(1)
 
 	h.rlb.Stop()
 
-	h.rlb.Block(ip, 5*time.Minute)
+	_ = h.rlb.Block(ip, 5*time.Minute)
 
 	if h.mockBlocker.blockCount.Load() != 1 {
 		t.Errorf("Expected exactly 1 block to be processed after stopping, got %d", h.mockBlocker.blockCount.Load())

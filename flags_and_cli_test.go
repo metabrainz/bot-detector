@@ -55,18 +55,18 @@ func TestFlagUsageOutput(t *testing.T) {
 	// 3. Ensure we restore os.Stderr and close the pipe when the test is done.
 	t.Cleanup(func() {
 		os.Stderr = originalStderr
-		w.Close()
-		r.Close()
+		_ = w.Close()
+		_ = r.Close()
 	})
 
 	// --- Act ---
 	// Call the global Usage function, which was set by init().
 	flag.Usage()
-	w.Close() // Close the writer to signal EOF to the reader.
+	_ = w.Close() // Close the writer to signal EOF to the reader.
 
 	// Read the output from the pipe.
 	var buf bytes.Buffer
-	buf.ReadFrom(r)
+	_, _ = buf.ReadFrom(r)
 	output := buf.String()
 
 	// --- Assert ---

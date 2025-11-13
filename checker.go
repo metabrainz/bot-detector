@@ -299,7 +299,8 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 		p.TopActorsPerChain[chain.Name][actorString].Completions++
 	}
 	// --- 2. Perform the action ---
-	if chain.Action == "block" {
+	switch chain.Action {
+	case "block":
 		p.Metrics.BlockActions.Add(1)
 		// Increment the counter for the specific block duration used.
 		if val, ok := p.Metrics.BlockDurations.Load(chain.BlockDuration); ok {
@@ -318,7 +319,7 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 		currentActivity.IsBlocked = true                                                           // Mark as blocked
 		currentActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
 		currentActivity.BlockedUntil = ipActivity.BlockedUntil
-	} else if chain.Action == "log" {
+	case "log":
 		p.Metrics.LogActions.Add(1)
 	}
 
@@ -328,8 +329,8 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 
 // executeBlock calls the external blocker unless in DryRun mode.
 func executeBlock(p *Processor, entry *LogEntry, chain *BehavioralChain) {
-	if p.DryRun {
-		return
+	if p.DryRun { // Should not happen due to caller check, but safe to keep.
+		return // Do not execute block in dry-run mode.
 	}
 	// Convert main.IPInfo to blocker.IPInfo before calling the blocker.
 	blockerIPInfo := blocker.IPInfo{
@@ -337,7 +338,8 @@ func executeBlock(p *Processor, entry *LogEntry, chain *BehavioralChain) {
 		Version: byte(entry.IPInfo.Version),
 	}
 	if err := p.Blocker.Block(blockerIPInfo, chain.BlockDuration); err != nil {
-		// Error is logged inside Block, no action needed here.
+		// The error is logged inside the HAProxyBlocker, but not the RateLimitedBlocker. Log it here for safety.
+		p.LogFunc(logging.LevelError, "BLOCK_FAIL", "Failed to queue block command for %s: %v", entry.IPInfo.Address, err)
 	}
 }
 
@@ -627,17 +629,6 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 
 }
 
-// checkChainsWithLock acquires the necessary lock and then calls the internal checking logic.
-// This is the new entry point for single, immediate processing.
-func checkChainsWithLock(p *Processor, entry *LogEntry) {
-	p.ActivityMutex.Lock()
-	// Lock config mutex to safely read p.Chains
-	p.ConfigMutex.RLock()
-	defer p.ActivityMutex.Unlock()
-	defer p.ConfigMutex.RUnlock()
-	checkChainsInternal(p, entry)
-}
-
 // doSignalOooBufferFlush sends a non-blocking signal to the entryBufferWorker to trigger an immediate flush.
 func (p *Processor) doSignalOooBufferFlush() {
 	select {
@@ -693,7 +684,9 @@ func CheckChains(p *Processor, entry *LogEntry) {
 					Version: byte(entry.IPInfo.Version),
 				}
 				// The blocker's Unblock method is non-blocking and rate-limited.
-				p.Blocker.Unblock(blockerIPInfo)
+				if err := p.Blocker.Unblock(blockerIPInfo); err != nil {
+					p.LogFunc(logging.LevelError, "UNBLOCK_FAIL", "Failed to queue unblock command for %s: %v", entry.IPInfo.Address, err)
+				}
 				activity.LastUnblockTime = time.Now()
 			}
 		}
@@ -704,10 +697,11 @@ func CheckChains(p *Processor, entry *LogEntry) {
 	_, skip, skipInfo := preCheckActivity(p, entry, actor)
 	if skip {
 		if skipInfo.Type != utils.SkipTypeNone {
-			var reasonStr string
 			// Construct the reason string based on SkipInfo.Type for logging and metrics.
 			// This ensures consistency and avoids string parsing.
-			if skipInfo.Type == utils.SkipTypeGoodActor {
+			var reasonStr string
+			switch skipInfo.Type {
+			case utils.SkipTypeGoodActor:
 				reasonStr = fmt.Sprintf("good_actor:%s", skipInfo.Source)
 				p.Metrics.GoodActorsSkipped.Add(1)
 				if val, ok := p.Metrics.GoodActorHits.Load(skipInfo.Source); ok { // This map is pre-populated
@@ -715,10 +709,9 @@ func CheckChains(p *Processor, entry *LogEntry) {
 						counter.Add(1)
 					}
 				}
-			} else if skipInfo.Type == utils.SkipTypeBlocked {
+			case utils.SkipTypeBlocked:
 				reasonStr = fmt.Sprintf("blocked:%s", skipInfo.Source)
 			}
-
 			if reasonStr != "" {
 				// Increment the counter for the specific skip reason.
 				val, _ := p.Metrics.SkipsByReason.LoadOrStore(reasonStr, new(atomic.Int64))

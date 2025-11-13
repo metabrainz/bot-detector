@@ -637,7 +637,7 @@ func TestDryRunMode(t *testing.T) {
 	if err := os.WriteFile("bad_user_agents.txt", []byte("BadUA/1.0\nregex:NastyBot"), 0644); err != nil {
 		t.Fatalf("Failed to create dummy user agent file in current directory: %v", err)
 	}
-	t.Cleanup(func() { os.Remove("bad_user_agents.txt") })
+	t.Cleanup(func() { _ = os.Remove("bad_user_agents.txt") })
 	// 1. Load configuration (chains, whitelist, etc.)
 	loadedCfg, err := LoadConfigFromYAML("testdata/config.yaml")
 	if err != nil {

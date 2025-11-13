@@ -24,8 +24,8 @@ func TestStart_DryRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	tmpFile.WriteString("dry run log line\n")
-	tmpFile.Close()
+	_, _ = tmpFile.WriteString("dry run log line\n")
+	_ = tmpFile.Close()
 
 	linesProcessed := 0
 	p := newTestProcessor(&AppConfig{}, nil)

@@ -201,7 +201,9 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 			p.LogFunc(logging.LevelCritical, "FATAL", "Failed to open log file %s: %v", p.LogPath, err)
 			return
 		}
-		defer file.Close()
+		defer func() {
+			_ = file.Close()
+		}()
 
 		// --- Magic Number Detection for file-based input ---
 		magicBuf := make([]byte, 3)
@@ -223,7 +225,9 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 				p.LogFunc(logging.LevelCritical, "FATAL", "Failed to create gzip reader for %s: %v", p.LogPath, err)
 				return
 			}
-			defer gzReader.Close()
+			defer func() {
+				_ = gzReader.Close()
+			}()
 			reader = gzReader
 			p.LogFunc(logging.LevelInfo, "DRY_RUN", "Detected gzip format. Decompressing log file on the fly...")
 		} else if bytesRead >= 3 && bytes.Equal(magicBuf[:3], []byte{'B', 'Z', 'h'}) {
@@ -680,7 +684,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 		} else {
 			p.LogFunc(logging.LevelWarning, "TAIL_WARN", "Failed to get initial file stat: %v. Rotation detection may be impaired.", statErr)
 			// If we can't stat the file, the handle is likely bad. Close it and restart the loop.
-			file.Close()
+			_ = file.Close()
 			restartTailing(ErrorRetryDelay) // Add a delay to prevent a tight loop on repeated stat failures.
 			if shutdown {
 				continue // Let the main loop handle the exit, consistent with other error paths.
@@ -691,7 +695,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 		// On the very first run, seek to the end to ignore old content.
 		// On subsequent runs (after rotation), we read the new file from the beginning.
 		if firstRun {
-			file.Seek(0, io.SeekEnd)
+			_, _ = file.Seek(0, io.SeekEnd)
 			firstRun = false
 		}
 
@@ -704,7 +708,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 		readLine, err := getLineReader(p.Config.LineEnding)
 		if err != nil {
 			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Configuration error with line_ending: %v. Retrying.", err)
-			file.Close()
+			_ = file.Close()
 			restartTailing(ErrorRetryDelay)
 			continue
 		}
@@ -716,7 +720,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			case s := <-signalCh:
 				p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
 				FlushEntryBuffer(p) // Final flush on shutdown.
-				file.Close()
+				_ = file.Close()
 				return
 			default:
 				// Continue to read.
@@ -732,7 +736,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 				if readErr == io.EOF {
 					FlushEntryBuffer(p)
 					if hasFileBeenRotated(p, p.LogPath, initialStat, p.Config.StatFunc) {
-						file.Close()
+						_ = file.Close()
 						restartTailing(FileOpenRetryDelay) // Add delay to prevent tight loop on stat errors.
 						break                              // Break inner loop to reopen.
 					}
@@ -740,7 +744,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 					continue
 				}
 				p.LogFunc(logging.LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening file.", readErr)
-				file.Close()
+				_ = file.Close()
 				restartTailing(ErrorRetryDelay)
 				break // Break the inner loop to force a file reopen via the outer loop.
 			}

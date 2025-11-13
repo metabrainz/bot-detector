@@ -381,7 +381,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 		{
 			name: "Successful Processing",
 			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\nexample.com 1.1.1.2 - - [01/Jan/2025:00:00:01 +0000] \"GET /2 HTTP/1.1\" 200 100 \"-\" \"-\"\n# a comment\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
+				_ = os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\nexample.com 1.1.1.2 - - [01/Jan/2025:00:00:01 +0000] \"GET /2 HTTP/1.1\" 200 100 \"-\" \"-\"\n# a comment\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
 			},
 			expectedLinesProcessed: 3,
 			expectedLogContains:    "Dry-run finished.",
@@ -389,7 +389,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 		{
 			name: "Empty line in middle of file",
 			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\n\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
+				_ = os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\n\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
 			},
 			expectedLinesProcessed: 2,
 			expectedLogContains:    "Dry-run finished.", // Just check that it finishes
@@ -397,21 +397,21 @@ func TestDryRunLogProcessor(t *testing.T) {
 		{
 			name: "Comment line in middle of file",
 			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\n# comment\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
+				_ = os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\n# comment\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
 			},
 			expectedLinesProcessed: 2,
 			expectedLogContains:    "Dry-run finished.", // Just check that it finishes
 		},
 		{
 			name:                   "File Not Found",
-			setupFunc:              func(filePath string) { os.Remove(filePath) },
+			setupFunc:              func(filePath string) { _ = os.Remove(filePath) },
 			expectedLinesProcessed: 0,
 			expectedLogContains:    "Failed to open log file",
 		},
 		{
 			name: "File ends without newline",
 			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\nexample.com 1.1.1.2 - - [01/Jan/2025:00:00:01 +0000] \"GET /2 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
+				_ = os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\nexample.com 1.1.1.2 - - [01/Jan/2025:00:00:01 +0000] \"GET /2 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
 			},
 			expectedLinesProcessed: 2,
 			expectedLogContains:    "Dry-run finished.",
@@ -419,7 +419,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 		{
 			name: "Line Exceeds Limit",
 			setupFunc: func(filePath string) {
-				os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\n"+strings.Repeat("a", MaxLogLineSize+1)+"\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
+				_ = os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\n"+strings.Repeat("a", MaxLogLineSize+1)+"\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
 			},
 			expectedLinesProcessed: 2, // The long line is skipped, but the other two are processed.
 			expectedLogContains:    "Skipped line (length exceeded",
@@ -428,11 +428,11 @@ func TestDryRunLogProcessor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			harness := newDryRunTestHarness(t, nil)
+			harness := newDryRunTestHarness(t, &AppConfig{})
 			tt.setupFunc(harness.tempLogFile)
 			done := make(chan struct{})
 
-			DryRunLogProcessor(harness.processor, done)
+			go DryRunLogProcessor(harness.processor, done)
 			<-done
 
 			if len(harness.processedLines) != tt.expectedLinesProcessed {
@@ -485,7 +485,7 @@ func TestDryRunLogProcessor_Decompression(t *testing.T) {
 			harness.processor.LogPath = tt.logFilePath // Point to the pre-compressed file
 
 			done := make(chan struct{})
-			DryRunLogProcessor(harness.processor, done)
+			go DryRunLogProcessor(harness.processor, done)
 			<-done
 
 			assertStringSlicesEqual(t, expectedLines, harness.processedLines)
@@ -584,13 +584,13 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 				LogFormatRegex:  `^(?P<VHost>\S+) (?P<IP>\S+) - - \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) \S+" (?P<StatusCode>\S+) (?P<Size>\S+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"$`,
 				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
 			})
-			os.WriteFile(harness.tempLogFile, []byte(logContent), 0644)
+			_ = os.WriteFile(harness.tempLogFile, []byte(logContent), 0644)
 			harness.processor.Chains = []BehavioralChain{chain1, chain2}
 			harness.processor.TopN = tt.topN
 			harness.processor.DryRun = true // Explicitly set DryRun mode for this test.
 
 			done := make(chan struct{})
-			DryRunLogProcessor(harness.processor, done)
+			go DryRunLogProcessor(harness.processor, done)
 			<-done
 
 			logOutput := strings.Join(harness.capturedLogs, "\n")
@@ -640,7 +640,7 @@ func TestLiveLogTailer(t *testing.T) {
 	if _, err := f.WriteString("new line 1\n"); err != nil {
 		t.Fatalf("Failed to write to log file: %v", err)
 	}
-	f.Close()
+	_ = f.Close()
 
 	// Wait for the tailer to process the new line by listening on the channel.
 	select {
@@ -726,7 +726,7 @@ func TestLiveLogTailer_ErrorHandling(t *testing.T) {
 		harness := newTailerTestHarness(t, &AppConfig{
 			PollingInterval: 10 * time.Millisecond,
 		})
-		os.Remove(harness.tempLogFile)
+		_ = os.Remove(harness.tempLogFile)
 
 		// Run tailer in a goroutine
 		go func() {
@@ -755,7 +755,7 @@ func TestLiveLogTailer_ErrorHandling(t *testing.T) {
 		})
 
 		// Create a file with some content
-		os.WriteFile(harness.tempLogFile, []byte("some line\n"), 0644)
+		_ = os.WriteFile(harness.tempLogFile, []byte("some line\n"), 0644)
 
 		// We can't easily inject a read error, but we can simulate the outcome.
 		// The logic for a non-EOF read error is to log "Read error while tailing"
@@ -790,7 +790,7 @@ func TestLiveLogTailer_InitialOpenErrorAndShutdown(t *testing.T) {
 	})
 
 	// Ensure the file does not exist.
-	os.Remove(harness.tempLogFile)
+	_ = os.Remove(harness.tempLogFile)
 
 	// --- Act ---
 	// We don't use harness.start() because it waits for a ready signal that will never come.
@@ -880,8 +880,8 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 
 	// Close the writer end first, then the reader end. Closing the reader
 	// will cause the blocked ReadByte() in the tailer to fail immediately.
-	w.Close()
-	r.Close()
+	_ = w.Close()
+	_ = r.Close()
 
 	// Wait for the tailer to log the read error. This is now deterministic.
 	select {
@@ -929,7 +929,7 @@ func TestLiveLogTailer_ShutdownDuringRetryDelay(t *testing.T) {
 	})
 
 	// Ensure the file does not exist to force the retry loop.
-	os.Remove(harness.tempLogFile)
+	_ = os.Remove(harness.tempLogFile)
 
 	// Override the LogFunc to count how many times "Failed to open" is logged.
 	openFailCount := 0
@@ -957,16 +957,6 @@ func TestLiveLogTailer_ShutdownDuringRetryDelay(t *testing.T) {
 	if openFailCount > 1 {
 		t.Errorf("Expected only one 'Failed to open' attempt, but got %d. The tailer did not shut down immediately.", openFailCount)
 	}
-}
-
-// statErrorHandle is a wrapper around os.File that forces the Stat() method to fail.
-type statErrorHandle struct {
-	*os.File
-}
-
-// Stat overrides the embedded os.File's Stat method to always return an error.
-func (f *statErrorHandle) Stat() (os.FileInfo, error) {
-	return nil, errors.New("simulated stat error")
 }
 
 // TestLiveLogTailer_InitialStatError verifies that if the initial file.Stat() call
