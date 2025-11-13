@@ -127,9 +127,8 @@ func main() {
 	// Assign the real implementation for ProcessLogLine, which no longer uses line numbers.
 	p.ProcessLogLine = func(line string) { processLogLineInternal(p, line) }
 
-	// Log the initial configuration summary.
+	// Log the initial configuration summary just before starting the main loops.
 	logConfigurationSummary(p)
-	// At startup, log details for all loaded chains.
 	logChainDetails(p, p.Chains, "Loaded chains")
 
 	start(p)
