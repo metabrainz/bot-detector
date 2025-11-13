@@ -558,7 +558,7 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 			if validHits > 0 {
 				hitsPctStr := formatPercentage(metric.Hits, validHits)
 				completionsPctStr := formatPercentage(metric.Completions, data.TotalChainsCompleted)
-				resetsPctStr := formatPercentage(metric.Resets, data.TotalChainsReset)
+				resetsPctStr := formatPercentage(metric.Resets, metric.Hits)
 				logFunc(logging.LevelInfo, logTag, "  - %s: Hits: %d (%s), Completed: %d (%s), Resets: %d (%s)",
 					metric.Name, metric.Hits, hitsPctStr, metric.Completions, completionsPctStr, metric.Resets, resetsPctStr)
 			} else {
