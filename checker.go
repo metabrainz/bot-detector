@@ -50,6 +50,8 @@ func GetActor(chain *BehavioralChain, entry *LogEntry) Actor {
 	return Actor{IPInfo: entry.IPInfo}
 }
 
+
+
 // GetMatchValue retrieves the field value from a LogEntry based on the field name.
 func GetMatchValue(fieldName string, entry *LogEntry) (interface{}, FieldType, error) {
 	// If entry is nil, this is a compile-time check for the field's type.
@@ -59,29 +61,9 @@ func GetMatchValue(fieldName string, entry *LogEntry) (interface{}, FieldType, e
 
 	// Convert the incoming fieldName to its canonical PascalCase form for internal matching.
 	// This ensures that YAML keys like "ip" map correctly to LogEntry.IPInfo.
-	canonicalFieldName := ""
-	switch strings.ToLower(fieldName) {
-	case "ip":
-		canonicalFieldName = "IP"
-	case "path":
-		canonicalFieldName = "Path"
-	case "method":
-		canonicalFieldName = "Method"
-	case "protocol":
-		canonicalFieldName = "Protocol"
-	case "useragent":
-		canonicalFieldName = "UserAgent"
-	case "referrer":
-		canonicalFieldName = "Referrer"
-	case "statuscode":
-		canonicalFieldName = "StatusCode"
-	case "size":
-		canonicalFieldName = "Size"
-	case "vhost":
-		canonicalFieldName = "VHost"
-	default:
-		// If it's not one of our known fields, use the original fieldName.
-		// This might happen for custom fields or if the input is already PascalCase.
+	canonicalFieldName, ok := fieldNameCanonicalMap[strings.ToLower(fieldName)]
+	if !ok {
+		// If not found in the map, assume the fieldName is already canonical or unknown.
 		canonicalFieldName = fieldName
 	}
 

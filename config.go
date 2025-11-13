@@ -22,8 +22,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-
-
 // logConfigurationSummary logs the key-value pairs of the current application configuration.
 // This is useful for visibility on startup and after a configuration reload.
 func logConfigurationSummary(p *Processor) {
@@ -164,33 +162,15 @@ func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]in
 	return matchers, nil
 }
 
+
+
 // compileSingleMatcher is a large switch that handles the different value "shapes" (string, int, list, map).
 func compileSingleMatcher(chainName string, stepIndex int, field string, value interface{}, fileDeps *[]string, configDir string) (fieldMatcher, error) {
 	// Convert the incoming fieldName to its canonical PascalCase form for internal matching.
 	// This ensures that YAML keys like "ip" map correctly to LogEntry.IPInfo.
-	canonicalFieldName := ""
-	switch strings.ToLower(field) { // Use 'field' here, not 'fieldName'
-	case "ip":
-		canonicalFieldName = "IP"
-	case "path":
-		canonicalFieldName = "Path"
-	case "method":
-		canonicalFieldName = "Method"
-	case "protocol":
-		canonicalFieldName = "Protocol"
-	case "useragent":
-		canonicalFieldName = "UserAgent"
-	case "referrer":
-		canonicalFieldName = "Referrer"
-	case "statuscode":
-		canonicalFieldName = "StatusCode"
-	case "size":
-		canonicalFieldName = "Size"
-	case "vhost":
-		canonicalFieldName = "VHost"
-	default:
-		// If it's not one of our known fields, use the original field.
-		// This might happen for custom fields or if the input is already PascalCase.
+	canonicalFieldName, ok := fieldNameCanonicalMap[strings.ToLower(field)]
+	if !ok {
+		// If not found in the map, assume the fieldName is already canonical or unknown.
 		canonicalFieldName = field
 	}
 

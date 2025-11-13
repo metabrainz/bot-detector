@@ -217,6 +217,20 @@ type BehavioralChainYAML struct {
 
 // --- RUNTIME DATA STRUCTURES ---
 
+// fieldNameCanonicalMap maps lowercase snake_case field names to their canonical PascalCase form.
+var fieldNameCanonicalMap = map[string]string{
+	"ip":         "IP",
+	"path":       "Path",
+	"method":     "Method",
+	"protocol":   "Protocol",
+	"useragent":  "UserAgent",
+	"referrer":   "Referrer",
+	"statuscode": "StatusCode",
+	"size":       "Size",
+	"vhost":      "VHost",
+}
+
+// LogEntry represents a parsed log entry with structured data.
 type LogEntry struct {
 	Timestamp  time.Time // Actual time of the request (parsed from log, not time.Now()).
 	IPInfo     utils.IPInfo

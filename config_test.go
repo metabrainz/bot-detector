@@ -99,8 +99,6 @@ chains:
 
 }
 
-
-
 func setupTestYAML(t *testing.T, content string) string {
 	t.Helper() // Mark this as a test helper function.
 
