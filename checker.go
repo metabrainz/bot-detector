@@ -50,8 +50,6 @@ func GetActor(chain *BehavioralChain, entry *LogEntry) Actor {
 	return Actor{IPInfo: entry.IPInfo}
 }
 
-
-
 // GetMatchValue retrieves the field value from a LogEntry based on the field name.
 func GetMatchValue(fieldName string, entry *LogEntry) (interface{}, FieldType, error) {
 	// If entry is nil, this is a compile-time check for the field's type.

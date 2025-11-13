@@ -162,8 +162,6 @@ func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]in
 	return matchers, nil
 }
 
-
-
 // compileSingleMatcher is a large switch that handles the different value "shapes" (string, int, list, map).
 func compileSingleMatcher(chainName string, stepIndex int, field string, value interface{}, fileDeps *[]string, configDir string) (fieldMatcher, error) {
 	// Convert the incoming fieldName to its canonical PascalCase form for internal matching.
