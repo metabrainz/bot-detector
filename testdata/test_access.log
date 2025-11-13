@@ -179,3 +179,11 @@ musicbrainz.org 10.0.0.2 - - [28/Oct/2025:17:00:06 +0000] "GET /blocked/resource
 musicbrainz.org 10.0.0.2 - - [28/Oct/2025:17:00:07 +0000] "GET /another/blocked/resource HTTP/1.1" 200 100 "-" "TestAgent"
 musicbrainz.org 10.0.0.13 - - [28/Oct/2025:17:04:01 +0000] "GET /blocked/chain-order HTTP/1.1" 200 100 "-" "ChainOrderBot"
 musicbrainz.org 10.0.0.13 - - [28/Oct/2025:17:04:02 +0000] "GET /another/blocked/chain-order HTTP/1.1" 200 100 "-" "ChainOrderBot"
+
+# ======================================================================================
+# === TEST CASE 23: Path with spaces in query string (Fix verification)
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: SimpleLogChain completed by IP 10.0.0.21. Action set to 'log' (DryRun)
+# === This tests that a URL with spaces in the query string is parsed correctly.
+# ===
+musicbrainz.org 10.0.0.21 - - [28/Oct/2025:17:11:00 +0000] "GET /log/step1?q=a search with spaces HTTP/1.1" 200 100 "-" "TestAgent"
+musicbrainz.org 10.0.0.21 - - [28/Oct/2025:17:11:01 +0000] "GET /log/step2 HTTP/1.1" 200 100 "-" "TestAgent"

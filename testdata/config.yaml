@@ -18,8 +18,8 @@ chains:
     action: "log"
     match_key: "ip"
     steps:
-      - field_matches: { Path: "/log/step1" } # Default is exact match
-      - field_matches: { Path: "/log/step2" }
+      - field_matches: { Path: "regex:^/log/step1" }
+      - field_matches: { Path: "regex:^/log/step2" }
 
   # --- 2. Simple Block Chain (10.0.0.2) ---
   - name: "SimpleBlockChain"
