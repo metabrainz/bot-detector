@@ -171,7 +171,7 @@ chains:
 	// This is now set on the processor directly.
 
 	// 2. Load the initial configuration.
-	initialLoadedCfg, err := LoadConfigFromYAML(tempFile)
+	initialLoadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tempFile})
 	if err != nil {
 		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
 	}
@@ -228,10 +228,11 @@ chains:
 	// --- Assert ---
 	// 8. Check if the processor's state has been updated.
 	processor.ConfigMutex.RLock()
-	defer processor.ConfigMutex.RUnlock()
+	reloadedChains := processor.Chains
+	processor.ConfigMutex.RUnlock()
 
-	if len(processor.Chains) != 1 || processor.Chains[0].Name != "ReloadedChain" {
-		t.Errorf("Expected chain to be 'ReloadedChain', but got: %+v", processor.Chains)
+	if len(reloadedChains) != 1 || reloadedChains[0].Name != "ReloadedChain" {
+		t.Errorf("Expected chain to be 'ReloadedChain', but got: %+v", reloadedChains)
 	}
 	if logging.GetLogLevel() != logging.LevelDebug {
 		t.Errorf("Expected log level to be updated to 'debug', but it was not.")

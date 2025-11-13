@@ -78,7 +78,7 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 	}
 
 	// Load base configuration from a test file.
-	loadedCfg, err := LoadConfigFromYAML("testdata/config.yaml")
+	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: "testdata/config.yaml"})
 	if err != nil {
 		t.Fatalf("Failed to load test YAML config: %v", err)
 	}

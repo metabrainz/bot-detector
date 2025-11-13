@@ -51,7 +51,7 @@ chains:
 	t.Cleanup(resetGlobalState)
 
 	// --- Act ---
-	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
+	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
 
 	// --- Assert ---
 	if err != nil {
@@ -154,7 +154,7 @@ version: "1.0"
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpConfigPath := setupTestYAML(t, tt.yamlContent)
-			loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
+			loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
 			if err != nil {
 				t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 			}
@@ -186,7 +186,7 @@ chains:
             lte: 404
 `
 	tmpConfigPath := setupTestYAML(t, yamlContent)
-	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
+	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 	}
@@ -611,7 +611,7 @@ chains:
 	tmpConfigPath := setupTestYAML(t, yamlContent)
 
 	// --- Act ---
-	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
+	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 	}
@@ -647,7 +647,7 @@ func runErrorTest(t *testing.T, name, yamlContent, expectedError string) {
 			t.Cleanup(func() { logging.LogOutput = originalLogFunc })
 		}
 
-		_, err := LoadConfigFromYAML(tmpConfigPath)
+		_, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
 
 		if expectedError == "" {
 			if err != nil {
@@ -877,7 +877,7 @@ func runWarningTest(t *testing.T, yamlContent, expectedWarning string) {
 	t.Cleanup(func() { logging.LogOutput = originalLogFunc })
 
 	// Act
-	_, err := LoadConfigFromYAML(tmpConfigPath)
+	_, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() returned an unexpected fatal error: %v", err)
 	}
@@ -1036,7 +1036,7 @@ chains: []
 `
 	tmpConfigPath := setupTestYAML(t, yamlContent)
 
-	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
+	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() failed unexpectedly: %v", err)
 	}
@@ -1087,7 +1087,7 @@ chains: []
 `
 	tmpConfigPath := setupTestYAML(t, yamlContent)
 
-	_, err := LoadConfigFromYAML(tmpConfigPath)
+	_, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err == nil {
 		t.Fatal("Expected an error when loading regex with missing required capture group, but got nil.")
 	}
@@ -1107,7 +1107,7 @@ chains: []
 
 	tmpConfigPath := setupTestYAML(t, yamlContent)
 
-	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
+	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() failed unexpectedly: %v", err)
 	}
@@ -1168,7 +1168,7 @@ chains:
 	tmpConfigPath := setupTestYAML(t, initialYAMLContent)
 
 	// 2. Load the initial configuration.
-	initialLoadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
+	initialLoadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
 		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
 	}
@@ -1275,7 +1275,7 @@ chains:
 
 	tmpConfigPath := setupTestYAML(t, initialYAMLContent)
 	// 3. Load the initial configuration.
-	initialLoadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
+	initialLoadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
 		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
 	}
@@ -1357,7 +1357,7 @@ chains:
 `
 	tmpConfigPath := setupTestYAML(t, initialYAMLContent)
 	// 2. Load the initial configuration.
-	initialLoadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
+	initialLoadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
 		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
 	}
@@ -1528,7 +1528,7 @@ func runMatcherTest(t *testing.T, yamlContent string, testCases map[string]struc
 }, expectError string) {
 	t.Helper()
 	tmpConfigPath := setupTestYAML(t, yamlContent)
-	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
+	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if expectError != "" {
 		if err == nil || !strings.Contains(err.Error(), expectError) {
 			t.Fatalf("Expected error containing '%s', but got: %v", expectError, err)
@@ -1590,7 +1590,7 @@ good_actors:
 	t.Cleanup(resetGlobalState)
 
 	// --- Act ---
-	loadedCfg, err := LoadConfigFromYAML(tmpConfigPath)
+	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() returned an unexpected error: %v", err)
 	}

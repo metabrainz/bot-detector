@@ -55,7 +55,10 @@ func main() {
 		log.Fatalf("[FATAL] Could not determine absolute path for config file: %v", err)
 	}
 	// Load initial configuration from YAML.
-	loadedCfg, err := LoadConfigFromYAML(absConfigPath)
+	opts := LoadConfigOptions{
+		ConfigPath: absConfigPath,
+	}
+	loadedCfg, err := LoadConfigFromYAML(opts)
 	if err != nil {
 		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
 	}

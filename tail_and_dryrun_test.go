@@ -652,18 +652,17 @@ func TestLiveLogTailer(t *testing.T) {
 	harness.processedLines = nil // Reset for next assertion
 	harness.logMutex.Unlock()
 
-	// Override LogFunc to signal when rotation is detected.
+	// --- Act 3: Simulate log rotation ---
+	// Override LogFunc to signal when rotation is detected. This must be set
+	// before the rotation happens to avoid a race.
 	fileRotated := make(chan struct{}, 1)
 	originalLogFunc := harness.processor.LogFunc
-	// This must be set BEFORE starting the goroutine to avoid a race.
 	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		originalLogFunc(level, tag, format, args...) // Call original to preserve logging
 		if tag == "TAIL" && strings.Contains(fmt.Sprintf(format, args...), "Detected log file rotation") {
 			fileRotated <- struct{}{}
 		}
 	}
-
-	// --- Act 3: Simulate log rotation ---
 	if err := os.Rename(harness.tempLogFile, harness.tempLogFile+".rotated"); err != nil {
 		t.Fatalf("Failed to simulate log rotation (rename): %v", err)
 	}

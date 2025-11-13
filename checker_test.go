@@ -663,7 +663,7 @@ func TestDryRunMode(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Remove("bad_user_agents.txt") })
 	// 1. Load configuration (chains, whitelist, etc.)
-	loadedCfg, err := LoadConfigFromYAML("testdata/config.yaml")
+	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: "testdata/config.yaml"})
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 	}

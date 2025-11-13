@@ -273,16 +273,15 @@ func findFileDirectives(path string) ([]string, error) {
 }
 
 // detectCycle performs a DFS traversal to find cycles.
-func (g *depGraph) detectCycle() error {
+func (g *depGraph) detectCycle(configPath string) error {
 	visiting := make(map[string]bool)
 	visited := make(map[string]bool)
-
-	for path, node := range g.Nodes {
-		if !visited[path] {
-			if path, err := g.dfs(node, visiting, visited, nil); err != nil {
-				return fmt.Errorf("cyclic dependency detected: %s", strings.Join(path, " -> "))
-			}
-		}
+	// Start the DFS from the first node added to the graph, which is the main config file.
+	// This makes cycle detection deterministic, which is important for testing.
+	// We find the root node by looking for a node that is not a dependency of any other node.
+	// A simpler and sufficient approach for this codebase is to start from the known root config path.
+	if path, err := g.dfs(g.Nodes[configPath], visiting, visited, nil); err != nil {
+		return fmt.Errorf("cyclic dependency detected: %s", strings.Join(path, " -> "))
 	}
 	return nil
 }
@@ -320,14 +319,20 @@ func calculateChecksum(lines []string) string {
 
 // --- New Matcher Compilation Logic ---
 
-// FileDependency represents a file that the configuration depends on.
-type FileDependency struct {
-	Path     string
+// FileDependencyStatus holds the complete state of a file at a specific point in time.
+type FileDependencyStatus struct {
 	ModTime  time.Time
-	Content  []string // Cached content
 	Status   FileStatus
 	Checksum string // SHA256 checksum of the content to detect no-op changes.
 	Error    error  // Store the error if status is Error
+}
+
+// FileDependency represents a file that the configuration depends on, tracking its state over time.
+type FileDependency struct {
+	Path           string
+	PreviousStatus *FileDependencyStatus
+	CurrentStatus  *FileDependencyStatus
+	Content        []string // Cached content from the last successful load
 }
 
 // FileStatus indicates the current state of a file dependency.
@@ -352,6 +357,89 @@ func (fs FileStatus) String() string {
 		return "Error"
 	default:
 		return fmt.Sprintf("FileStatus(%d)", fs)
+	}
+}
+
+// updateStatus polls the file on disk and updates its CurrentStatus.
+// It always preserves the previous state before updating.
+func (fd *FileDependency) updateStatus() {
+	// Preserve the last known state.
+	fd.PreviousStatus = fd.CurrentStatus
+
+	newStatus := &FileDependencyStatus{}
+
+	info, err := os.Stat(fd.Path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			newStatus.Status = FileStatusMissing
+			newStatus.Error = err
+		} else {
+			// Another error occurred (e.g., permissions).
+			newStatus.Status = FileStatusError
+			newStatus.Error = err
+		}
+		fd.CurrentStatus = newStatus
+		return
+	}
+
+	// File exists, update basic info.
+	newStatus.Status = FileStatusLoaded
+	newStatus.ModTime = info.ModTime()
+
+	// Always attempt to read the file if it exists and is loaded, to detect read errors (e.g., permissions).
+	// This also ensures the checksum is always up-to-date if content changes without ModTime update (rare, but possible).
+	content, readErr := ReadLinesFromFile(fd.Path)
+	if readErr != nil {
+		newStatus.Status = FileStatusError
+		newStatus.Error = readErr
+	} else {
+		newStatus.Checksum = calculateChecksum(content)
+	}
+
+	fd.CurrentStatus = newStatus
+}
+
+// hasChanged compares the PreviousStatus and CurrentStatus to see if a reload is warranted.
+func (fd *FileDependency) hasChanged() bool {
+	if fd.PreviousStatus == nil {
+		// If there's no previous state, any loaded state is a "change".
+		return fd.CurrentStatus.Status == FileStatusLoaded
+	}
+
+	// A change is warranted if the status is different, or if the checksums don't match.
+	// A simple `touch` will change ModTime but not Checksum, so we rely on checksum.
+	return fd.CurrentStatus.Status != fd.PreviousStatus.Status ||
+		fd.CurrentStatus.Checksum != fd.PreviousStatus.Checksum
+}
+
+// Clone creates a deep copy of the FileDependencyStatus object.
+func (fds *FileDependencyStatus) Clone() *FileDependencyStatus {
+	if fds == nil {
+		return nil
+	}
+	return &FileDependencyStatus{
+		ModTime:  fds.ModTime,
+		Status:   fds.Status,
+		Checksum: fds.Checksum,
+		Error:    fds.Error, // errors are immutable
+	}
+}
+
+// Clone creates a deep copy of the FileDependency object.
+func (fd *FileDependency) Clone() *FileDependency {
+	if fd == nil {
+		return nil
+	}
+	// Content is a slice of strings, which is a reference type, but since the
+	// content itself is immutable strings, a shallow copy of the slice is sufficient.
+	contentCopy := make([]string, len(fd.Content))
+	copy(contentCopy, fd.Content)
+
+	return &FileDependency{
+		Path:           fd.Path,
+		PreviousStatus: fd.PreviousStatus.Clone(),
+		CurrentStatus:  fd.CurrentStatus.Clone(),
+		Content:        contentCopy,
 	}
 }
 
@@ -468,38 +556,35 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 
 		// Check if the file is already loaded or needs to be loaded/reloaded
 		fileDep, exists := ctx.FileDependencies[absoluteFilePath]
-		if !exists {
-			fileDep = &FileDependency{Path: absoluteFilePath, Status: FileStatusUnknown}
+		if !exists || fileDep.CurrentStatus == nil {
+			fileDep = &FileDependency{Path: absoluteFilePath}
 			ctx.FileDependencies[absoluteFilePath] = fileDep
+			fileDep.updateStatus() // Perform initial status check
 		}
 
-		// Check modification time to see if we need to reload
-		fileInfo, err := os.Stat(absoluteFilePath)
-		if err != nil {
-			fileDep.Status = FileStatusMissing
-			fileDep.Error = err
-			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': file matcher '%s' does not exist or is inaccessible: %v", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, absoluteFilePath, err)
-			// Treat as empty for now, but record the error
-			fileDep.Content = []string{}
-		} else if !fileDep.ModTime.IsZero() && fileInfo.ModTime().Equal(fileDep.ModTime) {
-			// File hasn't changed, use cached content
-			fileDep.Status = FileStatusLoaded
-			fileDep.Error = nil // Clear any previous error
-		} else {
-			// File changed or not yet loaded, read content
+		// During the initial load or a reload, we need to read the file content.
+		// The watcher is responsible for detecting subsequent changes.
+		// Ensure the file's status is up-to-date before processing.
+		fileDep.updateStatus()
+		switch fileDep.CurrentStatus.Status {
+		case FileStatusLoaded:
+			// If the file is loaded, we must read its content for the matcher.
+			// The checksum is used by the watcher, but here we need the actual lines.
 			lines, readErr := ReadLinesFromFile(absoluteFilePath)
 			if readErr != nil {
-				fileDep.Status = FileStatusError
-				fileDep.Error = readErr
-				logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': failed to read file matcher '%s', it will be treated as empty: %v", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, absoluteFilePath, readErr)
-				fileDep.Content = []string{} // Treat as empty on read error
+				// This can happen if the file is deleted between the stat and the read.
+				fileDep.CurrentStatus.Status = FileStatusError
+				fileDep.CurrentStatus.Error = readErr
+				logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': failed to read file '%s' during config load: %v", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, absoluteFilePath, readErr)
+				fileDep.Content = []string{}
 			} else {
-				fileDep.Status = FileStatusLoaded
-				fileDep.Error = nil
+				// Successfully loaded, cache the content for the matcher.
 				fileDep.Content = lines
-				fileDep.Checksum = calculateChecksum(lines)
 			}
-			fileDep.ModTime = fileInfo.ModTime()
+		case FileStatusMissing, FileStatusError:
+			// If the file is missing or in error, log a warning and treat it as empty.
+			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': file matcher '%s' is %s, treating as empty. Error: %v", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, absoluteFilePath, fileDep.CurrentStatus.Status, fileDep.CurrentStatus.Error)
+			fileDep.Content = []string{}
 		}
 
 		// Convert []string to []interface{} to reuse compileListMatcher
@@ -733,8 +818,14 @@ func normalizeYAMLKeys(node *yaml.Node) {
 	}
 }
 
+// LoadConfigOptions holds the parameters for loading a configuration.
+type LoadConfigOptions struct {
+	ConfigPath   string
+	ExistingDeps map[string]*FileDependency
+}
+
 // LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
-func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
+func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	// --- PHASE 1: Build Dependency Graph and Detect Cycles ---
 	depGraph := newDepGraph()
 	scannedFiles := make(map[string]bool)
@@ -748,7 +839,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 
 		// The main config file MUST exist. Dependencies can be missing.
 		if _, err := os.Stat(currentFile); os.IsNotExist(err) {
-			if currentFile == configPath {
+			if currentFile == opts.ConfigPath {
 				return fmt.Errorf("failed to stat config file %s: %w", currentFile, err)
 			}
 			// For dependencies, this is not a fatal error for the graph building phase.
@@ -771,20 +862,20 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		return nil
 	}
 
-	if err := buildGraphRecursive(configPath); err != nil {
+	if err := buildGraphRecursive(opts.ConfigPath); err != nil {
 		return nil, err
 	}
 
 	// --- PHASE 2: Detect Cycles ---
-	if err := depGraph.detectCycle(); err != nil {
+	if err := depGraph.detectCycle(opts.ConfigPath); err != nil {
 		return nil, err // Return the clear cycle error
 	}
 
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(opts.ConfigPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read YAML file %s: %w", configPath, err)
+		return nil, fmt.Errorf("failed to read YAML file %s: %w", opts.ConfigPath, err)
 	}
-	configDir := filepath.Dir(configPath)
+	configDir := filepath.Dir(opts.ConfigPath)
 
 	// 1. Unmarshal into a generic yaml.Node to preprocess keys.
 	var root yaml.Node
@@ -1017,7 +1108,21 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 	}
 
 	// --- PARSE FILE DEPENDENCIES ---
+	// Use the existing map if provided, otherwise create a new one.
+	// This preserves the PreviousStatus across reloads.
 	newFileDependencies := make(map[string]*FileDependency)
+	if opts.ExistingDeps != nil {
+		for path, dep := range opts.ExistingDeps {
+			// Create a new FileDependency object for the new config,
+			// but preserve the PreviousStatus from the old config.
+			newFileDependencies[path] = &FileDependency{
+				Path:           path,
+				PreviousStatus: dep.PreviousStatus.Clone(), // Deep copy
+				CurrentStatus:  dep.CurrentStatus.Clone(),  // Deep copy
+				Content:        dep.Content,
+			}
+		}
+	}
 
 	for _, yamlChain := range config.Chains {
 		// Check if the chain is explicitly disabled via the action field.
@@ -1221,9 +1326,15 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 
 // logFileDependencyChanges logs changes in file dependencies between old and new configurations.
 func logFileDependencyChanges(p *Processor, oldDeps, newDeps map[string]*FileDependency) {
-	p.LogFunc(logging.LevelDebug, "CONFIG", "Debugging logFileDependencyChanges:")
-	p.LogFunc(logging.LevelDebug, "CONFIG", "  Old Dependencies: %+v", oldDeps)
-	p.LogFunc(logging.LevelDebug, "CONFIG", "  New Dependencies: %+v", newDeps)
+	// Enhanced debug logging for file dependencies.
+	p.LogFunc(logging.LevelDebug, "CONFIG", "--- Begin File Dependency State ---")
+	for path, dep := range oldDeps {
+		p.LogFunc(logging.LevelDebug, "CONFIG", "  Old: %s -> %+v", path, dep.CurrentStatus)
+	}
+	for path, dep := range newDeps {
+		p.LogFunc(logging.LevelDebug, "CONFIG", "  New: %s -> %+v", path, dep.CurrentStatus)
+	}
+	p.LogFunc(logging.LevelDebug, "CONFIG", "--- End File Dependency State ---")
 
 	var added, removed, modified []string
 
@@ -1231,17 +1342,18 @@ func logFileDependencyChanges(p *Processor, oldDeps, newDeps map[string]*FileDep
 	for path, newDep := range newDeps {
 		oldDep, exists := oldDeps[path]
 		if !exists {
-			added = append(added, fmt.Sprintf("'%s' (Status: %s)", path, newDep.Status))
+			added = append(added, fmt.Sprintf("'%s' (Status: %s)", path, newDep.CurrentStatus.Status))
 		} else {
 			var reasons []string
-			if !oldDep.ModTime.Equal(newDep.ModTime) {
-				reasons = append(reasons, "timestamp changed")
-			}
-			if oldDep.Status != newDep.Status {
-				reasons = append(reasons, fmt.Sprintf("status changed from %s to %s", oldDep.Status, newDep.Status))
-			}
-			if (oldDep.Error != nil) != (newDep.Error != nil) {
-				reasons = append(reasons, "error state changed")
+			// It's crucial to check for nil pointers before dereferencing.
+			// A file could go from existing (non-nil status) to being removed from config (nil).
+			if oldDep.CurrentStatus == nil || newDep.CurrentStatus == nil {
+				// This case should be handled by added/removed checks, but as a safeguard:
+				reasons = append(reasons, "status struct changed")
+			} else if oldDep.CurrentStatus.Status != newDep.CurrentStatus.Status {
+				reasons = append(reasons, fmt.Sprintf("status changed from %s to %s", oldDep.CurrentStatus.Status, newDep.CurrentStatus.Status))
+			} else if oldDep.CurrentStatus.Checksum != newDep.CurrentStatus.Checksum {
+				reasons = append(reasons, "content changed")
 			}
 			if len(reasons) > 0 {
 				modified = append(modified, fmt.Sprintf("'%s' (%s)", path, strings.Join(reasons, ", ")))
@@ -1270,17 +1382,19 @@ func logFileDependencyChanges(p *Processor, oldDeps, newDeps map[string]*FileDep
 // reloadConfiguration contains the logic to reload configuration, compare for changes,
 // and update the processor state. It is designed to be called by either the
 // file watcher or the signal reloader.
-func reloadConfiguration(p *Processor) { //nolint:cyclop
+func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForComparison *AppConfig) { //nolint:cyclop
 	p.ConfigMutex.RLock()
 	oldChains := p.Chains
-	// Create a deep copy of the config to compare against after the reload.
-	// A shallow copy (*p.Config) would lead to a race condition as both
-	// old and new configs would share the same RWMutex.
-	oldConfig := p.Config.Clone()
+	// Use the provided oldConfigForComparison instead of cloning here.
+	oldConfig := oldConfigForComparison
 	oldLogRegex := p.LogRegex
 	p.ConfigMutex.RUnlock()
 
-	loadedCfg, err := LoadConfigFromYAML(p.ConfigPath)
+	opts := LoadConfigOptions{
+		ConfigPath:   p.ConfigPath,
+		ExistingDeps: oldConfig.FileDependencies,
+	}
+	loadedCfg, err := LoadConfigFromYAML(opts)
 	if err != nil {
 		p.LogFunc(logging.LevelError, "LOAD_ERROR", "Failed to reload configuration: %v", err)
 		return // The deferred signal will still fire.
@@ -1303,7 +1417,6 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 		BlockerCommandsPerSecond: loadedCfg.BlockerCommandsPerSecond,
 		IdleTimeout:              loadedCfg.IdleTimeout,
 		LineEnding:               loadedCfg.LineEnding,
-		LastModTime:              time.Now(), // Use time.Now() to avoid race conditions
 		MaxTimeSinceLastHit:      loadedCfg.MaxTimeSinceLastHit,
 		OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
 		PollingInterval:          loadedCfg.PollingInterval,
@@ -1311,22 +1424,26 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 		UnblockOnGoodActor:       loadedCfg.UnblockOnGoodActor,
 		UnblockCooldown:          loadedCfg.UnblockCooldown,
 
-		StatFunc: oldConfig.StatFunc, // Preserve mockable functions
+		// Preserve mockable functions and the original mod time unless the main config changed.
+		StatFunc:    oldConfig.StatFunc,
+		LastModTime: oldConfig.LastModTime,
 	}
 
 	// Update the processor's state with the new config.
 	p.ConfigMutex.Lock()
 	p.Chains = loadedCfg.Chains
 	p.Config = newAppConfig // Atomically swap the config pointer.
+	if mainConfigChanged {
+		p.Config.LastModTime = time.Now() // Update LastModTime only if the main config file changed.
+	}
 	p.LogRegex = loadedCfg.LogFormatRegex
-	p.Config.LastModTime = time.Now() // Update LastModTime after a successful reload
 	initializeMetrics(p, loadedCfg)
 
 	logging.SetLogLevel(loadedCfg.LogLevel)
 	p.ConfigMutex.Unlock()
 
 	// --- Compare and log general config changes ---
-	configChanged := compareConfigsByTag(oldConfig, *loadedCfg) ||
+	configChanged := compareConfigsByTag(*oldConfig, *loadedCfg) ||
 		loadedCfg.LogLevel != logging.GetLogLevel().String() ||
 		(oldLogRegex != nil) != (loadedCfg.LogFormatRegex != nil)
 
@@ -1417,13 +1534,18 @@ func initializeMetrics(p *Processor, loadedCfg *LoadedConfig) {
 
 // SignalReloader listens for a specific OS signal to trigger a configuration reload. //nolint:cyclop
 func SignalReloader(p *Processor, stop <-chan struct{}, signalCh chan os.Signal) {
-	if p.DryRun {
-		return
+	var signalName string
+	// If ReloadOnSignal is not specified, default to SIGHUP.
+	// If it's explicitly set to an empty string or "none", disable signal handling.
+	if p.ReloadOnSignal == "" {
+		signalName = "HUP"
+	} else {
+		signalName = strings.ToUpper(p.ReloadOnSignal)
 	}
 
-	signalName := strings.ToUpper(p.ReloadOnSignal)
 	reloadSignal, ok := signalMap[signalName]
-	if !ok {
+	if !ok || p.DryRun || strings.ToLower(p.ReloadOnSignal) == "none" {
+		p.LogFunc(logging.LevelDebug, "RELOAD", "Signal-based config reloading is disabled.")
 		p.LogFunc(logging.LevelCritical, "FATAL", "Unsupported signal for reloading: '%s'. Use HUP, USR1, or USR2.", p.ReloadOnSignal)
 		// In a real app, you might want to stop the process here.
 		// For now, we just stop this goroutine.
@@ -1446,7 +1568,12 @@ func SignalReloader(p *Processor, stop <-chan struct{}, signalCh chan os.Signal)
 				if p.TestSignals != nil && p.TestSignals.ReloadDoneSignal != nil {
 					defer func() { p.TestSignals.ReloadDoneSignal <- struct{}{} }()
 				}
-				reloadConfiguration(p)
+				// When reloading via signal, we don't have an "old" config from the watcher's perspective.
+				// We need to clone the current config to serve as the oldConfigForComparison.
+				p.ConfigMutex.RLock()
+				currentConfig := p.Config.Clone()
+				p.ConfigMutex.RUnlock()
+				reloadConfiguration(p, true, &currentConfig)
 			}()
 		}
 	}
@@ -1488,8 +1615,15 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 			// Timer fired, continue with polling.
 		}
 
+		// Clone the current config *before* checking for changes in file dependencies.
+		// This ensures that oldConfigForComparison accurately represents the state before any updates.
+		p.ConfigMutex.RLock()
+		oldConfigForComparison := p.Config.Clone()
+		p.ConfigMutex.RUnlock()
+
 		isChanged := false
 		changedFile := ""
+		mainFileChanged := false
 
 		// 1. Check the main YAML file
 		fileInfo, err := os.Stat(p.ConfigPath)
@@ -1501,44 +1635,16 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 		p.ConfigMutex.RLock()
 		if fileInfo.ModTime().After(p.Config.LastModTime) {
 			isChanged = true
+			mainFileChanged = true
 			changedFile = p.ConfigPath
 		} else {
 			// 2. Check all file dependencies if YAML hasn't changed
 			for path, fileDep := range p.Config.FileDependencies {
-				p.LogFunc(logging.LevelDebug, "WATCH_DEBUG", "Checking file dependency: %s", path)
-				p.LogFunc(logging.LevelDebug, "WATCH_DEBUG", "  Old ModTime: %v", fileDep.ModTime)
-				p.LogFunc(logging.LevelDebug, "WATCH_DEBUG", "  Old Status: %v", fileDep.Status)
-
-				// If a file was previously missing or had an error, try to reload it.
-				if fileDep.Status == FileStatusMissing || fileDep.Status == FileStatusError {
+				fileDep.updateStatus()
+				if fileDep.hasChanged() {
 					isChanged = true
 					changedFile = path
 					break
-				}
-
-				depInfo, err := os.Stat(path)
-				if err != nil {
-					p.LogFunc(logging.LevelDebug, "WATCH_DEBUG", "  Stat error: %v", err)
-					// If a file that was previously loaded is now missing, trigger a reload.
-					isChanged = true
-					changedFile = path
-					break
-				}
-				p.LogFunc(logging.LevelDebug, "WATCH_DEBUG", "  Current ModTime: %v", depInfo.ModTime())
-				if depInfo.ModTime().After(fileDep.ModTime) {
-					// ModTime has changed. Now verify if content has actually changed by checking the checksum.
-					newContent, readErr := ReadLinesFromFile(path)
-					if readErr != nil {
-						p.LogFunc(logging.LevelWarning, "WATCH_WARN", "Could not read dependency file '%s' for checksum verification: %v", path, readErr)
-						isChanged = true // Treat as changed if we can't read it.
-						changedFile = path
-						break
-					}
-					if calculateChecksum(newContent) != fileDep.Checksum {
-						isChanged = true
-						changedFile = path
-						break
-					}
 				}
 			}
 		}
@@ -1547,11 +1653,16 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 		if isChanged {
 			p.LogFunc(logging.LevelInfo, "WATCH", "Detected change in '%s'. Attempting reload...", changedFile)
 			func() { // Use an anonymous function to scope the defer correctly.
+				defer func() {
+					if r := recover(); r != nil {
+						p.LogFunc(logging.LevelError, "WATCH_PANIC", "Recovered from panic during config reload: %v", r)
+					}
+				}()
 				// Defer the test signal to ensure it's sent whether the reload succeeds or fails.
 				if p.TestSignals != nil && p.TestSignals.ReloadDoneSignal != nil {
 					defer func() { p.TestSignals.ReloadDoneSignal <- struct{}{} }()
 				}
-				reloadConfiguration(p)
+				reloadConfiguration(p, mainFileChanged, &oldConfigForComparison)
 			}()
 		}
 	}

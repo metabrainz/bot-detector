@@ -154,12 +154,11 @@ func (c *AppConfig) Clone() AppConfig {
 	}
 
 	if c.FileDependencies != nil {
-		clone.FileDependencies = make(map[string]*FileDependency, len(c.FileDependencies))
+		newFileDependencies := make(map[string]*FileDependency, len(c.FileDependencies))
 		for k, v := range c.FileDependencies {
-			// FileDependency contains slices, but a shallow copy of the struct is sufficient here
-			// as the content is re-read on reload anyway.
-			clone.FileDependencies[k] = v
+			newFileDependencies[k] = v.Clone() // Deep copy the FileDependency object
 		}
+		clone.FileDependencies = newFileDependencies
 	}
 	// Other slice types are just strings, which are immutable, so a shallow copy is fine.
 	return clone

@@ -58,15 +58,10 @@ chains:
 	}
 
 	// --- Initial Load ---
-	loadedCfg, err := LoadConfigFromYAML(configPath)
+	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
 		t.Fatalf("Initial LoadConfigFromYAML failed: %v", err)
 	}
-	if loadedCfg == nil {
-		t.Fatal("Loaded config is nil")
-	}
-
-	// Capture logs to check for reload messages
 	var capturedLogs []string
 	var logMutex sync.Mutex
 	logCaptureFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
@@ -74,6 +69,11 @@ chains:
 		defer logMutex.Unlock()
 		capturedLogs = append(capturedLogs, fmt.Sprintf("[%s] %s: %s", level, tag, fmt.Sprintf(format, args...)))
 	}
+
+	// Redirect global logging.LogOutput to our capture function
+	originalLogOutput := logging.LogOutput
+	logging.LogOutput = logCaptureFunc
+	t.Cleanup(func() { logging.LogOutput = originalLogOutput })
 
 	// Create a processor with the loaded config
 	p := newTestProcessorWithFileDeps(t, &AppConfig{
@@ -119,11 +119,11 @@ chains:
 	if !reflect.DeepEqual(reloadedFileDep.Content, expectedContent) {
 		t.Errorf("FileDependency Content mismatch after reload.\nGot:  %v\nWant: %v", reloadedFileDep.Content, expectedContent)
 	}
-	if reloadedFileDep.Status != FileStatusLoaded {
-		t.Errorf("FileDependency Status mismatch after reload. Got '%s', want '%s'", reloadedFileDep.Status, FileStatusLoaded)
+	if reloadedFileDep.CurrentStatus.Status != FileStatusLoaded {
+		t.Errorf("FileDependency Status mismatch after reload. Got '%s', want '%s'", reloadedFileDep.CurrentStatus.Status, FileStatusLoaded)
 	}
-	if reloadedFileDep.Error != nil {
-		t.Errorf("FileDependency Error mismatch after reload. Got '%v', want nil", reloadedFileDep.Error)
+	if reloadedFileDep.CurrentStatus.Error != nil {
+		t.Errorf("FileDependency Error mismatch after reload. Got '%v', want nil", reloadedFileDep.CurrentStatus.Error)
 	}
 
 	// Verify log message for file change
@@ -180,7 +180,7 @@ chains:
 	t.Cleanup(func() { logging.LogOutput = originalLogOutput })
 
 	// --- Act ---
-	loadedCfg, err := LoadConfigFromYAML(configPath)
+	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML failed: %v", err)
 	}
@@ -198,14 +198,14 @@ chains:
 		t.Fatalf("Expected file dependency for '%s' not found", testFilePath)
 	}
 
-	if fileDep.Status != FileStatusMissing {
-		t.Errorf("FileDependency Status mismatch. Got '%s', want '%s'", fileDep.Status, FileStatusMissing)
+	if fileDep.CurrentStatus.Status != FileStatusMissing {
+		t.Errorf("FileDependency Status mismatch. Got '%s', want '%s'", fileDep.CurrentStatus.Status, FileStatusMissing)
 	}
-	if fileDep.Error == nil {
-		t.Error("FileDependency Error is nil, expected an error for missing file")
+	if fileDep.CurrentStatus.Error == nil {
+		t.Error("Expected an error for missing file")
 	}
-	if !strings.Contains(fileDep.Error.Error(), "no such file or directory") {
-		t.Errorf("Expected error to contain 'no such file or directory', got '%v'", fileDep.Error)
+	if !strings.Contains(fileDep.CurrentStatus.Error.Error(), "no such file or directory") {
+		t.Errorf("Expected error to contain 'no such file or directory', got '%v'", fileDep.CurrentStatus.Error)
 	}
 	if len(fileDep.Content) != 0 {
 		t.Errorf("FileDependency Content mismatch. Got %v, want empty", fileDep.Content)
@@ -215,7 +215,7 @@ chains:
 	logMutex.Lock()
 	foundWarning := false
 	for _, log := range capturedLogs {
-		if strings.Contains(log, "file matcher '"+testFilePath+"' does not exist or is inaccessible") {
+		if strings.Contains(log, "file matcher '"+testFilePath+"' is Missing, treating as empty") {
 			foundWarning = true
 			break
 		}
@@ -255,7 +255,7 @@ chains:
 	}
 
 	// --- Initial Load (file is missing) ---
-	loadedCfg, err := LoadConfigFromYAML(configPath)
+	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
 		t.Fatalf("Initial LoadConfigFromYAML failed: %v", err)
 	}
@@ -263,8 +263,8 @@ chains:
 		t.Fatal("Loaded config is nil")
 	}
 	initialFileDep, ok := loadedCfg.FileDependencies[testFilePath]
-	if !ok || initialFileDep.Status != FileStatusMissing {
-		t.Fatalf("Expected file dependency to be initially missing, got status '%s'", initialFileDep.Status)
+	if !ok || initialFileDep.CurrentStatus.Status != FileStatusMissing {
+		t.Fatalf("Expected file dependency to be initially missing, got status '%s'", initialFileDep.CurrentStatus.Status)
 	}
 
 	// Capture logs to check for reload messages
@@ -319,11 +319,11 @@ chains:
 	if !reflect.DeepEqual(reloadedFileDep.Content, expectedContent) {
 		t.Errorf("FileDependency Content mismatch after reappearance.\nGot:  %v\nWant: %v", reloadedFileDep.Content, expectedContent)
 	}
-	if reloadedFileDep.Status != FileStatusLoaded {
-		t.Errorf("FileDependency Status mismatch after reappearance. Got '%s', want '%s'", reloadedFileDep.Status, FileStatusLoaded)
+	if reloadedFileDep.CurrentStatus.Status != FileStatusLoaded {
+		t.Errorf("FileDependency Status mismatch after reappearance. Got '%s', want '%s'", reloadedFileDep.CurrentStatus.Status, FileStatusLoaded)
 	}
-	if reloadedFileDep.Error != nil {
-		t.Errorf("FileDependency Error mismatch after reappearance. Got '%v', want nil", reloadedFileDep.Error)
+	if reloadedFileDep.CurrentStatus.Error != nil {
+		t.Errorf("FileDependency Error mismatch after reappearance. Got '%v', want nil", reloadedFileDep.CurrentStatus.Error)
 	}
 
 	// Verify log message for file reappearance
@@ -376,7 +376,7 @@ chains:
 	}
 
 	// --- Initial Load ---
-	loadedCfg, err := LoadConfigFromYAML(configPath)
+	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
 		t.Fatalf("Initial LoadConfigFromYAML failed: %v", err)
 	}
@@ -384,8 +384,8 @@ chains:
 		t.Fatal("Loaded config is nil")
 	}
 	initialFileDep, ok := loadedCfg.FileDependencies[testFilePath]
-	if !ok || initialFileDep.Status != FileStatusLoaded {
-		t.Fatalf("Expected file dependency to be initially loaded, got status '%s'", initialFileDep.Status)
+	if !ok || initialFileDep.CurrentStatus.Status != FileStatusLoaded {
+		t.Fatalf("Expected file dependency to be initially loaded, got status '%s'", initialFileDep.CurrentStatus.Status)
 	}
 
 	// Capture logs to check for reload messages
@@ -435,11 +435,11 @@ chains:
 	if !ok {
 		t.Fatalf("File dependency '%s' not found in reloaded config", testFilePath)
 	}
-	if reloadedFileDep.Status != FileStatusMissing {
-		t.Errorf("FileDependency Status mismatch after disappearance. Got '%s', want '%s'", reloadedFileDep.Status, FileStatusMissing)
+	if reloadedFileDep.CurrentStatus.Status != FileStatusMissing {
+		t.Errorf("FileDependency Status mismatch after disappearance. Got '%s', want '%s'", reloadedFileDep.CurrentStatus.Status, FileStatusMissing)
 	}
-	if reloadedFileDep.Error == nil {
-		t.Error("FileDependency Error is nil, expected an error for missing file")
+	if reloadedFileDep.CurrentStatus.Error == nil {
+		t.Error("Expected an error for missing file")
 	}
 	if len(reloadedFileDep.Content) != 0 {
 		t.Errorf("FileDependency Content mismatch after disappearance. Got %v, want empty", reloadedFileDep.Content)
@@ -499,7 +499,7 @@ chains:
 	}
 
 	// --- Act ---
-	_, err := LoadConfigFromYAML(configPath)
+	_, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
 
 	// --- Assert ---
 	if err == nil {
@@ -510,4 +510,216 @@ chains:
 	if !strings.Contains(err.Error(), expectedError) {
 		t.Errorf("Error message mismatch.\nGot:  %s\nWant to contain: %s", err.Error(), expectedError)
 	}
+}
+
+// TestFileDependency_UpdateStatusScenarios verifies the correct behavior of FileDependency.updateStatus()
+// under various file state changes (initial load, no change, content change, disappearance, reappearance).
+func TestFileDependency_UpdateStatusScenarios(t *testing.T) {
+	resetGlobalState()
+
+	tempDir := t.TempDir()
+	testFilePath := filepath.Join(tempDir, "test_file.txt")
+
+	// Helper function to create a FileDependency and perform initial updateStatus
+	createAndInitFileDep := func(path, content string) *FileDependency {
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatalf("Failed to write test file %s: %v", path, err)
+		}
+		fd := &FileDependency{Path: path}
+		fd.updateStatus()
+		return fd
+	}
+
+	// Helper function to get checksum of content
+	getChecksum := func(content string) string {
+		return calculateChecksum([]string{content})
+	}
+
+	// Scenario 1: Initial Load
+	t.Run("Initial Load", func(t *testing.T) {
+		fd := createAndInitFileDep(testFilePath, "initial content")
+		if fd.CurrentStatus.Status != FileStatusLoaded {
+			t.Errorf("Expected status Loaded, got %s", fd.CurrentStatus.Status)
+		}
+		if fd.PreviousStatus != nil {
+			t.Error("Expected PreviousStatus to be nil on initial load")
+		}
+		expectedChecksum := getChecksum("initial content")
+		if fd.CurrentStatus.Checksum != expectedChecksum {
+			t.Errorf("Expected checksum %s, got %s", expectedChecksum, fd.CurrentStatus.Checksum)
+		}
+		if fd.CurrentStatus.Error != nil {
+			t.Errorf("Expected no error, got %v", fd.CurrentStatus.Error)
+		}
+	})
+
+	// Scenario 2: No Change (ModTime same, Checksum same)
+	t.Run("No Change", func(t *testing.T) {
+		fd := createAndInitFileDep(testFilePath, "stable content")
+		initialCurrentStatus := fd.CurrentStatus.Clone() // Clone to compare later
+
+		// Wait a bit, but don't modify the file, so ModTime should be the same
+		time.Sleep(10 * time.Millisecond)
+		fd.updateStatus()
+
+		if fd.CurrentStatus.Status != FileStatusLoaded {
+			t.Errorf("Expected status Loaded, got %s", fd.CurrentStatus.Status)
+		}
+		if fd.PreviousStatus == nil {
+			t.Error("Expected PreviousStatus to be set after update")
+		}
+		if fd.CurrentStatus.Checksum != initialCurrentStatus.Checksum {
+			t.Errorf("Expected checksum to be same, got %s, want %s", fd.CurrentStatus.Checksum, initialCurrentStatus.Checksum)
+		}
+		if !fd.CurrentStatus.ModTime.Equal(initialCurrentStatus.ModTime) {
+			t.Errorf("Expected ModTime to be same, got %v, want %v", fd.CurrentStatus.ModTime, initialCurrentStatus.ModTime)
+		}
+		if fd.CurrentStatus.Error != nil {
+			t.Errorf("Expected no error, got %v", fd.CurrentStatus.Error)
+		}
+	})
+
+	// Scenario 3: Content Change
+	t.Run("Content Change", func(t *testing.T) {
+		fd := createAndInitFileDep(testFilePath, "original content")
+		originalChecksum := fd.CurrentStatus.Checksum
+		originalModTime := fd.CurrentStatus.ModTime
+
+		// Modify file content
+		time.Sleep(20 * time.Millisecond) // Ensure ModTime changes
+		newContent := "updated content"
+		if err := os.WriteFile(testFilePath, []byte(newContent), 0644); err != nil {
+			t.Fatalf("Failed to write updated test file: %v", err)
+		}
+		fd.updateStatus()
+
+		if fd.CurrentStatus.Status != FileStatusLoaded {
+			t.Errorf("Expected status Loaded, got %s", fd.CurrentStatus.Status)
+		}
+		if fd.PreviousStatus == nil {
+			t.Error("Expected PreviousStatus to be set")
+		}
+		if fd.PreviousStatus.Checksum != originalChecksum {
+			t.Errorf("Expected PreviousStatus checksum %s, got %s", originalChecksum, fd.PreviousStatus.Checksum)
+		}
+		if fd.PreviousStatus.ModTime != originalModTime {
+			t.Errorf("Expected PreviousStatus ModTime %v, got %v", originalModTime, fd.PreviousStatus.ModTime)
+		}
+		expectedNewChecksum := getChecksum(newContent)
+		if fd.CurrentStatus.Checksum != expectedNewChecksum {
+			t.Errorf("Expected CurrentStatus checksum %s, got %s", expectedNewChecksum, fd.CurrentStatus.Checksum)
+		}
+		if fd.CurrentStatus.ModTime.Equal(originalModTime) {
+			t.Error("Expected CurrentStatus ModTime to be updated")
+		}
+		if fd.CurrentStatus.Error != nil {
+			t.Errorf("Expected no error, got %v", fd.CurrentStatus.Error)
+		}
+	})
+
+	// Scenario 4: File Disappears
+	t.Run("File Disappears", func(t *testing.T) {
+		fd := createAndInitFileDep(testFilePath, "content to disappear")
+		originalCurrentStatus := fd.CurrentStatus.Clone()
+
+		// Delete the file
+		if err := os.Remove(testFilePath); err != nil {
+			t.Fatalf("Failed to remove test file: %v", err)
+		}
+		fd.updateStatus()
+
+		if fd.CurrentStatus.Status != FileStatusMissing {
+			t.Errorf("Expected status Missing, got %s", fd.CurrentStatus.Status)
+		}
+		if fd.CurrentStatus.Error == nil {
+			t.Error("Expected an error for missing file")
+		}
+		if fd.PreviousStatus == nil {
+			t.Error("Expected PreviousStatus to be set")
+		}
+		if fd.PreviousStatus.Checksum != originalCurrentStatus.Checksum {
+			t.Errorf("Expected PreviousStatus checksum %s, got %s", originalCurrentStatus.Checksum, fd.PreviousStatus.Checksum)
+		}
+	})
+
+	// Scenario 5: File Reappears
+	t.Run("File Reappears", func(t *testing.T) {
+		fd := createAndInitFileDep(testFilePath, "initial content")
+		// Delete the file
+		if err := os.Remove(testFilePath); err != nil {
+			t.Fatalf("Failed to remove test file: %v", err)
+		}
+		fd.updateStatus() // Status should now be Missing
+
+		if fd.CurrentStatus.Status != FileStatusMissing {
+			t.Fatalf("Pre-condition failed: Expected status Missing, got %s", fd.CurrentStatus.Status)
+		}
+		missingStatus := fd.CurrentStatus.Clone()
+
+		// Recreate the file
+		time.Sleep(20 * time.Millisecond) // Ensure ModTime changes
+		reappearedContent := "reappeared content"
+		if err := os.WriteFile(testFilePath, []byte(reappearedContent), 0644); err != nil {
+			t.Fatalf("Failed to recreate test file: %v", err)
+		}
+		fd.updateStatus()
+
+		if fd.CurrentStatus.Status != FileStatusLoaded {
+			t.Errorf("Expected status Loaded, got %s", fd.CurrentStatus.Status)
+		}
+		if fd.CurrentStatus.Error != nil {
+			t.Errorf("Expected no error, got %v", fd.CurrentStatus.Error)
+		}
+		if fd.PreviousStatus == nil {
+			t.Error("Expected PreviousStatus to be set")
+		}
+		if fd.PreviousStatus.Status != missingStatus.Status {
+			t.Errorf("Expected PreviousStatus status %s, got %s", missingStatus.Status, fd.PreviousStatus.Status)
+		}
+		expectedChecksum := getChecksum(reappearedContent)
+		if fd.CurrentStatus.Checksum != expectedChecksum {
+			t.Errorf("Expected CurrentStatus checksum %s, got %s", expectedChecksum, fd.CurrentStatus.Checksum)
+		}
+	})
+
+	// Scenario 6: File Error (e.g., permissions - simulate by making unreadable)
+	t.Run("File Error", func(t *testing.T) {
+		// Create a file that we will make unreadable
+		unreadableFilePath := filepath.Join(tempDir, "unreadable_file.txt")
+		if err := os.WriteFile(unreadableFilePath, []byte("some content"), 0644); err != nil {
+			t.Fatalf("Failed to write unreadable test file: %v", err)
+		}
+
+		fd := &FileDependency{Path: unreadableFilePath}
+		fd.updateStatus() // Initial load should be fine
+
+		if fd.CurrentStatus.Status != FileStatusLoaded {
+			t.Fatalf("Pre-condition failed: Expected status Loaded, got %s", fd.CurrentStatus.Status)
+		}
+		loadedStatus := fd.CurrentStatus.Clone()
+
+		// Make the file unreadable (e.g., chmod 000)
+		if err := os.Chmod(unreadableFilePath, 0000); err != nil {
+			t.Fatalf("Failed to chmod file to unreadable: %v", err)
+		}
+		defer func() {
+			// Restore permissions for cleanup
+			_ = os.Chmod(unreadableFilePath, 0644)
+		}()
+
+		fd.updateStatus()
+
+		if fd.CurrentStatus.Status != FileStatusError {
+			t.Errorf("Expected status Error, got %s", fd.CurrentStatus.Status)
+		}
+		if fd.CurrentStatus.Error == nil {
+			t.Error("Expected an error for unreadable file")
+		}
+		if fd.PreviousStatus == nil {
+			t.Error("Expected PreviousStatus to be set")
+		}
+		if fd.PreviousStatus.Checksum != loadedStatus.Checksum {
+			t.Errorf("Expected PreviousStatus checksum %s, got %s", loadedStatus.Checksum, fd.PreviousStatus.Checksum)
+		}
+	})
 }
