@@ -292,9 +292,12 @@ func start(p *Processor) {
 		// interference from other goroutines like the config watcher.
 		if !IsTesting() {
 			// The ConfigWatcher is not started in test mode to prevent race conditions where
+			reloadSignalCh := make(chan os.Signal, 1)
+			signal.Notify(reloadSignalCh, syscall.SIGHUP, syscall.SIGUSR1, syscall.SIGUSR2)
 			// the test's config is overwritten by a reload from the default config file.
-			if p.ReloadOnSignal != "" {
-				go SignalReloader(p, stopWatcher, p.signalCh)
+			// Start SignalReloader unless it's explicitly disabled with "none".
+			if strings.ToLower(p.ReloadOnSignal) != "none" {
+				go SignalReloader(p, stopWatcher, reloadSignalCh)
 			} else {
 				go ConfigWatcher(p, stopWatcher)
 			}

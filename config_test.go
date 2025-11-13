@@ -1521,6 +1521,77 @@ chains:
 	}
 }
 
+func TestStart_WatcherSelection(t *testing.T) {
+	tests := []struct {
+		name                  string
+		reloadOnSignalFlag    string
+		expectWatcherLog      string
+		dontExpectReloaderLog bool
+	}{
+		{
+			name:                  "Default behavior starts SignalReloader",
+			reloadOnSignalFlag:    "", // Default case
+			expectWatcherLog:      "Signal-based config reloading enabled",
+			dontExpectReloaderLog: false,
+		},
+		{
+			name:                  "HUP starts SignalReloader",
+			reloadOnSignalFlag:    "HUP",
+			expectWatcherLog:      "Signal-based config reloading enabled",
+			dontExpectReloaderLog: false,
+		},
+		{
+			name:                  "none starts ConfigWatcher",
+			reloadOnSignalFlag:    "none",
+			expectWatcherLog:      "Starting ConfigWatcher",
+			dontExpectReloaderLog: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// --- Setup ---
+			var capturedLogs []string
+			var logMutex sync.Mutex
+			logFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+				logMutex.Lock()
+				defer logMutex.Unlock()
+				capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
+			}
+
+			p := newTestProcessor(&AppConfig{}, nil)
+			p.ReloadOnSignal = tt.reloadOnSignalFlag
+			p.LogFunc = logFunc
+
+			stopCh := make(chan struct{})
+			defer close(stopCh)
+
+			// --- Act ---
+			// This is a simplified, test-safe version of the logic in main.start()
+			if strings.ToLower(p.ReloadOnSignal) != "none" {
+				go SignalReloader(p, stopCh, make(chan os.Signal, 1))
+			} else {
+				go ConfigWatcher(p, stopCh)
+			}
+
+			time.Sleep(20 * time.Millisecond) // Give the goroutine a moment to start and log.
+
+			// --- Assert ---
+			logMutex.Lock()
+			defer logMutex.Unlock()
+			logOutput := strings.Join(capturedLogs, "\n")
+
+			if !strings.Contains(logOutput, tt.expectWatcherLog) {
+				t.Errorf("Expected log output to contain '%s', but it did not. Logs:\n%s", tt.expectWatcherLog, logOutput)
+			}
+
+			if tt.dontExpectReloaderLog && strings.Contains(logOutput, "Signal-based config reloading") {
+				t.Errorf("Expected SignalReloader not to start, but its log was found. Logs:\n%s", logOutput)
+			}
+		})
+	}
+}
+
 // runMatcherTest is a helper to reduce boilerplate in matcher tests.
 func runMatcherTest(t *testing.T, yamlContent string, testCases map[string]struct {
 	entry    *LogEntry

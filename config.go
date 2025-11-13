@@ -11,7 +11,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -1543,16 +1542,15 @@ func SignalReloader(p *Processor, stop <-chan struct{}, signalCh chan os.Signal)
 		signalName = strings.ToUpper(p.ReloadOnSignal)
 	}
 
-	reloadSignal, ok := signalMap[signalName]
-	if !ok || p.DryRun || strings.ToLower(p.ReloadOnSignal) == "none" {
+	if _, ok := signalMap[signalName]; !ok || p.DryRun {
 		p.LogFunc(logging.LevelDebug, "RELOAD", "Signal-based config reloading is disabled.")
-		p.LogFunc(logging.LevelCritical, "FATAL", "Unsupported signal for reloading: '%s'. Use HUP, USR1, or USR2.", p.ReloadOnSignal)
-		// In a real app, you might want to stop the process here.
-		// For now, we just stop this goroutine.
+		if p.ReloadOnSignal != "" && strings.ToLower(p.ReloadOnSignal) != "none" {
+			p.LogFunc(logging.LevelCritical, "FATAL", "Unsupported signal for reloading: '%s'. Use HUP, USR1, or USR2.", p.ReloadOnSignal)
+		}
 		return
 	}
 
-	signal.Notify(signalCh, reloadSignal) // Notify on the provided channel
+	// The signal channel is already notified by the caller in main.go.
 
 	p.LogFunc(logging.LevelInfo, "RELOAD", "Signal-based config reloading enabled. Send %s signal to reload.", signalName)
 
