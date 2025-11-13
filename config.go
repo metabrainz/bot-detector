@@ -144,12 +144,46 @@ func compareConfigsByTag(oldCfg AppConfig, newCfg LoadedConfig) bool {
 
 // --- New Matcher Compilation Logic ---
 
+// FileDependency represents a file that the configuration depends on.
+type FileDependency struct {
+	Path    string
+	ModTime time.Time
+	Content []string // Cached content
+	Status  FileStatus
+	Error   error // Store the error if status is Error
+}
+
+// FileStatus indicates the current state of a file dependency.
+type FileStatus int
+
+const (
+	FileStatusUnknown FileStatus = iota
+	FileStatusLoaded
+	FileStatusMissing
+	FileStatusError
+)
+
+func (fs FileStatus) String() string {
+	switch fs {
+	case FileStatusUnknown:
+		return "Unknown"
+	case FileStatusLoaded:
+		return "Loaded"
+	case FileStatusMissing:
+		return "Missing"
+	case FileStatusError:
+		return "Error"
+	default:
+		return fmt.Sprintf("FileStatus(%d)", fs)
+	}
+}
+
 // MatcherContext holds common parameters needed during matcher compilation.
 type MatcherContext struct {
 	ChainName          string
 	StepIndex          int
 	CanonicalFieldName string
-	FileDependencies   *[]string
+	FileDependencies   map[string]*FileDependency // Changed to map
 	ConfigDir          string
 }
 
@@ -158,7 +192,7 @@ type MatcherContext struct {
 type fieldMatcher func(entry *LogEntry) bool
 
 // compileMatchers parses the raw `field_matches` interface from YAML into a slice of efficient matcher functions.
-func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps *[]string, configDir string) ([]fieldMatcher, error) {
+func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps map[string]*FileDependency, configDir string) ([]fieldMatcher, error) {
 	var matchers []fieldMatcher
 	// Create the initial MatcherContext for this chain and step.
 	ctx := MatcherContext{
@@ -255,18 +289,44 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 			absoluteFilePath = filepath.Join(ctx.ConfigDir, relativeFilePath)
 		}
 
-		*ctx.FileDependencies = append(*ctx.FileDependencies, absoluteFilePath) // Track file for watching
-		lines, err := ReadLinesFromFile(absoluteFilePath)
-		if err != nil {
-			// Log a warning but do not fail the entire config load.
-			// Treat the file as empty, effectively disabling this part of the rule.
-			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': failed to read file matcher '%s', it will be treated as empty: %v", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, absoluteFilePath, err)
-			// Return a matcher for an empty list, which will never match. Do not return an error.
-			lines = []string{}
+		// Check if the file is already loaded or needs to be loaded/reloaded
+		fileDep, exists := ctx.FileDependencies[absoluteFilePath]
+		if !exists {
+			fileDep = &FileDependency{Path: absoluteFilePath, Status: FileStatusUnknown}
+			ctx.FileDependencies[absoluteFilePath] = fileDep
 		}
+
+		// Check modification time to see if we need to reload
+		fileInfo, err := os.Stat(absoluteFilePath)
+		if err != nil {
+			fileDep.Status = FileStatusMissing
+			fileDep.Error = err
+			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': file matcher '%s' does not exist or is inaccessible: %v", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, absoluteFilePath, err)
+			// Treat as empty for now, but record the error
+			fileDep.Content = []string{}
+		} else if !fileDep.ModTime.IsZero() && fileInfo.ModTime().Equal(fileDep.ModTime) {
+			// File hasn't changed, use cached content
+			fileDep.Status = FileStatusLoaded
+			fileDep.Error = nil // Clear any previous error
+		} else {
+			// File changed or not yet loaded, read content
+			lines, readErr := ReadLinesFromFile(absoluteFilePath)
+			if readErr != nil {
+				fileDep.Status = FileStatusError
+				fileDep.Error = readErr
+				logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': failed to read file matcher '%s', it will be treated as empty: %v", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, absoluteFilePath, readErr)
+				fileDep.Content = []string{} // Treat as empty on read error
+			} else {
+				fileDep.Status = FileStatusLoaded
+				fileDep.Error = nil
+				fileDep.Content = lines
+			}
+			fileDep.ModTime = fileInfo.ModTime()
+		}
+
 		// Convert []string to []interface{} to reuse compileListMatcher
-		interfaceSlice := make([]interface{}, len(lines))
-		for i, v := range lines {
+		interfaceSlice := make([]interface{}, len(fileDep.Content))
+		for i, v := range fileDep.Content {
 			interfaceSlice[i] = v
 		}
 		return compileListMatcher(ctx, interfaceSlice)
@@ -734,7 +794,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 	}
 
 	// --- PARSE FILE DEPENDENCIES ---
-	fileDependencies := []string{}
+	newFileDependencies := make(map[string]*FileDependency)
 
 	for _, yamlChain := range config.Chains {
 		// Check if the chain is explicitly disabled via the action field.
@@ -831,7 +891,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 			}
 
 			// Compile the new flexible matchers
-			runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, &fileDependencies, configDir)
+			runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, newFileDependencies, configDir)
 			if err != nil {
 				return nil, err // Error from compilation
 			}
@@ -859,11 +919,10 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 			// Create a base context for good actors.
 			baseCtx := MatcherContext{
 				ChainName:        fmt.Sprintf("good_actor '%s'", name),
-				StepIndex:        0, // Good actors don't have steps, use 0 or a sentinel value
-				FileDependencies: &fileDependencies,
+				StepIndex:        0,                   // Good actors don't have steps, use 0 or a sentinel value
+				FileDependencies: newFileDependencies, // Now using the map
 				ConfigDir:        configDir,
 			}
-
 			switch strings.ToLower(key) {
 			case "ip":
 				var ipList []interface{}
@@ -917,7 +976,7 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		CleanupInterval:          cleanupInterval,
 		EOFPollingDelay:          eofPollingDelay,
 		DurationToTableName:      newDurationTables,
-		FileDependencies:         fileDependencies,
+		FileDependencies:         newFileDependencies, // Now using the map
 		BlockerAddresses:         config.BlockerAddresses,
 		BlockerDialTimeout:       blockerDialTimeout,
 		BlockerMaxRetries:        blockerMaxRetries,
@@ -935,6 +994,39 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 		UnblockOnGoodActor:       config.UnblockOnGoodActor,
 		UnblockCooldown:          unblockCooldown,
 	}, nil
+}
+
+// logFileDependencyChanges logs changes in file dependencies between old and new configurations.
+func logFileDependencyChanges(p *Processor, oldDeps, newDeps map[string]*FileDependency) {
+	var added, removed, modified []string
+
+	// Check for added or modified files
+	for path, newDep := range newDeps {
+		oldDep, exists := oldDeps[path]
+		if !exists {
+			added = append(added, fmt.Sprintf("'%s' (Status: %s)", path, newDep.Status))
+		} else if oldDep.ModTime != newDep.ModTime || oldDep.Status != newDep.Status || (oldDep.Error != nil && newDep.Error == nil) || (oldDep.Error == nil && newDep.Error != nil) {
+			// Consider modified if ModTime, Status, or Error state changes
+			modified = append(modified, fmt.Sprintf("'%s' (Old Status: %s, New Status: %s)", path, oldDep.Status, newDep.Status))
+		}
+	}
+
+	// Check for removed files
+	for path := range oldDeps {
+		if _, exists := newDeps[path]; !exists {
+			removed = append(removed, fmt.Sprintf("'%s'", path))
+		}
+	}
+
+	if len(added) > 0 {
+		p.LogFunc(logging.LevelInfo, "CONFIG", "Added file dependencies: %s", strings.Join(added, ", "))
+	}
+	if len(removed) > 0 {
+		p.LogFunc(logging.LevelInfo, "CONFIG", "Removed file dependencies: %s", strings.Join(removed, ", "))
+	}
+	if len(modified) > 0 {
+		p.LogFunc(logging.LevelInfo, "CONFIG", "Modified file dependencies: %s", strings.Join(modified, ", "))
+	}
 }
 
 // reloadConfiguration contains the logic to reload configuration, compare for changes,
@@ -1003,6 +1095,9 @@ func reloadConfiguration(p *Processor) { //nolint:cyclop
 		p.LogFunc(logging.LevelInfo, "CONFIG", "General configuration settings have been updated.")
 		logConfigurationSummary(p)
 	}
+
+	// --- Compare and log file dependency changes ---
+	logFileDependencyChanges(p, oldConfig.FileDependencies, loadedCfg.FileDependencies)
 
 	// --- Compare and log chain differences ---
 	oldChainsMap := make(map[string]BehavioralChain)
@@ -1170,17 +1265,27 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 			changedFile = p.ConfigPath
 		} else {
 			// 2. Check all file dependencies if YAML hasn't changed
-			for _, depPath := range p.Config.FileDependencies {
-				depInfo, err := os.Stat(depPath)
-				if err != nil {
-					// Log at debug level if a dependency file is missing, as this might be temporary.
-					// A reload will only be triggered if config.yaml itself changes.
-					p.LogFunc(logging.LevelDebug, "WATCH_SKIP", "Could not stat dependency file %s (may have been removed): %v", depPath, err)
-					continue
-				}
-				if depInfo.ModTime().After(p.Config.LastModTime) {
+			for path, fileDep := range p.Config.FileDependencies {
+				// If a file was previously missing or had an error, try to reload it.
+				if fileDep.Status == FileStatusMissing || fileDep.Status == FileStatusError {
 					isChanged = true
-					changedFile = depPath
+					changedFile = path
+					p.LogFunc(logging.LevelInfo, "WATCH", "Detected previously %s file dependency '%s'. Attempting reload...", fileDep.Status, path)
+					break
+				}
+
+				depInfo, err := os.Stat(path)
+				if err != nil {
+					// If a file that was previously loaded is now missing, trigger a reload.
+					isChanged = true
+					changedFile = path
+					p.LogFunc(logging.LevelInfo, "WATCH", "Detected missing file dependency '%s'. Attempting reload...", path)
+					break
+				}
+				if depInfo.ModTime().After(fileDep.ModTime) {
+					isChanged = true
+					changedFile = path
+					p.LogFunc(logging.LevelInfo, "WATCH", "Detected change in file dependency '%s'. Attempting reload...", path)
 					break
 				}
 			}

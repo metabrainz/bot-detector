@@ -220,8 +220,11 @@ func (h *checkerTestHarness) addChain(chainYAML BehavioralChain) {
 	h.t.Helper()
 	// This simulates the compilation part of LoadConfigFromYAML for a single chain.
 	runtimeChain := chainYAML
+	// Create an empty FileDependencies map for testing purposes.
+	testFileDependencies := make(map[string]*FileDependency)
+
 	for i, stepYAML := range chainYAML.StepsYAML {
-		matchers, err := compileMatchers(chainYAML.Name, i, stepYAML.FieldMatches, &[]string{}, "")
+		matchers, err := compileMatchers(chainYAML.Name, i, stepYAML.FieldMatches, testFileDependencies, "")
 		if err != nil {
 			h.t.Fatalf("Failed to compile matchers for chain '%s': %v", chainYAML.Name, err)
 		}

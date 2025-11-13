@@ -84,7 +84,7 @@ type AppConfig struct {
 	DurationToTableName      map[time.Duration]string          `config:"compare" summary:"duration_tables"`
 	DefaultBlockDuration     time.Duration                     `config:"compare" summary:"default_block_duration"`
 	EOFPollingDelay          time.Duration                     `config:"compare" summary:"eof_polling_delay"`
-	FileDependencies         []string                          // List of file paths used in `file:` matchers.
+	FileDependencies         map[string]*FileDependency        // List of file paths used in `file:` matchers.
 	BlockerAddresses         []string                          `config:"compare" summary:"blocker_addresses"`
 	BlockerDialTimeout       time.Duration                     `config:"compare" summary:"blocker_dial_timeout"`
 	BlockerMaxRetries        int                               `config:"compare" summary:"blocker_max_retries"`
@@ -144,30 +144,30 @@ func (c *AppConfig) Clone() AppConfig {
 
 // LoadedConfig encapsulates all configuration data loaded from the YAML file.
 type LoadedConfig struct {
-	GoodActors               []GoodActorDef           `config:"compare"`
-	BlockTableNameFallback   string                   `config:"compare"`
-	Chains                   []BehavioralChain        // Not compared here
-	CleanupInterval          time.Duration            `config:"compare"`
-	DefaultBlockDuration     time.Duration            `config:"compare"`
-	DurationToTableName      map[time.Duration]string `config:"compare"`
-	EOFPollingDelay          time.Duration            `config:"compare"`
-	FileDependencies         []string                 // Not compared
-	BlockerAddresses         []string                 `config:"compare"`
-	BlockerDialTimeout       time.Duration            `config:"compare"`
-	BlockerMaxRetries        int                      `config:"compare"`
-	BlockerRetryDelay        time.Duration            `config:"compare"`
-	BlockerCommandQueueSize  int                      `config:"compare"`
-	BlockerCommandsPerSecond int                      `config:"compare"`
-	IdleTimeout              time.Duration            `config:"compare"`
-	LogLevel                 string                   `config:"compare"`
-	LineEnding               string                   `config:"compare"`
-	LogFormatRegex           *regexp.Regexp           // Not compared here
-	MaxTimeSinceLastHit      time.Duration            `config:"compare"`
-	OutOfOrderTolerance      time.Duration            `config:"compare"`
-	PollingInterval          time.Duration            `config:"compare"`
-	TimestampFormat          string                   `config:"compare"`
-	UnblockOnGoodActor       bool                     `config:"compare"`
-	UnblockCooldown          time.Duration            `config:"compare"`
+	GoodActors               []GoodActorDef             `config:"compare"`
+	BlockTableNameFallback   string                     `config:"compare"`
+	Chains                   []BehavioralChain          // Not compared here
+	CleanupInterval          time.Duration              `config:"compare"`
+	DefaultBlockDuration     time.Duration              `config:"compare"`
+	DurationToTableName      map[time.Duration]string   `config:"compare"`
+	EOFPollingDelay          time.Duration              `config:"compare"`
+	FileDependencies         map[string]*FileDependency // Not compared
+	BlockerAddresses         []string                   `config:"compare"`
+	BlockerDialTimeout       time.Duration              `config:"compare"`
+	BlockerMaxRetries        int                        `config:"compare"`
+	BlockerRetryDelay        time.Duration              `config:"compare"`
+	BlockerCommandQueueSize  int                        `config:"compare"`
+	BlockerCommandsPerSecond int                        `config:"compare"`
+	IdleTimeout              time.Duration              `config:"compare"`
+	LogLevel                 string                     `config:"compare"`
+	LineEnding               string                     `config:"compare"`
+	LogFormatRegex           *regexp.Regexp             // Not compared here
+	MaxTimeSinceLastHit      time.Duration              `config:"compare"`
+	OutOfOrderTolerance      time.Duration              `config:"compare"`
+	PollingInterval          time.Duration              `config:"compare"`
+	TimestampFormat          string                     `config:"compare"`
+	UnblockOnGoodActor       bool                       `config:"compare"`
+	UnblockCooldown          time.Duration              `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error)
 }
 
