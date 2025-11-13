@@ -254,8 +254,8 @@ func handleOutOfOrder(p *Processor, entry *LogEntry) (buffered bool) {
 }
 
 // handleChainCompletion takes action when a chain is completed (log, block, etc.).
-// It updates the actor's state and returns true if the chain was completed.
-// It returns true if processing of other chains should be stopped for this log entry.
+// It updates the actor's state and metrics, and performs the configured action.
+// It returns true if `on_match` is "stop", indicating that no further chains should be processed for this entry.
 func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *store.ActorActivity) bool {
 	// Increment the counter for the specific chain that was completed, if metrics are available.
 	// This check prevents panics in test scenarios where metrics are not fully initialized.
@@ -462,7 +462,7 @@ func checkInterStepTimeRules(p *Processor, chain *BehavioralChain, entry *LogEnt
 
 // processChainForEntry evaluates a single log entry against a single behavioral chain.
 // It manages state transitions (advancing, resetting) and triggers completion handling.
-// It returns true if processing of other chains should be stopped for this entry.
+// It returns true if the chain completed and its `on_match` rule was "stop".
 func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *store.ActorActivity, previousRequestTime time.Time) bool {
 	// If GetActor returns an empty actor, it's a mismatch for this chain (e.g., wrong IP version).
 	if GetActor(chain, entry).IPInfo.Address == "" {

@@ -284,8 +284,6 @@ func TestCheckChains_TimeDelayReset(t *testing.T) {
 	}
 }
 
-// TestCheckChains_WhitelistSkip tests that a whitelisted IP is skipped entirely.
-
 // TestCheckChains_LogAction tests that a chain with Action="log" clears the state but does not call the blocker.
 func TestCheckChains_LogAction(t *testing.T) {
 	// --- Setup ---

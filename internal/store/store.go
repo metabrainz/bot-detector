@@ -8,7 +8,9 @@ import (
 	"time"
 )
 
-// Provider defines the interface the store needs to access configuration and metrics.
+// Provider defines the interface that the store package needs to access application-level
+// configuration, metrics, and state. This is a form of dependency injection that allows
+// the store package to remain decoupled from the main application package.
 type Provider interface {
 	GetCleanupInterval() time.Duration
 	GetIdleTimeout() time.Duration

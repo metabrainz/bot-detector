@@ -649,7 +649,7 @@ chains:
 
 func TestLoadConfigFromYAML_IntMatcherFallback(t *testing.T) {
 	// This test specifically targets the non-StatusCode path in compileIntMatcher.
-	// We use a field that is not an integer (Method) to ensure the fallback logic
+	// We use a field that is not an integer (Method) to ensure the logic
 	// of converting a string value to an integer is tested.
 	// --- Setup ---
 	yamlContent := `
