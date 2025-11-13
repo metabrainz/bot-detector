@@ -206,22 +206,22 @@ good_actors:
   # Actors from our internal network are always trusted.
   # This uses a file containing a list of CIDR blocks.
   - name: "our_network"
-    IP: "file:./internal_ips.txt"
+    ip: "file:./internal_ips.txt"
 
   # A specific monitoring service that should be ignored.
   # This uses a case-insensitive regex to match the User-Agent.
   - name: "monitoring_agent"
-    UserAgent: "regex:(?i)HealthCheck"
+    useragent: "regex:(?i)HealthCheck"
 
   # A known, trusted bot that is only considered trusted if BOTH its IP and User-Agent match.
   # This prevents spoofing from other IPs that might use the same User-Agent.
   - name: "known_friendly_bot"
-    IP: "8.8.8.8"
-    UserAgent: "regex:(?i)FriendlyBot"
+    ip: "8.8.8.8"
+    useragent: "regex:(?i)FriendlyBot"
 
   # A list of specific partner server IPs can also be provided directly.
   - name: "partner_servers"
-    IP:
+    ip:
       - "203.0.113.10"
       - "203.0.113.11"
 ```
@@ -300,16 +300,16 @@ Each step in the steps array defines a specific log entry characteristic that mu
 
 ### `field_matches`
 
-| Field (Case-Insensitive) | Description |
+| Field | Description |
 | :--- | :--- |
-| **IP** | The client IP address. |
-| **Method** | The HTTP request method (e.g., `GET`, `POST`). A malformed request in the log (e.g., `"-"`) is parsed as an empty string. |
-| **Path** | The requested URL path. |
-| **StatusCode**, `status_code` | The HTTP response status code (e.g., `200`, `404`). |
-| **Referrer** | The full HTTP Referer header value. |
-| **Size** | The response size in bytes. A dash (`"-"`) in the log is parsed as `-1`. |
-| **UserAgent**, `user_agent` | The HTTP User-Agent header value. |
-| **VHost** | The virtual host from the log entry. |
+| **ip** | The client IP address. |
+| **method** | The HTTP request method (e.g., `GET`, `POST`). A malformed request in the log (e.g., `"-"`) is parsed as an empty string. |
+| **path** | The requested URL path. |
+| **statuscode**, `status_code` | The HTTP response status code (e.g., `200`, `404`). |
+| **referrer** | The full HTTP Referer header value. |
+| **size** | The response size in bytes. A dash (`"-"`) in the log is parsed as `-1`. |
+| `useragent`, `user_agent` | The HTTP User-Agent header value. |
+| **vhost** | The virtual host from the log entry. |
 
 ### **Advanced `field_matches` Syntax**
 
@@ -321,11 +321,11 @@ The simplest match is a direct value. The parser intelligently determines the ma
 
 *   **Exact String Match (Default for strings):**
     ```yaml
-    Method: "POST"
+    method: "POST"
     ```
 *   **Exact Integer Match (Default for numbers):**
     ```yaml
-    StatusCode: 404
+    statuscode: 404
     ```
 
 #### **Prefixed String Matchers**
@@ -334,29 +334,29 @@ For more complex string matching, use a prefix.
 
 *   **Exact String (Explicit):** Use `exact:` to force a literal string match for a value that could be misinterpreted as another prefix type. This is useful for rare edge cases.
     ```yaml
-    Path: "exact:file:not-a-real-path" # Matches the literal string "file:not-a-real-path"
+    path: "exact:file:not-a-real-path" # Matches the literal string "file:not-a-real-path"
     ```
 
 *   **Regular Expression:** Uses Go's standard `regexp` package, which implements the RE2 syntax. The `(?i)` flag at the beginning of the pattern makes the match case-insensitive.
     ```yaml
     # Matches if "Bot", "crawler", or "Python" appear anywhere in the User-Agent string (e.g., "SomeBot/1.0", "Python-Requests/2.26.0").
-    UserAgent: "regex:(?i)(bot|crawler|python)"
+    useragent: "regex:(?i)(bot|crawler|python)"
     ```
     > **Note on Escaping:** YAML strings treat the backslash (`\`) as an escape character. If your regular expression needs a literal backslash (e.g., for `\d` or to escape a dot `\.`), you must escape it for YAML by doubling it.
     ```yaml
     # To match a digit (\d), you must write \\d in the YAML file.
-    Path: "regex:^/user/\\d+$"
+    path: "regex:^/user/\\d+$"
     ```
     > **Tip:** To avoid double-escaping backslashes in regular expressions, you can use a YAML literal block scalar (`|-`). This makes complex patterns much cleaner:
     ```yaml
     # This is equivalent to the above, but more readable.
-    Path: |-
+    path: |-
       regex:^/user/\d+$
     ```
 *   **CIDR Block:** Matches if an IP address falls within the specified CIDR block. This prefix is **only valid for the `IP` field**.
     ```yaml
     # Matches any IP in the 192.168.1.0/24 subnet.
-    IP: "cidr:192.168.1.0/24"
+    ip: "cidr:192.168.1.0/24"
     ```
 *   **File-Based Matcher:** Loads a list of values from an external file. This can be used with any field that accepts string values (e.g., `Path`, `UserAgent`, `IP`). Each line in the file is treated as a separate value in a list (OR condition). 
     > **Path Resolution:** File paths are resolved relative to the directory of the main `config.yaml` file. Absolute paths are also supported.
@@ -371,7 +371,7 @@ For more complex string matching, use a prefix.
     ```
     You would use it in your configuration like this:
     ```yaml
-    Path: "file:./bad_paths.txt"
+    path: "file:./bad_paths.txt"
     ```
     Lines in the referenced file that are empty or start with `#` are treated as comments and ignored.
     > **Important:** When using prefixes like `regex:` inside a file, the string is read literally. You do **not** need to escape backslashes for YAML (e.g., use `\d` directly, not `\\d`).
@@ -379,8 +379,8 @@ For more complex string matching, use a prefix.
 *   **Status Code Pattern:** A special shorthand for matching status code classes.
     The `X` acts as a wildcard for any digit.
     ```yaml
-    StatusCode: "4XX" # Matches 400-499
-    StatusCode: "30X" # Matches 300-309
+    statuscode: "4XX" # Matches 400-499
+    statuscode: "30X" # Matches 300-309
     ```
 
 #### **List of Values (OR Condition)**
@@ -389,17 +389,17 @@ Provide a list to match if the field's value is **any of** the items in the list
 
 ```yaml
 field_matches:
-  Method: ["POST", "PUT"]
-  UserAgent: ["file:./bad_user_agents.txt", "SpecificBadBot/2.0"] # Mix file and direct values
-  StatusCode: [401, 403, "5XX"] # Matches 401, 403, or any 5xx code
-  Path:
+  method: ["POST", "PUT"]
+  useragent: ["file:./bad_user_agents.txt", "SpecificBadBot/2.0"] # Mix file and direct values
+  statuscode: [401, 403, "5XX"] # Matches 401, 403, or any 5xx code
+  path:
     - "/login"
     - "regex:^/reset-password/\\w+$"
 ```
 
 #### **Object for Numeric Ranges (AND Condition)**
 
-Use an object to define numeric ranges. This is especially useful for `StatusCode`. All conditions in the object must be met.
+Use an object to define numeric ranges. This is especially useful for `statuscode`. All conditions in the object must be met.
 
 *   `gt`: greater than
 *   `gte`: greater than or equal to
@@ -410,13 +410,13 @@ Use an object to define numeric ranges. This is especially useful for `StatusCod
 ```yaml
 field_matches:
   # Matches any status code from 401 to 499 (inclusive)
-  StatusCode:
+  statuscode:
     gte: 401
     lt: 500
 
   # The 'not' operator can be used with any field type.
   # It can negate a single value or a list of values.
-  Path:
+  path:
     not:
       - "/admin"
       - "regex:^/api/v1/public/"
@@ -494,18 +494,18 @@ chains:
     match_key: "ip_ua" # Track by IP and User-Agent combination
     steps:
       - field_matches:
-          Method: "HEAD"
-          StatusCode: 403 # Exact integer match
+          method: "HEAD"
+          statuscode: 403 # Exact integer match
       - max_delay: "2s" # Must happen within 2s of the previous step
         min_delay: "200ms" # And must wait at least 200ms
         field_matches:
-          Method: "GET"
-          StatusCode: 403
+          method: "GET"
+          statuscode: 403
       - max_delay: "2s"
         field_matches:
-          Method:
+          method:
             not: "GET"
-          StatusCode: 403
+          statuscode: 403
 
   # --- CHAIN 2: "Sleepy" Bad Bot ---
   # Detects a bot that probes a sensitive endpoint after a long period of inactivity.
@@ -517,8 +517,8 @@ chains:
     steps:
       - min_time_since_last_hit: "20m" # Step only matches if IP was quiet for 20+ minutes
         field_matches:
-          UserAgent: "file:./bad_agents.txt" # Match against a list of bad user agents
-          Path: "/wp-login.php"
+          useragent: "file:./bad_agents.txt" # Match against a list of bad user agents
+          path: "/wp-login.php"
 
   # --- CHAIN 3: Multi-faceted Login Abuse (Log Only) ---
   # Logs attempts to access various login/reset paths that result in a client error.
@@ -529,13 +529,13 @@ chains:
     steps:
       - field_matches:
           # Match multiple methods (OR condition)
-          Method: ["POST", "PUT"]
+          method: ["POST", "PUT"]
           # Match multiple paths (OR condition with mixed string/regex)
-          Path:
+          path:
             - "/api/v2/login"
             - "regex:^/reset-password/\\w+$"
           # Match any 4xx status code except 404 (AND condition)
-          StatusCode:
+          statuscode:
             gte: 400
             lt: 500
             not: 404 # Note: 'not' is a powerful addition
@@ -549,16 +549,16 @@ chains:
                       # Log entries with IPv4 addresses will be ignored by this specific chain.
     steps:
       - field_matches:
-          StatusCode: "5XX"
-          Referrer: "https://internal.my-app.com/dashboard"
+          statuscode: "5XX"
+          referrer: "https://internal.my-app.com/dashboard"
       - max_delay: "10s"
         field_matches:
-          StatusCode: "5XX"
-          Referrer: "https://internal.my-app.com/dashboard"
+          statuscode: "5XX"
+          referrer: "https://internal.my-app.com/dashboard"
       - max_delay: "10s"
         # This step uses the inline {} notation for completeness,
         # showing it's useful for simple, single-line matchers.
-        field_matches: { StatusCode: "5XX", Referrer: "https://internal.my-app.com/dashboard" }
+        field_matches: { statuscode: "5XX", referrer: "https://internal.my-app.com/dashboard" }
 ```
 
 ---

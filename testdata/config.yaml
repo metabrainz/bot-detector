@@ -4,12 +4,12 @@ out_of_order_tolerance: "5s" # Required for Test Case 5
 
 good_actors:
   - name: "our_network"
-    IP: "file:good_actors_ips.txt"
+    ip: "file:good_actors_ips.txt"
   - name: "monitoring_agent"
-    UserAgent: "regex:(?i)HealthCheck"
+    useragent: "regex:(?i)HealthCheck"
   - name: "known_bot"
-    IP: "8.8.8.8"
-    UserAgent: "regex:(?i)KnownBot"
+    ip: "8.8.8.8"
+    useragent: "regex:(?i)KnownBot"
 
 
 chains:
@@ -18,8 +18,8 @@ chains:
     action: "log"
     match_key: "ip"
     steps:
-      - field_matches: { Path: "regex:^/log/step1" }
-      - field_matches: { Path: "regex:^/log/step2" }
+      - field_matches: { path: "regex:^/log/step1" }
+      - field_matches: { path: "regex:^/log/step2" }
 
   # --- 2. Simple Block Chain (10.0.0.2) ---
   - name: "SimpleBlockChain"
@@ -27,16 +27,16 @@ chains:
     block_duration: "1h"
     match_key: "ip"
     steps:
-      - field_matches: { Path: "/block/step1" }
-      - field_matches: { Path: "/block/step2" }
+      - field_matches: { path: "/block/step1" }
+      - field_matches: { path: "/block/step2" }
 
   # --- 3. Out-of-Order Chain (10.0.0.3) ---
   - name: "OutOfOrderChain"
     action: "log"
     match_key: "ip"
     steps:
-      - field_matches: { Path: "regex:^/order/start$" }
-      - field_matches: { Path: "/order/end" }
+      - field_matches: { path: "regex:^/order/start$" }
+      - field_matches: { path: "/order/end" }
 
   # --- 4. IPv6 User-Agent Change Detection (2001:db8::4) ---
   - name: "IPv6-UA-Change-Detection"
@@ -44,12 +44,12 @@ chains:
     match_key: "ipv6" # Track by IPv6, steps will check UserAgent
     steps:
       - field_matches: # Using explicit regex for clarity
-          Path: "regex:^/ua/probe$" # This regex is simple, leave as is.
-          UserAgent: |-
+          path: "regex:^/ua/probe$" # This regex is simple, leave as is.
+          useragent: |-
             regex:^Mozilla/5\.0 \(UA1\)$
       - field_matches: # Using exact match for path
-          Path: "/ua/attack"
-          UserAgent: |-
+          path: "/ua/attack"
+          useragent: |-
             regex:^Mozilla/5\.0 \(UA2\)$
         max_delay: "5s" # Must occur within 5 seconds of the first step
 
@@ -61,15 +61,15 @@ chains:
     match_key: "ip" # Track by IP, allowing UA to change between steps
     steps:
       - field_matches:
-          Path: "/ua-ref/step1"
-          UserAgent: "regex:^Consistent_UA_\\d+\\.\\d+$" # Match Consistent_UA_X.Y
-          Referrer: "https://common.ref/page"
-          StatusCode: 200 # Integer match
+          path: "/ua-ref/step1"
+          useragent: "regex:^Consistent_UA_\\d+\\.\\d+$" # Match Consistent_UA_X.Y
+          referrer: "https://common.ref/page"
+          statuscode: 200 # Integer match
       - field_matches:
-          Path: "/ua-ref/step2"
-          UserAgent: "regex:^Consistent_UA_\\d+\\.\\d+$" # Match Consistent_UA_X.Y
-          Referrer: "https://common.ref/page"
-          StatusCode: "5XX" # Use new status code pattern
+          path: "/ua-ref/step2"
+          useragent: "regex:^Consistent_UA_\\d+\\.\\d+$" # Match Consistent_UA_X.Y
+          referrer: "https://common.ref/page"
+          statuscode: "5XX" # Use new status code pattern
         max_delay: "10s"
 
   # --- 6. Sleepy Bot Detection (min_time_since_last_hit) ---
@@ -79,7 +79,7 @@ chains:
     steps:
       - min_time_since_last_hit: "15s"
         field_matches:
-          Path: "/sleepy/probe"
+          path: "/sleepy/probe"
 
   # --- 7. Combined Field Matching (Size and IP) ---
   - name: "CombinedMatcherChain"
@@ -87,9 +87,9 @@ chains:
     match_key: "ip"
     steps:
       - field_matches:
-          Size:
+          size:
             gte: 5000
-          IP: |-
+          ip: |-
             regex:^1\.2\.3\.
 
   # --- 8. Malformed Request Matching ---
@@ -98,9 +98,9 @@ chains:
     match_key: "ip"
     steps:
       - field_matches:
-          StatusCode: 400
-          Method: ""
-          Size: -1
+          statuscode: 400
+          method: ""
+          size: -1
 
   # --- 9. HTTP/2 Protocol Matching ---
   - name: "HTTP2RequestChain"
@@ -108,8 +108,8 @@ chains:
     match_key: "ip"
     steps:
       - field_matches:
-          Protocol: "HTTP/2.0"
-          Path: "file:http2_paths.txt"
+          protocol: "HTTP/2.0"
+          path: "file:http2_paths.txt"
 
   # --- 10. VHost Matching ---
   - name: "VHostSpecificChain"
@@ -117,17 +117,17 @@ chains:
     match_key: "ip"
     steps:
       - field_matches:
-          VHost: "internal.api.com"
-          Path: "/admin/dashboard"
+          vhost: "internal.api.com"
+          path: "/admin/dashboard"
 
   # --- 11. Chain Reset Test ---
   - name: "ChainResetTest"
     action: "log"
     match_key: "ip"
     steps:
-      - field_matches: { Path: "/reset/step1" }
+      - field_matches: { path: "/reset/step1" }
       - max_delay: "5s"
-        field_matches: { Path: "/reset/step2" }
+        field_matches: { path: "/reset/step2" }
 
   # --- 12. Chain Order Test ---
   # This tests that a single log entry is processed against all chains in order.
@@ -138,13 +138,13 @@ chains:
     action: "log"
     match_key: "ip"
     steps:
-      - field_matches: { Path: "/chain-order-test" }
+      - field_matches: { path: "/chain-order-test" }
   - name: "ChainOrderTest_Block"
     action: "block"
     block_duration: "10m"
     match_key: "ip"
     steps:
-      - field_matches: { Path: "/chain-order-test" }
+      - field_matches: { path: "/chain-order-test" }
 
   # --- 13. OnMatch Stop Test ---
   # This tests that `on_match: "stop"` prevents further chain processing for a hit.
@@ -154,15 +154,15 @@ chains:
     action: "log"
     match_key: "ip"
     steps:
-      - field_matches: { Path: "/on-match-stop-test" }
+      - field_matches: { path: "/on-match-stop-test" }
   - name: "OnMatchStop_ChainB_Stop"
     action: "log"
     match_key: "ip"
     on_match: "stop" # This should stop processing after this chain.
     steps:
-      - field_matches: { Path: "/on-match-stop-test" }
+      - field_matches: { path: "/on-match-stop-test" }
   - name: "OnMatchStop_ChainC_Should_Not_Run"
     action: "log"
     match_key: "ip"
     steps:
-      - field_matches: { Path: "/on-match-stop-test" }
+      - field_matches: { path: "/on-match-stop-test" }

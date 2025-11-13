@@ -1630,14 +1630,14 @@ func TestLoadConfigFromYAML_GoodActors(t *testing.T) {
 	yamlContent := fmt.Sprintf(`
 version: "1.0"
 good_actors:
-  - name: "our_network" # Use lowercase 'ip'
+  - name: "our_network"
     ip:
       - "cidr:10.10.10.0/24"
       - "127.0.0.1"
-  - name: "googlebot" # Use uppercase 'IP' and 'UserAgent'
-    IP: "file:%s"
-    UserAgent: "regex:(?i)googlebot"
-  - name: "free_agent" # Use lowercase 'useragent'
+  - name: "googlebot"
+    ip: "file:%s"
+    useragent: "regex:(?i)googlebot"
+  - name: "free_agent"
     useragent: "neverblocked"
 `, ipListPath)
 
@@ -1672,11 +1672,11 @@ good_actors:
 	googleIPEntry := &LogEntry{IPInfo: utils.NewIPInfo("8.8.8.8"), UserAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"}
 
 	// The IP matcher should match
-	if !googlebotDef.IPMatchers[0](googleIPEntry) {
+	if len(googlebotDef.IPMatchers) == 0 || !googlebotDef.IPMatchers[0](googleIPEntry) {
 		t.Error("Googlebot IP matcher failed for a matching IP.")
 	}
 	// The UserAgent matcher should match
-	if !googlebotDef.UAMatchers[0](googleIPEntry) {
+	if len(googlebotDef.UAMatchers) == 0 || !googlebotDef.UAMatchers[0](googleIPEntry) {
 		t.Error("Googlebot UserAgent matcher failed for a matching UserAgent.")
 	}
 }
