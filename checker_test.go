@@ -827,21 +827,21 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 		expectedFinalLastRequestTime time.Time // The expected LastRequestTime after the second entry.
 	}{
 		{ // This test is now simplified to just check that the entry is buffered.
-			name:             "Out-of-order within tolerance (processed)",
+			name:             "Out-of-order within tolerance (buffered)",
 			outOfOrderOffset: 3 * time.Second, // 3s older
 			tolerance:        5 * time.Second, // 5s tolerance
 			expectProcessed:  true,
 		},
 		// The test's `expectLastRequestTime` assertion was hardcoded to `now`, which is incorrect for the in-order case.
 		{
-			name:             "Out-of-order outside tolerance (not buffered)",
+			name:             "Out-of-order outside tolerance (processed immediately)",
 			outOfOrderOffset: 5 * time.Second, // 5s older
 			tolerance:        4 * time.Second, // 4s tolerance, so 5s is outside
-			expectProcessed:  false,           // Should not be buffered, but processed immediately.
+			expectProcessed:  false,           // Should not be buffered, but processed immediately and not added to buffer.
 		},
 	}
 
-	for _, tt := range tests {
+	for _, tt := range tests { //nolint:dupl
 		t.Run(tt.name, func(t *testing.T) {
 			resetGlobalState()
 			targetIP := "192.0.2.1"
@@ -854,29 +854,33 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 
 			processor := newTestProcessor(&AppConfig{OutOfOrderTolerance: tt.tolerance, MaxTimeSinceLastHit: 1 * time.Minute}, chains)
 
-			// Manually create an activity to ensure the ChainProgress map is not nil.
-			key := store.Actor{IPInfo: utils.NewIPInfo(targetIP)}
-			store.GetOrCreateUnsafe(processor.ActivityStore, key)
+			// Use a mock checkChainsInternal to see what gets processed immediately
+			var processedImmediately []*LogEntry
+			originalCheck := checkChainsInternal
+			checkChainsInternal = func(p *Processor, entry *LogEntry) {
+				processedImmediately = append(processedImmediately, entry)
+			}
+			t.Cleanup(func() { checkChainsInternal = originalCheck })
 
-			// 1. Process a "newer" entry first to set the LastRequestTime.
-			newerEntry := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: now, Path: "/other-path"}
-			CheckChains(processor, newerEntry)
+			// 1. Set the last request time manually to set up the scenario
+			processor.ActivityMutex.Lock()
+			activity := store.GetOrCreateUnsafe(processor.ActivityStore, store.Actor{IPInfo: utils.NewIPInfo(targetIP)})
+			activity.LastRequestTime = now
+			processor.ActivityMutex.Unlock()
 
-			// 2. Process the out-of-order entry.
-			outOfOrderEntry := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: now.Add(-tt.outOfOrderOffset), Path: "/step1"}
+			// 2. Process the out-of-order entry by calling the main entrypoint
+			outOfOrderEntry := &LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: now.Add(-tt.outOfOrderOffset)}
 			CheckChains(processor, outOfOrderEntry)
 
-			// 3. Assert the outcome.
-			processor.ActivityMutex.RLock()
-			defer processor.ActivityMutex.RUnlock()
-
+			// 3. Assert outcome
 			bufferIsPopulated := len(processor.EntryBuffer) > 0
+			wasProcessedImmediately := len(processedImmediately) > 0
 
 			if bufferIsPopulated != tt.expectProcessed {
-				t.Errorf("Expected entry to be buffered: %t, but buffer state was: %t (size: %d)", tt.expectProcessed, bufferIsPopulated, len(processor.EntryBuffer))
+				t.Errorf("Expected buffering state to be %t, but buffer populated was %t", tt.expectProcessed, bufferIsPopulated)
 			}
-			if bufferIsPopulated && len(processor.EntryBuffer) == 1 && processor.EntryBuffer[0] != outOfOrderEntry {
-				t.Error("The wrong entry was found in the buffer.")
+			if wasProcessedImmediately == tt.expectProcessed {
+				t.Errorf("Expected immediate processing state to be %t, but it was %t", !tt.expectProcessed, wasProcessedImmediately)
 			}
 		})
 	}
@@ -1216,10 +1220,10 @@ func TestOutOfOrder_ComplexScenario(t *testing.T) {
 	}
 
 	// The final processing order should be hit3 (immediate), then the sorted buffer.
-	// The user's expected order was 1, 4, 2, 3. Our total order is 3, 1, 4, 2.
+	// The user's expected order was 1, 4, 2, 3. Our total order is 5, 3, 1, 4, 2.
 	// Let's verify the final chronological order of all processed entries.
 	expectedOrder := []*LogEntry{hit5, hit1, hit4, hit2, hit3}
-	// Sort the actual processed entries by timestamp to verify against the ideal chronological order.
+	// Sort the actual processed entries by timestamp to verify against the ideal chronological order
 	sort.Slice(processedEntries, func(i, j int) bool {
 		if processedEntries[i].Timestamp.Equal(processedEntries[j].Timestamp) {
 			// For stable sorting in the test, sort by path if timestamps are equal.
