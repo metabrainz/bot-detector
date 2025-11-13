@@ -257,11 +257,13 @@ func handleOutOfOrder(p *Processor, entry *LogEntry) (buffered bool) {
 // It updates the actor's state and returns true if the chain was completed.
 // It returns true if processing of other chains should be stopped for this log entry.
 func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *store.ActorActivity) bool {
-	// Increment the counter for the specific chain that was completed.
-	// This is the equivalent of `chains_completed_total{chain="<name>"}`.
-	if val, ok := p.Metrics.ChainsCompleted.Load(chain.Name); ok {
-		if counter, ok := val.(*atomic.Int64); ok {
-			counter.Add(1)
+	// Increment the counter for the specific chain that was completed, if metrics are available.
+	// This check prevents panics in test scenarios where metrics are not fully initialized.
+	if p.Metrics.ChainsCompleted != nil {
+		if val, ok := p.Metrics.ChainsCompleted.Load(chain.Name); ok {
+			if counter, ok := val.(*atomic.Int64); ok {
+				counter.Add(1)
+			}
 		}
 	}
 
