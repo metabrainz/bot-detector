@@ -114,30 +114,23 @@ func TestStart_LiveMode(t *testing.T) {
 	<-readyCh // Wait until the tailer is actually running and has opened the file.
 
 	// --- Simulate Rotation and Update Mock State Atomically ---
-	// Acquire the lock to prevent the tailer's goroutine from reading the mock
-	// state while we are in the middle of changing it.
-	statMutex.Lock()
-
-	// Simulate log rotation.
+	// Simulate log rotation by renaming the original file and creating a new one.
+	// This changes the inode, which is the primary mechanism our tailer uses to detect rotation.
 	if err := os.Rename(liveLogFile, liveLogFile+".rotated"); err != nil {
-		statMutex.Unlock() // Ensure unlock on failure
-		t.Fatalf("Failed to rename log file: %v", err)
+		t.Fatalf("Failed to rename log file to simulate rotation: %v", err)
 	}
 
 	if err := os.WriteFile(liveLogFile, []byte("new line\n"), 0644); err != nil {
-		statMutex.Unlock() // Ensure unlock on failure
 		t.Fatalf("Failed to create new log file: %v", err)
 	}
 
-	// Get the stats of the *new* file.
+	// Get the stats of the *new* file to update the mock.
 	newStat, err := os.Stat(liveLogFile)
 	if err != nil {
-		statMutex.Unlock() // Ensure unlock on failure
 		t.Fatalf("Failed to stat new log file: %v", err)
 	}
-
-	// Now, update the mock to return the new file's info, which will trigger rotation detection.
-	mockStatInfo = newStat
+	statMutex.Lock()
+	mockStatInfo = newStat // Update the mock to return the new file's info.
 	statMutex.Unlock()
 
 	// Assert: Wait for the rotation to be detected.
