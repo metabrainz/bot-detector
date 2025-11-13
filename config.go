@@ -946,8 +946,10 @@ func LoadConfigFromYAML(configPath string) (*LoadedConfig, error) {
 func reloadConfiguration(p *Processor) { //nolint:cyclop
 	p.ConfigMutex.RLock()
 	oldChains := p.Chains
-	// Create a shallow copy of the config to compare against after the reload.
-	oldConfig := *p.Config //nolint:govet
+	// Create a deep copy of the config to compare against after the reload.
+	// A shallow copy (*p.Config) would lead to a race condition as both
+	// old and new configs would share the same RWMutex.
+	oldConfig := p.Config.Clone()
 	oldLogRegex := p.LogRegex
 	p.ConfigMutex.RUnlock()
 

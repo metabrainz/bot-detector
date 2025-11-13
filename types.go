@@ -95,6 +95,43 @@ type AppConfig struct {
 
 }
 
+// Clone creates a deep copy of the AppConfig. This is crucial for safely comparing
+// configurations during a reload without causing race conditions.
+func (c *AppConfig) Clone() AppConfig {
+	if c == nil {
+		return AppConfig{}
+	}
+
+	// Create a new config and copy value types.
+	clone := *c
+
+	// Deep copy slices and maps.
+	if c.GoodActors != nil {
+		clone.GoodActors = make([]GoodActorDef, len(c.GoodActors))
+		copy(clone.GoodActors, c.GoodActors) // GoodActorDef contains slices, so we need to copy them too.
+		for i, def := range c.GoodActors {
+			if def.IPMatchers != nil {
+				clone.GoodActors[i].IPMatchers = make([]fieldMatcher, len(def.IPMatchers))
+				copy(clone.GoodActors[i].IPMatchers, def.IPMatchers)
+			}
+			if def.UAMatchers != nil {
+				clone.GoodActors[i].UAMatchers = make([]fieldMatcher, len(def.UAMatchers))
+				copy(clone.GoodActors[i].UAMatchers, def.UAMatchers)
+			}
+		}
+	}
+
+	if c.DurationToTableName != nil {
+		clone.DurationToTableName = make(map[time.Duration]string, len(c.DurationToTableName))
+		for k, v := range c.DurationToTableName {
+			clone.DurationToTableName[k] = v
+		}
+	}
+
+	// Other slice types are just strings, which are immutable, so a shallow copy is fine.
+	return clone
+}
+
 // LoadedConfig encapsulates all configuration data loaded from the YAML file.
 type LoadedConfig struct {
 	GoodActors               []GoodActorDef           `config:"compare"`
