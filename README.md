@@ -135,8 +135,6 @@ The application uses a unified logging system with five discrete levels. The `--
 This file defines the sequential behavioral chains used by the bot-detector to identify and act upon suspicious traffic patterns.
 The file is structured as a top-level map containing a single key, chains, which holds an array of individual chain definitions.
 
-> **Note on Keys:** All configuration keys in the YAML file (e.g., `log_level`, `match_key`, `field_matches`) are **case-insensitive**. They will be treated as lowercase.
-
 ## **Root Structure**
 
 | Field | Type | Description |
@@ -191,13 +189,13 @@ You can define a set of "good actors" that should always be skipped from all beh
 
 When a log entry matches a `good_actors` rule, it is immediately ignored, and no chains are evaluated for it.
 
-The `good_actors` key is a list of objects. Each object must have a unique `name` and a definition containing an `IP` and/or `UserAgent` matcher. The keys for `IP` and `UserAgent` are case-insensitive.
+The `good_actors` key is a list of objects. Each object must have a unique `name` and a definition containing an `ip` and/or `useragent` matcher.
 
-*   If only `IP` is defined, any entry with a matching IP is skipped.
-*   If only `UserAgent` is defined, any entry with a matching User-Agent is skipped.
-*   If **both** `IP` and `UserAgent` are defined, it creates an **AND** condition. The entry is only skipped if **both** the IP and User-Agent match the rule. This is useful for preventing IP spoofing of trusted bots.
+*   If only `ip` is defined, any entry with a matching IP is skipped.
+*   If only `useragent` is defined, any entry with a matching User-Agent is skipped.
+*   If **both** `ip` and `useragent` are defined, it creates an **AND** condition. The entry is only skipped if **both** the IP and User-Agent match the rule. This is useful for preventing IP spoofing of trusted bots.
 
-The values for `IP` and `UserAgent` use the same powerful syntax as `field_matches`, supporting simple strings, `regex:`, `cidr:`, `file:`, and lists.
+The values for `ip` and `useragent` use the same powerful syntax as `field_matches`, supporting simple strings, `regex:`, `cidr:`, `file:`, and lists.
 
 ### Example `good_actors` Configuration
 
@@ -358,7 +356,7 @@ For more complex string matching, use a prefix.
     # Matches any IP in the 192.168.1.0/24 subnet.
     ip: "cidr:192.168.1.0/24"
     ```
-*   **File-Based Matcher:** Loads a list of values from an external file. This can be used with any field that accepts string values (e.g., `Path`, `UserAgent`, `IP`). Each line in the file is treated as a separate value in a list (OR condition). 
+*   **File-Based Matcher:** Loads a list of values from an external file. This can be used with any field that accepts string values (e.g., `path`, `useragent`, `ip`). Each line in the file is treated as a separate value in a list (OR condition). 
     > **Path Resolution:** File paths are resolved relative to the directory of the main `config.yaml` file. Absolute paths are also supported.
 
     For example, given a file named `bad_paths.txt` with the following content:
