@@ -262,7 +262,7 @@ func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, st
 		return // Top-N reporting is disabled.
 	}
 
-	logFunc(logging.LevelInfo, "STATS", "--- Top %d Actors per Chain (sorted by resets, then completions, then hits) ---", p.TopN)
+	logFunc(logging.LevelInfo, "STATS", "--- Top %d Actors per Chain ---", p.TopN)
 	if len(p.TopActorsPerChain) == 0 {
 		logFunc(logging.LevelInfo, "STATS", "  (No chain activity to report)")
 		return
@@ -291,22 +291,11 @@ func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, st
 			stats = append(stats, actorStat{Actor: actor, Stats: actorStats})
 		}
 
-		// Sort actors primarily by resets, then by completions, then by hits (all descending).
+		// Sort actors primarily by hits, then by completions, then by resets (all descending).
+		// The IsMoreActiveThan method handles the primary sorting logic.
+		// A final sort by the actor string is used as a tie-breaker for stable ordering.
 		sort.Slice(stats, func(i, j int) bool {
-			// Primary sort by Resets (descending)
-			if stats[i].Stats.Resets != stats[j].Stats.Resets {
-				return stats[i].Stats.Resets > stats[j].Stats.Resets
-			}
-			// Secondary sort by Completions (descending)
-			if stats[i].Stats.Completions != stats[j].Stats.Completions {
-				return stats[i].Stats.Completions > stats[j].Stats.Completions
-			}
-			// Tertiary sort by Hits (descending)
-			if stats[i].Stats.Hits != stats[j].Stats.Hits {
-				return stats[i].Stats.Hits > stats[j].Stats.Hits
-			}
-			// Final sort by Actor string (ascending) for stability.
-			return stats[i].Actor < stats[j].Actor
+			return stats[i].Stats.IsMoreActiveThan(stats[j].Stats)
 		})
 
 		logFunc(logging.LevelInfo, "STATS", "  Chain: %s", chainName)

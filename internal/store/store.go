@@ -72,6 +72,26 @@ type ActorStats struct {
 	Resets      int64
 }
 
+// IsMoreActiveThan compares two ActorStats and returns true if the receiver
+// is considered more active than the other. The comparison is done in order
+// of priority: Hits > Completions > Resets.
+func (s *ActorStats) IsMoreActiveThan(other *ActorStats) bool {
+	if s == nil || other == nil {
+		return false
+	}
+
+	// Primary sort by Hits (descending)
+	if s.Hits != other.Hits {
+		return s.Hits > other.Hits
+	}
+	// Secondary sort by Completions (descending)
+	if s.Completions != other.Completions {
+		return s.Completions > other.Completions
+	}
+	// Tertiary sort by Resets (descending)
+	return s.Resets > other.Resets
+}
+
 // GetOrCreateUnsafe finds or creates an ActorActivity without locking.
 func GetOrCreateUnsafe(store map[Actor]*ActorActivity, actor Actor) *ActorActivity {
 	if activity, exists := store[actor]; exists {

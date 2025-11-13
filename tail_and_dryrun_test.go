@@ -557,10 +557,10 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 				"Chain: SecondChain",
 				"[1 hits, 1 completions, 0 resets] 3.3.3.3",
 				"Chain: TopNTestChain",
-				"[3 hits, 1 completions, 1 resets] 1.1.1.1",
+				"[4 hits, 2 completions, 0 resets] 2.2.2.2", // Actor 2.2.2.2 has more hits, so it's the top actor.
 			},
 			expectNotInOutput: []string{
-				"[4 hits, 2 completions, 0 resets] 2.2.2.2", // Actor 2 should be excluded from TopNTestChain's top 1
+				"[3 hits, 1 completions, 1 resets] 1.1.1.1", // Actor 1.1.1.1 should be excluded.
 			},
 		},
 		{
@@ -572,8 +572,8 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 				"Chain: SecondChain",
 				"[1 hits, 1 completions, 0 resets] 3.3.3.3",
 				"Chain: TopNTestChain",
-				"[3 hits, 1 completions, 1 resets] 1.1.1.1",
 				"[4 hits, 2 completions, 0 resets] 2.2.2.2",
+				"[3 hits, 1 completions, 1 resets] 1.1.1.1",
 			},
 		},
 	}

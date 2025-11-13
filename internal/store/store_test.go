@@ -140,6 +140,72 @@ func TestCleanUpIdleActors(t *testing.T) {
 	}
 }
 
+func TestIsMoreActiveThan(t *testing.T) {
+	tests := []struct {
+		name     string
+		s1       *ActorStats
+		s2       *ActorStats
+		expected bool
+	}{
+		{
+			name:     "s1 has more hits",
+			s1:       &ActorStats{Resets: 1, Completions: 5, Hits: 20},
+			s2:       &ActorStats{Resets: 2, Completions: 10, Hits: 10},
+			expected: true,
+		},
+		{
+			name:     "s2 has more hits",
+			s1:       &ActorStats{Resets: 2, Completions: 5, Hits: 10},
+			s2:       &ActorStats{Resets: 1, Completions: 10, Hits: 20},
+			expected: false,
+		},
+		{
+			name:     "Equal hits, s1 has more completions",
+			s1:       &ActorStats{Resets: 5, Completions: 6, Hits: 20},
+			s2:       &ActorStats{Resets: 10, Completions: 5, Hits: 20},
+			expected: true,
+		},
+		{
+			name:     "Equal hits, s2 has more completions",
+			s1:       &ActorStats{Resets: 10, Completions: 5, Hits: 20},
+			s2:       &ActorStats{Resets: 5, Completions: 6, Hits: 20},
+			expected: false,
+		},
+		{
+			name:     "Equal hits and completions, s1 has more resets",
+			s1:       &ActorStats{Resets: 2, Completions: 5, Hits: 20},
+			s2:       &ActorStats{Resets: 1, Completions: 5, Hits: 20},
+			expected: true,
+		},
+		{
+			name:     "Equal hits and completions, s2 has more resets",
+			s1:       &ActorStats{Resets: 1, Completions: 5, Hits: 20},
+			s2:       &ActorStats{Resets: 2, Completions: 5, Hits: 20},
+			expected: false,
+		},
+		{
+			name:     "All stats are equal",
+			s1:       &ActorStats{Resets: 5, Completions: 5, Hits: 20},
+			s2:       &ActorStats{Resets: 5, Completions: 5, Hits: 20},
+			expected: false,
+		},
+		{
+			name:     "s1 is nil",
+			s1:       nil,
+			s2:       &ActorStats{Resets: 1, Completions: 1, Hits: 10},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.s1.IsMoreActiveThan(tt.s2); got != tt.expected {
+				t.Errorf("IsMoreActiveThan() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 // TestCleanUpIdleActors_ImmediateShutdown verifies that the cleanup goroutine
 // exits immediately if a stop signal is received before the first tick.
 func TestCleanUpIdleActors_ImmediateShutdown(t *testing.T) {
