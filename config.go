@@ -5,6 +5,7 @@ import (
 	"bot-detector/internal/utils"
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -288,20 +289,19 @@ func (g *depGraph) detectCycle() error {
 
 // dfs is the recursive helper for cycle detection.
 func (g *depGraph) dfs(node *depGraphNode, visiting, visited map[string]bool, path []string) ([]string, error) {
-	// Create a new slice for the path to avoid modification by other branches.
-	newPath := make([]string, len(path)+1)
-	copy(newPath, path)
-	newPath[len(newPath)-1] = node.Path
-
 	visiting[node.Path] = true
+	path = append(path, node.Path)
 
 	for _, dep := range node.Dependencies {
 		if visiting[dep.Path] {
-			newPath = append(newPath, dep.Path)
-			return newPath, errors.New("cycle found")
+			// Cycle detected. Append the final node to show the loop and return.
+			path = append(path, dep.Path)
+			return path, errors.New("cycle found")
 		}
 		if !visited[dep.Path] {
-			if p, err := g.dfs(dep, visiting, visited, newPath); err != nil {
+			// It's crucial to pass a copy of the path slice to the recursive call.
+			// This prevents different traversal branches from interfering with each other's path tracking.
+			if p, err := g.dfs(dep, visiting, visited, append([]string{}, path...)); err != nil {
 				return p, err
 			}
 		}
@@ -311,15 +311,23 @@ func (g *depGraph) dfs(node *depGraphNode, visiting, visited map[string]bool, pa
 	return nil, nil
 }
 
+// calculateChecksum computes the SHA256 checksum of a slice of strings.
+func calculateChecksum(lines []string) string {
+	h := sha256.New()
+	h.Write([]byte(strings.Join(lines, "\n")))
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
 // --- New Matcher Compilation Logic ---
 
 // FileDependency represents a file that the configuration depends on.
 type FileDependency struct {
-	Path    string
-	ModTime time.Time
-	Content []string // Cached content
-	Status  FileStatus
-	Error   error // Store the error if status is Error
+	Path     string
+	ModTime  time.Time
+	Content  []string // Cached content
+	Status   FileStatus
+	Checksum string // SHA256 checksum of the content to detect no-op changes.
+	Error    error  // Store the error if status is Error
 }
 
 // FileStatus indicates the current state of a file dependency.
@@ -489,6 +497,7 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 				fileDep.Status = FileStatusLoaded
 				fileDep.Error = nil
 				fileDep.Content = lines
+				fileDep.Checksum = calculateChecksum(lines)
 			}
 			fileDep.ModTime = fileInfo.ModTime()
 		}
@@ -1223,9 +1232,20 @@ func logFileDependencyChanges(p *Processor, oldDeps, newDeps map[string]*FileDep
 		oldDep, exists := oldDeps[path]
 		if !exists {
 			added = append(added, fmt.Sprintf("'%s' (Status: %s)", path, newDep.Status))
-		} else if oldDep.ModTime != newDep.ModTime || oldDep.Status != newDep.Status || (oldDep.Error != nil && newDep.Error == nil) || (oldDep.Error == nil && newDep.Error != nil) {
-			// Consider modified if ModTime, Status, or Error state changes
-			modified = append(modified, fmt.Sprintf("'%s' (Old Status: %s, New Status: %s)", path, oldDep.Status, newDep.Status))
+		} else {
+			var reasons []string
+			if !oldDep.ModTime.Equal(newDep.ModTime) {
+				reasons = append(reasons, "timestamp changed")
+			}
+			if oldDep.Status != newDep.Status {
+				reasons = append(reasons, fmt.Sprintf("status changed from %s to %s", oldDep.Status, newDep.Status))
+			}
+			if (oldDep.Error != nil) != (newDep.Error != nil) {
+				reasons = append(reasons, "error state changed")
+			}
+			if len(reasons) > 0 {
+				modified = append(modified, fmt.Sprintf("'%s' (%s)", path, strings.Join(reasons, ", ")))
+			}
 		}
 	}
 
@@ -1493,7 +1513,6 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 				if fileDep.Status == FileStatusMissing || fileDep.Status == FileStatusError {
 					isChanged = true
 					changedFile = path
-					p.LogFunc(logging.LevelInfo, "WATCH", "Detected previously %s file dependency '%s'. Attempting reload...", fileDep.Status, path)
 					break
 				}
 
@@ -1503,15 +1522,23 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 					// If a file that was previously loaded is now missing, trigger a reload.
 					isChanged = true
 					changedFile = path
-					p.LogFunc(logging.LevelInfo, "WATCH", "Detected missing file dependency '%s'. Attempting reload...", path)
 					break
 				}
 				p.LogFunc(logging.LevelDebug, "WATCH_DEBUG", "  Current ModTime: %v", depInfo.ModTime())
 				if depInfo.ModTime().After(fileDep.ModTime) {
-					isChanged = true
-					changedFile = path
-					p.LogFunc(logging.LevelInfo, "WATCH", "Detected change in file dependency '%s'. Attempting reload...", path)
-					break
+					// ModTime has changed. Now verify if content has actually changed by checking the checksum.
+					newContent, readErr := ReadLinesFromFile(path)
+					if readErr != nil {
+						p.LogFunc(logging.LevelWarning, "WATCH_WARN", "Could not read dependency file '%s' for checksum verification: %v", path, readErr)
+						isChanged = true // Treat as changed if we can't read it.
+						changedFile = path
+						break
+					}
+					if calculateChecksum(newContent) != fileDep.Checksum {
+						isChanged = true
+						changedFile = path
+						break
+					}
 				}
 			}
 		}
