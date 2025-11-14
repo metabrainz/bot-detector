@@ -293,15 +293,31 @@ func start(p *Processor) {
 		// interference from other goroutines like the config watcher.
 		if !IsTesting() {
 			// The ConfigWatcher is not started in test mode to prevent race conditions where
+			// the test's config is overwritten by a reload from the default config file.
 			reloadSignalCh := make(chan os.Signal, 1)
 			signal.Notify(reloadSignalCh, syscall.SIGHUP, syscall.SIGUSR1, syscall.SIGUSR2)
-			// the test's config is overwritten by a reload from the default config file.
-			// Start SignalReloader unless it's explicitly disabled with "none".
-			if strings.ToLower(p.ReloadOnSignal) != "none" {
+
+			reloadFlag := strings.ToLower(p.ReloadOnSignal)
+
+			// Determine which reloading mechanisms to start based on the flag.
+			switch {
+			case reloadFlag == "hup" || reloadFlag == "usr1" || reloadFlag == "usr2":
+				// Case 2: Flag is set to a specific signal. Watcher is disabled.
+				p.LogFunc(logging.LevelInfo, "SETUP", "File watcher disabled. Reloading only on %s signal.", strings.ToUpper(reloadFlag))
 				go SignalReloader(p, stopWatcher, reloadSignalCh)
-			} else {
+
+			case reloadFlag == "none":
+				// Case 3: Flag is 'none'. Signal reloading is disabled.
+				p.LogFunc(logging.LevelInfo, "SETUP", "Signal-based reloading disabled. Watching config file for changes.")
 				go ConfigWatcher(p, stopWatcher)
+
+			default: // This covers the case where the flag is absent (reloadFlag == "").
+				// Case 1: Flag is absent. Both watcher and SIGHUP reloader are active.
+				p.LogFunc(logging.LevelInfo, "SETUP", "File watcher enabled. Also listening on SIGHUP for forced reload.")
+				go ConfigWatcher(p, stopWatcher)
+				go SignalReloader(p, stopWatcher, reloadSignalCh) // This will default to HUP when p.ReloadOnSignal is ""
 			}
+
 			if p.TopN > 0 {
 				go cleanupTopActors(p, stopWatcher)
 			}
