@@ -898,11 +898,11 @@ func TestLoadConfigFromYAML_InvalidDurations(t *testing.T) {
 		expectedError string
 	}{
 		{
-			name: "Invalid poll_interval",
+			name: "Invalid polling_interval",
 			yamlContent: `
 version: "1.0"
-poll_interval: "5x"`,
-			expectedError: "invalid poll_interval format",
+polling_interval: "5x"`,
+			expectedError: "invalid polling_interval format",
 		},
 		{
 			name: "Invalid cleanup_interval",

@@ -143,7 +143,7 @@ The file is structured as a top-level map containing a single key, chains, which
 | **chains** | list of objects | The list of behavioral chains to be loaded. |
 | **good_actors** | list of objects | Optional. A list of trusted actors to skip from all processing. |
 | **log_level** | string | Optional. Set minimum log level: `critical`, `error`, `warning`, `info`, `debug`. Default: `warning`. |
-| **poll_interval** | string | Optional. Interval to check this file for changes. Default: `5s`. A minimum of `1s` is enforced. |
+| **polling_interval** | string | Optional. Interval to check this file for changes. Default: `5s`. A minimum of `1s` is enforced. |
 | **cleanup_interval**| string | Optional. Interval to run the routine that cleans up idle IP state. Default: `1m`. |
 | **line_ending** | string | Optional. Specifies the expected line ending for log parsing. Can be `lf` (Unix, default), `crlf` (Windows), or `cr` (Classic Mac). |
 | **idle_timeout** | string | Optional. Duration an IP must be inactive before its state is purged. Default: `30m`. |

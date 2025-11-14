@@ -111,7 +111,7 @@ type AppConfig struct {
 	LastModTime              time.Time                         // Not compared
 	MaxTimeSinceLastHit      time.Duration                     `config:"compare" summary:"max_time_since_last_hit"`
 	OutOfOrderTolerance      time.Duration                     `config:"compare" summary:"out_of_order_tolerance"`
-	PollingInterval          time.Duration                     `config:"compare" summary:"poll_interval"`
+	PollingInterval          time.Duration                     `config:"compare" summary:"polling_interval"`
 	TimestampFormat          string                            `config:"compare"`
 	UnblockOnGoodActor       bool                              `config:"compare"`
 	UnblockCooldown          time.Duration                     `config:"compare"`
@@ -214,7 +214,7 @@ type ChainConfig struct {
 	LogLevel                 string                   `yaml:"log_level"`
 	LogFormatRegex           string                   `yaml:"log_format_regex"`
 	OutOfOrderTolerance      string                   `yaml:"out_of_order_tolerance"`
-	PollingInterval          string                   `yaml:"poll_interval"`
+	PollingInterval          string                   `yaml:"polling_interval"`
 	TimestampFormat          string                   `yaml:"timestamp_format"`
 	UnblockOnGoodActor       bool                     `yaml:"unblock_on_good_actor"`
 	UnblockCooldown          string                   `yaml:"unblock_cooldown"`

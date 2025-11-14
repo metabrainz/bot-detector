@@ -979,7 +979,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	// Parse durations
 	pollingInterval, err = time.ParseDuration(pollingIntervalStr)
 	if err != nil {
-		return nil, fmt.Errorf("invalid poll_interval format: %w", err)
+		return nil, fmt.Errorf("invalid polling_interval format: %w", err)
 	}
 	cleanupInterval, err = time.ParseDuration(cleanupIntervalStr)
 	if err != nil {
