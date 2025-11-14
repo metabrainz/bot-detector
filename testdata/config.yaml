@@ -178,3 +178,23 @@ chains:
           path: "/repeated/path"
         max_delay: "5s"
         repeated: 2 # This will expand to two steps, making a total of 1 + 2 = 3 steps
+
+  # --- NEW CHAIN: Rapid API Abuse (429/503) ---
+  # Detects an IP that rapidly receives multiple 429 or 503 responses on API paths,
+  # indicating aggressive rate-limit bypassing attempts after an initial non-rate-limited hit.
+  - name: "Rapid-API-Abuse"
+    action: "block"
+    block_duration: "5m"
+    match_key: "ip_ua"
+    steps:
+      # Step 1: Initial hit that is a 429 or 503, on an API path.
+      - field_matches:
+          statuscode: [429, 503]
+          path: "regex:^/ws/\\d+/"
+      # Step 2: Subsequent hits that ARE 429 or 503, on an API path, rapidly.
+      # This looks for 5 such hits within 1 second of each other.
+      - field_matches:
+          statuscode: [429, 503]
+          path: "regex:^/ws/\\d+/"
+        max_delay: "1s" # Subsequent 429/503s must occur within 1 second of the previous one
+        repeated: 4 # This means 1 initial non-429/503 + 4 more 429/503s within 1s of each other = 5 total hits

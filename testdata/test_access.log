@@ -196,3 +196,14 @@ musicbrainz.org 10.0.0.21 - - [28/Oct/2025:17:11:01 +0000] "GET /log/step2 HTTP/
 musicbrainz.org 10.0.0.22 - - [28/Oct/2025:17:12:00 +0000] "GET /repeated/path HTTP/1.1" 200 100 "-" "RepeatedBot"
 musicbrainz.org 10.0.0.22 - - [28/Oct/2025:17:12:01 +0000] "GET /repeated/path HTTP/1.1" 200 100 "-" "RepeatedBot"
 musicbrainz.org 10.0.0.22 - - [28/Oct/2025:17:12:02 +0000] "GET /repeated/path HTTP/1.1" 200 100 "-" "RepeatedBot"
+# ======================================================================================
+# === TEST CASE 25: Rapid-API-Abuse Chain - SUCCESS (BLOCK) ---
+# === EXPECTED LOG: DRY_RUN: BLOCK! Chain: Rapid-API-Abuse completed by IP 192.0.2.1. Blocking for 5m0s (DryRun)
+# === This sequence should trigger the "Rapid-API-Abuse" chain.
+# === It starts with a 200 OK, followed by 5 rapid 429s on /ws/2/ paths.
+musicbrainz.org 192.0.2.1 - - [14/Nov/2025:18:05:50 +0000] "GET /ws/2/work/initial-hit HTTP/2.0" 200 142 "-" "AnonymizedBot/1.0"
+musicbrainz.org 192.0.2.1 - - [14/Nov/2025:18:05:50 +0000] "GET /ws/2/recording/429-1 HTTP/2.0" 429 166 "-" "AnonymizedBot/1.0"
+musicbrainz.org 192.0.2.1 - - [14/Nov/2025:18:05:50 +0000] "GET /ws/2/recording/429-2 HTTP/2.0" 429 166 "-" "AnonymizedBot/1.0"
+musicbrainz.org 192.0.2.1 - - [14/Nov/2025:18:05:50 +0000] "GET /ws/2/recording/429-3 HTTP/2.0" 429 166 "-" "AnonymizedBot/1.0"
+musicbrainz.org 192.0.2.1 - - [14/Nov/2025:18:05:50 +0000] "GET /ws/2/recording/429-4 HTTP/2.0" 429 166 "-" "AnonymizedBot/1.0"
+musicbrainz.org 192.0.2.1 - - [14/Nov/2025:18:05:50 +0000] "GET /ws/2/recording/429-5 HTTP/2.0" 429 166 "-" "AnonymizedBot/1.0"
