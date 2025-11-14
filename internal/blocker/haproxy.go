@@ -185,7 +185,7 @@ func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[stri
 					errs <- err
 					b.P.Log(logging.LevelError, "HAPROXY_FAIL", "HAProxy command failed on instance %s for IP %s (Table %s): %v", a, ip, tn, err)
 				} else {
-					b.P.Log(logging.LevelInfo, "HAPROXY_SUCCESS", "Successfully sent command for IP %s on instance %s to table %s.", ip, a, tn)
+					b.P.Log(logging.LevelDebug, "HAPROXY_SUCCESS", "Successfully sent command for IP %s on instance %s to table %s.", ip, a, tn)
 				}
 			}(addr, command, tableName)
 		}
