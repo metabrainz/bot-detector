@@ -248,6 +248,8 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 
 // logTopActorsSummary displays the top N actors per chain if the feature is enabled.
 func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, string, ...interface{})) {
+	p.ActivityMutex.RLock()
+	defer p.ActivityMutex.RUnlock()
 	if p.TopN <= 0 {
 		return // Top-N reporting is disabled.
 	}
