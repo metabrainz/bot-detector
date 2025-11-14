@@ -35,21 +35,25 @@ type BlockerCommand struct {
 type RateLimitedBlocker struct {
 	LogProvider
 	MetricsProvider
-	WrappedBlocker Blocker
-	CommandQueue   chan BlockerCommand
-	stopCh         chan struct{}
-	wg             sync.WaitGroup
-	once           sync.Once
+	WrappedBlocker    Blocker
+	CommandQueue      chan BlockerCommand
+	stopCh            chan struct{}
+	wg                sync.WaitGroup
+	once              sync.Once
+	QueueSize         int
+	CommandsPerSecond int
 }
 
 // NewRateLimitedBlocker creates a new RateLimitedBlocker.
 func NewRateLimitedBlocker(lp LogProvider, mp MetricsProvider, wrapped Blocker, queueSize int, commandsPerSecond int) *RateLimitedBlocker {
 	rlb := &RateLimitedBlocker{
-		LogProvider:     lp,
-		MetricsProvider: mp,
-		WrappedBlocker:  wrapped,
-		CommandQueue:    make(chan BlockerCommand, queueSize),
-		stopCh:          make(chan struct{}),
+		LogProvider:       lp,
+		MetricsProvider:   mp,
+		WrappedBlocker:    wrapped,
+		CommandQueue:      make(chan BlockerCommand, queueSize),
+		stopCh:            make(chan struct{}),
+		QueueSize:         queueSize,
+		CommandsPerSecond: commandsPerSecond,
 	}
 	rlb.wg.Add(1)
 	go rlb.worker(commandsPerSecond)
@@ -64,7 +68,7 @@ func (b *RateLimitedBlocker) Block(ipInfo IPInfo, duration time.Duration) error 
 		b.Log(logging.LevelDebug, "RATE_LIMITER", "Queued block command for IP %s.", ipInfo.Address)
 		b.IncrementBlockerCmdsQueued()
 	default:
-		b.Log(logging.LevelWarning, "RATE_LIMITER", "Command queue is full. Dropping block command for IP %s.", ipInfo.Address)
+		b.Log(logging.LevelWarning, "RATE_LIMITER", "Command queue is full (size: %d). Dropping block command for IP %s. Rate: %d/s.", b.QueueSize, ipInfo.Address, b.CommandsPerSecond)
 		b.IncrementBlockerCmdsDropped()
 	}
 	return nil
@@ -78,7 +82,7 @@ func (b *RateLimitedBlocker) Unblock(ipInfo IPInfo) error {
 		b.Log(logging.LevelDebug, "RATE_LIMITER", "Queued unblock command for IP %s.", ipInfo.Address)
 		b.IncrementBlockerCmdsQueued()
 	default:
-		b.Log(logging.LevelWarning, "RATE_LIMITER", "Command queue is full. Dropping unblock command for IP %s.", ipInfo.Address)
+		b.Log(logging.LevelWarning, "RATE_LIMITER", "Command queue is full (size: %d). Dropping unblock command for IP %s. Rate: %d/s.", b.QueueSize, ipInfo.Address, b.CommandsPerSecond)
 		b.IncrementBlockerCmdsDropped()
 	}
 	return nil
