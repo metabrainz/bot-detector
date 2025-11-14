@@ -187,3 +187,12 @@ musicbrainz.org 10.0.0.13 - - [28/Oct/2025:17:04:02 +0000] "GET /another/blocked
 # ===
 musicbrainz.org 10.0.0.21 - - [28/Oct/2025:17:11:00 +0000] "GET /log/step1?q=a search with spaces HTTP/1.1" 200 100 "-" "TestAgent"
 musicbrainz.org 10.0.0.21 - - [28/Oct/2025:17:11:01 +0000] "GET /log/step2 HTTP/1.1" 200 100 "-" "TestAgent"
+
+# ======================================================================================
+# === TEST CASE 24: Repeated Path Access Detection (10.0.0.22) - SUCCESS (LOG)
+# === EXPECTED LOG: DRY_RUN: LOG! Chain: RepeatedPathAccess completed by IP 10.0.0.22. Action set to 'log' (DryRun)
+# === This tests the new 'repeated' step functionality.
+# ===
+musicbrainz.org 10.0.0.22 - - [28/Oct/2025:17:12:00 +0000] "GET /repeated/path HTTP/1.1" 200 100 "-" "RepeatedBot"
+musicbrainz.org 10.0.0.22 - - [28/Oct/2025:17:12:01 +0000] "GET /repeated/path HTTP/1.1" 200 100 "-" "RepeatedBot"
+musicbrainz.org 10.0.0.22 - - [28/Oct/2025:17:12:02 +0000] "GET /repeated/path HTTP/1.1" 200 100 "-" "RepeatedBot"

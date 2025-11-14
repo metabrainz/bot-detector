@@ -296,6 +296,7 @@ Each step in the steps array defines a specific log entry characteristic that mu
 | **max_delay** | string | No | **(Steps 2+)** The maximum allowed time between the previous step and this one. If exceeded, the chain resets. Ignored on the first step. Format: Go duration string (e.g., "10s", "1m"). |
 | **min_delay** | string | No | **(Steps 2+)** The minimum required time between the *previous successful step in this chain* and the current step. If not met, the chain resets. Ignored on the first step. Format: Go duration string (e.g., "10s", "1m"). |
 | **min_time_since_last_hit** | string | No | **(First Step Only)** The first step will only match if the time since the *last overall request* from the same actor (`match_key`) is **greater than** this duration. If the last request was too recent, or if the actor has never been seen before, the step will not match. This is useful for detecting "sleepy" bots that have long periods of inactivity between requests. When used in a chain with `match_key: "ip_ua"`, this check is performed independently for each unique IP and User-Agent combination, allowing the detector to distinguish between different bots operating from the same IP address. This setting is ignored on all subsequent steps. Format: Go duration string (e.g., "30m", "12h"). |
+| **repeated** | int | No | Optional. If `> 1`, this step definition will be repeated the specified number of times when the chain is compiled. This simplifies defining sequences of identical steps. Default: `1`. |
 
 ### `field_matches`
 

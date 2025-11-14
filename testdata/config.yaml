@@ -166,3 +166,15 @@ chains:
     match_key: "ip"
     steps:
       - field_matches: { path: "/on-match-stop-test" }
+
+  # --- 17. Repeated Path Access Detection ---
+  - name: "RepeatedPathAccess"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          path: "/repeated/path"
+      - field_matches:
+          path: "/repeated/path"
+        max_delay: "5s"
+        repeated: 2 # This will expand to two steps, making a total of 1 + 2 = 3 steps

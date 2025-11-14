@@ -1259,38 +1259,45 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 
 		// 3. Process Steps
 		for i, yamlStep := range yamlChain.Steps {
-			runtimeStep := StepDef{
-				Order: i + 1,
-				// FieldMatches is no longer stored directly in the runtime step.
-				// It's compiled into Matchers.
+			numRepeats := yamlStep.Repeated
+			if numRepeats < 1 {
+				numRepeats = 1 // Default to 1 if not specified or invalid
 			}
 
-			// Parse delays
-			if yamlStep.MaxDelay != "" {
-				runtimeStep.MaxDelayDuration, err = time.ParseDuration(yamlStep.MaxDelay)
-				if err != nil {
-					return nil, fmt.Errorf("chain '%s', step %d: invalid max_delay: %w", yamlChain.Name, runtimeStep.Order, err)
+			for r := 0; r < numRepeats; r++ {
+				runtimeStep := StepDef{
+					Order: len(runtimeChain.Steps) + 1, // Assign a unique order to each generated step
 				}
-			}
-			if yamlStep.MinDelay != "" {
-				runtimeStep.MinDelayDuration, err = time.ParseDuration(yamlStep.MinDelay)
-				if err != nil {
-					return nil, fmt.Errorf("chain '%s', step %d: invalid min_delay: %w", yamlChain.Name, runtimeStep.Order, err)
-				}
-			}
-			if i == 0 && yamlStep.MinTimeSinceLastHit != "" { // Only parse for the first step
-				runtimeStep.MinTimeSinceLastHit, err = time.ParseDuration(yamlStep.MinTimeSinceLastHit)
-				if err != nil {
-					return nil, fmt.Errorf("chain '%s', step %d: invalid min_time_since_last_hit: %w", yamlChain.Name, runtimeStep.Order, err)
-				}
-			}
 
-			// Compile the new flexible matchers
-			runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, newFileDependencies, opts.ConfigPath)
-			if err != nil {
-				return nil, err // Error from compilation
+				// Parse delays (apply to each repeated step)
+				if yamlStep.MaxDelay != "" {
+					runtimeStep.MaxDelayDuration, err = time.ParseDuration(yamlStep.MaxDelay)
+					if err != nil {
+						return nil, fmt.Errorf("chain '%s', step %d (repeated %d): invalid max_delay: %w", yamlChain.Name, i+1, r+1, err)
+					}
+				}
+				if yamlStep.MinDelay != "" {
+					runtimeStep.MinDelayDuration, err = time.ParseDuration(yamlStep.MinDelay)
+					if err != nil {
+						return nil, fmt.Errorf("chain '%s', step %d (repeated %d): invalid min_delay: %w", yamlChain.Name, i+1, r+1, err)
+					}
+				}
+				// min_time_since_last_hit only applies to the first step of a chain.
+				// It should only be applied to the very first step generated, not subsequent repeated steps.
+				if len(runtimeChain.Steps) == 0 && yamlStep.MinTimeSinceLastHit != "" {
+					runtimeStep.MinTimeSinceLastHit, err = time.ParseDuration(yamlStep.MinTimeSinceLastHit)
+					if err != nil {
+						return nil, fmt.Errorf("chain '%s', step %d: invalid min_time_since_last_hit: %w", yamlChain.Name, i+1, err)
+					}
+				}
+
+				// Compile the new flexible matchers
+				runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, newFileDependencies, opts.ConfigPath)
+				if err != nil {
+					return nil, err // Error from compilation
+				}
+				runtimeChain.Steps = append(runtimeChain.Steps, runtimeStep)
 			}
-			runtimeChain.Steps = append(runtimeChain.Steps, runtimeStep)
 		}
 		newChains = append(newChains, runtimeChain)
 	}

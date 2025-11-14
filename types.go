@@ -227,6 +227,7 @@ type StepDefYAML struct {
 	MaxDelay            string                 `yaml:"max_delay"`
 	MinDelay            string                 `yaml:"min_delay"`
 	MinTimeSinceLastHit string                 `yaml:"min_time_since_last_hit"`
+	Repeated            int                    `yaml:"repeated"`
 }
 
 type BehavioralChainYAML struct {
