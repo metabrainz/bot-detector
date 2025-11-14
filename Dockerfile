@@ -1,12 +1,20 @@
 # Stage 1: Build the Go application
 FROM golang:1.25-alpine AS builder
 
+# Create a non-root user for security in the builder stage as well
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
 WORKDIR /app
+# Change ownership of the working directory to appuser
+RUN chown appuser:appgroup /app
 
 # Copy Go module files and download dependencies
 COPY go.mod go.sum ./
 RUN go mod download
 RUN go mod tidy
+
+# Switch to non-root user after go mod commands
+USER appuser
 
 # Copy the rest of the source code
 COPY . .
