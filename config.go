@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -190,8 +189,9 @@ func (g *depGraph) addEdge(fromPath, toPath string) {
 	fromNode.Dependencies = append(fromNode.Dependencies, toNode)
 }
 
-// findFileDirectives scans a file for `file:` directives without parsing other rules.
-func findFileDirectives(path string) ([]string, error) {
+// findFileDirectives scans a file for `file:` directives. The main config is parsed as YAML,
+// while any included files are treated as plain text.
+func findFileDirectives(path string, isMainConfig bool) ([]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		// If a file is missing during dependency scan, it's a critical error.
@@ -209,27 +209,51 @@ func findFileDirectives(path string) ([]string, error) {
 	configDir := filepath.Dir(path)
 	var dependencies []string
 
-	// A recursive function to find "file:" strings in the parsed YAML data.
-	var findInNode func(node *yaml.Node)
-	findInNode = func(node *yaml.Node) {
-		switch node.Kind {
-		case yaml.DocumentNode:
-			for _, child := range node.Content {
-				findInNode(child)
+	if isMainConfig {
+		// Main config is treated as YAML.
+		var findInNode func(node *yaml.Node)
+		findInNode = func(node *yaml.Node) {
+			switch node.Kind {
+			case yaml.DocumentNode:
+				for _, child := range node.Content {
+					findInNode(child)
+				}
+			case yaml.MappingNode:
+				for i := 1; i < len(node.Content); i += 2 {
+					findInNode(node.Content[i])
+				}
+			case yaml.SequenceNode:
+				for _, child := range node.Content {
+					findInNode(child)
+				}
+			case yaml.ScalarNode:
+				if strings.HasPrefix(node.Value, filePrefix) {
+					relativeDepPath := strings.TrimSpace(strings.TrimPrefix(node.Value, filePrefix))
+					if relativeDepPath != "" {
+						var absoluteDepPath string
+						if filepath.IsAbs(relativeDepPath) {
+							absoluteDepPath = relativeDepPath
+						} else {
+							absoluteDepPath = filepath.Join(configDir, relativeDepPath)
+						}
+						dependencies = append(dependencies, absoluteDepPath)
+					}
+				}
 			}
-		case yaml.MappingNode:
-			// In a mapping node, content is a sequence of key, value, key, value...
-			// We only need to check the value nodes.
-			for i := 1; i < len(node.Content); i += 2 {
-				findInNode(node.Content[i])
-			}
-		case yaml.SequenceNode:
-			for _, child := range node.Content {
-				findInNode(child)
-			}
-		case yaml.ScalarNode:
-			if strings.HasPrefix(node.Value, filePrefix) {
-				relativeDepPath := strings.TrimSpace(strings.TrimPrefix(node.Value, filePrefix))
+		}
+		var root yaml.Node
+		decoder := yaml.NewDecoder(file)
+		if err := decoder.Decode(&root); err == nil {
+			findInNode(&root)
+		}
+		// We ignore YAML decoding errors here; the main loader will report them.
+	} else {
+		// Included files are treated as plain text.
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if strings.HasPrefix(line, filePrefix) {
+				relativeDepPath := strings.TrimSpace(strings.TrimPrefix(line, filePrefix))
 				if relativeDepPath != "" {
 					var absoluteDepPath string
 					if filepath.IsAbs(relativeDepPath) {
@@ -241,42 +265,13 @@ func findFileDirectives(path string) ([]string, error) {
 				}
 			}
 		}
-	}
-	// Try to parse as YAML first. If it fails, fall back to plain text scan.
-	var root yaml.Node
-	decoder := yaml.NewDecoder(file)
-	if err := decoder.Decode(&root); err == nil {
-		findInNode(&root)
-		logging.LogOutput(logging.LevelInfo, "FILE_SCAN", "Successfully scanned '%s' for file directives. Found %d dependencies.", path, len(dependencies))
-		return dependencies, nil
-	}
-
-	// Fallback for plain text files (e.g., good_actors_ips.txt).
-	// We must seek back to the start of the file.
-	// An *os.File always implements io.Seeker, so we can call Seek directly.
-	_, err = file.Seek(0, io.SeekStart)
-	if err != nil {
-		return nil, fmt.Errorf("failed to seek back to start of %s for plain text scan: %w", path, err)
-	}
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, filePrefix) {
-			relativeDepPath := strings.TrimSpace(strings.TrimPrefix(line, filePrefix))
-			if relativeDepPath != "" {
-				var absoluteDepPath string
-				if filepath.IsAbs(relativeDepPath) {
-					absoluteDepPath = relativeDepPath
-				} else {
-					absoluteDepPath = filepath.Join(configDir, relativeDepPath)
-				}
-				dependencies = append(dependencies, absoluteDepPath)
-			}
+		if err := scanner.Err(); err != nil {
+			return nil, err
 		}
 	}
+
 	logging.LogOutput(logging.LevelInfo, "FILE_SCAN", "Successfully scanned '%s' for file directives. Found %d dependencies.", path, len(dependencies))
-	return dependencies, scanner.Err()
+	return dependencies, nil
 }
 
 // detectCycle performs a DFS traversal to find cycles.
@@ -846,8 +841,8 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	scannedFiles := make(map[string]bool)
 
 	// Use a recursive function to build the graph. This helps trace the correct path for cycle detection.
-	var buildGraphRecursive func(currentFile string) error
-	buildGraphRecursive = func(currentFile string) error {
+	var buildGraphRecursive func(currentFile string, isMainConfig bool) error
+	buildGraphRecursive = func(currentFile string, isMainConfig bool) error {
 		if scannedFiles[currentFile] {
 			return nil
 		}
@@ -866,18 +861,18 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		depGraph.addNode(currentFile)
 
 		// Errors from findFileDirectives are now considered non-fatal for this phase, so we ignore the error.
-		dependencies, _ := findFileDirectives(currentFile)
+		dependencies, _ := findFileDirectives(currentFile, isMainConfig)
 
 		for _, dep := range dependencies {
 			depGraph.addEdge(currentFile, dep)
-			if err := buildGraphRecursive(dep); err != nil {
+			if err := buildGraphRecursive(dep, false); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
 
-	if err := buildGraphRecursive(opts.ConfigPath); err != nil {
+	if err := buildGraphRecursive(opts.ConfigPath, true); err != nil {
 		return nil, err
 	}
 
