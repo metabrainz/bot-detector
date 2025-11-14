@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/logging"
 	"bot-detector/internal/utils"
 	"fmt"
+	"strings" // Added for strings.SplitN
 	"sync"
 	"time"
 )
@@ -41,6 +42,25 @@ func (a Actor) String() string {
 		return fmt.Sprintf("%s | %s", a.IPInfo.Address, a.UA)
 	}
 	return a.IPInfo.Address
+}
+
+// NewActorFromString parses an actor string (e.g., "192.168.1.1 | Mozilla/5.0") into an Actor struct.
+func NewActorFromString(actorStr string) (Actor, error) {
+	parts := strings.SplitN(actorStr, " | ", 2) // Note the " | " separator
+	if len(parts) == 0 {
+		return Actor{}, fmt.Errorf("invalid actor string: %s", actorStr)
+	}
+
+	ipInfo := utils.NewIPInfo(parts[0])
+	if ipInfo.Version == utils.VersionInvalid {
+		return Actor{}, fmt.Errorf("invalid IP in actor string '%s'", actorStr)
+	}
+
+	actor := Actor{IPInfo: ipInfo}
+	if len(parts) == 2 {
+		actor.UA = parts[1]
+	}
+	return actor, nil
 }
 
 // ActorActivity tracks state for a single actor.

@@ -549,12 +549,16 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 			expectInOutput: []string{
 				"Top 1 Actors per Chain",
 				"Chain: SecondChain",
-				"[1 hits, 1 completions, 0 resets] 3.3.3.3",
+				"    Hits  Compl.  Resets  Last Seen  Actor",
+				"    -----  ------  ------  ---------  -----",
+				"        1       1       0         5s  3.3.3.3", // Updated last seen and format
 				"Chain: TopNTestChain",
-				"[4 hits, 2 completions, 0 resets] 2.2.2.2", // Actor 2.2.2.2 has more hits, so it's the top actor.
+				"    Hits  Compl.  Resets  Last Seen  Actor",
+				"    -----  ------  ------  ---------  -----",
+				"        4       2       0         9s  2.2.2.2", // Updated last seen and format
 			},
 			expectNotInOutput: []string{
-				"[3 hits, 1 completions, 1 resets] 1.1.1.1", // Actor 1.1.1.1 should be excluded.
+				"        3       1       1         8s  1.1.1.1", // Updated last seen and format
 			},
 		},
 		{
@@ -564,10 +568,14 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 			expectInOutput: []string{
 				"Top 5 Actors per Chain",
 				"Chain: SecondChain",
-				"[1 hits, 1 completions, 0 resets] 3.3.3.3",
+				"    Hits  Compl.  Resets  Last Seen  Actor",
+				"    -----  ------  ------  ---------  -----",
+				"        1       1       0         5s  3.3.3.3", // Updated last seen and format
 				"Chain: TopNTestChain",
-				"[4 hits, 2 completions, 0 resets] 2.2.2.2",
-				"[3 hits, 1 completions, 1 resets] 1.1.1.1",
+				"    Hits  Compl.  Resets  Last Seen  Actor",
+				"    -----  ------  ------  ---------  -----",
+				"        4       2       0         9s  2.2.2.2", // Updated last seen and format
+				"        3       1       1         8s  1.1.1.1", // Updated last seen and format
 			},
 		},
 	}

@@ -246,6 +246,34 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 	logMetricsSummary(p, elapsedTime, p.LogFunc, "METRICS", "dryrun")
 }
 
+// formatLastSeen formats a time.Time into a human-readable string like "Nd", "Nh", "Nm", "Ns".
+func formatLastSeen(t time.Time, now time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	duration := now.Sub(t)
+
+	// If the event is in the future relative to 'now', take the absolute value
+	// for "last seen" to represent magnitude.
+	if duration < 0 {
+		duration = -duration
+	}
+
+	if duration.Hours() >= 24 {
+		days := int(duration.Hours() / 24)
+		return fmt.Sprintf("%dd", days)
+	} else if duration.Hours() >= 1 {
+		hours := int(duration.Hours())
+		return fmt.Sprintf("%dh", hours)
+	} else if duration.Minutes() >= 1 {
+		minutes := int(duration.Minutes())
+		return fmt.Sprintf("%dm", minutes)
+	} else {
+		seconds := int(duration.Seconds())
+		return fmt.Sprintf("%ds", seconds)
+	}
+}
+
 // logTopActorsSummary displays the top N actors per chain if the feature is enabled.
 func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, string, ...interface{})) {
 	p.ActivityMutex.RLock()
@@ -291,14 +319,28 @@ func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, st
 		})
 
 		logFunc(logging.LevelInfo, "STATS", "  Chain: %s", chainName)
+		logFunc(logging.LevelInfo, "STATS", "    %5s  %6s  %6s  %9s  %s", "Hits", "Compl.", "Resets", "Last Seen", "Actor")
+		logFunc(logging.LevelInfo, "STATS", "    %5s  %6s  %6s  %9s  %s", "-----", "------", "------", "---------", "-----")
+
 		limit := p.TopN
-		for i, stat := range stats {
+		for i := 0; i < limit && i < len(stats); i++ {
+			stat := stats[i]
 			// Only show actors with at least one hit.
-			if i >= limit || stat.Stats.Hits == 0 {
+			if stat.Stats.Hits == 0 {
 				break
 			}
-			logFunc(logging.LevelInfo, "STATS", "    - [%d hits, %d completions, %d resets] %s",
-				stat.Stats.Hits, stat.Stats.Completions, stat.Stats.Resets, stat.Actor)
+
+			// Parse actor string back to Actor struct to look up LastRequestTime
+			actorObj, err := store.NewActorFromString(stat.Actor)
+			lastSeen := "n/a"
+			if err == nil {
+				if activity, ok := p.ActivityStore[actorObj]; ok {
+					lastSeen = formatLastSeen(activity.LastRequestTime, p.NowFunc())
+				}
+			}
+
+			logFunc(logging.LevelInfo, "STATS", "    %5d  %6d  %6d  %9s  %s",
+				stat.Stats.Hits, stat.Stats.Completions, stat.Stats.Resets, lastSeen, stat.Actor)
 		}
 	}
 }

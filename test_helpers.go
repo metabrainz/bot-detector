@@ -133,6 +133,7 @@ func newDryRunTestHarness(t *testing.T, config *AppConfig) *dryRunTestHarness {
 
 	// Create processor with mock/capture functions
 	h.processor = newTestProcessor(config, nil)
+	h.processor.NowFunc = func() time.Time { return time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC) } // Mock time.Now()
 
 	// Use a custom LogFunc to capture logs and identify skipped lines.
 	// This needs to be done before setting ProcessLogLine, as ProcessLogLine
