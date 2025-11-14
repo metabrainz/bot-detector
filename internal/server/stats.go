@@ -23,17 +23,17 @@ type MetricsProvider interface {
 func Start(p MetricsProvider) {
 	listenAddr := p.GetListenAddr()
 	if listenAddr == "" {
-		p.Log(logging.LevelDebug, "HTTP_SERVER", "HTTP server is disabled (http_listen_addr is not set).")
+		p.Log(logging.LevelDebug, "HTTP_SERVER", "HTTP server is disabled.")
 		return
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/stats", metricsPageHandler(p))
+	mux.HandleFunc("/stats", statsPageHandler(p))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/stats", http.StatusFound) // 302 Found
 	})
 
-	p.Log(logging.LevelInfo, "SETUP", "Starting metrics web server on http://%s", listenAddr)
+	p.Log(logging.LevelInfo, "HTTP_SERVER", "Starting web server on http://%s", listenAddr)
 
 	server := &http.Server{
 		Addr:    listenAddr,
@@ -43,9 +43,9 @@ func Start(p MetricsProvider) {
 	// Listen for shutdown signal to gracefully close the server.
 	go func() {
 		s := <-p.GetShutdownChannel()
-		p.Log(logging.LevelInfo, "HTTP_SERVER", "Shutting down metrics web server.")
+		p.Log(logging.LevelInfo, "HTTP_SERVER", "Shutting down web server.")
 		if err := server.Close(); err != nil {
-			p.Log(logging.LevelError, "HTTP_SERVER", "Error closing metrics server: %v", err)
+			p.Log(logging.LevelError, "HTTP_SERVER", "Error closing web server: %v", err)
 		}
 
 		// Re-broadcast the signal so other listeners can also receive it.
@@ -56,12 +56,12 @@ func Start(p MetricsProvider) {
 	}()
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		p.Log(logging.LevelCritical, "HTTP_SERVER_FATAL", "Metrics web server failed: %v", err)
+		p.Log(logging.LevelCritical, "HTTP_SERVER_FATAL", "Web server failed: %v", err)
 	}
 }
 
-// metricsPageHandler creates an HTTP handler that displays the current metrics.
-func metricsPageHandler(p MetricsProvider) http.HandlerFunc {
+// statsPageHandler creates an HTTP handler that displays the current stats.
+func statsPageHandler(p MetricsProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Generate the report using the provider.
 		reportContent := p.GenerateHTMLMetricsReport()
@@ -78,6 +78,6 @@ func metricsPageHandler(p MetricsProvider) http.HandlerFunc {
 </body>
 </html>`, reportContent)
 
-		http.ServeContent(w, r, "metrics.html", time.Now(), bytes.NewReader([]byte(html)))
+		http.ServeContent(w, r, "stats.html", time.Now(), bytes.NewReader([]byte(html)))
 	}
 }

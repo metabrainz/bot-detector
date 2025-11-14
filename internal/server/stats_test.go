@@ -52,7 +52,7 @@ func (m *mockMetricsProvider) Log(level logging.LogLevel, tag string, format str
 	m.logMutex.Unlock()
 
 	// If this is the startup message, signal that the server is ready.
-	if strings.HasPrefix(logMsg, "Starting metrics web server") {
+	if strings.HasPrefix(logMsg, "Starting web server") {
 		close(m.readyCh)
 	}
 }
@@ -68,7 +68,8 @@ func TestServer_StartAndShutdown(t *testing.T) {
 	addr := listener.Addr().String()
 	_ = listener.Close() // Close it immediately; the server will re-bind it.
 
-	mockProvider := newMockProvider(addr, "TEST METRICS REPORT")
+	expected_string := "TEST STATS REPORT"
+	mockProvider := newMockProvider(addr, expected_string)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -90,7 +91,7 @@ func TestServer_StartAndShutdown(t *testing.T) {
 	// --- Assert 1: Server is responding ---
 	resp, err := http.Get("http://" + addr)
 	if err != nil {
-		t.Fatalf("Failed to make GET request to metrics server: %v", err)
+		t.Fatalf("Failed to make GET request to http server: %v", err)
 	}
 	defer func() {
 		_ = resp.Body.Close()
@@ -101,8 +102,8 @@ func TestServer_StartAndShutdown(t *testing.T) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "TEST METRICS REPORT") {
-		t.Errorf("Response body did not contain the expected metrics report. Got:\n%s", string(body))
+	if !strings.Contains(string(body), expected_string) {
+		t.Errorf("Response body did not contain the expected report. Got:\n%s", string(body))
 	}
 
 	// --- Act 2: Shutdown the server ---
