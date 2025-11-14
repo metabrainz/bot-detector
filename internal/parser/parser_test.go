@@ -89,6 +89,26 @@ func TestParseLogLine(t *testing.T) {
 			},
 		},
 		{
+			name:     "Valid Line with Quoted Hyphen Request",
+			line:     `musicbrainz.org 212.159.74.61 - - [14/Nov/2025:14:07:26 +0000] "-" 400 154 "-" "-"`,
+			provider: defaultProvider,
+			expected: &LogEntry{
+				Timestamp: func() time.Time {
+					t, _ := time.Parse("02/Jan/2006:15:04:05 -0700", "14/Nov/2025:14:07:26 +0000")
+					return t
+				}(),
+				IPInfo:     utils.NewIPInfo("212.159.74.61"),
+				Method:     "", // Should be empty as it's a quoted hyphen
+				Path:       "", // Should be empty
+				Protocol:   "", // Should be empty
+				StatusCode: 400,
+				Size:       154,
+				Referrer:   "-",
+				UserAgent:  "-",
+				VHost:      "musicbrainz.org",
+			},
+		},
+		{
 			name:        "Empty Line",
 			line:        "",
 			provider:    defaultProvider,
