@@ -475,6 +475,7 @@ func TestDryRunLogProcessor_Decompression(t *testing.T) {
 				// This config is now passed to the helper function.
 				LogFormatRegex:  `^(?P<VHost>\S+) (?P<IP>\S+) - - \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) \S+" (?P<StatusCode>\S+) (?P<Size>\S+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"$`,
 				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				EnableMetrics:   true,
 			})
 			harness.processor.LogPath = tt.logFilePath // Point to the pre-compressed file
 
@@ -590,6 +591,7 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 			harness := newDryRunTestHarness(t, &AppConfig{
 				LogFormatRegex:  `^(?P<VHost>\S+) (?P<IP>\S+) - - \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) \S+" (?P<StatusCode>\S+) (?P<Size>\S+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"$`,
 				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				EnableMetrics:   true,
 			})
 			_ = os.WriteFile(harness.tempLogFile, []byte(logContent), 0644)
 			harness.processor.Chains = []BehavioralChain{chain1, chain2}
@@ -1084,7 +1086,7 @@ func TestLogMetricsSummary(t *testing.T) {
 		{Name: "ChainA", MetricsCounter: new(atomic.Int64), MetricsResetCounter: new(atomic.Int64), MetricsHitsCounter: new(atomic.Int64)},
 		{Name: "ChainB", MetricsCounter: new(atomic.Int64), MetricsResetCounter: new(atomic.Int64), MetricsHitsCounter: new(atomic.Int64)},
 	}
-	p := newTestProcessor(&AppConfig{}, chains)
+	p := newTestProcessor(&AppConfig{EnableMetrics: true}, chains)
 
 	// 2. Manually set metric values.
 	p.Metrics.LinesProcessed.Store(1000)
@@ -1194,7 +1196,7 @@ func TestLogMetricsSummary(t *testing.T) {
 func TestLogMetricsSummary_Filter(t *testing.T) {
 	// This test specifically verifies that the filtering logic works.
 	// --- Setup ---
-	p := newTestProcessor(&AppConfig{}, nil)
+	p := newTestProcessor(&AppConfig{EnableMetrics: true}, nil)
 	p.Metrics.LinesProcessed.Store(100) // dryrun:"true"
 	p.Metrics.BlockerRetries.Store(5)   // dryrun:"false"
 

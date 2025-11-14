@@ -1023,6 +1023,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	idleTimeoutStr := DefaultIdleTimeout
 	lineEndingStr := DefaultLineEnding
 	outOfOrderToleranceStr := DefaultOutOfOrderTolerance
+	enableMetrics := DefaultEnableMetrics
 
 	// Override defaults with values from YAML if they exist
 	if config.LogLevel != "" {
@@ -1045,6 +1046,11 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	}
 	if config.OutOfOrderTolerance != "" {
 		outOfOrderToleranceStr = config.OutOfOrderTolerance
+	}
+
+	// Handle EnableMetrics with a pointer to bool
+	if config.EnableMetrics != nil {
+		enableMetrics = *config.EnableMetrics
 	}
 
 	// Parse unblock settings
@@ -1412,6 +1418,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		TimestampFormat:          timestampFormat,
 		UnblockOnGoodActor:       config.UnblockOnGoodActor,
 		UnblockCooldown:          unblockCooldown,
+		EnableMetrics:            enableMetrics,
 	}, nil
 }
 
@@ -1502,6 +1509,7 @@ func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 		TimestampFormat:          loadedCfg.TimestampFormat,
 		UnblockOnGoodActor:       loadedCfg.UnblockOnGoodActor,
 		UnblockCooldown:          loadedCfg.UnblockCooldown,
+		EnableMetrics:            loadedCfg.EnableMetrics, // New field
 
 		// Preserve mockable functions and the original mod time unless the main config changed.
 		StatFunc:    oldConfig.StatFunc,
@@ -1516,6 +1524,7 @@ func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 		p.Config.LastModTime = time.Now() // Update LastModTime only if the main config file changed.
 	}
 	p.LogRegex = loadedCfg.LogFormatRegex
+	p.EnableMetrics = loadedCfg.EnableMetrics // Set the processor's EnableMetrics field
 	initializeMetrics(p, loadedCfg)
 
 	logging.SetLogLevel(loadedCfg.LogLevel)
@@ -1572,6 +1581,18 @@ func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 // initializeMetrics sets up all the metric counters based on the loaded configuration.
 // It resets and repopulates the metric maps, making it safe to call on both startup and reload.
 func initializeMetrics(p *Processor, loadedCfg *LoadedConfig) {
+	if !p.EnableMetrics {
+		// If metrics are disabled, ensure all metric maps are nil or empty
+		p.Metrics.ChainsCompleted = nil
+		p.Metrics.ChainsReset = nil
+		p.Metrics.ChainsHits = nil
+		p.Metrics.MatchKeyHits = nil
+		p.Metrics.BlockDurations = nil
+		p.Metrics.CmdsPerBlocker = nil
+		p.Metrics.GoodActorHits = nil
+		return
+	}
+
 	// Reset and initialize per-chain metrics.
 	p.Metrics.ChainsCompleted = &sync.Map{}
 	p.Metrics.ChainsReset = &sync.Map{}

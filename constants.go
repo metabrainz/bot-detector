@@ -44,6 +44,7 @@ const (
 	DefaultBlockerCommandQueueSize  = 1000 // Default queue size
 	DefaultBlockerCommandsPerSecond = 10   // Default rate limit
 	DefaultUnblockCooldown          = "5m"
+	DefaultEnableMetrics            = true
 )
 
 // Define constants for Top N table formatting

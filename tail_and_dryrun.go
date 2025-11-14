@@ -429,6 +429,10 @@ func collectMetricsSummaryData(p *Processor, elapsedTime time.Duration, filterTa
 		data.LogSource = "stdin"
 	}
 
+	if !p.EnableMetrics { // Added check
+		return data // Return early if metrics are disabled
+	}
+
 	// --- Chain Metrics ---
 	p.Metrics.ChainsCompleted.Range(func(key, value interface{}) bool {
 		chainName, _ := key.(string)
@@ -496,6 +500,11 @@ func collectMetricsSummaryData(p *Processor, elapsedTime time.Duration, filterTa
 //   - logTag: The tag to use for each log line (e.g., "METRICS").
 //   - filterTag: The struct tag to filter which general metrics to display (e.g., "dryrun").
 func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag, filterTag string) {
+	if !p.EnableMetrics { // Added check
+		logFunc(logging.LevelInfo, logTag, "Metrics are disabled.")
+		return
+	}
+
 	data := collectMetricsSummaryData(p, elapsedTime, filterTag)
 
 	// --- Collect all metrics data before printing ---

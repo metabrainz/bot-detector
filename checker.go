@@ -257,12 +257,12 @@ func handleOutOfOrder(p *Processor, entry *LogEntry) (buffered bool) {
 // It updates the actor's state and metrics, and performs the configured action.
 // It returns true if `on_match` is "stop", indicating that no further chains should be processed for this entry.
 func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *store.ActorActivity) bool {
-	// Increment the counter for the specific chain that was completed, if metrics are available.
-	// This check prevents panics in test scenarios where metrics are not fully initialized.
-	if p.Metrics.ChainsCompleted != nil {
-		if val, ok := p.Metrics.ChainsCompleted.Load(chain.Name); ok {
-			if counter, ok := val.(*atomic.Int64); ok {
-				counter.Add(1)
+	if p.EnableMetrics {
+		if p.Metrics.ChainsCompleted != nil {
+			if val, ok := p.Metrics.ChainsCompleted.Load(chain.Name); ok {
+				if counter, ok := val.(*atomic.Int64); ok {
+					counter.Add(1)
+				}
 			}
 		}
 	}
@@ -301,11 +301,13 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 	// --- 2. Perform the action ---
 	switch chain.Action {
 	case "block":
-		p.Metrics.BlockActions.Add(1)
-		// Increment the counter for the specific block duration used.
-		if val, ok := p.Metrics.BlockDurations.Load(chain.BlockDuration); ok {
-			if counter, ok := val.(*atomic.Int64); ok {
-				counter.Add(1)
+		if p.EnableMetrics {
+			p.Metrics.BlockActions.Add(1)
+			// Increment the counter for the specific block duration used.
+			if val, ok := p.Metrics.BlockDurations.Load(chain.BlockDuration); ok {
+				if counter, ok := val.(*atomic.Int64); ok {
+					counter.Add(1)
+				}
 			}
 		}
 		executeBlock(p, entry, chain)
@@ -320,7 +322,9 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 		currentActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
 		currentActivity.BlockedUntil = ipActivity.BlockedUntil
 	case "log":
-		p.Metrics.LogActions.Add(1)
+		if p.EnableMetrics {
+			p.Metrics.LogActions.Add(1)
+		}
 	}
 
 	// Return true if OnMatch is "stop" to halt further chain processing.
@@ -402,10 +406,12 @@ func matchStepFields(p *Processor, chain *BehavioralChain, step *StepDef, entry 
 			return false
 		}
 		// If Metrics are enabled and a match occurred, increment the field match counter for this chain.
-		if p.Metrics.MetricsEnabled {
-			if counter, ok := chain.FieldMatchCounts.Load(matcher.FieldName); ok {
-				if c, ok := counter.(*atomic.Int64); ok {
-					c.Add(1)
+		if p.EnableMetrics {
+			if chain.FieldMatchCounts != nil {
+				if counter, ok := chain.FieldMatchCounts.Load(matcher.FieldName); ok {
+					if c, ok := counter.(*atomic.Int64); ok {
+						c.Add(1)
+					}
 				}
 			}
 		}
@@ -437,9 +443,11 @@ func checkFirstStepTimeRule(step *StepDef, timeSinceLastHit time.Duration, previ
 // handleTimeRuleReset logs the reason for a chain reset and updates metrics.
 // This helper is used by checkInterStepTimeRules to reduce code duplication.
 func handleTimeRuleReset(p *Processor, chain *BehavioralChain, entry *LogEntry, reason string, value time.Duration) {
-	if val, ok := p.Metrics.ChainsReset.Load(chain.Name); ok {
-		if counter, ok := val.(*atomic.Int64); ok {
-			counter.Add(1)
+	if p.EnableMetrics {
+		if val, ok := p.Metrics.ChainsReset.Load(chain.Name); ok {
+			if counter, ok := val.(*atomic.Int64); ok {
+				counter.Add(1)
+			}
 		}
 	}
 	if p.TopN > 0 {
@@ -481,9 +489,11 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 
 	// Increment the counter for the match_key type.
 	// This gives us metrics on which keying strategies are most active.
-	if counter, ok := p.Metrics.MatchKeyHits.Load(chain.MatchKey); ok {
-		if c, ok := counter.(*atomic.Int64); ok {
-			c.Add(1)
+	if p.EnableMetrics {
+		if counter, ok := p.Metrics.MatchKeyHits.Load(chain.MatchKey); ok {
+			if c, ok := counter.(*atomic.Int64); ok {
+				c.Add(1)
+			}
 		}
 	}
 
@@ -530,9 +540,11 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 
 		// --- STEP MATCHED ---
 		// Increment the total hits counter for this chain.
-		if val, ok := p.Metrics.ChainsHits.Load(chain.Name); ok {
-			if counter, ok := val.(*atomic.Int64); ok {
-				counter.Add(1)
+		if p.EnableMetrics {
+			if val, ok := p.Metrics.ChainsHits.Load(chain.Name); ok {
+				if counter, ok := val.(*atomic.Int64); ok {
+					counter.Add(1)
+				}
 			}
 		}
 
@@ -594,7 +606,9 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 
 	// If we've reached this point, the line was successfully parsed.
 	// This is a "valid hit" that will be processed against the chains.
-	p.Metrics.ValidHits.Add(1)
+	if p.EnableMetrics {
+		p.Metrics.ValidHits.Add(1)
+	}
 
 	// A set to keep track of activities that have been processed for this entry.
 	// This is crucial to ensure that LastRequestTime is updated only once per activity,
@@ -708,23 +722,25 @@ func CheckChains(p *Processor, entry *LogEntry) {
 			// Construct the reason string based on SkipInfo.Type for logging and metrics.
 			// This ensures consistency and avoids string parsing.
 			var reasonStr string
-			switch skipInfo.Type {
-			case utils.SkipTypeGoodActor:
-				reasonStr = fmt.Sprintf("good_actor:%s", skipInfo.Source)
-				p.Metrics.GoodActorsSkipped.Add(1)
-				if val, ok := p.Metrics.GoodActorHits.Load(skipInfo.Source); ok { // This map is pre-populated
+			if p.EnableMetrics {
+				switch skipInfo.Type {
+				case utils.SkipTypeGoodActor:
+					reasonStr = fmt.Sprintf("good_actor:%s", skipInfo.Source)
+					p.Metrics.GoodActorsSkipped.Add(1)
+					if val, ok := p.Metrics.GoodActorHits.Load(skipInfo.Source); ok { // This map is pre-populated
+						if counter, ok := val.(*atomic.Int64); ok {
+							counter.Add(1)
+						}
+					}
+				case utils.SkipTypeBlocked:
+					reasonStr = fmt.Sprintf("blocked:%s", skipInfo.Source)
+				}
+				if reasonStr != "" {
+					// Increment the counter for the specific skip reason.
+					val, _ := p.Metrics.SkipsByReason.LoadOrStore(reasonStr, new(atomic.Int64))
 					if counter, ok := val.(*atomic.Int64); ok {
 						counter.Add(1)
 					}
-				}
-			case utils.SkipTypeBlocked:
-				reasonStr = fmt.Sprintf("blocked:%s", skipInfo.Source)
-			}
-			if reasonStr != "" {
-				// Increment the counter for the specific skip reason.
-				val, _ := p.Metrics.SkipsByReason.LoadOrStore(reasonStr, new(atomic.Int64))
-				if counter, ok := val.(*atomic.Int64); ok {
-					counter.Add(1)
 				}
 			}
 		}

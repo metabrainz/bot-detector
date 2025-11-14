@@ -109,6 +109,7 @@ func main() {
 		OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
 		PollingInterval:          loadedCfg.PollingInterval,
 		TimestampFormat:          loadedCfg.TimestampFormat,
+		EnableMetrics:            loadedCfg.EnableMetrics,
 		StatFunc:                 defaultStatFunc, // Initialize StatFunc to prevent nil pointer panic.
 		FileOpener: func(name string) (fileHandle, error) {
 			return os.Open(name)
@@ -126,6 +127,7 @@ func main() {
 		Config:               appConfig,
 		LogRegex:             loadedCfg.LogFormatRegex,
 		DryRun:               *cliFlags.DryRun,
+		EnableMetrics:        loadedCfg.EnableMetrics,
 		oooBufferFlushSignal: make(chan struct{}, 1), // Buffered channel of size 1
 		signalCh:             make(chan os.Signal, 1),
 		LogFunc:              logging.LogOutput,

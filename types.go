@@ -71,6 +71,7 @@ type Processor struct {
 	Chains        []BehavioralChain
 	Config        *AppConfig
 	DryRun        bool
+	EnableMetrics bool
 
 	EntryBuffer          []*LogEntry    // Buffer for holding out-of-order entries.
 	oooBufferFlushSignal chan struct{}  // Signal to the entryBufferWorker to flush the OOO buffer immediately.
@@ -117,6 +118,7 @@ type AppConfig struct {
 	UnblockOnGoodActor       bool                              `config:"compare"`
 	UnblockCooldown          time.Duration                     `config:"compare"`
 	LogFormatRegex           string                            `config:"compare"`
+	EnableMetrics            bool                              `config:"compare" summary:"enable_metrics"`
 	StatFunc                 func(string) (os.FileInfo, error) // Mockable
 	FileOpener               fileOpener                        // Mockable
 }
@@ -191,6 +193,7 @@ type LoadedConfig struct {
 	TimestampFormat          string         `config:"compare"`
 	UnblockOnGoodActor       bool           `config:"compare"`
 	UnblockCooldown          time.Duration  `config:"compare"`
+	EnableMetrics            bool           `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error)
 }
 
@@ -219,6 +222,7 @@ type ChainConfig struct {
 	TimestampFormat          string                   `yaml:"timestamp_format"`
 	UnblockOnGoodActor       bool                     `yaml:"unblock_on_good_actor"`
 	UnblockCooldown          string                   `yaml:"unblock_cooldown"`
+	EnableMetrics            *bool                    `yaml:"enable_metrics"` // Changed to *bool
 }
 
 type StepDefYAML struct {
@@ -308,7 +312,7 @@ type BehavioralChain struct {
 	MetricsHitsCounter       *atomic.Int64 // Counter for hits on this specific chain.
 	MetricsResetCounter      *atomic.Int64 // Counter for resets of this specific chain.
 	MetricsCounter           *atomic.Int64 // Counter for this specific chain.
-	FieldMatchCounts         *sync.Map     // New: Counter for field matches within this chain (key: fieldName, value: *atomic.Int64).
+	FieldMatchCounts         *sync.Map     // Counter for field matches within this chain (key: fieldName, value: *atomic.Int64).
 }
 
 // GoodActorDef represents a single compiled definition from the good_actors config.
