@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"sort" // Added for sorting step metrics
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -188,6 +189,41 @@ func (p *Processor) GenerateHTMLMetricsReport() string {
 		report.WriteString(utils.ForHTML(fmt.Sprintf(format, args...)) + "\n")
 	}
 	logMetricsSummary(p, time.Since(p.startTime), webLogFunc, "METRICS", "metric")
+	return report.String()
+}
+
+// GenerateStepsMetricsReport creates a report of step execution counts as an HTML-safe string.
+func (p *Processor) GenerateStepsMetricsReport() string {
+	var report strings.Builder
+	report.WriteString("--- Step Execution Counts ---\n")
+	if p.Metrics.StepExecutionCounts == nil {
+		report.WriteString("Step metrics are not enabled or initialized.\n")
+		return report.String()
+	}
+
+	// Collect and sort step metrics for consistent output
+	type StepMetric struct {
+		Name  string
+		Count int64
+	}
+	var stepMetrics []StepMetric
+	p.Metrics.StepExecutionCounts.Range(func(key, value interface{}) bool {
+		stepName, _ := key.(string)
+		count, _ := value.(*atomic.Int64)
+		stepMetrics = append(stepMetrics, StepMetric{Name: stepName, Count: count.Load()})
+		return true
+	})
+
+	sort.Slice(stepMetrics, func(i, j int) bool {
+		if stepMetrics[i].Count == stepMetrics[j].Count {
+			return stepMetrics[i].Name < stepMetrics[j].Name
+		}
+		return stepMetrics[i].Count >= stepMetrics[j].Count
+	})
+
+	for _, sm := range stepMetrics {
+		report.WriteString(fmt.Sprintf("%12d %s\n", sm.Count, utils.ForHTML(sm.Name)))
+	}
 	return report.String()
 }
 

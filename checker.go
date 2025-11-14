@@ -405,6 +405,22 @@ func matchStepFields(p *Processor, chain *BehavioralChain, step *StepDef, entry 
 		if !matcher.Matcher(entry) { // Access the actual matcher function
 			return false
 		}
+		// If metrics are enabled, increment the StepExecutionCounts for this step.
+		if p.EnableMetrics {
+			if p.Metrics.StepExecutionCounts != nil {
+				stepIdentifier := fmt.Sprintf("step %d/%d of %s", step.Order, len(chain.Steps), chain.Name)
+				if counter, ok := p.Metrics.StepExecutionCounts.Load(stepIdentifier); ok {
+					if c, ok := counter.(*atomic.Int64); ok {
+						c.Add(1)
+					}
+				} else {
+					// If the step name is not yet in the map, add it.
+					newCounter := new(atomic.Int64)
+					newCounter.Add(1)
+					p.Metrics.StepExecutionCounts.Store(stepIdentifier, newCounter)
+				}
+			}
+		}
 		// If Metrics are enabled and a match occurred, increment the field match counter for this chain.
 		if p.EnableMetrics {
 			if chain.FieldMatchCounts != nil {

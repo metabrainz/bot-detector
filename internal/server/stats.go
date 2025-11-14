@@ -14,6 +14,7 @@ import (
 type MetricsProvider interface {
 	GetListenAddr() string
 	GenerateHTMLMetricsReport() string
+	GenerateStepsMetricsReport() string
 	GetShutdownChannel() chan os.Signal
 	Log(level logging.LogLevel, tag string, format string, v ...interface{})
 }
@@ -29,6 +30,7 @@ func Start(p MetricsProvider) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/stats", statsPageHandler(p))
+	mux.HandleFunc("/stats/steps", stepsStatsPageHandler(p)) // New endpoint for step metrics
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/stats", http.StatusFound) // 302 Found
 	})
@@ -60,24 +62,33 @@ func Start(p MetricsProvider) {
 	}
 }
 
-// statsPageHandler creates an HTTP handler that displays the current stats.
-func statsPageHandler(p MetricsProvider) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Generate the report using the provider.
-		reportContent := p.GenerateHTMLMetricsReport()
-
-		// Format the output as a simple, pre-formatted HTML page.
-		html := fmt.Sprintf(`<!DOCTYPE html>
+func servePage(w http.ResponseWriter, r *http.Request, title string, content string, name string) {
+	// Format the output as a simple, pre-formatted HTML page.
+	html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
-<title>Bot-Detector Metrics</title>
+<title>%s</title>
 <meta http-equiv="refresh" content="5">
 <style>body { font-family: monospace; background-color: #f4f4f4; color: #333; }</style>
 </head>
 <body><pre>%s</pre>
 </body>
-</html>`, reportContent)
+</html>`, title, content)
+	http.ServeContent(w, r, name, time.Now(), bytes.NewReader([]byte(html)))
+}
 
-		http.ServeContent(w, r, "stats.html", time.Now(), bytes.NewReader([]byte(html)))
+// stepsStatsPageHandler creates an HTTP handler that displays the step execution stats.
+func stepsStatsPageHandler(p MetricsProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		reportContent := p.GenerateStepsMetricsReport()
+		servePage(w, r, "Bot-Detector Step Stats", reportContent, "step_stats.html")
+	}
+}
+
+// statsPageHandler creates an HTTP handler that displays the current stats.
+func statsPageHandler(p MetricsProvider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		reportContent := p.GenerateHTMLMetricsReport()
+		servePage(w, r, "Bot-Detector Stats", reportContent, "stats.html")
 	}
 }

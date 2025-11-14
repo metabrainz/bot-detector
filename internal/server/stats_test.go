@@ -16,12 +16,13 @@ import (
 
 // mockMetricsProvider is a mock implementation of the MetricsProvider interface for testing.
 type mockMetricsProvider struct {
-	listenAddr    string
-	reportContent string
-	shutdownCh    chan os.Signal
-	readyCh       chan struct{} // Closed when the server is ready to accept connections.
-	logMutex      sync.Mutex
-	logs          []string
+	listenAddr         string
+	reportContent      string
+	stepsReportContent string // New field for step metrics report
+	shutdownCh         chan os.Signal
+	readyCh            chan struct{} // Closed when the server is ready to accept connections.
+	logMutex           sync.Mutex
+	logs               []string
 }
 
 func newMockProvider(addr, report string) *mockMetricsProvider {
@@ -39,6 +40,10 @@ func (m *mockMetricsProvider) GetListenAddr() string {
 
 func (m *mockMetricsProvider) GenerateHTMLMetricsReport() string {
 	return m.reportContent
+}
+
+func (m *mockMetricsProvider) GenerateStepsMetricsReport() string {
+	return m.stepsReportContent
 }
 
 func (m *mockMetricsProvider) GetShutdownChannel() chan os.Signal {
@@ -110,6 +115,60 @@ func TestServer_StartAndShutdown(t *testing.T) {
 	mockProvider.shutdownCh <- syscall.SIGTERM
 
 	// Wait for the server goroutine to exit.
+	wg.Wait()
+}
+
+// TestServer_StepsEndpoint verifies that the /stats/steps endpoint works correctly.
+func TestServer_StepsEndpoint(t *testing.T) {
+	// --- Setup ---
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to listen on a free port: %v", err)
+	}
+	addr := listener.Addr().String()
+	_ = listener.Close()
+
+	expectedStepsReport := "STEP1: 10\nSTEP2: 5\n"
+	mockProvider := newMockProvider(addr, "MAIN REPORT")
+	mockProvider.stepsReportContent = expectedStepsReport // Set the steps report content
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	// --- Act 1: Start the server ---
+	go func() {
+		defer wg.Done()
+		Start(mockProvider)
+	}()
+
+	// Wait for the server to be ready.
+	select {
+	case <-mockProvider.readyCh:
+		// Server is ready.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timed out waiting for server to start.")
+	}
+
+	// --- Assert 1: Server is responding to /stats/steps ---
+	resp, err := http.Get("http://" + addr + "/stats/steps")
+	if err != nil {
+		t.Fatalf("Failed to make GET request to /stats/steps: %v", err)
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status code 200 for /stats/steps, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), expectedStepsReport) {
+		t.Errorf("Response body for /stats/steps did not contain the expected report. Got:\n%s", string(body))
+	}
+
+	// --- Act 2: Shutdown the server ---
+	mockProvider.shutdownCh <- syscall.SIGTERM
 	wg.Wait()
 }
 
