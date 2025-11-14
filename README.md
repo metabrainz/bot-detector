@@ -306,7 +306,7 @@ Each step in the steps array defines a specific log entry characteristic that mu
 | **statuscode**, `status_code` | The HTTP response status code (e.g., `200`, `404`). |
 | **referrer** | The full HTTP Referer header value. |
 | **size** | The response size in bytes. A dash (`"-"`) in the log is parsed as `-1`. |
-| `useragent`, `user_agent` | The HTTP User-Agent header value. |
+| **useragent** | The HTTP User-Agent header value. |
 | **vhost** | The virtual host from the log entry. |
 
 ### **Advanced `field_matches` Syntax**
@@ -350,7 +350,7 @@ For more complex string matching, use a prefix.
 > | `  regex:^/path` | Literal String | Matches the exact string `"  regex:^/path"`. |
 > | `regex: ^/path ` | Regex | The pattern is `" ^/path "`. Matches a path that starts and ends with a space. |
 > | `exact:  value  ` | Exact String | The value is `"  value  "`. Matches a value that starts and ends with spaces. |
-| `  my-value  ` | Plain Value | The value is trimmed to `"my-value"`. Matches the exact string `"my-value"`. |
+> | `  my-value  ` | Plain Value | The value is trimmed to `"my-value"`. Matches the exact string `"my-value"`. |
 
 *   **Exact String (Explicit):** Use `exact:` to force a literal string match for a value that could be misinterpreted as another prefix type. This is useful for rare edge cases.
     ```yaml
