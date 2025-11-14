@@ -33,7 +33,7 @@ func Start(p MetricsProvider) {
 		http.Redirect(w, r, "/stats", http.StatusFound) // 302 Found
 	})
 
-	p.Log(logging.LevelInfo, "HTTP_SERVER", "Starting metrics web server on http://%s", listenAddr)
+	p.Log(logging.LevelInfo, "SETUP", "Starting metrics web server on http://%s", listenAddr)
 
 	server := &http.Server{
 		Addr:    listenAddr,

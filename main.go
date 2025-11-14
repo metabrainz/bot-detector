@@ -111,7 +111,7 @@ func main() {
 		LogPath:              *cliFlags.LogPath,
 		ReloadOn:             *cliFlags.ReloadOn,
 		TopN:                 *cliFlags.TopN,
-		HTTPListenAddr:       *cliFlags.HTTPListenAddr,
+		HTTPServer:           *cliFlags.HTTPServer,
 		configReloaded:       false,
 	}
 	p.startTime = p.NowFunc() // Record the start time.
@@ -142,7 +142,7 @@ func main() {
 
 // GetListenAddr returns the HTTP listen address from the config.
 func (p *Processor) GetListenAddr() string {
-	return p.HTTPListenAddr
+	return p.HTTPServer
 }
 
 // GetShutdownChannel returns the channel used for shutdown signals.

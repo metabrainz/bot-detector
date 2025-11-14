@@ -9,13 +9,13 @@ import (
 // CLIFlagValues holds pointers to the variables where command-line flag values will be stored.
 // This struct is returned by RegisterCLIFlags to provide access to the parsed flag values.
 type CLIFlagValues struct {
-	LogPath        *string
-	ConfigPath     *string
-	DryRun         *bool
-	ShowVersion    *bool
-	ReloadOn       *string
-	TopN           *int
-	HTTPListenAddr *string
+	LogPath     *string
+	ConfigPath  *string
+	DryRun      *bool
+	ShowVersion *bool
+	ReloadOn    *string
+	TopN        *int
+	HTTPServer  *string
 }
 
 // RegisterCLIFlags registers the command-line flags with the global flag set.
@@ -27,7 +27,7 @@ func RegisterCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 	flags.ShowVersion = fs.Bool("version", false, "Optional. Print the application version and exit.")
 	flags.ReloadOn = fs.String("reload-on", "", "Optional. Controls config reloading. Use `watcher` for file-watching only, or `hup`, `usr1`, `usr2` for signal-based reloads only. If absent, both watcher and `SIGHUP` are enabled.")
 	flags.TopN = fs.Int("top-n", 0, "Optional. In dry-run mode, show top N actors per chain. Default is 0 (disabled).")
-	flags.HTTPListenAddr = fs.String("http-listen-addr", "", "Optional. If set (e.g., \"127.0.0.1:8080\"), starts a web server on this address. Disabled by default.")
+	flags.HTTPServer = fs.String("http-server", "", "Optional. If set (e.g., \"127.0.0.1:8080\"), starts a web server on this address to display live metrics. Disabled by default.")
 	return flags
 }
 
