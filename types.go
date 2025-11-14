@@ -305,6 +305,7 @@ type BehavioralChain struct {
 	MetricsHitsCounter       *atomic.Int64 // Counter for hits on this specific chain.
 	MetricsResetCounter      *atomic.Int64 // Counter for resets of this specific chain.
 	MetricsCounter           *atomic.Int64 // Counter for this specific chain.
+	FieldMatchCounts         *sync.Map     // New: Counter for field matches within this chain (key: fieldName, value: *atomic.Int64).
 }
 
 // GoodActorDef represents a single compiled definition from the good_actors config.
