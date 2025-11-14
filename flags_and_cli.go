@@ -16,6 +16,7 @@ type CLIFlagValues struct {
 	ReloadOn    *string
 	TopN        *int
 	HTTPServer  *string
+	Check       *bool
 }
 
 // RegisterCLIFlags registers the command-line flags with the global flag set.
@@ -28,6 +29,7 @@ func RegisterCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 	flags.ReloadOn = fs.String("reload-on", "", "Optional. Controls config reloading. Use `watcher` for file-watching only, or `hup`, `usr1`, `usr2` for signal-based reloads only. If absent, both watcher and `SIGHUP` are enabled.")
 	flags.TopN = fs.Int("top-n", 0, "Optional. In dry-run mode, show top N actors per chain. Default is 0 (disabled).")
 	flags.HTTPServer = fs.String("http-server", "", "Optional. If set (e.g., \"127.0.0.1:8080\"), starts a web server on this address to display live metrics. Disabled by default.")
+	flags.Check = fs.Bool("check", false, "Optional. If true, validates the configuration file and exits. Returns a non-zero exit code on failure.")
 	return flags
 }
 

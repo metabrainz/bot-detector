@@ -112,6 +112,7 @@ This will produce a single executable named `bot-detector`.
 | **`--log-path`** | (none) | **Required.** Path to the access log file to tail (or to read in dry-run mode). |
 | **`--dry-run`** | `false` | Optional. If true, runs in test mode, ignoring the configured blocking backend and live logging. |
 | **`--version`** | `false` | Optional. Print the application version and exit. |
+| **`--check`** | `false` | Optional. If true, validates the configuration file and exits. Returns a non-zero exit code on failure. |
 | **`--reload-on`** | (none) | Optional. Controls config reloading. Use `watcher` for file-watching only, or `hup`, `usr1`, `usr2` for signal-based reloads only. If absent, both watcher and `SIGHUP` are enabled. |
 | **`--http-server`** | `""` | Optional. If set (e.g., `"127.0.0.1:8080"`), starts a web server on this address to display live metrics. Disabled by default. |
 | **`--top-n`** | `0` | Optional. In dry-run mode, show top N actors per chain. Default is 0 (disabled). |

@@ -36,6 +36,29 @@ func main() {
 	// Parse CLI flags
 	flag.Parse()
 
+	// Handle --check flag first. If present, validate config and exit.
+	if *cliFlags.Check {
+		if *cliFlags.ConfigPath == "" {
+			log.Println("[FATAL] --config flag is required for --check")
+			os.Exit(1)
+		}
+		absConfigPath, err := filepath.Abs(*cliFlags.ConfigPath)
+		if err != nil {
+			log.Printf("[FATAL] Could not determine absolute path for config file: %v\n", err)
+			os.Exit(1)
+		}
+		opts := LoadConfigOptions{
+			ConfigPath: absConfigPath,
+		}
+		_, err = LoadConfigFromYAML(opts)
+		if err != nil {
+			log.Printf("[FATAL] Configuration check failed: %v\n", err)
+			os.Exit(1)
+		}
+		log.Println("[SUCCESS] Configuration is valid.")
+		os.Exit(0)
+	}
+
 	// Handle the version flag first. If present, print version and exit.
 	if *cliFlags.ShowVersion {
 		fmt.Printf("bot-detector version %s\n", AppVersion)
