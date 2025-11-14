@@ -395,11 +395,19 @@ func logDryRunCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry) 
 
 // matchStepFields checks if the fields of a log entry match the compiled matchers of a step.
 // It returns true if all fields match, false otherwise.
-func matchStepFields(step *StepDef, entry *LogEntry) bool {
+func matchStepFields(p *Processor, chain *BehavioralChain, step *StepDef, entry *LogEntry) bool {
 	// Iterate over the pre-compiled matcher functions.
 	for _, matcher := range step.Matchers {
-		if !matcher(entry) {
+		if !matcher.Matcher(entry) { // Access the actual matcher function
 			return false
+		}
+		// If Metrics are enabled and a match occurred, increment the field match counter for this chain.
+		if p.Metrics.MetricsEnabled {
+			if counter, ok := chain.FieldMatchCounts.Load(matcher.FieldName); ok {
+				if c, ok := counter.(*atomic.Int64); ok {
+					c.Add(1)
+				}
+			}
 		}
 	}
 	return true
@@ -516,7 +524,7 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 		}
 
 		// --- FIELD MATCHING ---
-		if !matchStepFields(&step, entry) {
+		if !matchStepFields(p, chain, &step, entry) { // Pass p and chain
 			break // No match on this step, exit the `for {}` loop for this chain.
 		}
 
