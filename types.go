@@ -89,6 +89,7 @@ type Processor struct {
 	HTTPListenAddr       string
 	TopN                 int // For dry-run stats: show top N actors.
 	startTime            time.Time
+	configReloaded       bool
 }
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.

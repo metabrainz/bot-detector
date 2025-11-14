@@ -33,6 +33,13 @@ func logConfigurationSummary(p *Processor) {
 	currentLogLevel := logging.GetLogLevel().String()
 	p.ConfigMutex.RUnlock()
 
+	if p.configReloaded {
+		p.LogFunc(logging.LevelInfo, "CONFIG_RELOAD", "Successfully reloaded main configuration from '%s'", p.ConfigPath)
+	} else {
+		p.configReloaded = true
+		p.LogFunc(logging.LevelInfo, "CONFIG", "Successfully loaded main configuration from '%s'", p.ConfigPath)
+	}
+
 	p.LogFunc(logging.LevelDebug, "CONFIG", "Loaded configuration:")
 
 	// Handle special cases first

@@ -112,6 +112,7 @@ func main() {
 		ReloadOnSignal:       *cliFlags.ReloadOnSignal,
 		TopN:                 *cliFlags.TopN,
 		HTTPListenAddr:       *cliFlags.HTTPListenAddr,
+		configReloaded:       false,
 	}
 	p.startTime = p.NowFunc() // Record the start time.
 	// TestSignals is intentionally left nil in production.
