@@ -9,14 +9,15 @@ import (
 // This is designed to be easily adaptable to a Prometheus backend in the future.
 type Metrics struct {
 	// Per-chain metrics are stored in sync.Maps for thread-safe access.
-	ChainsCompleted *sync.Map
-	ChainsReset     *sync.Map
-	ChainsHits      *sync.Map
-	MatchKeyHits    *sync.Map
-	GoodActorHits   *sync.Map
-	SkipsByReason   *sync.Map
-	BlockDurations  *sync.Map
-	CmdsPerBlocker  *sync.Map
+	ChainsCompleted     *sync.Map
+	ChainsReset         *sync.Map
+	ChainsHits          *sync.Map
+	MatchKeyHits        *sync.Map
+	GoodActorHits       *sync.Map
+	SkipsByReason       *sync.Map
+	BlockDurations      *sync.Map
+	CmdsPerBlocker      *sync.Map
+	StepExecutionCounts *sync.Map // New: Counter for each logical step executed.
 
 	// General counters with struct tags for metadata.
 	// `metric:"..."` is the display name.
@@ -42,13 +43,14 @@ func NewMetrics() *Metrics {
 		// sync.Map is used here as it's optimized for write-once, read-many scenarios
 		// and is safe for concurrent access without a global lock, which is ideal
 		// for initializing chain counters at startup and incrementing them later.
-		ChainsCompleted: &sync.Map{},
-		ChainsReset:     &sync.Map{},
-		ChainsHits:      &sync.Map{},
-		MatchKeyHits:    &sync.Map{},
-		GoodActorHits:   &sync.Map{},
-		SkipsByReason:   &sync.Map{},
-		BlockDurations:  &sync.Map{},
-		CmdsPerBlocker:  &sync.Map{},
+		ChainsCompleted:     &sync.Map{},
+		ChainsReset:         &sync.Map{},
+		ChainsHits:          &sync.Map{},
+		MatchKeyHits:        &sync.Map{},
+		GoodActorHits:       &sync.Map{},
+		SkipsByReason:       &sync.Map{},
+		BlockDurations:      &sync.Map{},
+		CmdsPerBlocker:      &sync.Map{},
+		StepExecutionCounts: &sync.Map{}, // Initialize the new field
 	}
 }
