@@ -13,7 +13,7 @@ type CLIFlagValues struct {
 	ConfigPath     *string
 	DryRun         *bool
 	ShowVersion    *bool
-	ReloadOnSignal *string
+	ReloadOn       *string
 	TopN           *int
 	HTTPListenAddr *string
 }
@@ -25,7 +25,7 @@ func RegisterCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 	flags.ConfigPath = fs.String("config", "", "Required. Path to the YAML configuration file.")
 	flags.DryRun = fs.Bool("dry-run", false, "Optional. If true, runs in test mode, ignoring HAProxy and live logging.")
 	flags.ShowVersion = fs.Bool("version", false, "Optional. Print the application version and exit.")
-	flags.ReloadOnSignal = fs.String("reload-on-signal", "", "Optional. Controls configuration reloading via OS signals. Defaults to 'HUP'. Set to 'USR1' or 'USR2' to use a different signal. Set to 'none' to disable signal-based reloading and use file-watching instead.")
+	flags.ReloadOn = fs.String("reload-on", "", "Optional. Controls config reloading. Use `watcher` for file-watching only, or `hup`, `usr1`, `usr2` for signal-based reloads only. If absent, both watcher and `SIGHUP` are enabled.")
 	flags.TopN = fs.Int("top-n", 0, "Optional. In dry-run mode, show top N actors per chain. Default is 0 (disabled).")
 	flags.HTTPListenAddr = fs.String("http-listen-addr", "", "Optional. If set (e.g., \"127.0.0.1:8080\"), starts a web server on this address. Disabled by default.")
 	return flags

@@ -1524,26 +1524,26 @@ chains:
 func TestStart_WatcherSelection(t *testing.T) {
 	tests := []struct {
 		name                  string
-		reloadOnSignalFlag    string
+		reloadOnFlag          string
 		expectWatcherLog      string
 		dontExpectReloaderLog bool
 	}{
 		{
-			name:                  "Default behavior starts SignalReloader",
-			reloadOnSignalFlag:    "", // Default case
-			expectWatcherLog:      "Signal-based config reloading enabled",
+			name:                  "Default behavior starts both watcher and SIGHUP reloader",
+			reloadOnFlag:          "", // Default case
+			expectWatcherLog:      "Signal-based config reloading enabled. Send HUP signal to reload.",
 			dontExpectReloaderLog: false,
 		},
 		{
-			name:                  "HUP starts SignalReloader",
-			reloadOnSignalFlag:    "HUP",
-			expectWatcherLog:      "Signal-based config reloading enabled",
+			name:                  "HUP starts SignalReloader only",
+			reloadOnFlag:          "HUP",
+			expectWatcherLog:      "Signal-based config reloading enabled. Send HUP signal to reload.",
 			dontExpectReloaderLog: false,
 		},
 		{
-			name:                  "none starts ConfigWatcher",
-			reloadOnSignalFlag:    "none",
-			expectWatcherLog:      "Starting ConfigWatcher",
+			name:                  "watcher starts ConfigWatcher only",
+			reloadOnFlag:          "watcher",
+			expectWatcherLog:      "Starting ConfigWatcher, polling every", // Partial match due to dynamic polling interval
 			dontExpectReloaderLog: true,
 		},
 	}
@@ -1560,7 +1560,7 @@ func TestStart_WatcherSelection(t *testing.T) {
 			}
 
 			p := newTestProcessor(&AppConfig{}, nil)
-			p.ReloadOnSignal = tt.reloadOnSignalFlag
+			p.ReloadOn = tt.reloadOnFlag
 			p.LogFunc = logFunc
 
 			stopCh := make(chan struct{})
@@ -1568,7 +1568,7 @@ func TestStart_WatcherSelection(t *testing.T) {
 
 			// --- Act ---
 			// This is a simplified, test-safe version of the logic in main.start()
-			if strings.ToLower(p.ReloadOnSignal) != "none" {
+			if strings.ToLower(p.ReloadOn) != "watcher" {
 				go SignalReloader(p, stopCh, make(chan os.Signal, 1))
 			} else {
 				go ConfigWatcher(p, stopCh)

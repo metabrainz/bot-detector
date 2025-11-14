@@ -190,8 +190,8 @@ chains:
 			// This signal is used by the test to wait for the reload to complete.
 			ReloadDoneSignal: make(chan struct{}, 1),
 		},
-		ConfigPath:     tempFile,
-		ReloadOnSignal: "HUP", // Set for this test
+		ConfigPath: tempFile,
+		ReloadOn:   "HUP", // Set for this test
 	}
 
 	// 4. Start the SignalReloader.

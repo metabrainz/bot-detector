@@ -109,7 +109,7 @@ func main() {
 		NowFunc:              time.Now, // Use the real time.Now in production.
 		ConfigPath:           absConfigPath,
 		LogPath:              *cliFlags.LogPath,
-		ReloadOnSignal:       *cliFlags.ReloadOnSignal,
+		ReloadOn:             *cliFlags.ReloadOn,
 		TopN:                 *cliFlags.TopN,
 		HTTPListenAddr:       *cliFlags.HTTPListenAddr,
 		configReloaded:       false,
@@ -297,25 +297,28 @@ func start(p *Processor) {
 			reloadSignalCh := make(chan os.Signal, 1)
 			signal.Notify(reloadSignalCh, syscall.SIGHUP, syscall.SIGUSR1, syscall.SIGUSR2)
 
-			reloadFlag := strings.ToLower(p.ReloadOnSignal)
+			reloadFlag := strings.ToLower(p.ReloadOn)
 
 			// Determine which reloading mechanisms to start based on the flag.
-			switch {
-			case reloadFlag == "hup" || reloadFlag == "usr1" || reloadFlag == "usr2":
-				// Case 2: Flag is set to a specific signal. Watcher is disabled.
+			switch reloadFlag {
+			case "hup", "usr1", "usr2":
+				// Flag is set to a specific signal. Watcher is disabled.
 				p.LogFunc(logging.LevelInfo, "SETUP", "File watcher disabled. Reloading only on %s signal.", strings.ToUpper(reloadFlag))
 				go SignalReloader(p, stopWatcher, reloadSignalCh)
 
-			case reloadFlag == "none":
-				// Case 3: Flag is 'none'. Signal reloading is disabled.
+			case "watcher":
+				// Flag is 'watcher'. Signal reloading is disabled.
 				p.LogFunc(logging.LevelInfo, "SETUP", "Signal-based reloading disabled. Watching config file for changes.")
 				go ConfigWatcher(p, stopWatcher)
 
-			default: // This covers the case where the flag is absent (reloadFlag == "").
-				// Case 1: Flag is absent. Both watcher and SIGHUP reloader are active.
+			case "":
+				// Flag is absent. Both watcher and SIGHUP reloader are active.
 				p.LogFunc(logging.LevelInfo, "SETUP", "File watcher enabled. Also listening on SIGHUP for forced reload.")
 				go ConfigWatcher(p, stopWatcher)
-				go SignalReloader(p, stopWatcher, reloadSignalCh) // This will default to HUP when p.ReloadOnSignal is ""
+				go SignalReloader(p, stopWatcher, reloadSignalCh) // This will default to HUP when p.ReloadOn is ""
+			default:
+				// An invalid value was provided. Log a fatal error and exit.
+				log.Fatalf("[FATAL] Invalid value for --reload-on: '%s'. Must be one of 'watcher', 'hup', 'usr1', or 'usr2'.", p.ReloadOn)
 			}
 
 			if p.TopN > 0 {

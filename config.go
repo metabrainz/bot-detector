@@ -1565,19 +1565,17 @@ func initializeMetrics(p *Processor, loadedCfg *LoadedConfig) {
 // SignalReloader listens for a specific OS signal to trigger a configuration reload. //nolint:cyclop
 func SignalReloader(p *Processor, stop <-chan struct{}, signalCh chan os.Signal) {
 	var signalName string
-	// If ReloadOnSignal is not specified, default to SIGHUP.
-	// If it's explicitly set to an empty string or "none", disable signal handling.
-	if p.ReloadOnSignal == "" {
+	// If ReloadOn is not specified, default to SIGHUP.
+	if p.ReloadOn == "" {
 		signalName = "HUP"
 	} else {
-		signalName = strings.ToUpper(p.ReloadOnSignal)
+		signalName = strings.ToUpper(p.ReloadOn)
 	}
 
+	// The main function should have already validated the signal name.
+	// This check is now just a safeguard, especially for dry-run mode.
 	if _, ok := signalMap[signalName]; !ok || p.DryRun {
-		p.LogFunc(logging.LevelDebug, "RELOAD", "Signal-based config reloading is disabled.")
-		if p.ReloadOnSignal != "" && strings.ToLower(p.ReloadOnSignal) != "none" {
-			p.LogFunc(logging.LevelCritical, "FATAL", "Unsupported signal for reloading: '%s'. Use HUP, USR1, or USR2.", p.ReloadOnSignal)
-		}
+		p.LogFunc(logging.LevelDebug, "RELOAD", "Signal-based config reloading is disabled or signal is unsupported.")
 		return
 	}
 

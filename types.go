@@ -84,7 +84,7 @@ type Processor struct {
 	TestSignals          *TestSignals // Test-only signals for synchronization.
 	ConfigPath           string
 	LogPath              string `test:"-"`
-	ReloadOnSignal       string
+	ReloadOn             string
 	TopActorsPerChain    map[string]map[string]*store.ActorStats // Dry-run only: tracks top actors per chain.
 	HTTPListenAddr       string
 	TopN                 int // For dry-run stats: show top N actors.
