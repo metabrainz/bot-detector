@@ -242,12 +242,12 @@ func findFileDirectives(path string) ([]string, error) {
 			}
 		}
 	}
-
 	// Try to parse as YAML first. If it fails, fall back to plain text scan.
 	var root yaml.Node
 	decoder := yaml.NewDecoder(file)
 	if err := decoder.Decode(&root); err == nil {
 		findInNode(&root)
+		logging.LogOutput(logging.LevelInfo, "FILE_SCAN", "Successfully scanned '%s' for file directives. Found %d dependencies.", path, len(dependencies))
 		return dependencies, nil
 	}
 
@@ -275,6 +275,7 @@ func findFileDirectives(path string) ([]string, error) {
 			}
 		}
 	}
+	logging.LogOutput(logging.LevelInfo, "FILE_SCAN", "Successfully scanned '%s' for file directives. Found %d dependencies.", path, len(dependencies))
 	return dependencies, scanner.Err()
 }
 
@@ -369,6 +370,8 @@ func (fs FileStatus) String() string {
 // updateStatus polls the file on disk and updates its CurrentStatus.
 // It always preserves the previous state before updating.
 func (fd *FileDependency) updateStatus() {
+	logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "Updating status for '%s'. PreviousStatus: %+v", fd.Path, fd.PreviousStatus)
+
 	// Preserve the last known state.
 	fd.PreviousStatus = fd.CurrentStatus
 
@@ -379,10 +382,12 @@ func (fd *FileDependency) updateStatus() {
 		if os.IsNotExist(err) {
 			newStatus.Status = FileStatusMissing
 			newStatus.Error = err
+			logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "File '%s' is missing. NewStatus: %+v", fd.Path, newStatus)
 		} else {
 			// Another error occurred (e.g., permissions).
 			newStatus.Status = FileStatusError
 			newStatus.Error = err
+			logging.LogOutput(logging.LevelError, "FILE_DEP_UPDATE", "Error stating file '%s': %v. NewStatus: %+v", fd.Path, err, newStatus)
 		}
 		fd.CurrentStatus = newStatus
 		return
@@ -398,11 +403,14 @@ func (fd *FileDependency) updateStatus() {
 	if readErr != nil {
 		newStatus.Status = FileStatusError
 		newStatus.Error = readErr
+		logging.LogOutput(logging.LevelError, "FILE_DEP_UPDATE", "Error reading file '%s': %v. NewStatus: %+v", fd.Path, readErr, newStatus)
 	} else {
 		newStatus.Checksum = calculateChecksum(content)
+		logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "File '%s' read successfully. Checksum: %s", fd.Path, newStatus.Checksum)
 	}
 
 	fd.CurrentStatus = newStatus
+	logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "Finished updating status for '%s'. CurrentStatus: %+v", fd.Path, fd.CurrentStatus)
 }
 
 // hasChanged compares the PreviousStatus and CurrentStatus to see if a reload is warranted.
@@ -586,6 +594,7 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 			} else {
 				// Successfully loaded, cache the content for the matcher.
 				fileDep.Content = lines
+				logging.LogOutput(logging.LevelInfo, "FILE_DEP", "Successfully loaded content from file dependency '%s' for chain '%s', step %d, field '%s'", absoluteFilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName)
 			}
 		case FileStatusMissing, FileStatusError:
 			// If the file is missing or in error, log a warning and treat it as empty.
@@ -1332,16 +1341,6 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 
 // logFileDependencyChanges logs changes in file dependencies between old and new configurations.
 func logFileDependencyChanges(p *Processor, oldDeps, newDeps map[string]*FileDependency) {
-	// Enhanced debug logging for file dependencies.
-	p.LogFunc(logging.LevelDebug, "CONFIG", "--- Begin File Dependency State ---")
-	for path, dep := range oldDeps {
-		p.LogFunc(logging.LevelDebug, "CONFIG", "  Old: %s -> %+v", path, dep.CurrentStatus)
-	}
-	for path, dep := range newDeps {
-		p.LogFunc(logging.LevelDebug, "CONFIG", "  New: %s -> %+v", path, dep.CurrentStatus)
-	}
-	p.LogFunc(logging.LevelDebug, "CONFIG", "--- End File Dependency State ---")
-
 	var added, removed, modified []string
 
 	// Check for added or modified files
@@ -1350,19 +1349,17 @@ func logFileDependencyChanges(p *Processor, oldDeps, newDeps map[string]*FileDep
 		if !exists {
 			added = append(added, fmt.Sprintf("'%s' (Status: %s)", path, newDep.CurrentStatus.Status))
 		} else {
-			var reasons []string
-			// It's crucial to check for nil pointers before dereferencing.
-			// A file could go from existing (non-nil status) to being removed from config (nil).
+			// Compare CurrentStatus of oldDep with CurrentStatus of newDep
+			// This is the crucial part: oldDep.CurrentStatus represents the state *before* the reload.
+			// newDep.CurrentStatus represents the state *after* the reload.
 			if oldDep.CurrentStatus == nil || newDep.CurrentStatus == nil {
-				// This case should be handled by added/removed checks, but as a safeguard:
-				reasons = append(reasons, "status struct changed")
+				// This case should ideally not happen if both maps are populated correctly,
+				// but as a safeguard, treat as modified if status structs are missing.
+				modified = append(modified, fmt.Sprintf("'%s' (status struct missing in comparison)", path))
 			} else if oldDep.CurrentStatus.Status != newDep.CurrentStatus.Status {
-				reasons = append(reasons, fmt.Sprintf("status changed from %s to %s", oldDep.CurrentStatus.Status, newDep.CurrentStatus.Status))
+				modified = append(modified, fmt.Sprintf("'%s' (status changed from %s to %s)", path, oldDep.CurrentStatus.Status, newDep.CurrentStatus.Status))
 			} else if oldDep.CurrentStatus.Checksum != newDep.CurrentStatus.Checksum {
-				reasons = append(reasons, "content changed")
-			}
-			if len(reasons) > 0 {
-				modified = append(modified, fmt.Sprintf("'%s' (%s)", path, strings.Join(reasons, ", ")))
+				modified = append(modified, fmt.Sprintf("'%s' (content changed - checksum mismatch)", path))
 			}
 		}
 	}
@@ -1375,13 +1372,13 @@ func logFileDependencyChanges(p *Processor, oldDeps, newDeps map[string]*FileDep
 	}
 
 	if len(added) > 0 {
-		p.LogFunc(logging.LevelInfo, "CONFIG", "Added file dependencies: %s", strings.Join(added, ", "))
+		p.LogFunc(logging.LevelInfo, "FILE_DEP", "Added file dependencies: %s", strings.Join(added, ", "))
 	}
 	if len(removed) > 0 {
-		p.LogFunc(logging.LevelInfo, "CONFIG", "Removed file dependencies: %s", strings.Join(removed, ", "))
+		p.LogFunc(logging.LevelInfo, "FILE_DEP", "Removed file dependencies: %s", strings.Join(removed, ", "))
 	}
 	if len(modified) > 0 {
-		p.LogFunc(logging.LevelInfo, "CONFIG", "Modified file dependencies: %s", strings.Join(modified, ", "))
+		p.LogFunc(logging.LevelInfo, "FILE_DEP", "Modified file dependencies: %s", strings.Join(modified, ", "))
 	}
 }
 
@@ -1454,7 +1451,6 @@ func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 		(oldLogRegex != nil) != (loadedCfg.LogFormatRegex != nil)
 
 	if configChanged {
-		p.LogFunc(logging.LevelInfo, "CONFIG", "General configuration settings have been updated.")
 		logConfigurationSummary(p)
 	}
 

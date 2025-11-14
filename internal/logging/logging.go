@@ -16,7 +16,7 @@ const (
 	LevelDebug                    // 4: Verbose: All high-volume messages (skip, match, reset, cleanup, watch polling)
 )
 
-var currentLogLevel = LevelWarning // Default level set to WARNING
+var currentLogLevel = LevelInfo // Default level set to INFO
 var logLevelMap = map[string]LogLevel{
 	"critical": LevelCritical,
 	"error":    LevelError,
