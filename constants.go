@@ -45,3 +45,9 @@ const (
 	DefaultBlockerCommandsPerSecond = 10   // Default rate limit
 	DefaultUnblockCooldown          = "5m"
 )
+
+// Define constants for Top N table formatting
+const (
+	TopNHeaderFormat = "  %6s %6s %6s %6s %s"
+	TopNRowFormat    = "  %6d %6d %6d %6s %s"
+)

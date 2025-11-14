@@ -549,16 +549,14 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 			expectInOutput: []string{
 				"Top 1 Actors per Chain",
 				"Chain: SecondChain",
-				"    Hits  Compl.  Resets  Last Seen  Actor",
-				"    -----  ------  ------  ---------  -----",
-				"        1       1       0         5s  3.3.3.3", // Updated last seen and format
+				fmt.Sprintf(TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor"),
+				fmt.Sprintf(TopNRowFormat, 1, 1, 0, "5s", "3.3.3.3"),
 				"Chain: TopNTestChain",
-				"    Hits  Compl.  Resets  Last Seen  Actor",
-				"    -----  ------  ------  ---------  -----",
-				"        4       2       0         9s  2.2.2.2", // Updated last seen and format
+				fmt.Sprintf(TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor"),
+				fmt.Sprintf(TopNRowFormat, 4, 2, 0, "9s", "2.2.2.2"),
 			},
 			expectNotInOutput: []string{
-				"        3       1       1         8s  1.1.1.1", // Updated last seen and format
+				fmt.Sprintf(TopNRowFormat, 3, 1, 1, "8s", "1.1.1.1"),
 			},
 		},
 		{
@@ -568,14 +566,12 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 			expectInOutput: []string{
 				"Top 5 Actors per Chain",
 				"Chain: SecondChain",
-				"    Hits  Compl.  Resets  Last Seen  Actor",
-				"    -----  ------  ------  ---------  -----",
-				"        1       1       0         5s  3.3.3.3", // Updated last seen and format
+				fmt.Sprintf(TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor"),
+				fmt.Sprintf(TopNRowFormat, 1, 1, 0, "5s", "3.3.3.3"),
 				"Chain: TopNTestChain",
-				"    Hits  Compl.  Resets  Last Seen  Actor",
-				"    -----  ------  ------  ---------  -----",
-				"        4       2       0         9s  2.2.2.2", // Updated last seen and format
-				"        3       1       1         8s  1.1.1.1", // Updated last seen and format
+				fmt.Sprintf(TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor"),
+				fmt.Sprintf(TopNRowFormat, 4, 2, 0, "9s", "2.2.2.2"),
+				fmt.Sprintf(TopNRowFormat, 3, 1, 1, "8s", "1.1.1.1"),
 			},
 		},
 	}

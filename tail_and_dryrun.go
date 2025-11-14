@@ -319,8 +319,7 @@ func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, st
 		})
 
 		logFunc(logging.LevelInfo, "STATS", "  Chain: %s", chainName)
-		logFunc(logging.LevelInfo, "STATS", "    %5s  %6s  %6s  %9s  %s", "Hits", "Compl.", "Resets", "Last Seen", "Actor")
-		logFunc(logging.LevelInfo, "STATS", "    %5s  %6s  %6s  %9s  %s", "-----", "------", "------", "---------", "-----")
+		logFunc(logging.LevelInfo, "STATS", TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor")
 
 		limit := p.TopN
 		for i := 0; i < limit && i < len(stats); i++ {
@@ -339,7 +338,7 @@ func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, st
 				}
 			}
 
-			logFunc(logging.LevelInfo, "STATS", "    %5d  %6d  %6d  %9s  %s",
+			logFunc(logging.LevelInfo, "STATS", TopNRowFormat,
 				stat.Stats.Hits, stat.Stats.Completions, stat.Stats.Resets, lastSeen, stat.Actor)
 		}
 	}
