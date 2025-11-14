@@ -307,7 +307,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 		StepIndex:          0, // Or a suitable value for tests
 		CanonicalFieldName: "Path",
 		FileDependencies:   make(map[string]*FileDependency),
-		ConfigDir:          "",
+		FilePath:           "",
 	}
 	matcher, _ := compileStringMatcher(ctx, "/1")
 	chain := BehavioralChain{

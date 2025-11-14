@@ -467,8 +467,8 @@ type MatcherContext struct {
 	ChainName          string
 	StepIndex          int
 	CanonicalFieldName string
-	FileDependencies   map[string]*FileDependency // Changed to map
-	ConfigDir          string
+	FileDependencies   map[string]*FileDependency
+	FilePath           string
 }
 
 // fieldMatcher is a function type that represents a compiled matching rule.
@@ -476,14 +476,14 @@ type MatcherContext struct {
 type fieldMatcher func(entry *LogEntry) bool
 
 // compileMatchers parses the raw `field_matches` interface from YAML into a slice of efficient matcher functions.
-func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps map[string]*FileDependency, configDir string) ([]fieldMatcher, error) {
+func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps map[string]*FileDependency, filePath string) ([]fieldMatcher, error) {
 	var matchers []fieldMatcher
 	// Create the initial MatcherContext for this chain and step.
 	ctx := MatcherContext{
 		ChainName:        chainName,
 		StepIndex:        stepIndex,
 		FileDependencies: fileDeps,
-		ConfigDir:        configDir,
+		FilePath:         filePath,
 	}
 
 	for field, value := range fieldMatches {
@@ -521,7 +521,7 @@ func compileSingleMatcher(ctx MatcherContext, field string, value interface{}) (
 	case map[string]interface{}:
 		return compileObjectMatcher(subCtx, v)
 	default:
-		return nil, fmt.Errorf("chain '%s', step %d, field '%s': unsupported value type '%T'", ctx.ChainName, ctx.StepIndex+1, field, v)
+		return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': unsupported value type '%T'", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, field, v)
 	}
 }
 
@@ -575,7 +575,7 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 		if filepath.IsAbs(relativeFilePath) {
 			absoluteFilePath = relativeFilePath
 		} else {
-			absoluteFilePath = filepath.Join(ctx.ConfigDir, relativeFilePath)
+			absoluteFilePath = filepath.Join(filepath.Dir(ctx.FilePath), relativeFilePath)
 		}
 
 		// Check if the file is already loaded or needs to be loaded/reloaded
@@ -599,7 +599,7 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 				// This can happen if the file is deleted between the stat and the read.
 				fileDep.CurrentStatus.Status = FileStatusError
 				fileDep.CurrentStatus.Error = readErr
-				logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': failed to read file '%s' during config load: %v", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, absoluteFilePath, readErr)
+				logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "In file '%s': chain '%s', step %d, field '%s': failed to read file '%s' during config load: %v", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, absoluteFilePath, readErr)
 				fileDep.Content = []string{}
 			} else {
 				// Successfully loaded, cache the content for the matcher.
@@ -608,21 +608,25 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 			}
 		case FileStatusMissing, FileStatusError:
 			// If the file is missing or in error, log a warning and treat it as empty.
-			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "Chain '%s', step %d, field '%s': file matcher '%s' is %s, treating as empty. Error: %v", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, absoluteFilePath, fileDep.CurrentStatus.Status, fileDep.CurrentStatus.Error)
+			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "In file '%s': chain '%s', step %d, field '%s': file matcher '%s' is %s, treating as empty. Error: %v", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, absoluteFilePath, fileDep.CurrentStatus.Status, fileDep.CurrentStatus.Error)
 			fileDep.Content = []string{}
 		}
+
+		// Create a new context for the lines within the file.
+		fileCtx := ctx
+		fileCtx.FilePath = absoluteFilePath
 
 		// Convert []string to []interface{} to reuse compileListMatcher
 		interfaceSlice := make([]interface{}, len(fileDep.Content))
 		for i, v := range fileDep.Content {
 			interfaceSlice[i] = v
 		}
-		return compileListMatcher(ctx, interfaceSlice)
+		return compileListMatcher(fileCtx, interfaceSlice)
 	} else if strings.HasPrefix(value, "regex:") {
 		pattern := strings.TrimPrefix(value, "regex:")
 		re, err := regexp.Compile(pattern)
 		if err != nil {
-			return nil, fmt.Errorf("chain '%s', step %d, field '%s': invalid regex '%s': %w", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, pattern, err)
+			return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': invalid regex '%s': %w", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, pattern, err)
 		}
 		return func(entry *LogEntry) bool {
 			fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, StringField)
@@ -633,12 +637,12 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 		}, nil
 	} else if strings.HasPrefix(value, "cidr:") {
 		if ctx.CanonicalFieldName != "IP" {
-			return nil, fmt.Errorf("chain '%s', step %d, field '%s': 'cidr:' matcher is only supported for the 'IP' field", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName)
+			return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': 'cidr:' matcher is only supported for the 'IP' field", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName)
 		}
 		cidrStr := strings.TrimPrefix(value, "cidr:")
 		_, ipNet, err := net.ParseCIDR(cidrStr)
 		if err != nil {
-			return nil, fmt.Errorf("chain '%s', step %d, field '%s': invalid CIDR '%s' for 'cidr:' matcher: %w", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, cidrStr, err)
+			return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': invalid CIDR '%s' for 'cidr:' matcher: %w", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, cidrStr, err)
 		}
 		return func(entry *LogEntry) bool {
 			fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, StringField)
@@ -749,7 +753,7 @@ func compileObjectMatcher(ctx MatcherContext, obj map[string]interface{}) (field
 		case "not":
 			matcher, err = compileNotMatcher(ctx, val)
 		default:
-			return nil, fmt.Errorf("chain '%s', step %d, field '%s': unknown operator '%s' in object matcher", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, key)
+			return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': unknown operator '%s' in object matcher", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, key)
 		}
 		if err != nil {
 			return nil, err
@@ -776,7 +780,7 @@ func compileObjectMatcher(ctx MatcherContext, obj map[string]interface{}) (field
 func compileRangeMatcher(ctx MatcherContext, op string, value interface{}) (fieldMatcher, error) {
 	num, ok := value.(int)
 	if !ok {
-		return nil, fmt.Errorf("chain '%s', step %d, field '%s': value for '%s' must be an integer, got %T", ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, op, value)
+		return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': value for '%s' must be an integer, got %T", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, op, value)
 	}
 
 	// Validate that the field is a known numeric field at compile time.
@@ -784,7 +788,7 @@ func compileRangeMatcher(ctx MatcherContext, op string, value interface{}) (fiel
 	_, fieldType, _ := GetMatchValue(ctx.CanonicalFieldName, nil)
 	if fieldType != IntField {
 		// This error message is now more generic, which is good.
-		return nil, fmt.Errorf("chain '%s', step %d: operator '%s' is only supported for numeric fields, not '%s'", ctx.ChainName, ctx.StepIndex+1, op, ctx.CanonicalFieldName)
+		return nil, fmt.Errorf("in file '%s': chain '%s', step %d: operator '%s' is only supported for numeric fields, not '%s'", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, op, ctx.CanonicalFieldName)
 	}
 
 	// Return a function that performs the comparison on the generic numeric field.
@@ -918,7 +922,6 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read YAML file %s: %w", opts.ConfigPath, err)
 	}
-	configDir := filepath.Dir(opts.ConfigPath)
 
 	// 1. Unmarshal into a generic yaml.Node to preprocess keys.
 	var root yaml.Node
@@ -942,7 +945,15 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	decoder := yaml.NewDecoder(&normalizedYAML)
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&config); err != nil {
-		return nil, fmt.Errorf("failed to strictly unmarshal YAML (unknown field found): %w", err)
+		var e *yaml.TypeError
+		if errors.As(err, &e) {
+			var errs []string
+			for _, msg := range e.Errors {
+				errs = append(errs, strings.TrimPrefix(msg, "yaml: "))
+			}
+			return nil, fmt.Errorf("YAML syntax error in %s: %s", opts.ConfigPath, strings.Join(errs, "; "))
+		}
+		return nil, fmt.Errorf("failed to strictly unmarshal YAML from %s (unknown field found): %w", opts.ConfigPath, err)
 	}
 	// ---------------------------------------------------------------------------------
 
@@ -1262,7 +1273,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 			}
 
 			// Compile the new flexible matchers
-			runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, newFileDependencies, configDir)
+			runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, newFileDependencies, opts.ConfigPath)
 			if err != nil {
 				return nil, err // Error from compilation
 			}
@@ -1292,7 +1303,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 				ChainName:        fmt.Sprintf("good_actor '%s'", name),
 				StepIndex:        0,                   // Good actors don't have steps, use 0 or a sentinel value
 				FileDependencies: newFileDependencies, // Now using the map
-				ConfigDir:        configDir,
+				FilePath:         opts.ConfigPath,
 			}
 			switch strings.ToLower(key) {
 			case "ip":

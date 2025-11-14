@@ -685,7 +685,7 @@ version: "1.0"
 unknown_field: "some_value"
 chains: []
 `,
-			expectedError: "unknown field",
+			expectedError: "YAML syntax error",
 		},
 		{
 			name: "Missing Version",

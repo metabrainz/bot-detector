@@ -497,7 +497,7 @@ func TestCheckChains_UnblockOnGoodActor(t *testing.T) {
 		StepIndex:          0,
 		CanonicalFieldName: "IP",
 		FileDependencies:   make(map[string]*FileDependency), // Empty map for this test
-		ConfigDir:          "",                               // Empty for this test
+		FilePath:           "",                               // Empty for this test
 	}
 	goodActorMatcher, err := compileStringMatcher(goodActorCtx, goodIP)
 	if err != nil {
@@ -560,7 +560,7 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		StepIndex:          0,
 		CanonicalFieldName: "Path",
 		FileDependencies:   make(map[string]*FileDependency),
-		ConfigDir:          "",
+		FilePath:           "",
 	}
 	matcher1, _ := compileStringMatcher(ctx1, "/step1")
 
@@ -569,7 +569,7 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		StepIndex:          1,
 		CanonicalFieldName: "Path",
 		FileDependencies:   make(map[string]*FileDependency),
-		ConfigDir:          "",
+		FilePath:           "",
 	}
 	matcher2, _ := compileStringMatcher(ctx2, "/step2")
 	chain.Steps = []StepDef{
