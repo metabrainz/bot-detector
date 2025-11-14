@@ -573,8 +573,14 @@ func TestCheckChains_TimeRules(t *testing.T) {
 	}
 	matcher2, _ := compileStringMatcher(ctx2, "/step2")
 	chain.Steps = []StepDef{
-		{Order: 1, MinTimeSinceLastHit: 2 * time.Second, Matchers: []fieldMatcher{matcher1}},
-		{Order: 2, Matchers: []fieldMatcher{matcher2}},
+		{Order: 1, MinTimeSinceLastHit: 2 * time.Second, Matchers: []struct {
+			Matcher   fieldMatcher
+			FieldName string
+		}{{Matcher: matcher1, FieldName: "Path"}}},
+		{Order: 2, Matchers: []struct {
+			Matcher   fieldMatcher
+			FieldName string
+		}{{Matcher: matcher2, FieldName: "Path"}}},
 	}
 
 	chains := []BehavioralChain{chain}

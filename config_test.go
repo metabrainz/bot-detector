@@ -193,10 +193,10 @@ chains:
 	matcher := loadedCfg.Chains[0].Steps[0].Matchers[0]
 
 	// Test cases
-	if !matcher(&LogEntry{StatusCode: 404}) { // 404 <= 404 -> true
+	if !matcher.Matcher(&LogEntry{StatusCode: 404}) { // 404 <= 404 -> true
 		t.Error("Matcher failed for lte boundary")
 	}
-	if matcher(&LogEntry{StatusCode: 400}) { // 400 > 400 -> false
+	if matcher.Matcher(&LogEntry{StatusCode: 400}) { // 400 > 400 -> false
 		t.Error("Matcher failed for gt boundary")
 	}
 }
@@ -624,7 +624,7 @@ chains:
 	matcher := loadedCfg.Chains[0].Steps[0].Matchers[0]
 
 	// This entry should NOT match because "GET" != "123"
-	if matcher(&LogEntry{Method: "GET"}) {
+	if matcher.Matcher(&LogEntry{Method: "GET"}) {
 		t.Error("Matcher incorrectly matched 'GET' with integer 123.")
 	}
 }
@@ -1334,7 +1334,7 @@ chains:
 
 	// The single matcher function should now only match the new agent.
 	matcherFunc := processor.Chains[0].Steps[0].Matchers[0]
-	if matcherFunc(entryWithOldAgent) || !matcherFunc(entryWithNewAgent) {
+	if matcherFunc.Matcher(entryWithOldAgent) || !matcherFunc.Matcher(entryWithNewAgent) {
 		t.Error("The file-based matcher was not updated correctly after the dependency file was reloaded.")
 	}
 }
@@ -1626,7 +1626,7 @@ func runMatcherTest(t *testing.T, yamlContent string, testCases map[string]struc
 					val = tc.entry.Size
 				}
 			}
-			if got := matcher(tc.entry); got != tc.expected {
+			if got := matcher.Matcher(tc.entry); got != tc.expected {
 				// Use a more generic error message to handle both Path and StatusCode tests.
 				t.Errorf("Matcher returned %v, expected %v for entry value '%v'", got, tc.expected, val)
 			}

@@ -313,7 +313,10 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 	chain := BehavioralChain{
 		Name: "dryrun_chain",
 		Steps: []StepDef{
-			{Order: 1, Matchers: []fieldMatcher{matcher}},
+			{Order: 1, Matchers: []struct {
+				Matcher   fieldMatcher
+				FieldName string
+			}{{Matcher: matcher, FieldName: "Path"}}},
 		},
 		Action:        "block",
 		BlockDuration: time.Minute,

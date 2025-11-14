@@ -516,8 +516,14 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 	}
 	// Correctly create matchers without capturing loop variables.
 	chain1.Steps = []StepDef{
-		{Matchers: []fieldMatcher{func(path string) func(e *LogEntry) bool { return func(e *LogEntry) bool { return e.Path == path } }("/step1")}},
-		{MaxDelayDuration: 3 * time.Second, Matchers: []fieldMatcher{func(path string) func(e *LogEntry) bool { return func(e *LogEntry) bool { return e.Path == path } }("/step2")}},
+		{Matchers: []struct {
+			Matcher   fieldMatcher
+			FieldName string
+		}{{Matcher: func(path string) func(e *LogEntry) bool { return func(e *LogEntry) bool { return e.Path == path } }("/step1"), FieldName: "Path"}}},
+		{MaxDelayDuration: 3 * time.Second, Matchers: []struct {
+			Matcher   fieldMatcher
+			FieldName string
+		}{{Matcher: func(path string) func(e *LogEntry) bool { return func(e *LogEntry) bool { return e.Path == path } }("/step2"), FieldName: "Path"}}},
 	}
 
 	chain2 := BehavioralChain{
@@ -526,7 +532,10 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 		MatchKey: "ip",
 	}
 	chain2.Steps = []StepDef{
-		{Matchers: []fieldMatcher{func(path string) func(e *LogEntry) bool { return func(e *LogEntry) bool { return e.Path == path } }("/other-chain-trigger")}},
+		{Matchers: []struct {
+			Matcher   fieldMatcher
+			FieldName string
+		}{{Matcher: func(path string) func(e *LogEntry) bool { return func(e *LogEntry) bool { return e.Path == path } }("/other-chain-trigger"), FieldName: "Path"}}},
 	}
 
 	tests := []struct {

@@ -489,8 +489,14 @@ type MatcherContext struct {
 type fieldMatcher func(entry *LogEntry) bool
 
 // compileMatchers parses the raw `field_matches` interface from YAML into a slice of efficient matcher functions.
-func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps map[string]*FileDependency, filePath string) ([]fieldMatcher, error) {
-	var matchers []fieldMatcher
+func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps map[string]*FileDependency, filePath string) ([]struct {
+	Matcher   fieldMatcher
+	FieldName string
+}, error) {
+	var matchers []struct {
+		Matcher   fieldMatcher
+		FieldName string
+	}
 	// Create the initial MatcherContext for this chain and step.
 	ctx := MatcherContext{
 		ChainName:        chainName,
@@ -501,17 +507,20 @@ func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]in
 
 	for field, value := range fieldMatches {
 		// Field names are already normalized by normalizeYAMLKeys before this function is called.
-		matcher, err := compileSingleMatcher(ctx, field, value)
+		matcher, fieldName, err := compileSingleMatcher(ctx, field, value)
 		if err != nil {
 			return nil, err // Propagate error up
 		}
-		matchers = append(matchers, matcher)
+		matchers = append(matchers, struct {
+			Matcher   fieldMatcher
+			FieldName string
+		}{Matcher: matcher, FieldName: fieldName})
 	}
 	return matchers, nil
 }
 
 // compileSingleMatcher is a large switch that handles the different value "shapes" (string, int, list, map).
-func compileSingleMatcher(ctx MatcherContext, field string, value interface{}) (fieldMatcher, error) {
+func compileSingleMatcher(ctx MatcherContext, field string, value interface{}) (fieldMatcher, string, error) {
 	// Convert the incoming fieldName to its canonical PascalCase form for internal matching.
 	// This ensures that YAML keys like "ip" map correctly to LogEntry.IPInfo.
 	canonicalFieldName, ok := FieldNameCanonicalMap[strings.ToLower(field)]
@@ -524,18 +533,26 @@ func compileSingleMatcher(ctx MatcherContext, field string, value interface{}) (
 	subCtx := ctx
 	subCtx.CanonicalFieldName = canonicalFieldName
 
+	var matcher fieldMatcher
+	var err error
+
 	switch v := value.(type) {
 	case string:
-		return compileStringMatcher(subCtx, v)
+		matcher, err = compileStringMatcher(subCtx, v)
 	case int:
-		return compileIntMatcher(subCtx, v), nil
+		matcher, err = compileIntMatcher(subCtx, v), nil
 	case []interface{}:
-		return compileListMatcher(subCtx, v)
+		matcher, err = compileListMatcher(subCtx, v)
 	case map[string]interface{}:
-		return compileObjectMatcher(subCtx, v)
+		matcher, err = compileObjectMatcher(subCtx, v)
 	default:
-		return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': unsupported value type '%T'", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, field, v)
+		return nil, "", fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': unsupported value type '%T'", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, field, v)
 	}
+
+	if err != nil {
+		return nil, "", err
+	}
+	return matcher, canonicalFieldName, nil
 }
 
 // readLinesFromFile is a helper to read a file into a slice of strings, ignoring comments and empty lines.
@@ -735,7 +752,7 @@ func compileListMatcher(ctx MatcherContext, values []interface{}) (fieldMatcher,
 	for _, item := range values {
 		// Pass the existing context to the sub-matcher.
 		// The canonicalFieldName is already set in ctx by compileSingleMatcher.
-		matcher, err := compileSingleMatcher(ctx, ctx.CanonicalFieldName, item)
+		matcher, _, err := compileSingleMatcher(ctx, ctx.CanonicalFieldName, item)
 		if err != nil {
 			return nil, err // Error in a sub-matcher
 		}
@@ -838,7 +855,7 @@ func compileNotMatcher(ctx MatcherContext, value interface{}) (fieldMatcher, err
 		subMatcher, err = compileListMatcher(ctx, values)
 	} else {
 		// Otherwise, compile it as a single matcher.
-		subMatcher, err = compileSingleMatcher(ctx, ctx.CanonicalFieldName, value)
+		subMatcher, _, err = compileSingleMatcher(ctx, ctx.CanonicalFieldName, value)
 	}
 
 	if err != nil {
