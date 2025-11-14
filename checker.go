@@ -106,7 +106,7 @@ func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*store.ActorA
 	if activity.IsBlocked {
 		if time.Now().After(activity.BlockedUntil) {
 			// Block has expired, clear it and proceed.
-			p.LogFunc(logging.LevelInfo, "EXPIRE", "Chain-specific block expired for actor %s (UA: %s).", actor.IPInfo.Address, actor.UA)
+			p.LogFunc(logging.LevelDebug, "EXPIRE", "Chain-specific block expired for actor %s (UA: %s).", actor.IPInfo.Address, actor.UA)
 			activity.IsBlocked = false
 			activity.SkipInfo = store.SkipInfo{} // Clear the skip info.
 			activity.BlockedUntil = time.Time{}
