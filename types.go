@@ -284,8 +284,11 @@ type StepState struct {
 
 // StepDef holds the compiled definition of a single step in a behavioral chain.
 type StepDef struct {
-	Order               int
-	Matchers            []struct { Matcher fieldMatcher; FieldName string } // Changed: Now stores matcher and its associated field name.
+	Order    int
+	Matchers []struct {
+		Matcher   fieldMatcher
+		FieldName string
+	} // Changed: Now stores matcher and its associated field name.
 	MaxDelayDuration    time.Duration
 	MinDelayDuration    time.Duration
 	MinTimeSinceLastHit time.Duration
