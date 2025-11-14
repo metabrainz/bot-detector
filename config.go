@@ -1107,7 +1107,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	newFallbackName := ""
 
 	for durationStr, tableName := range config.DurationTables {
-		duration, err := time.ParseDuration(durationStr)
+		duration, err := utils.ParseDuration(durationStr)
 		if err != nil {
 			return nil, fmt.Errorf("invalid duration '%s' in 'duration_tables': %w", durationStr, err)
 		}
