@@ -375,7 +375,10 @@ func (fs FileStatus) String() string {
 // updateStatus polls the file on disk and updates its CurrentStatus.
 // It always preserves the previous state before updating.
 func (fd *FileDependency) updateStatus() {
-	logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "Updating status for '%s'. PreviousStatus: %+v", fd.Path, fd.PreviousStatus)
+	debug := false
+	if debug {
+		logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "Updating status for '%s'. PreviousStatus: %+v", fd.Path, fd.PreviousStatus)
+	}
 
 	// Preserve the last known state.
 	fd.PreviousStatus = fd.CurrentStatus
@@ -387,12 +390,16 @@ func (fd *FileDependency) updateStatus() {
 		if os.IsNotExist(err) {
 			newStatus.Status = FileStatusMissing
 			newStatus.Error = err
-			logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "File '%s' is missing. NewStatus: %+v", fd.Path, newStatus)
+			if debug {
+				logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "File '%s' is missing. NewStatus: %+v", fd.Path, newStatus)
+			}
 		} else {
 			// Another error occurred (e.g., permissions).
 			newStatus.Status = FileStatusError
 			newStatus.Error = err
-			logging.LogOutput(logging.LevelError, "FILE_DEP_UPDATE", "Error stating file '%s': %v. NewStatus: %+v", fd.Path, err, newStatus)
+			if debug {
+				logging.LogOutput(logging.LevelError, "FILE_DEP_UPDATE", "Error stating file '%s': %v. NewStatus: %+v", fd.Path, err, newStatus)
+			}
 		}
 		fd.CurrentStatus = newStatus
 		return
@@ -408,14 +415,20 @@ func (fd *FileDependency) updateStatus() {
 	if readErr != nil {
 		newStatus.Status = FileStatusError
 		newStatus.Error = readErr
-		logging.LogOutput(logging.LevelError, "FILE_DEP_UPDATE", "Error reading file '%s': %v. NewStatus: %+v", fd.Path, readErr, newStatus)
+		if debug {
+			logging.LogOutput(logging.LevelError, "FILE_DEP_UPDATE", "Error reading file '%s': %v. NewStatus: %+v", fd.Path, readErr, newStatus)
+		}
 	} else {
 		newStatus.Checksum = calculateChecksum(content)
-		logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "File '%s' read successfully. Checksum: %s", fd.Path, newStatus.Checksum)
+		if debug {
+			logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "File '%s' read successfully. Checksum: %s", fd.Path, newStatus.Checksum)
+		}
 	}
 
 	fd.CurrentStatus = newStatus
-	logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "Finished updating status for '%s'. CurrentStatus: %+v", fd.Path, fd.CurrentStatus)
+	if debug {
+		logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "Finished updating status for '%s'. CurrentStatus: %+v", fd.Path, fd.CurrentStatus)
+	}
 }
 
 // hasChanged compares the PreviousStatus and CurrentStatus to see if a reload is warranted.
