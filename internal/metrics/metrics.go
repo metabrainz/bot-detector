@@ -18,6 +18,7 @@ type Metrics struct {
 	BlockDurations      *sync.Map
 	CmdsPerBlocker      *sync.Map
 	StepExecutionCounts *sync.Map // New: Counter for each logical step executed.
+	MetricsEnabled      bool      // New: Flag to enable/disable metric collection.
 
 	// General counters with struct tags for metadata.
 	// `metric:"..."` is the display name.
@@ -52,5 +53,6 @@ func NewMetrics() *Metrics {
 		BlockDurations:      &sync.Map{},
 		CmdsPerBlocker:      &sync.Map{},
 		StepExecutionCounts: &sync.Map{}, // Initialize the new field
+		MetricsEnabled:      false,       // Initialize to false by default
 	}
 }
