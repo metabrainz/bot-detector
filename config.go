@@ -1586,21 +1586,21 @@ func SignalReloader(p *Processor, stop <-chan struct{}, signalCh chan os.Signal)
 	// The main function should have already validated the signal name.
 	// This check is now just a safeguard, especially for dry-run mode.
 	if _, ok := signalMap[signalName]; !ok || p.DryRun {
-		p.LogFunc(logging.LevelDebug, "RELOAD", "Signal-based config reloading is disabled or signal is unsupported.")
+		p.LogFunc(logging.LevelDebug, "SIGNAL", "Signal-based config reloading is disabled or signal is unsupported.")
 		return
 	}
 
 	// The signal channel is already notified by the caller in main.go.
 
-	p.LogFunc(logging.LevelInfo, "RELOAD", "Signal-based config reloading enabled. Send %s signal to reload.", signalName)
+	p.LogFunc(logging.LevelInfo, "SIGNAL", "Signal-based config reloading enabled. Send %s signal to reload.", signalName)
 
 	for {
 		select {
 		case <-stop:
-			p.LogFunc(logging.LevelInfo, "RELOAD", "SignalReloader received stop signal. Shutting down.")
+			p.LogFunc(logging.LevelInfo, "SIGNAL", "SignalReloader received stop signal. Shutting down.")
 			return
 		case s := <-signalCh:
-			p.LogFunc(logging.LevelInfo, "RELOAD", "Received signal %s. Reloading configuration...", s)
+			p.LogFunc(logging.LevelInfo, "SIGNAL", "Received signal %s. Reloading configuration...", s)
 			func() { // Use an anonymous function to scope the defer correctly.
 				// Defer the test signal to ensure it's sent whether the reload succeeds or fails.
 				if p.TestSignals != nil && p.TestSignals.ReloadDoneSignal != nil {
