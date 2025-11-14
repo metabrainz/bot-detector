@@ -330,6 +330,28 @@ The simplest match is a direct value. The parser intelligently determines the ma
 
 For more complex string matching, use a prefix.
 
+> #### **A Note on Prefix Parsing**
+>
+> The parser is strict about how it identifies and handles prefixes to ensure that matching is predictable and explicit.
+>
+> *   **Prefixes Must Be at the Start:** A prefix (`regex:`, `exact:`, `file:`, `cidr:`) is only detected if it appears at the very beginning of a string value.
+>
+> *   **Leading Spaces Matter:** If there are any leading spaces before a prefix, the string is **not** treated as a directive. Instead, it is treated as a literal string for an exact match.
+>
+> *   **Spaces in Values are Preserved:** For directives, the value is everything that follows the prefix, including any leading or trailing spaces.
+>
+> *   **Plain Values are Trimmed:** If a string does not start with a recognized prefix, it is considered a plain value, and any leading or trailing whitespace is trimmed before it is used for an exact match.
+>
+> **Examples:**
+>
+> | YAML / File Line | Parsed As | Match Behavior |
+> | :--- | :--- | :--- |
+> | `regex:^/path` | Regex | Matches a path starting with `/path`. |
+> | `  regex:^/path` | Literal String | Matches the exact string `"  regex:^/path"`. |
+> | `regex: ^/path ` | Regex | The pattern is `" ^/path "`. Matches a path that starts and ends with a space. |
+> | `exact:  value  ` | Exact String | The value is `"  value  "`. Matches a value that starts and ends with spaces. |
+| `  my-value  ` | Plain Value | The value is trimmed to `"my-value"`. Matches the exact string `"my-value"`. |
+
 *   **Exact String (Explicit):** Use `exact:` to force a literal string match for a value that could be misinterpreted as another prefix type. This is useful for rare edge cases.
     ```yaml
     path: "exact:file:not-a-real-path" # Matches the literal string "file:not-a-real-path"

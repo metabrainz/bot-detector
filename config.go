@@ -251,9 +251,19 @@ func findFileDirectives(path string, isMainConfig bool) ([]string, error) {
 		// Included files are treated as plain text.
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if strings.HasPrefix(line, filePrefix) {
-				relativeDepPath := strings.TrimSpace(strings.TrimPrefix(line, filePrefix))
+			rawLine := scanner.Text()
+			// First, check if the line is empty or a comment after trimming.
+			// This ensures we don't process empty lines or comments as directives.
+			trimmedForCheck := strings.TrimSpace(rawLine)
+			if trimmedForCheck == "" || strings.HasPrefix(trimmedForCheck, "#") {
+				continue
+			}
+
+			// Now, check for the exact "file:" prefix on the raw line.
+			// This ensures no spaces before "file:".
+			if strings.HasPrefix(rawLine, filePrefix) {
+				// Extract the path, preserving its leading/trailing spaces.
+				relativeDepPath := strings.TrimPrefix(rawLine, filePrefix) // No TrimSpace here
 				if relativeDepPath != "" {
 					var absoluteDepPath string
 					if filepath.IsAbs(relativeDepPath) {
@@ -528,11 +538,16 @@ func ReadLinesFromFile(path string) ([]string, error) {
 	var lines []string
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		// Ignore empty lines and lines that start with '#'
-		if line != "" && !strings.HasPrefix(line, "#") {
-			lines = append(lines, line)
+		rawLine := scanner.Text()
+
+		// Check if the line is empty or a comment after trimming for check.
+		trimmedForCheck := strings.TrimSpace(rawLine)
+		if trimmedForCheck == "" || strings.HasPrefix(trimmedForCheck, "#") {
+			continue
 		}
+
+		// Add the raw line to be processed by the caller.
+		lines = append(lines, rawLine)
 	}
 	return lines, scanner.Err()
 }
@@ -658,13 +673,31 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 		}
 	}
 
-	// Default for string is exact match
+	// Default case
+	trimmedValue := strings.TrimSpace(value)
+	// If the trimmed value looks like a directive, it means the raw value had spaces.
+	// In that case, we should use the raw value for exact match.
+	if strings.HasPrefix(trimmedValue, "exact:") ||
+		strings.HasPrefix(trimmedValue, "regex:") ||
+		strings.HasPrefix(trimmedValue, "cidr:") ||
+		strings.HasPrefix(trimmedValue, "file:") {
+		// This is a "spaced-out" directive, treat as literal on the raw value.
+		return func(entry *LogEntry) bool {
+			fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, StringField)
+			if fieldVal == nil {
+				return false
+			}
+			return fieldVal.(string) == value
+		}, nil
+	}
+
+	// Otherwise, it's a plain value, use the trimmed value for exact match.
 	return func(entry *LogEntry) bool {
 		fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, StringField)
 		if fieldVal == nil {
 			return false
 		}
-		return fieldVal.(string) == value
+		return fieldVal.(string) == trimmedValue
 	}, nil
 }
 
