@@ -1,47 +1,31 @@
-# --- STAGE 1: Build the Go application ---
-FROM golang:1.22-alpine AS builder
+# Stage 1: Build the Go application
+FROM golang:1.25-alpine AS builder
 
-# Set necessary environment variables
-ENV CGO_ENABLED=0 \
-    GOOS=linux
-
-# Create and set the working directory inside the container
 WORKDIR /app
 
-# Copy the Go application source code
-COPY main.go .
-# Copy the dependency file (assuming config.yaml is needed for final image)
-COPY config.yaml .
-
-# Fetch Go dependencies (Go 1.16+ handles this automatically if no go.mod/go.sum, 
-# but including a placeholder for future dependency management)
-
-# Initialize go modules and download dependencies
-RUN go mod init bot-detector
+# Copy Go module files and download dependencies
+COPY go.mod go.sum ./
+RUN go mod download
 RUN go mod tidy
 
-# Build the Go application
-# Use the -a flag to ensure a statically linked binary for the final Alpine image
-RUN go build -a -ldflags '-s -w' -o bot-detector main.go
+# Copy the rest of the source code
+COPY . .
 
+# Build the Go application for a static binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bot-detector .
 
-# --- STAGE 2: Create the final minimal image ---
+# Stage 2: Create the final minimal image
 FROM alpine:latest
 
-# Security best practice: use a non-root user
+# Create a non-root user for security
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 
-# Set the working directory
 WORKDIR /home/appuser/bot-detector
 
 # Copy the built binary from the builder stage
 COPY --from=builder /app/bot-detector .
 
-# Copy the configuration file (which will be mounted over by the host)
-COPY --from=builder /app/config.yaml .
-
-# Set default command if user runs without arguments (helpful for debugging/info)
+# Default command to show help
 ENTRYPOINT ["./bot-detector"]
 CMD ["-h"]
-
