@@ -34,6 +34,11 @@ var signalMap = map[string]os.Signal{
 	"USR2": syscall.SIGUSR2,
 }
 
+// GetMarshalledConfig reads the raw configuration file from disk.
+func (p *Processor) GetMarshalledConfig() ([]byte, error) {
+	return os.ReadFile(p.ConfigPath)
+}
+
 // main is the application entry point.
 func main() {
 	cliFlags := RegisterCLIFlags(flag.CommandLine)

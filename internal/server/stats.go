@@ -9,19 +9,18 @@ import (
 	"time"
 )
 
-// MetricsProvider defines the interface that the stats server needs to access
-// metrics and configuration from the main application.
-type MetricsProvider interface {
+// Provider defines the interface that the server needs from the main application.
+type Provider interface {
 	GetListenAddr() string
 	GenerateHTMLMetricsReport() string
 	GenerateStepsMetricsReport() string
 	GetShutdownChannel() chan os.Signal
 	Log(level logging.LogLevel, tag string, format string, v ...interface{})
+	GetMarshalledConfig() ([]byte, error)
 }
 
-// Start runs the metrics web server in a goroutine.
-// It takes a MetricsProvider to decouple it from the main Processor struct.
-func Start(p MetricsProvider) {
+// Start runs the web server in a goroutine.
+func Start(p Provider) {
 	listenAddr := p.GetListenAddr()
 	if listenAddr == "" {
 		p.Log(logging.LevelDebug, "HTTP_SERVER", "HTTP server is disabled.")
@@ -30,7 +29,8 @@ func Start(p MetricsProvider) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/stats", statsPageHandler(p))
-	mux.HandleFunc("/stats/steps", stepsStatsPageHandler(p)) // New endpoint for step metrics
+	mux.HandleFunc("/stats/steps", stepsStatsPageHandler(p))
+	mux.HandleFunc("/config", configHandler(p)) // Register the new handler
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/stats", http.StatusFound) // 302 Found
 	})
@@ -78,7 +78,7 @@ func servePage(w http.ResponseWriter, r *http.Request, title string, content str
 }
 
 // stepsStatsPageHandler creates an HTTP handler that displays the step execution stats.
-func stepsStatsPageHandler(p MetricsProvider) http.HandlerFunc {
+func stepsStatsPageHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reportContent := p.GenerateStepsMetricsReport()
 		servePage(w, r, "Bot-Detector Step Stats", reportContent, "step_stats.html")
@@ -86,7 +86,7 @@ func stepsStatsPageHandler(p MetricsProvider) http.HandlerFunc {
 }
 
 // statsPageHandler creates an HTTP handler that displays the current stats.
-func statsPageHandler(p MetricsProvider) http.HandlerFunc {
+func statsPageHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reportContent := p.GenerateHTMLMetricsReport()
 		servePage(w, r, "Bot-Detector Stats", reportContent, "stats.html")

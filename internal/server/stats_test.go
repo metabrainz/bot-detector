@@ -2,11 +2,13 @@ package server
 
 import (
 	"bot-detector/internal/logging"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -14,43 +16,51 @@ import (
 	"time"
 )
 
-// mockMetricsProvider is a mock implementation of the MetricsProvider interface for testing.
-type mockMetricsProvider struct {
+// mockProvider is a mock implementation of the Provider interface for testing.
+type mockProvider struct {
 	listenAddr         string
 	reportContent      string
 	stepsReportContent string // New field for step metrics report
+	configPath         string // New field for the config file path
 	shutdownCh         chan os.Signal
 	readyCh            chan struct{} // Closed when the server is ready to accept connections.
 	logMutex           sync.Mutex
 	logs               []string
 }
 
-func newMockProvider(addr, report string) *mockMetricsProvider {
-	return &mockMetricsProvider{
+func newMockProvider(addr, report string) *mockProvider {
+	return &mockProvider{
 		listenAddr:    addr,
 		reportContent: report,
 		shutdownCh:    make(chan os.Signal, 1),
-		readyCh:       make(chan struct{}),
+		readyCh:       make(chan struct{}, 1),
 	}
 }
 
-func (m *mockMetricsProvider) GetListenAddr() string {
+func (m *mockProvider) GetListenAddr() string {
 	return m.listenAddr
 }
 
-func (m *mockMetricsProvider) GenerateHTMLMetricsReport() string {
+func (m *mockProvider) GenerateHTMLMetricsReport() string {
 	return m.reportContent
 }
 
-func (m *mockMetricsProvider) GenerateStepsMetricsReport() string {
+func (m *mockProvider) GenerateStepsMetricsReport() string {
 	return m.stepsReportContent
 }
 
-func (m *mockMetricsProvider) GetShutdownChannel() chan os.Signal {
+func (m *mockProvider) GetShutdownChannel() chan os.Signal {
 	return m.shutdownCh
 }
 
-func (m *mockMetricsProvider) Log(level logging.LogLevel, tag string, format string, v ...interface{}) {
+func (m *mockProvider) GetMarshalledConfig() ([]byte, error) {
+	if m.configPath == "" {
+		return nil, errors.New("config path not set in mock")
+	}
+	return os.ReadFile(m.configPath)
+}
+
+func (m *mockProvider) Log(level logging.LogLevel, tag string, format string, v ...interface{}) {
 	logMsg := fmt.Sprintf(format, v...)
 	m.logMutex.Lock()
 	m.logs = append(m.logs, logMsg)
@@ -172,6 +182,74 @@ func TestServer_StepsEndpoint(t *testing.T) {
 	wg.Wait()
 }
 
+// TestServer_ConfigEndpoint verifies the /config endpoint.
+func TestServer_ConfigEndpoint(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to listen on a free port: %v", err)
+	}
+	addr := listener.Addr().String()
+	_ = listener.Close()
+
+	mockProvider := newMockProvider(addr, "")
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		Start(mockProvider)
+	}()
+
+	select {
+	case <-mockProvider.readyCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Timed out waiting for server to start.")
+	}
+
+	// --- Test Case 1: Successful config retrieval ---
+	tempDir := t.TempDir()
+	configFile := filepath.Join(tempDir, "config.yaml")
+	expectedConfig := "version: 1.0\nchains: []"
+	if err := os.WriteFile(configFile, []byte(expectedConfig), 0600); err != nil {
+		t.Fatalf("Failed to write temp config file: %v", err)
+	}
+	mockProvider.configPath = configFile
+
+	resp, err := http.Get("http://" + addr + "/config")
+	if err != nil {
+		t.Fatalf("Failed to make GET request to /config: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status code 200 for /config, got %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != expectedConfig {
+		t.Errorf("Expected config '%s', got '%s'", expectedConfig, string(body))
+	}
+
+	// --- Test Case 2: Error retrieving config (file not found) ---
+	mockProvider.configPath = filepath.Join(tempDir, "non-existent.yaml")
+
+	resp, err = http.Get("http://" + addr + "/config")
+	if err != nil {
+		t.Fatalf("Failed to make GET request to /config: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("Expected status code 500 for /config error, got %d", resp.StatusCode)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "failed to read config file") {
+		t.Errorf("Expected error message, got '%s'", string(body))
+	}
+
+	mockProvider.shutdownCh <- syscall.SIGTERM
+	wg.Wait()
+}
+
 // TestServer_Disabled verifies that the server does not start if the listen address is empty.
 func TestServer_Disabled(t *testing.T) {
 	mockProvider := newMockProvider("", "") // Empty address
@@ -180,6 +258,6 @@ func TestServer_Disabled(t *testing.T) {
 	Start(mockProvider)
 
 	if len(mockProvider.logs) != 1 || !strings.Contains(mockProvider.logs[0], "HTTP server is disabled") {
-		t.Errorf("Expected a 'server disabled' log message, but got: %v", mockProvider.logs)
+		t.Errorf("Expected disabled server log message, but got: %v", mockProvider.logs)
 	}
 }
