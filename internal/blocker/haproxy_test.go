@@ -125,8 +125,8 @@ func TestHAProxyBlocker_Unblock(t *testing.T) {
 	defer h.mu.Unlock()
 
 	expectedCmds := map[string]struct{}{
-		"clear table table_10m_ipv4 key 192.0.2.1":  {},
-		"clear table table_long_ipv4 key 192.0.2.1": {},
+		"set table table_10m_ipv4 key 192.0.2.1 data.gpc0 0":  {},
+		"set table table_long_ipv4 key 192.0.2.1 data.gpc0 0": {},
 	}
 
 	if len(h.commands) != len(expectedCmds) {

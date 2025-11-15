@@ -140,7 +140,7 @@ func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo) error {
 	for baseName := range baseTables {
 		tableName := baseName + ipSuffix
 		targets[tableName] = make(map[string]string)
-		command := fmt.Sprintf("clear table %s key %s\n", tableName, ipInfo.Address)
+		command := fmt.Sprintf("set table %s key %s data.gpc0 0\n", tableName, ipInfo.Address)
 		for _, addr := range b.P.GetBlockerAddresses() {
 			targets[tableName][addr] = command
 		}
