@@ -11,7 +11,8 @@ import (
 type Blocker interface {
 	Block(ipInfo utils.IPInfo, duration time.Duration) error
 	Unblock(ipInfo utils.IPInfo) error
-	ListBlocked() ([]string, error) // New method
+	ListBlocked() ([]string, error)
+	CompareHAProxyBackends(expTolerance time.Duration) ([]SyncDiscrepancy, error) // New method
 }
 
 // LogProvider defines the interface for logging, decoupling the blocker from the main logger.
@@ -93,6 +94,12 @@ func (b *RateLimitedBlocker) Unblock(ipInfo utils.IPInfo) error {
 // ListBlocked retrieves all currently blocked IPs from the wrapped blocker.
 func (b *RateLimitedBlocker) ListBlocked() ([]string, error) {
 	return b.WrappedBlocker.ListBlocked()
+}
+
+// CompareHAProxyBackends compares the stick table entries across multiple HAProxy backends
+// by delegating the call to the wrapped blocker.
+func (b *RateLimitedBlocker) CompareHAProxyBackends(expTolerance time.Duration) ([]SyncDiscrepancy, error) {
+	return b.WrappedBlocker.CompareHAProxyBackends(expTolerance)
 }
 
 // Stop stops the command queue worker.

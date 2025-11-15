@@ -36,6 +36,10 @@ func (m *mockWrappedBlocker) ListBlocked() ([]string, error) {
 	return m.blockedIPs, nil
 }
 
+func (m *mockWrappedBlocker) CompareHAProxyBackends(expTolerance time.Duration) ([]blocker.SyncDiscrepancy, error) {
+	return []blocker.SyncDiscrepancy{}, nil
+}
+
 // mockProvider implements both LogProvider and MetricsProvider for testing.
 type mockProvider struct {
 	cmdsDropped atomic.Int32

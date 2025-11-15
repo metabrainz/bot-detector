@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/blocker" // Added for blocker.SyncDiscrepancy
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/store"
@@ -48,9 +49,10 @@ func resetGlobalState() {
 
 // MockBlocker implements the Blocker interface for testing, allowing Block() calls to be intercepted.
 type MockBlocker struct {
-	BlockFunc       func(ipInfo utils.IPInfo, duration time.Duration) error
-	UnblockFunc     func(ipInfo utils.IPInfo) error
-	ListBlockedFunc func() ([]string, error)
+	BlockFunc             func(ipInfo utils.IPInfo, duration time.Duration) error
+	UnblockFunc           func(ipInfo utils.IPInfo) error
+	ListBlockedFunc       func() ([]string, error)
+	CompareHAProxyBackendsFunc func(expTolerance time.Duration) ([]blocker.SyncDiscrepancy, error)
 }
 
 // Block calls the stored mock function to simulate the blocking action.
@@ -75,6 +77,14 @@ func (m *MockBlocker) ListBlocked() ([]string, error) {
 		return m.ListBlockedFunc()
 	}
 	return []string{}, nil
+}
+
+// CompareHAProxyBackends calls the stored mock function to simulate comparing HAProxy backends.
+func (m *MockBlocker) CompareHAProxyBackends(expTolerance time.Duration) ([]blocker.SyncDiscrepancy, error) {
+	if m.CompareHAProxyBackendsFunc != nil {
+		return m.CompareHAProxyBackendsFunc(expTolerance)
+	}
+	return []blocker.SyncDiscrepancy{}, nil
 }
 
 // newTestProcessor creates a new Processor instance with sensible defaults for testing.
