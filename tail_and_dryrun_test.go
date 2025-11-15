@@ -221,6 +221,25 @@ func TestHasFileBeenRotated(t *testing.T) {
 			expected:    false, // Cannot detect rotation without initial stat
 			initialStat: nil,
 		},
+		{
+			name: "Initial Stat Sys() is nil",
+			mockStatFunc: func(path string) (os.FileInfo, error) {
+				return &mockFileInfo{size: 2048, sys: &syscall.Stat_t{Dev: 1, Ino: 12345}}, nil
+			},
+			expected: false,
+			initialStat: &mockFileInfo{
+				size: 1024,
+				sys:  nil, // Simulate Sys() returning nil
+			},
+		},
+		{
+			name: "Current Stat Sys() is nil",
+			mockStatFunc: func(path string) (os.FileInfo, error) {
+				return &mockFileInfo{size: 2048, sys: nil}, nil
+			},
+			expected:    false,
+			initialStat: initialStat,
+		},
 	}
 
 	for _, tt := range tests {

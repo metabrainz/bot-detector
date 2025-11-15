@@ -105,11 +105,23 @@ func hasFileBeenRotated(p *Processor, filePath string, initialStat os.FileInfo, 
 	}
 
 	// Check for Inode/Device change (rotation).
-	initialSysStat := initialStat.Sys().(*syscall.Stat_t)
-	currentSysStat := currentStat.Sys().(*syscall.Stat_t)
-	if currentSysStat.Dev != initialSysStat.Dev || currentSysStat.Ino != initialSysStat.Ino {
-		p.LogFunc(logging.LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialSysStat.Ino, currentSysStat.Ino)
-		return true
+	initialSys := initialStat.Sys()
+	currentSys := currentStat.Sys()
+
+	if initialSys != nil && currentSys != nil {
+		initialSysStat, ok1 := initialSys.(*syscall.Stat_t)
+		currentSysStat, ok2 := currentSys.(*syscall.Stat_t)
+
+		if ok1 && ok2 {
+			if currentSysStat.Dev != initialSysStat.Dev || currentSysStat.Ino != initialSysStat.Ino {
+				p.LogFunc(logging.LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialSysStat.Ino, currentSysStat.Ino)
+				return true
+			}
+		} else {
+			p.LogFunc(logging.LevelWarning, "TAIL_WARN", "Could not assert syscall.Stat_t for initial or current file. Inode/Device rotation detection impaired.")
+		}
+	} else {
+		p.LogFunc(logging.LevelDebug, "TAIL_DEBUG", "Sys() call returned nil for initial or current file. Inode/Device rotation detection skipped.")
 	}
 
 	return false
@@ -723,8 +735,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 		// Get initial file stats for rotation/truncation detection
 		initialStat, statErr := file.Stat()
 		if statErr == nil {
-			initialSysStat := initialStat.Sys().(*syscall.Stat_t)
-			p.LogFunc(logging.LevelDebug, "TAIL", "Initial file state: Size=%d, Inode=%d, Device=%d", initialStat.Size(), initialSysStat.Ino, initialSysStat.Dev)
+			p.LogFunc(logging.LevelDebug, "TAIL", "Initial file state: Size=%d", initialStat.Size())
 		} else {
 			p.LogFunc(logging.LevelWarning, "TAIL_WARN", "Failed to get initial file stat: %v. Rotation detection may be impaired.", statErr)
 			// If we can't stat the file, the handle is likely bad. Close it and restart the loop.
