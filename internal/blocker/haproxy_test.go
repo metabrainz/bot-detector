@@ -3,6 +3,7 @@ package blocker_test
 import (
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/utils" // Added for IPInfo
 	"bufio"
 	"fmt"
 	"net"
@@ -85,7 +86,7 @@ func TestHAProxyBlocker_Block(t *testing.T) {
 	h := newHAProxyTestHarness(t)
 	h.mockProvider.durationTables[10*time.Minute] = "table_10m"
 
-	ipInfo := blocker.IPInfo{Address: "192.0.2.1", Version: 4}
+	ipInfo := utils.NewIPInfo("192.0.2.1")
 	duration := 10 * time.Minute
 
 	err := h.blocker.Block(ipInfo, duration)
@@ -109,7 +110,7 @@ func TestHAProxyBlocker_Unblock(t *testing.T) {
 	h.mockProvider.durationTables[10*time.Minute] = "table_10m"
 	h.mockProvider.blockTableNameFallback = "table_long"
 
-	ipInfo := blocker.IPInfo{Address: "192.0.2.1", Version: 4}
+	ipInfo := utils.NewIPInfo("192.0.2.1")
 
 	err := h.blocker.Unblock(ipInfo)
 	if err != nil {
@@ -140,7 +141,7 @@ func TestHAProxyBlocker_Block_Fallback(t *testing.T) {
 	h.mockProvider.durationTables[5*time.Minute] = "table_5m"
 	h.mockProvider.blockTableNameFallback = "table_fallback"
 
-	ipInfo := blocker.IPInfo{Address: "192.0.2.5", Version: 4}
+	ipInfo := utils.NewIPInfo("192.0.2.5")
 	unconfiguredDuration := 30 * time.Minute
 
 	err := h.blocker.Block(ipInfo, unconfiguredDuration)
@@ -175,7 +176,7 @@ func TestHAProxyBlocker_ErrorTolerance(t *testing.T) {
 		return nil
 	}
 
-	ipInfo := blocker.IPInfo{Address: "2001:db8::1", Version: 6}
+	ipInfo := utils.NewIPInfo("2001:db8::1")
 
 	err := h.blocker.Unblock(ipInfo)
 	if err == nil {

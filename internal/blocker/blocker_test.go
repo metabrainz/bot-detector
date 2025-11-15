@@ -3,6 +3,7 @@ package blocker_test
 import (
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/utils" // Added for IPInfo
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -11,21 +12,28 @@ import (
 
 // mockWrappedBlocker is a mock for the underlying Blocker interface.
 type mockWrappedBlocker struct {
-	blockCount   atomic.Int32
-	unblockCount atomic.Int32
-	processCh    chan struct{}
+	blockCount       atomic.Int32
+	unblockCount     atomic.Int32
+	listBlockedCount atomic.Int32
+	processCh        chan struct{}
+	blockedIPs       []string // For ListBlocked
 }
 
-func (m *mockWrappedBlocker) Block(ipInfo blocker.IPInfo, duration time.Duration) error {
+func (m *mockWrappedBlocker) Block(ipInfo utils.IPInfo, duration time.Duration) error {
 	m.blockCount.Add(1)
 	m.processCh <- struct{}{}
 	return nil
 }
 
-func (m *mockWrappedBlocker) Unblock(ipInfo blocker.IPInfo) error {
+func (m *mockWrappedBlocker) Unblock(ipInfo utils.IPInfo) error {
 	m.unblockCount.Add(1)
 	m.processCh <- struct{}{}
 	return nil
+}
+
+func (m *mockWrappedBlocker) ListBlocked() ([]string, error) {
+	m.listBlockedCount.Add(1)
+	return m.blockedIPs, nil
 }
 
 // mockProvider implements both LogProvider and MetricsProvider for testing.
@@ -78,7 +86,7 @@ func TestRateLimitedBlocker_BlockAndUnblock(t *testing.T) {
 	// --- Test Blocking ---
 	numBlockCommands := 5
 	for i := 0; i < numBlockCommands; i++ {
-		ip := blocker.IPInfo{Address: fmt.Sprintf("192.168.1.%d", i)}
+		ip := utils.NewIPInfo(fmt.Sprintf("192.168.1.%d", i))
 		_ = h.rlb.Block(ip, 5*time.Minute)
 	}
 
@@ -91,7 +99,7 @@ func TestRateLimitedBlocker_BlockAndUnblock(t *testing.T) {
 	// --- Test Unblocking ---
 	numUnblockCommands := 3
 	for i := 0; i < numUnblockCommands; i++ {
-		ip := blocker.IPInfo{Address: fmt.Sprintf("192.168.2.%d", i)}
+		ip := utils.NewIPInfo(fmt.Sprintf("192.168.2.%d", i))
 		_ = h.rlb.Unblock(ip)
 	}
 
@@ -109,7 +117,7 @@ func TestRateLimitedBlocker_QueueFull(t *testing.T) {
 	// Fill the queue (size 2) and send one more to be dropped.
 	numCommands := 3
 	for i := 0; i < numCommands; i++ {
-		ip := blocker.IPInfo{Address: fmt.Sprintf("192.168.1.%d", i)}
+		ip := utils.NewIPInfo(fmt.Sprintf("192.168.1.%d", i))
 		_ = h.rlb.Block(ip, 5*time.Minute)
 	}
 
@@ -130,7 +138,7 @@ func TestRateLimitedBlocker_QueueFull(t *testing.T) {
 func TestRateLimitedBlocker_Stop(t *testing.T) {
 	h := newRateLimiterTestHarness(t, 10, 100) // High rate
 
-	ip := blocker.IPInfo{Address: "192.168.1.1"}
+	ip := utils.NewIPInfo("192.168.1.1")
 	_ = h.rlb.Block(ip, 5*time.Minute)
 
 	h.waitForCommands(1)

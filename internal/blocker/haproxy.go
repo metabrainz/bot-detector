@@ -2,6 +2,7 @@ package blocker
 
 import (
 	"bot-detector/internal/logging"
+	"bot-detector/internal/utils" // Added for IPInfo
 	"bufio"
 	"errors"
 	"fmt"
@@ -43,7 +44,7 @@ func NewHAProxyBlocker(p HAProxyProvider, dryRun bool) *HAProxyBlocker {
 }
 
 // Block adds an IP to the appropriate HAProxy stick table.
-func (b *HAProxyBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
+func (b *HAProxyBlocker) Block(ipInfo utils.IPInfo, duration time.Duration) error {
 	if b.IsDryRun {
 		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would block IP %s for %v (Chain complete).", ipInfo.Address, duration)
 		return nil
@@ -81,7 +82,7 @@ func (b *HAProxyBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
 }
 
 // Unblock removes an IP from all configured HAProxy stick tables.
-func (b *HAProxyBlocker) Unblock(ipInfo IPInfo) error {
+func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo) error {
 	if b.IsDryRun {
 		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would unblock IP %s from all tables/maps.", ipInfo.Address)
 		return nil
@@ -165,6 +166,55 @@ func (b *HAProxyBlocker) executeCommandImpl(addr, ip, command string) error {
 	return lastErr
 }
 
+// executeCommandImpl connects to a single HAProxy instance and executes a command.
+func (b *HAProxyBlocker) executeHAProxyCommand(addr, command string) (string, error) {
+	network := "tcp"
+	if strings.Contains(addr, "/") {
+		network = "unix"
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < b.P.GetBlockerMaxRetries(); attempt++ {
+		if attempt > 0 {
+			b.P.IncrementBlockerRetries()
+			b.P.Log(logging.LevelWarning, "HAPROXY_RETRY", "Retrying HAProxy command for %s (Attempt %d/%d)", addr, attempt+1, b.P.GetBlockerMaxRetries())
+			time.Sleep(b.P.GetBlockerRetryDelay())
+		}
+
+		conn, err := net.DialTimeout(network, addr, b.P.GetBlockerDialTimeout())
+		if err != nil {
+			lastErr = fmt.Errorf("failed to connect to HAProxy instance %s: %w", addr, err)
+			continue
+		}
+		defer func() {
+			_ = conn.Close()
+		}()
+
+		if _, err = conn.Write([]byte(command)); err != nil {
+			lastErr = fmt.Errorf("failed to send command to HAProxy instance %s: %w", addr, err)
+			continue
+		}
+
+		reader := bufio.NewReader(conn)
+		_ = conn.SetReadDeadline(time.Now().Add(b.P.GetBlockerDialTimeout()))
+		response, err := reader.ReadString('\n')
+
+		if err == nil || (errors.Is(err, io.EOF) && response != "") {
+			trimmedResponse := strings.TrimSpace(response)
+			if trimmedResponse == "200 OK" {
+				b.P.IncrementCmdsPerBlocker(addr)
+				return trimmedResponse, nil
+			} else if strings.HasPrefix(trimmedResponse, "500") || strings.HasPrefix(trimmedResponse, "400") {
+				return "", fmt.Errorf("HAProxy command execution failed on %s (Response: %s)", addr, trimmedResponse)
+			}
+			b.P.IncrementCmdsPerBlocker(addr)
+			return trimmedResponse, nil
+		}
+		lastErr = fmt.Errorf("HAProxy response read error from %s: %w", addr, err)
+	}
+	return "", lastErr
+}
+
 // executeCommandsConcurrently handles the concurrent execution of multiple commands.
 func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[string]map[string]string, commandType string) error {
 	addresses := b.P.GetBlockerAddresses()
@@ -199,4 +249,124 @@ func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[stri
 		return fmt.Errorf("%d HAProxy '%s' commands failed for IP %s", numErrs, commandType, ip)
 	}
 	return nil
+}
+
+// ListBlocked retrieves all currently blocked IPs from HAProxy.
+func (b *HAProxyBlocker) ListBlocked() ([]string, error) {
+	if b.IsDryRun {
+		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would list blocked IPs.")
+		return []string{}, nil
+	}
+
+	addresses := b.P.GetBlockerAddresses()
+	if len(addresses) == 0 {
+		b.P.Log(logging.LevelWarning, "SKIP_COMMAND", "HAProxy addresses list is empty. Skipping 'list blocked' command.")
+		return nil, nil
+	}
+
+	var (
+		allBlockedIPs = make(map[string]struct{})
+		mu            sync.Mutex
+		wg            sync.WaitGroup
+		errs          = make(chan error, len(addresses))
+	)
+
+	for _, addr := range addresses {
+		wg.Add(1)
+		go func(currentAddr string) {
+			defer wg.Done()
+
+			// 1. Get all table names
+			tableNames, err := b.getHAProxyTableNames(currentAddr)
+			if err != nil {
+				errs <- fmt.Errorf("failed to get table names from %s: %w", currentAddr, err)
+				return
+			}
+
+			// 2. For each table, get blocked IPs
+			for _, tableName := range tableNames {
+				ipsInTable, err := b.getHAProxyIPsInTable(currentAddr, tableName)
+				if err != nil {
+					errs <- fmt.Errorf("failed to get IPs from table %s on %s: %w", tableName, currentAddr, err)
+					return
+				}
+
+				mu.Lock()
+				for _, ip := range ipsInTable {
+					allBlockedIPs[ip] = struct{}{}
+				}
+				mu.Unlock()
+			}
+		}(addr)
+	}
+
+	wg.Wait()
+	close(errs)
+
+	if numErrs := len(errs); numErrs > 0 {
+		b.P.Log(logging.LevelWarning, "HAPROXY_WARN", "One or more HAProxy instances failed to list blocked IPs. Total failures: %d", numErrs)
+		// Collect all errors
+		var errorMessages []string
+		for err := range errs {
+			errorMessages = append(errorMessages, err.Error())
+		}
+		return nil, fmt.Errorf("%d HAProxy 'list blocked' commands failed: %s", numErrs, strings.Join(errorMessages, "; "))
+	}
+
+	var result []string
+	for ip := range allBlockedIPs {
+		result = append(result, ip)
+	}
+	return result, nil
+}
+
+// getHAProxyTableNames executes "show table" and parses the response to get table names.
+func (b *HAProxyBlocker) getHAProxyTableNames(addr string) ([]string, error) {
+	command := "show table\n"
+	response, err := b.executeHAProxyCommand(addr, command)
+	if err != nil {
+		return nil, err
+	}
+
+	var tableNames []string
+	scanner := bufio.NewScanner(strings.NewReader(response))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "# table: ") {
+			parts := strings.Split(line, ",")
+			if len(parts) > 0 {
+				tableNamePart := strings.TrimPrefix(parts[0], "# table: ")
+				tableName := strings.TrimSpace(tableNamePart)
+				tableNames = append(tableNames, tableName)
+			}
+		}
+	}
+	return tableNames, scanner.Err()
+}
+
+// getHAProxyIPsInTable executes "show table <name>" and parses the response to get IPs.
+func (b *HAProxyBlocker) getHAProxyIPsInTable(addr, tableName string) ([]string, error) {
+	command := fmt.Sprintf("show table %s\n", tableName)
+	response, err := b.executeHAProxyCommand(addr, command)
+	if err != nil {
+		return nil, err
+	}
+
+	var ips []string
+	scanner := bufio.NewScanner(strings.NewReader(response))
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Example line: "0x564f26146268: key=1.10.230.15 use=0 exp=51153745 gpc0=1"
+		if strings.Contains(line, "key=") && strings.Contains(line, "gpc0=1") {
+			parts := strings.Fields(line)
+			for _, part := range parts {
+				if strings.HasPrefix(part, "key=") {
+					ip := strings.TrimPrefix(part, "key=")
+					ips = append(ips, ip)
+					break
+				}
+			}
+		}
+	}
+	return ips, scanner.Err()
 }

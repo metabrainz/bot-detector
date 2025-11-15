@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
@@ -336,10 +335,10 @@ func executeBlock(p *Processor, entry *LogEntry, chain *BehavioralChain) {
 	if p.DryRun { // Should not happen due to caller check, but safe to keep.
 		return // Do not execute block in dry-run mode.
 	}
-	// Convert main.IPInfo to blocker.IPInfo before calling the blocker.
-	blockerIPInfo := blocker.IPInfo{
+	// Convert main.IPInfo to utils.IPInfo before calling the blocker.
+	blockerIPInfo := utils.IPInfo{
 		Address: entry.IPInfo.Address,
-		Version: byte(entry.IPInfo.Version),
+		Version: entry.IPInfo.Version,
 	}
 	if err := p.Blocker.Block(blockerIPInfo, chain.BlockDuration); err != nil {
 		// The error is logged inside the HAProxyBlocker, but not the RateLimitedBlocker. Log it here for safety.
@@ -716,10 +715,10 @@ func CheckChains(p *Processor, entry *LogEntry) {
 			// Check if the cooldown has passed or if it has never been unblocked.
 			if activity.LastUnblockTime.IsZero() || time.Since(activity.LastUnblockTime) > unblockCooldown {
 				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s. Issuing unblock command.", entry.IPInfo.Address)
-				// Convert main.IPInfo to blocker.IPInfo before calling the blocker.
-				blockerIPInfo := blocker.IPInfo{
+				// Convert main.IPInfo to utils.IPInfo before calling the blocker.
+				blockerIPInfo := utils.IPInfo{
 					Address: entry.IPInfo.Address,
-					Version: byte(entry.IPInfo.Version),
+					Version: entry.IPInfo.Version,
 				}
 				// The blocker's Unblock method is non-blocking and rate-limited.
 				if err := p.Blocker.Unblock(blockerIPInfo); err != nil {

@@ -2,14 +2,16 @@ package blocker
 
 import (
 	"bot-detector/internal/logging"
+	"bot-detector/internal/utils" // Import utils for IPInfo
 	"sync"
 	"time"
 )
 
 // Blocker defines the interface for external IP blocking services (e.g., HAProxy).
 type Blocker interface {
-	Block(ipInfo IPInfo, duration time.Duration) error
-	Unblock(ipInfo IPInfo) error
+	Block(ipInfo utils.IPInfo, duration time.Duration) error
+	Unblock(ipInfo utils.IPInfo) error
+	ListBlocked() ([]string, error) // New method
 }
 
 // LogProvider defines the interface for logging, decoupling the blocker from the main logger.
@@ -27,7 +29,7 @@ type MetricsProvider interface {
 // BlockerCommand defines a command to be executed by the blocker.
 type BlockerCommand struct {
 	Action   string
-	IPInfo   IPInfo
+	IPInfo   utils.IPInfo // Use utils.IPInfo
 	Duration time.Duration
 }
 
@@ -61,7 +63,7 @@ func NewRateLimitedBlocker(lp LogProvider, mp MetricsProvider, wrapped Blocker, 
 }
 
 // Block adds a block command to the queue.
-func (b *RateLimitedBlocker) Block(ipInfo IPInfo, duration time.Duration) error {
+func (b *RateLimitedBlocker) Block(ipInfo utils.IPInfo, duration time.Duration) error {
 	command := BlockerCommand{Action: "block", IPInfo: ipInfo, Duration: duration}
 	select {
 	case b.CommandQueue <- command:
@@ -75,7 +77,7 @@ func (b *RateLimitedBlocker) Block(ipInfo IPInfo, duration time.Duration) error 
 }
 
 // Unblock adds an unblock command to the queue.
-func (b *RateLimitedBlocker) Unblock(ipInfo IPInfo) error {
+func (b *RateLimitedBlocker) Unblock(ipInfo utils.IPInfo) error {
 	command := BlockerCommand{Action: "unblock", IPInfo: ipInfo}
 	select {
 	case b.CommandQueue <- command:
@@ -86,6 +88,11 @@ func (b *RateLimitedBlocker) Unblock(ipInfo IPInfo) error {
 		b.IncrementBlockerCmdsDropped()
 	}
 	return nil
+}
+
+// ListBlocked retrieves all currently blocked IPs from the wrapped blocker.
+func (b *RateLimitedBlocker) ListBlocked() ([]string, error) {
+	return b.WrappedBlocker.ListBlocked()
 }
 
 // Stop stops the command queue worker.
