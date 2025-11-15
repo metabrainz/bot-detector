@@ -13,7 +13,9 @@ func TestSnapshotting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() {
+		_ = os.RemoveAll(dir)
+	}()
 
 	path := filepath.Join(dir, "state.snapshot")
 
@@ -75,7 +77,9 @@ func TestJournaling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() {
+		_ = os.RemoveAll(dir)
+	}()
 
 	path := filepath.Join(dir, "events.log")
 
@@ -104,7 +108,7 @@ func TestJournaling(t *testing.T) {
 	if err := WriteEventToJournal(handle, event2); err != nil {
 		t.Fatalf("WriteEventToJournal failed for event 2: %v", err)
 	}
-	handle.Close()
+	_ = handle.Close()
 
 	data, err := os.ReadFile(path)
 	if err != nil {

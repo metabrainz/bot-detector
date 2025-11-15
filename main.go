@@ -155,6 +155,11 @@ func main() {
 	p.signalOooBufferFlush = p.doSignalOooBufferFlush
 	initializeMetrics(p, loadedCfg)
 
+	haproxyBlocker := blocker.NewHAProxyBlocker(p, p.DryRun)
+	rateLimitedBlocker := blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.BlockerCommandQueueSize, p.Config.BlockerCommandsPerSecond)
+	p.Blocker = rateLimitedBlocker
+	defer rateLimitedBlocker.Stop() // Ensure the rate limiter worker is stopped on exit.
+
 	if p.persistenceEnabled {
 		// -- STATE RESTORATION --
 		p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.stateDir)
@@ -190,7 +195,9 @@ func main() {
 					}
 				}
 			}
-			journalFile.Close()
+			if err := journalFile.Close(); err != nil {
+				p.LogFunc(logging.LevelWarning, "JOURNAL_CLOSE_FAIL", "Failed to close journal file: %v", err)
+			}
 		} else if !os.IsNotExist(err) {
 			p.LogFunc(logging.LevelWarning, "JOURNAL_OPEN_FAIL", "Could not open journal file for replay: %v", err)
 		}
@@ -220,7 +227,9 @@ func main() {
 						break
 					}
 				}
-				p.Blocker.Block(utils.NewIPInfo(ip), bestFitDuration, info.Reason)
+				if err := p.Blocker.Block(utils.NewIPInfo(ip), bestFitDuration, info.Reason); err != nil {
+					p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore block for IP %s: %v", ip, err)
+				}
 			}
 		}
 
@@ -232,8 +241,8 @@ func main() {
 		}
 	}
 
-	haproxyBlocker := blocker.NewHAProxyBlocker(p, p.DryRun)
-	rateLimitedBlocker := blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.BlockerCommandQueueSize, p.Config.BlockerCommandsPerSecond)
+	haproxyBlocker = blocker.NewHAProxyBlocker(p, p.DryRun)
+	rateLimitedBlocker = blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.BlockerCommandQueueSize, p.Config.BlockerCommandsPerSecond)
 
 	p.Blocker = rateLimitedBlocker
 	defer rateLimitedBlocker.Stop() // Ensure the rate limiter worker is stopped on exit.

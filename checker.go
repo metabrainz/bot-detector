@@ -713,12 +713,11 @@ func CheckChains(p *Processor, entry *LogEntry) {
 	// Create the base actor for this entry. This is used for good_actor checks,
 	// pre-checks, and out-of-order buffering logic.
 	actor := Actor{IPInfo: entry.IPInfo}
+	activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 
 	// 1. First, check if the entry is a good actor. This will set the SkipInfo on the actor's activity.
 	isGood, goodActorRuleName := isGoodActor(p, entry)
 	if isGood {
-		activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
-
 		// Only log the skip message and set the state the first time.
 		if activity.SkipInfo.Type == utils.SkipTypeNone {
 			activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeGoodActor, Source: goodActorRuleName}
