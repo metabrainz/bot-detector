@@ -149,6 +149,13 @@ func main() {
 		compactionInterval: loadedCfg.Persistence.CompactionInterval,
 		activeBlocks:       make(map[string]persistence.ActiveBlockInfo),
 	}
+
+	// Command-line flag overrides YAML for persistence
+	if cliFlags.StateDir != nil && *cliFlags.StateDir != "" {
+		p.persistenceEnabled = true
+		p.stateDir = *cliFlags.StateDir
+	}
+
 	p.startTime = p.NowFunc() // Record the start time.
 	// TestSignals is intentionally left nil in production.
 	// Set up the signalOooBufferFlush field to call the method.
@@ -162,6 +169,9 @@ func main() {
 
 	if p.persistenceEnabled {
 		// -- STATE RESTORATION --
+		if err := os.MkdirAll(p.stateDir, 0750); err != nil {
+			log.Fatalf("[FATAL] Failed to create state directory '%s': %v", p.stateDir, err)
+		}
 		p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.stateDir)
 
 		// 1. Load snapshot

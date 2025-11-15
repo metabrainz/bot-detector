@@ -16,22 +16,25 @@ type CLIFlagValues struct {
 	ReloadOn    *string
 	TopN        *int
 	HTTPServer  *string
+	ListBlocked *bool
+	StateDir    *string
 	Check       *bool
-	ListBlocked *bool // New flag
 }
 
-// RegisterCLIFlags registers the command-line flags with the global flag set.
+// RegisterCLIFlags registers the command line flags.
 func RegisterCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
-	flags := &CLIFlagValues{}
-	flags.LogPath = fs.String("log-path", "", "Path to the access log file. Required for live mode. If omitted in dry-run mode, reads from stdin.")
-	flags.ConfigPath = fs.String("config", "", "Required. Path to the YAML configuration file.")
-	flags.DryRun = fs.Bool("dry-run", false, "Optional. If true, runs in test mode, ignoring HAProxy and live logging.")
-	flags.ShowVersion = fs.Bool("version", false, "Optional. Print the application version and exit.")
-	flags.ReloadOn = fs.String("reload-on", "", "Optional. Controls config reloading. Use `watcher` for file-watching only, or `hup`, `usr1`, `usr2` for signal-based reloads only. If absent, both watcher and `SIGHUP` are enabled.")
-	flags.TopN = fs.Int("top-n", 0, "Optional. In dry-run mode, show top N actors per chain. Default is 0 (disabled).")
-	flags.HTTPServer = fs.String("http-server", "", "Optional. If set (e.g., \"127.0.0.1:8080\"), starts a web server on this address to display live metrics. Disabled by default.")
-	flags.Check = fs.Bool("check", false, "Optional. If true, validates the configuration file and exits. Returns a non-zero exit code on failure.")
-	flags.ListBlocked = fs.Bool("list-blocked", false, "Optional. If true, lists all currently blocked IPs and exits.")
+	flags := &CLIFlagValues{
+		ConfigPath:  fs.String("config", "config.yaml", "Path to the configuration file."),
+		LogPath:     fs.String("log-path", "", "Path to the log file to monitor."),
+		DryRun:      fs.Bool("dry-run", false, "Enable dry-run mode. Processes a static log file and exits."),
+		ShowVersion: fs.Bool("version", false, "Show the application version and exit."),
+		Check:       fs.Bool("check", false, "Check the configuration file for validity and exit."),
+		ReloadOn:    fs.String("reload-on", "", "Trigger a configuration reload on a specific signal (hup, usr1, usr2) or 'watcher'. By default, both are enabled."),
+		TopN:        fs.Int("top-n", 0, "Number of top actors to display in the metrics summary."),
+		HTTPServer:  fs.String("http-server", "", "Enable the HTTP server for metrics on the given address (e.g., :8080)."),
+		ListBlocked: fs.Bool("list-blocked", false, "List currently blocked IPs and exit."),
+		StateDir:    fs.String("state-dir", "", "Path to the state directory. Enables persistence if set."),
+	}
 	return flags
 }
 
