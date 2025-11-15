@@ -245,407 +245,644 @@ func (b *HAProxyBlocker) executeHAProxyCommand(addr, command string) (string, er
 }
 
 // executeCommandsConcurrently handles the concurrent execution of multiple commands.
+
 func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[string]map[string]string, commandType string) error {
+
 	addresses := b.P.GetBlockerAddresses()
+
 	if len(addresses) == 0 {
+
 		b.P.Log(logging.LevelWarning, "SKIP_COMMAND", "HAProxy addresses list is empty. Skipping '%s' command for IP %s.", commandType, ip)
+
 		return nil
+
 	}
 
 	var wg sync.WaitGroup
+
 	errs := make(chan error, len(targets)*len(addresses))
 
 	for tableName, commandsByAddr := range targets {
+
 		for addr, command := range commandsByAddr {
+
 			wg.Add(1)
+
 			go func(a, c, tn string) {
+
 				defer wg.Done()
+
 				if err := b.Executor(a, ip, c); err != nil {
+
 					errs <- err
+
 					b.P.Log(logging.LevelError, "HAPROXY_FAIL", "HAProxy command failed on instance %s for IP %s (Table %s): %v", a, ip, tn, err)
+
 				} else {
+
 					b.P.Log(logging.LevelDebug, "HAPROXY_SUCCESS", "Successfully sent command for IP %s on instance %s to table %s.", ip, a, tn)
+
 				}
+
 			}(addr, command, tableName)
+
 		}
+
 	}
 
 	wg.Wait()
+
 	close(errs)
 
 	if numErrs := len(errs); numErrs > 0 {
+
 		b.P.Log(logging.LevelWarning, "HAPROXY_WARN", "One or more HAProxy instances failed to process command for IP %s. Total failures: %d", ip, numErrs)
+
 		return fmt.Errorf("%d HAProxy '%s' commands failed for IP %s", numErrs, commandType, ip)
+
 	}
+
 	return nil
+
 }
 
-// DumpBackends retrieves all currently blocked IPs from HAProxy.
+// DumpBackends retrieves all currently blocked and unblocked IPs from HAProxy.
+
 func (b *HAProxyBlocker) DumpBackends() ([]string, error) {
+
 	if b.IsDryRun {
+
 		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would list blocked IPs.")
+
 		return []string{}, nil
+
 	}
 
 	addresses := b.P.GetBlockerAddresses()
+
 	if len(addresses) == 0 {
+
 		b.P.Log(logging.LevelWarning, "SKIP_COMMAND", "HAProxy addresses list is empty. Skipping 'list blocked' command.")
+
 		return nil, nil
+
 	}
 
 	var (
-		allBlockedIPs = make(map[string]struct{})
-		mu            sync.Mutex
-		wg            sync.WaitGroup
-		errs          = make(chan error, len(addresses))
+		allIPs = make(map[string]string) // Use map to store ip -> status, ensuring uniqueness
+
+		mu sync.Mutex
+
+		wg sync.WaitGroup
+
+		errs = make(chan error, len(addresses))
 	)
 
 	for _, addr := range addresses {
+
 		wg.Add(1)
+
 		go func(currentAddr string) {
+
 			defer wg.Done()
 
 			// 1. Get all table names
+
 			tableNames, err := b.getHAProxyTableNames(currentAddr)
+
 			if err != nil {
+
 				errs <- fmt.Errorf("failed to get table names from %s: %w", currentAddr, err)
+
 				return
+
 			}
 
-			// 2. For each table, get blocked IPs
+			// 2. For each table, get all IPs (blocked and unblocked)
+
 			for _, tableName := range tableNames {
-				entriesInTable, err := b.getHAProxyIPsInTable(currentAddr, tableName)
+
+				entriesInTable, err := b.getHAProxyAllIPsInTable(currentAddr, tableName)
+
 				if err != nil {
+
 					errs <- fmt.Errorf("failed to get IPs from table %s on %s: %w", tableName, currentAddr, err)
+
 					return
+
 				}
 
 				mu.Lock()
+
 				for _, entry := range entriesInTable {
-					allBlockedIPs[entry.IP] = struct{}{}
+
+					status := "U"
+
+					if entry.Gpc0 > 0 {
+
+						status = "B"
+
+					}
+
+					// If an IP is in multiple states, the last one seen wins. This is a reasonable
+
+					// trade-off for this simple format.
+
+					allIPs[entry.IP] = status
+
 				}
+
 				mu.Unlock()
+
 			}
+
 		}(addr)
+
 	}
 
 	wg.Wait()
+
 	close(errs)
 
 	if numErrs := len(errs); numErrs > 0 {
-		b.P.Log(logging.LevelWarning, "HAPROXY_WARN", "One or more HAProxy instances failed to list blocked IPs. Total failures: %d", numErrs)
+
+		b.P.Log(logging.LevelWarning, "HAPROXY_WARN", "One or more HAProxy instances failed to list IPs. Total failures: %d", numErrs)
+
 		// Collect all errors
+
 		var errorMessages []string
+
 		for err := range errs {
+
 			errorMessages = append(errorMessages, err.Error())
+
 		}
-		return nil, fmt.Errorf("%d HAProxy 'list blocked' commands failed: %s", numErrs, strings.Join(errorMessages, "; "))
+
+		return nil, fmt.Errorf("%d HAProxy 'dump backends' commands failed: %s", numErrs, strings.Join(errorMessages, "; "))
+
 	}
 
 	var result []string
-	for ip := range allBlockedIPs {
-		result = append(result, ip)
+
+	for ip, status := range allIPs {
+
+		result = append(result, fmt.Sprintf("%s|%s", ip, status))
+
 	}
+
 	return result, nil
+
 }
 
 // CompareHAProxyBackends compares the stick table entries across multiple HAProxy backends
+
 // and reports any synchronization discrepancies.
+
 func (b *HAProxyBlocker) CompareHAProxyBackends(expTolerance time.Duration) ([]SyncDiscrepancy, error) {
+
 	addresses := b.P.GetBlockerAddresses()
+
 	if len(addresses) < 2 {
+
 		return nil, fmt.Errorf("at least two HAProxy addresses are required for comparison")
+
 	}
 
 	// Map to store all entries from all backends: backend_addr -> table_name -> ip_addr -> HAProxyTableEntry
+
 	allBackendEntries := make(map[string]map[string]map[string]HAProxyTableEntry)
 
 	var (
-		wg   sync.WaitGroup
-		mu   sync.Mutex // Protects allBackendEntries and errors
+		wg sync.WaitGroup
+
+		mu sync.Mutex // Protects allBackendEntries and errors
+
 		errs []error
 	)
 
 	// Concurrently fetch all entries from all backends
+
 	for _, addr := range addresses {
+
 		wg.Add(1)
+
 		go func(currentAddr string) {
+
 			defer wg.Done()
 
 			backendEntries := make(map[string]map[string]HAProxyTableEntry)
+
 			tableNames, err := b.getHAProxyTableNames(currentAddr)
+
 			if err != nil {
+
 				mu.Lock()
+
 				errs = append(errs, fmt.Errorf("failed to get table names from %s: %w", currentAddr, err))
+
 				mu.Unlock()
+
 				return
+
 			}
 
 			for _, tableName := range tableNames {
+
 				entries, err := b.getHAProxyAllIPsInTable(currentAddr, tableName)
+
 				if err != nil {
+
 					mu.Lock()
+
 					errs = append(errs, fmt.Errorf("failed to get entries from table %s on %s: %w", tableName, currentAddr, err))
+
 					mu.Unlock()
+
 					return
+
 				}
+
 				if len(entries) > 0 {
+
 					if _, ok := backendEntries[tableName]; !ok {
+
 						backendEntries[tableName] = make(map[string]HAProxyTableEntry)
+
 					}
+
 					for _, entry := range entries {
+
 						backendEntries[tableName][entry.IP] = entry
+
 					}
+
 				}
+
 			}
 
 			mu.Lock()
+
 			allBackendEntries[currentAddr] = backendEntries
+
 			mu.Unlock()
+
 		}(addr)
+
 	}
+
 	wg.Wait()
 
 	if len(errs) > 0 {
+
 		return nil, fmt.Errorf("errors occurred during data collection: %v", errs)
+
 	}
 
 	var discrepancies []SyncDiscrepancy
 
 	// Collect all unique table names and IPs across all backends
+
 	uniqueTables := make(map[string]struct{})
+
 	uniqueIPsByTable := make(map[string]map[string]struct{}) // table_name -> ip_addr -> exists
 
 	for _, backendEntries := range allBackendEntries {
+
 		for tableName, ipEntries := range backendEntries {
+
 			if ipEntries == nil { // Add this check
+
 				continue
+
 			}
+
 			uniqueTables[tableName] = struct{}{}
+
 			if _, ok := uniqueIPsByTable[tableName]; !ok {
+
 				uniqueIPsByTable[tableName] = make(map[string]struct{})
+
 			}
+
 			for ip := range ipEntries {
+
 				uniqueIPsByTable[tableName][ip] = struct{}{}
+
 			}
+
 		}
+
 	}
 
 	// Ensure consistent order for backend addresses
+
 	backendAddrs := make([]string, 0, len(addresses))
+
 	for addr := range allBackendEntries {
+
 		backendAddrs = append(backendAddrs, addr)
+
 	}
+
 	sort.Strings(backendAddrs)
 
 	// Compare entries across all backends for each unique IP in each unique table
+
 	for tableName := range uniqueTables {
+
 		for ip := range uniqueIPsByTable[tableName] {
+
 			// Collect all entries for this IP in this table across all backends
+
 			entriesForIP := make(map[string]*HAProxyTableEntry) // backend_addr -> entry
+
 			for _, backendAddr := range backendAddrs {
+
 				if allBackendEntries[backendAddr][tableName] != nil {
+
 					entry, found := allBackendEntries[backendAddr][tableName][ip]
+
 					if found {
+
 						entriesForIP[backendAddr] = &entry
+
 					} else {
+
 						entriesForIP[backendAddr] = nil // Explicitly mark as missing
+
 					}
+
 				} else {
+
 					entriesForIP[backendAddr] = nil // Table not found in this backend
+
 				}
+
 			}
 
 			// Now, compare the collected entries
+
 			// We need to find if there's any discrepancy among the N backends
+
 			// A discrepancy exists if:
+
 			// 1. An IP is present in some backends but missing in others for the same table.
+
 			// 2. An IP is present in multiple backends, but their gpc0 values differ.
+
 			// 3. An IP is present in multiple backends, but their exp values differ beyond tolerance.
 
 			// Check for presence/absence discrepancies
+
 			presentBackends := []string{}
+
 			missingBackends := []string{}
+
 			for _, addr := range backendAddrs {
+
 				if entriesForIP[addr] != nil {
+
 					presentBackends = append(presentBackends, addr)
+
 				} else {
+
 					missingBackends = append(missingBackends, addr)
+
 				}
+
 			}
 
 			if len(presentBackends) > 0 && len(missingBackends) > 0 {
+
 				// IP is present in some, missing in others
+
 				discrepancies = append(discrepancies, SyncDiscrepancy{
-					IP:        ip,
+
+					IP: ip,
+
 					TableName: tableName,
-					Reason:    "Presence Mismatch",
+
+					Reason: "Presence Mismatch",
+
 					Details: map[string]string{
+
 						"present_in": strings.Join(presentBackends, ", "),
+
 						"missing_in": strings.Join(missingBackends, ", "),
 					},
 				})
+
 			}
 
 			if len(presentBackends) > 1 {
+
 				// Compare gpc0 and exp for present backends
+
 				firstEntry := entriesForIP[presentBackends[0]]
+
 				for i := 1; i < len(presentBackends); i++ {
+
 					currentAddr := presentBackends[i]
+
 					currentEntry := entriesForIP[currentAddr]
 
 					// Gpc0 Mismatch
+
 					if firstEntry.Gpc0 != currentEntry.Gpc0 {
+
 						discrepancies = append(discrepancies, SyncDiscrepancy{
-							IP:        ip,
+
+							IP: ip,
+
 							TableName: tableName,
-							BackendA:  presentBackends[0],
-							BackendB:  currentAddr,
-							EntryA:    firstEntry,
-							EntryB:    currentEntry,
-							Reason:    "Gpc0 Mismatch",
+
+							BackendA: presentBackends[0],
+
+							BackendB: currentAddr,
+
+							EntryA: firstEntry,
+
+							EntryB: currentEntry,
+
+							Reason: "Gpc0 Mismatch",
+
 							Details: map[string]string{
+
 								fmt.Sprintf("gpc0_%s", presentBackends[0]): fmt.Sprintf("%d", firstEntry.Gpc0),
-								fmt.Sprintf("gpc0_%s", currentAddr):        fmt.Sprintf("%d", currentEntry.Gpc0),
+
+								fmt.Sprintf("gpc0_%s", currentAddr): fmt.Sprintf("%d", currentEntry.Gpc0),
 							},
 						})
+
 					}
 
 					// Expiration Mismatch
+
 					diffExp := firstEntry.Exp - currentEntry.Exp
+
 					if diffExp < 0 {
+
 						diffExp = -diffExp // Absolute difference
+
 					}
 
 					if time.Duration(diffExp)*time.Millisecond > expTolerance {
+
 						discrepancies = append(discrepancies, SyncDiscrepancy{
-							IP:         ip,
-							TableName:  tableName,
-							BackendA:   presentBackends[0],
-							BackendB:   currentAddr,
-							EntryA:     firstEntry,
-							EntryB:     currentEntry,
-							Reason:     "Expiration Mismatch",
+
+							IP: ip,
+
+							TableName: tableName,
+
+							BackendA: presentBackends[0],
+
+							BackendB: currentAddr,
+
+							EntryA: firstEntry,
+
+							EntryB: currentEntry,
+
+							Reason: "Expiration Mismatch",
+
 							DiffMillis: diffExp,
+
 							Details: map[string]string{
+
 								fmt.Sprintf("exp_%s", presentBackends[0]): fmt.Sprintf("%d", firstEntry.Exp),
-								fmt.Sprintf("exp_%s", currentAddr):        fmt.Sprintf("%d", currentEntry.Exp),
-								"diff_millis":                             fmt.Sprintf("%d", diffExp),
-								"tolerance_millis":                        fmt.Sprintf("%d", expTolerance.Milliseconds()),
+
+								fmt.Sprintf("exp_%s", currentAddr): fmt.Sprintf("%d", currentEntry.Exp),
+
+								"diff_millis": fmt.Sprintf("%d", diffExp),
+
+								"tolerance_millis": fmt.Sprintf("%d", expTolerance.Milliseconds()),
 							},
 						})
+
 					}
+
 				}
+
 			}
+
 		}
+
 	}
 
 	return discrepancies, nil
+
 }
 
 // getHAProxyTableNames executes "show table" and parses the response to get table names.
+
 func (b *HAProxyBlocker) getHAProxyTableNames(addr string) ([]string, error) {
+
 	command := "show table\n"
+
 	response, err := b.ExecuteHAProxyCommandFunc(addr, command)
+
 	if err != nil {
+
 		return nil, err
+
 	}
 
 	var tableNames []string
+
 	scanner := bufio.NewScanner(strings.NewReader(response))
+
 	for scanner.Scan() {
+
 		line := scanner.Text()
+
 		if strings.HasPrefix(line, "table: ") {
+
 			parts := strings.Split(line, ",")
+
 			if len(parts) > 0 {
+
 				tableNamePart := strings.TrimPrefix(parts[0], "table: ")
+
 				tableName := strings.TrimSpace(tableNamePart)
+
 				tableNames = append(tableNames, tableName)
+
 			}
+
 		}
+
 	}
+
 	return tableNames, scanner.Err()
-}
 
-// getHAProxyIPsInTable executes "show table <name>" and parses the response to get IPs.
-func (b *HAProxyBlocker) getHAProxyIPsInTable(addr, tableName string) ([]HAProxyTableEntry, error) {
-	command := fmt.Sprintf("show table %s\n", tableName)
-	response, err := b.ExecuteHAProxyCommandFunc(addr, command)
-	if err != nil {
-		return nil, err
-	}
-
-	var entries []HAProxyTableEntry
-	scanner := bufio.NewScanner(strings.NewReader(response))
-	for scanner.Scan() {
-		line := scanner.Text()
-		match := haProxyTableEntryRegex.FindStringSubmatch(line)
-		if match != nil {
-			ip := match[haProxyTableEntryRegex.SubexpIndex("ip")]
-			expStr := match[haProxyTableEntryRegex.SubexpIndex("exp")]
-			gpc0Str := match[haProxyTableEntryRegex.SubexpIndex("gpc0")]
-
-			exp, parseErr := utils.ParseInt64(expStr)
-			if parseErr != nil {
-				b.P.Log(logging.LevelError, "HAPROXY_PARSE_ERROR", "Failed to parse exp value '%s' for IP '%s' in table '%s' on '%s': %v", expStr, ip, tableName, addr, parseErr)
-				continue
-			}
-			gpc0, parseErr := utils.ParseInt(gpc0Str)
-			if parseErr != nil {
-				b.P.Log(logging.LevelError, "HAPROXY_PARSE_ERROR", "Failed to parse gpc0 value '%s' for IP '%s' in table '%s' on '%s': %v", gpc0Str, ip, tableName, addr, parseErr)
-				continue
-			}
-
-			// Only include entries that are actively blocked (gpc0=1)
-			if gpc0 == 1 {
-				entries = append(entries, HAProxyTableEntry{
-					IP:      ip,
-					Exp:     exp,
-					Gpc0:    gpc0,
-					RawLine: line,
-				})
-			}
-		}
-	}
-	return entries, scanner.Err()
 }
 
 // getHAProxyAllIPsInTable executes "show table <name>" and parses the response to get all IPs, regardless of gpc0 status.
+
 func (b *HAProxyBlocker) getHAProxyAllIPsInTable(addr, tableName string) ([]HAProxyTableEntry, error) {
+
 	command := fmt.Sprintf("show table %s\n", tableName)
+
 	response, err := b.ExecuteHAProxyCommandFunc(addr, command)
+
 	if err != nil {
+
 		return nil, err
+
 	}
 
 	var entries []HAProxyTableEntry
+
 	scanner := bufio.NewScanner(strings.NewReader(response))
+
 	for scanner.Scan() {
+
 		line := scanner.Text()
+
 		match := haProxyTableEntryRegex.FindStringSubmatch(line)
+
 		if match != nil {
+
 			ip := match[haProxyTableEntryRegex.SubexpIndex("ip")]
+
 			expStr := match[haProxyTableEntryRegex.SubexpIndex("exp")]
+
 			gpc0Str := match[haProxyTableEntryRegex.SubexpIndex("gpc0")]
 
 			exp, parseErr := utils.ParseInt64(expStr)
+
 			if parseErr != nil {
+
 				b.P.Log(logging.LevelError, "HAPROXY_PARSE_ERROR", "Failed to parse exp value '%s' for IP '%s' in table '%s' on '%s': %v", expStr, ip, tableName, addr, parseErr)
+
 				continue
+
 			}
+
 			gpc0, parseErr := utils.ParseInt(gpc0Str)
+
 			if parseErr != nil {
+
 				b.P.Log(logging.LevelError, "HAPROXY_PARSE_ERROR", "Failed to parse gpc0 value '%s' for IP '%s' in table '%s' on '%s': %v", gpc0Str, ip, tableName, addr, parseErr)
+
 				continue
+
 			}
 
 			entries = append(entries, HAProxyTableEntry{
-				IP:      ip,
-				Exp:     exp,
-				Gpc0:    gpc0,
+
+				IP: ip,
+
+				Exp: exp,
+
+				Gpc0: gpc0,
+
 				RawLine: line,
 			})
+
 		}
+
 	}
+
 	return entries, scanner.Err()
+
 }
