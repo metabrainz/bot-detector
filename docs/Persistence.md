@@ -49,3 +49,33 @@ To prevent the `events.log` from growing infinitely, a periodic compaction proce
 2.  **Snapshot:** It creates a new, clean snapshot of the current in-memory state (after purging any expired entries) using the atomic rename pattern.
 3.  **Truncate:** Once the new snapshot is safely on disk, the `events.log` is truncated (cleared), as all its information is now consolidated in the snapshot.
 4.  **Resume:** The application resumes normal operation.
+
+## Failure Scenario Analysis
+
+This architecture is designed to be resilient to common failures.
+
+| Failure Type | System Behavior | Outcome | Key Feature |
+| :--- | :--- | :--- | :--- |
+| **App Crash (Normal)** | Replays journal on restart to find un-executed actions. | **Highly Resilient.** State is self-healed. | Journaling (`events.log`) + `fsync` |
+| **App Crash (Compaction)** | Safely ignores temporary files and replays the old log. | **Highly Resilient.** No state is lost. | Atomic Rename |
+| **Disk Full** | Write operations fail; the app halts processing new events. | **Safe.** Prevents state inconsistency. | Error Handling on I/O |
+| **File Corruption** | Can recover from the journal if the snapshot is corrupt. | **Resilient.** Fails safely if the journal is also lost. | Graceful Degradation |
+| **Network Failure** | Retries backend commands in the background until successful. | **Highly Resilient.** Achieves eventual consistency. | Retry Queues |
+
+### Crash During Normal Operation
+
+If the application crashes after writing an event to the journal but before executing it on the backend, the startup process will automatically correct the situation. The journaled event is replayed, added to the in-memory state, and pushed to the backend, ensuring no actions are ever lost.
+
+### Crash During Compaction
+
+The compaction process is transactional. If a crash occurs:
+- **Before the atomic `rename`:** The old snapshot and journal are used on the next startup. The temporary snapshot file is ignored.
+- **After the `rename` but before the journal is cleared:** The new snapshot is used. The journal replay logic correctly ignores events that are older than the new snapshot, preventing double-application of events.
+
+In all cases, the state remains consistent.
+
+### Disk and Network Failures
+
+The system is designed to fail safely.
+- **On disk full:** It stops processing rather than continue with an un-journaled action that could lead to an inconsistent state.
+- **On network failure:** It logs the error and persistently retries sending the state to the backend in the background until the connection is restored, ensuring eventual consistency.
