@@ -131,6 +131,7 @@ type AppConfig struct {
 	Persistence              persistence.PersistenceConfig     `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error) // Mockable
 	FileOpener               fileOpener                        // Mockable
+	YAMLContent              []byte
 }
 
 // Clone creates a deep copy of the AppConfig. This is crucial for safely comparing
@@ -206,6 +207,7 @@ type LoadedConfig struct {
 	EnableMetrics            bool                          `config:"compare"`
 	Persistence              persistence.PersistenceConfig `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error)
+	YAMLContent              []byte
 }
 
 // --- YAML DATA STRUCTURES ---

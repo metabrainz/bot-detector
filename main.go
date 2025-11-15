@@ -35,8 +35,8 @@ var signalMap = map[string]os.Signal{
 }
 
 // GetMarshalledConfig reads the raw configuration file from disk.
-func (p *Processor) GetMarshalledConfig() ([]byte, error) {
-	return os.ReadFile(p.ConfigPath)
+func (p *Processor) GetMarshalledConfig() ([]byte, time.Time, error) {
+	return p.Config.YAMLContent, p.Config.LastModTime, nil
 }
 
 // main is the application entry point.
@@ -86,6 +86,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("[FATAL] Could not determine absolute path for config file: %v", err)
 	}
+	// Get the modification time of the config file to initialize LastModTime.
+	fileInfo, err := os.Stat(absConfigPath)
+	if err != nil {
+		log.Fatalf("[FATAL] Could not stat config file: %v", err)
+	}
 	// Load initial configuration from YAML.
 	opts := LoadConfigOptions{
 		ConfigPath: absConfigPath,
@@ -113,7 +118,7 @@ func main() {
 		BlockerCommandQueueSize:  loadedCfg.BlockerCommandQueueSize,
 		BlockerCommandsPerSecond: loadedCfg.BlockerCommandsPerSecond,
 		IdleTimeout:              loadedCfg.IdleTimeout,
-		LastModTime:              time.Now(),
+		LastModTime:              fileInfo.ModTime(),
 		MaxTimeSinceLastHit:      loadedCfg.MaxTimeSinceLastHit,
 		OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
 		PollingInterval:          loadedCfg.PollingInterval,
@@ -123,6 +128,7 @@ func main() {
 		FileOpener: func(name string) (fileHandle, error) {
 			return os.Open(name)
 		},
+		YAMLContent: loadedCfg.YAMLContent,
 	}
 
 	// Initialize the Processor instance.

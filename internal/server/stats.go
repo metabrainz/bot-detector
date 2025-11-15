@@ -16,7 +16,7 @@ type Provider interface {
 	GenerateStepsMetricsReport() string
 	GetShutdownChannel() chan os.Signal
 	Log(level logging.LogLevel, tag string, format string, v ...interface{})
-	GetMarshalledConfig() ([]byte, error)
+	GetMarshalledConfig() ([]byte, time.Time, error)
 }
 
 // Start runs the web server in a goroutine.

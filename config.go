@@ -1434,6 +1434,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		UnblockCooldown:          unblockCooldown,
 		EnableMetrics:            enableMetrics,
 		Persistence:              persistenceConfig,
+		YAMLContent:              data,
 	}, nil
 }
 
@@ -1491,6 +1492,19 @@ func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	oldLogRegex := p.LogRegex
 	p.ConfigMutex.RUnlock()
 
+	var newLastModTime time.Time
+	if mainConfigChanged {
+		fileInfo, err := os.Stat(p.ConfigPath)
+		if err != nil {
+			p.LogFunc(logging.LevelError, "WATCH_ERROR", "Failed to stat file for ModTime update %s: %v", p.ConfigPath, err)
+			newLastModTime = oldConfig.LastModTime // Fallback to old time on error
+		} else {
+			newLastModTime = fileInfo.ModTime()
+		}
+	} else {
+		newLastModTime = oldConfig.LastModTime // Preserve old time if main config didn't change
+	}
+
 	opts := LoadConfigOptions{
 		ConfigPath:   p.ConfigPath,
 		ExistingDeps: oldConfig.FileDependencies,
@@ -1524,21 +1538,21 @@ func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 		TimestampFormat:          loadedCfg.TimestampFormat,
 		UnblockOnGoodActor:       loadedCfg.UnblockOnGoodActor,
 		UnblockCooldown:          loadedCfg.UnblockCooldown,
-		EnableMetrics:            loadedCfg.EnableMetrics, // New field
+		EnableMetrics:            loadedCfg.EnableMetrics,
 		Persistence:              loadedCfg.Persistence,
 
-		// Preserve mockable functions and the original mod time unless the main config changed.
+		// Preserve mockable functions and set the correct LastModTime.
 		StatFunc:    oldConfig.StatFunc,
-		LastModTime: oldConfig.LastModTime,
+		LastModTime: newLastModTime,
+
+		YAMLContent: loadedCfg.YAMLContent,
 	}
 
 	// Update the processor's state with the new config.
 	p.ConfigMutex.Lock()
 	p.Chains = loadedCfg.Chains
 	p.Config = newAppConfig // Atomically swap the config pointer.
-	if mainConfigChanged {
-		p.Config.LastModTime = time.Now() // Update LastModTime only if the main config file changed.
-	}
+	// The LastModTime is already set correctly in newAppConfig, no need to update here.
 	p.LogRegex = loadedCfg.LogFormatRegex
 	p.EnableMetrics = loadedCfg.EnableMetrics // Set the processor's EnableMetrics field
 	initializeMetrics(p, loadedCfg)

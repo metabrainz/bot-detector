@@ -2,6 +2,7 @@ package server
 
 import (
 	"bot-detector/internal/logging"
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -53,11 +54,27 @@ func (m *mockProvider) GetShutdownChannel() chan os.Signal {
 	return m.shutdownCh
 }
 
-func (m *mockProvider) GetMarshalledConfig() ([]byte, error) {
+func (m *mockProvider) GetMarshalledConfig() ([]byte, time.Time, error) {
+	var modtime time.Time
 	if m.configPath == "" {
-		return nil, errors.New("config path not set in mock")
+		return nil, modtime, errors.New("config path not set in mock")
 	}
-	return os.ReadFile(m.configPath)
+	file, err := os.Open(m.configPath)
+	defer func() {
+		_ = file.Close()
+	}()
+	if err == nil {
+		stat, err := file.Stat()
+		if err == nil {
+			modtime = stat.ModTime()
+			buf := make([]byte, stat.Size())
+			_, err = bufio.NewReader(file).Read(buf)
+			if err == nil {
+				return buf, modtime, nil
+			}
+		}
+	}
+	return nil, modtime, err
 }
 
 func (m *mockProvider) Log(level logging.LogLevel, tag string, format string, v ...interface{}) {
