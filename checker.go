@@ -334,26 +334,28 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 // executeBlock calls the external blocker unless in DryRun mode.
 func executeBlock(p *Processor, entry *LogEntry, chain *BehavioralChain) {
 	if p.persistenceEnabled {
-		p.persistenceMutex.Lock()
-		defer p.persistenceMutex.Unlock()
+		func() {
+			p.persistenceMutex.Lock()
+			defer p.persistenceMutex.Unlock()
 
-		unblockTime := p.NowFunc().Add(chain.BlockDuration)
-		event := &persistence.AuditEvent{
-			Timestamp: p.NowFunc(),
-			Event:     persistence.EventTypeBlock,
-			IP:        entry.IPInfo.Address,
-			Duration:  chain.BlockDuration,
-			Reason:    chain.Name,
-		}
-		if err := persistence.WriteEventToJournal(p.journalHandle, event); err != nil {
-			p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write block event to journal for %s: %v", entry.IPInfo.Address, err)
-		}
+			unblockTime := p.NowFunc().Add(chain.BlockDuration)
+			event := &persistence.AuditEvent{
+				Timestamp: p.NowFunc(),
+				Event:     persistence.EventTypeBlock,
+				IP:        entry.IPInfo.Address,
+				Duration:  chain.BlockDuration,
+				Reason:    chain.Name,
+			}
+			if err := persistence.WriteEventToJournal(p.journalHandle, event); err != nil {
+				p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write block event to journal for %s: %v", entry.IPInfo.Address, err)
+			}
 
-		// Update in-memory state
-		p.activeBlocks[entry.IPInfo.Address] = persistence.ActiveBlockInfo{
-			UnblockTime: unblockTime,
-			Reason:      chain.Name,
-		}
+			// Update in-memory state
+			p.activeBlocks[entry.IPInfo.Address] = persistence.ActiveBlockInfo{
+				UnblockTime: unblockTime,
+				Reason:      chain.Name,
+			}
+		}()
 	}
 
 	if p.DryRun { // Should not happen due to caller check, but safe to keep.
@@ -741,21 +743,23 @@ func CheckChains(p *Processor, entry *LogEntry) {
 				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s. Issuing unblock command.", entry.IPInfo.Address)
 
 				if p.persistenceEnabled {
-					p.persistenceMutex.Lock()
-					defer p.persistenceMutex.Unlock()
+					func() {
+						p.persistenceMutex.Lock()
+						defer p.persistenceMutex.Unlock()
 
-					event := &persistence.AuditEvent{
-						Timestamp: p.NowFunc(),
-						Event:     persistence.EventTypeUnblock,
-						IP:        entry.IPInfo.Address,
-						Reason:    "good-actor-match",
-					}
-					if err := persistence.WriteEventToJournal(p.journalHandle, event); err != nil {
-						p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write unblock event to journal for %s: %v", entry.IPInfo.Address, err)
-					}
+						event := &persistence.AuditEvent{
+							Timestamp: p.NowFunc(),
+							Event:     persistence.EventTypeUnblock,
+							IP:        entry.IPInfo.Address,
+							Reason:    "good-actor-match",
+						}
+						if err := persistence.WriteEventToJournal(p.journalHandle, event); err != nil {
+							p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write unblock event to journal for %s: %v", entry.IPInfo.Address, err)
+						}
 
-					// Update in-memory state
-					delete(p.activeBlocks, entry.IPInfo.Address)
+						// Update in-memory state
+						delete(p.activeBlocks, entry.IPInfo.Address)
+					}()
 				}
 
 				// Convert main.IPInfo to utils.IPInfo before calling the blocker.

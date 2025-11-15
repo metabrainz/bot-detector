@@ -585,11 +585,78 @@ func TestCompareHAProxyBackends_ErrorDuringCollection(t *testing.T) {
 	b := setupMockHAProxyForComparison(t, addresses, mockResponses)
 
 	_, err := b.CompareHAProxyBackends(0)
+
 	if err == nil {
+
 		t.Fatal("Expected an error during data collection, got nil")
+
 	}
+
 	expectedErrMsg := "errors occurred during data collection"
+
 	if !strings.Contains(err.Error(), expectedErrMsg) {
+
 		t.Errorf("Expected error message '%s', got '%v'", expectedErrMsg, err)
+
 	}
+
+}
+
+func TestHAProxyBlocker_ListBlocked(t *testing.T) {
+
+	addresses := []string{"127.0.0.1:8080", "127.0.0.1:8081"}
+
+	mockResponses := map[string]map[string]string{
+
+		"127.0.0.1:8080": {
+
+			"show table": "table: table_1m_ipv4\ntable: table_1h_ipv4\n",
+
+			"show table table_1m_ipv4": "0x1 key=1.1.1.1 use=0 exp=1000 gpc0=1\n" +
+
+				"0x2 key=2.2.2.2 use=0 exp=2000 gpc0=0\n", // 2.2.2.2 is not blocked
+
+			"show table table_1h_ipv4": "0x3 key=3.3.3.3 use=0 exp=3000 gpc0=1\n",
+		},
+
+		"127.0.0.1:8081": {
+
+			"show table": "table: table_1m_ipv4\n",
+
+			"show table table_1m_ipv4": "0x4 key=1.1.1.1 use=0 exp=4000 gpc0=1\n" + // Duplicate
+
+				"0x5 key=4.4.4.4 use=0 exp=5000 gpc0=1\n",
+		},
+	}
+
+	b := setupMockHAProxyForComparison(t, addresses, mockResponses)
+
+	blockedIPs, err := b.ListBlocked()
+
+	if err != nil {
+
+		t.Fatalf("ListBlocked() failed: %v", err)
+
+	}
+
+	expectedIPs := []string{"1.1.1.1", "3.3.3.3", "4.4.4.4"}
+
+	sort.Strings(blockedIPs) // Sort for consistent comparison
+
+	if len(blockedIPs) != len(expectedIPs) {
+
+		t.Fatalf("Expected %d blocked IPs, got %d: %v", len(expectedIPs), len(blockedIPs), blockedIPs)
+
+	}
+
+	for i, ip := range blockedIPs {
+
+		if ip != expectedIPs[i] {
+
+			t.Errorf("Expected IP %s at index %d, but got %s", expectedIPs[i], i, ip)
+
+		}
+
+	}
+
 }
