@@ -438,6 +438,48 @@ func (p *Processor) IncrementCmdsPerBlocker(addr string) {
 	}
 }
 
+// runCompaction creates a new snapshot and truncates the journal.
+func runCompaction(p *Processor) {
+	p.persistenceMutex.Lock()
+	defer p.persistenceMutex.Unlock()
+
+	// Filter out expired blocks before snapshotting
+	now := p.NowFunc()
+	activeBlocks := make(map[string]persistence.ActiveBlockInfo)
+	for ip, info := range p.activeBlocks {
+		if now.Before(info.UnblockTime) {
+			activeBlocks[ip] = info
+		}
+	}
+	p.activeBlocks = activeBlocks // Update in-memory map
+
+	snapshot := &persistence.Snapshot{
+		Timestamp:    now,
+		ActiveBlocks: p.activeBlocks,
+	}
+
+	if err := persistence.WriteSnapshot(filepath.Join(p.stateDir, "state.snapshot"), snapshot); err != nil {
+		p.LogFunc(logging.LevelError, "COMPACTION_FAIL", "Failed to write snapshot: %v", err)
+		return
+	}
+
+	// Truncate and re-open journal
+	journalPath := filepath.Join(p.stateDir, "events.log")
+	if err := p.journalHandle.Close(); err != nil {
+		p.LogFunc(logging.LevelError, "COMPACTION_FAIL", "Failed to close journal for truncation: %v", err)
+	}
+
+	// Re-open with truncation
+	handle, err := os.OpenFile(journalPath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		p.LogFunc(logging.LevelError, "COMPACTION_FAIL", "Failed to truncate and re-open journal: %v", err)
+		// Attempt to re-open in append mode as a fallback
+		handle, _ = persistence.OpenJournalForAppend(journalPath)
+	}
+	p.journalHandle = handle
+	p.LogFunc(logging.LevelInfo, "COMPACTION", "State snapshot and journal compaction completed successfully.")
+}
+
 // start is the unexported function that contains the main application logic,
 // which is called by the tests and the main function.
 func start(p *Processor) {
@@ -485,6 +527,24 @@ func start(p *Processor) {
 			default:
 				// An invalid value was provided. Log a fatal error and exit.
 				log.Fatalf("[FATAL] Invalid value for --reload-on: '%s'. Must be one of 'watcher', 'hup', 'usr1', or 'usr2'.", p.ReloadOn)
+			}
+
+			if p.persistenceEnabled && p.compactionInterval > 0 {
+				go func() {
+					ticker := time.NewTicker(p.compactionInterval)
+					defer ticker.Stop()
+					p.LogFunc(logging.LevelInfo, "SETUP", "State compaction enabled, running every %v.", p.compactionInterval)
+					for {
+						select {
+						case <-ticker.C:
+							runCompaction(p)
+						case <-stopWatcher:
+							p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Performing final state compaction...")
+							runCompaction(p)
+							return
+						}
+					}
+				}()
 			}
 
 			if p.TopN > 0 {

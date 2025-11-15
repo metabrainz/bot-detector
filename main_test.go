@@ -3,6 +3,7 @@ package main
 import (
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
+	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
 	"fmt"
 	"os"
@@ -236,5 +237,66 @@ chains:
 	}
 	if logging.GetLogLevel() != logging.LevelDebug {
 		t.Errorf("Expected log level to be updated to 'debug', but it was not.")
+	}
+}
+
+// TestCompaction verifies that the state snapshot and journal truncation work correctly.
+func TestCompaction(t *testing.T) {
+	// --- Setup ---
+	resetGlobalState()
+	tempDir := t.TempDir()
+
+	// Create a processor with persistence enabled.
+	p := newTestProcessor(&AppConfig{}, nil)
+	p.persistenceEnabled = true
+	p.stateDir = tempDir
+	p.NowFunc = func() time.Time { return time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC) } // Mock time
+
+	// Manually create an events.log to be truncated.
+	journalPath := filepath.Join(tempDir, "events.log")
+	journalHandle, err := os.OpenFile(journalPath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatalf("Failed to create dummy journal file: %v", err)
+	}
+	p.journalHandle = journalHandle
+	_, _ = p.journalHandle.WriteString("some old event\n")
+
+	// Add some active blocks to the processor's state.
+	p.activeBlocks = map[string]persistence.ActiveBlockInfo{
+		"1.1.1.1": {UnblockTime: p.NowFunc().Add(1 * time.Hour), Reason: "chain1"},
+		"2.2.2.2": {UnblockTime: p.NowFunc().Add(-1 * time.Minute), Reason: "chain2"}, // Expired
+	}
+
+	// --- Act ---
+	runCompaction(p)
+
+	// --- Assert ---
+	// 1. Check that the snapshot file was created with the correct content.
+	snapshotPath := filepath.Join(tempDir, "state.snapshot")
+	snapshotData, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		t.Fatalf("Failed to read snapshot file: %v", err)
+	}
+
+	expectedJSON := `{
+  "snapshot_time": "2025-01-01T12:00:00Z",
+  "active_blocks": {
+    "1.1.1.1": {
+      "unblock_time": "2025-01-01T13:00:00Z",
+      "reason": "chain1"
+    }
+  }
+}`
+	if strings.TrimSpace(string(snapshotData)) != strings.TrimSpace(expectedJSON) {
+		t.Errorf("Snapshot content mismatch.\nGot:\n%s\n\nExpected:\n%s", string(snapshotData), expectedJSON)
+	}
+
+	// 2. Check that the journal file is now empty.
+	journalInfo, err := os.Stat(journalPath)
+	if err != nil {
+		t.Fatalf("Failed to stat journal file after compaction: %v", err)
+	}
+	if journalInfo.Size() != 0 {
+		t.Errorf("Expected journal file to be empty after compaction, but size is %d", journalInfo.Size())
 	}
 }

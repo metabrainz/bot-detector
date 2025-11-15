@@ -187,23 +187,23 @@ type LoadedConfig struct {
 	DurationToTableName      map[time.Duration]string `config:"compare"`
 	EOFPollingDelay          time.Duration            `config:"compare"`
 	FileDependencies         map[string]*FileDependency
-	BlockerAddresses         []string       `config:"compare"`
-	BlockerDialTimeout       time.Duration  `config:"compare"`
-	BlockerMaxRetries        int            `config:"compare"`
-	BlockerRetryDelay        time.Duration  `config:"compare"`
-	BlockerCommandQueueSize  int            `config:"compare"`
-	BlockerCommandsPerSecond int            `config:"compare"`
-	IdleTimeout              time.Duration  `config:"compare"`
-	LogLevel                 string         `config:"compare"`
-	LineEnding               string         `config:"compare"`
-	LogFormatRegex           *regexp.Regexp // Not compared here
-	MaxTimeSinceLastHit      time.Duration  `config:"compare"`
-	OutOfOrderTolerance      time.Duration  `config:"compare"`
-	PollingInterval          time.Duration  `config:"compare"`
-	TimestampFormat          string         `config:"compare"`
-	UnblockOnGoodActor       bool           `config:"compare"`
-	UnblockCooldown          time.Duration  `config:"compare"`
-	EnableMetrics            bool           `config:"compare"`
+	BlockerAddresses         []string                      `config:"compare"`
+	BlockerDialTimeout       time.Duration                 `config:"compare"`
+	BlockerMaxRetries        int                           `config:"compare"`
+	BlockerRetryDelay        time.Duration                 `config:"compare"`
+	BlockerCommandQueueSize  int                           `config:"compare"`
+	BlockerCommandsPerSecond int                           `config:"compare"`
+	IdleTimeout              time.Duration                 `config:"compare"`
+	LogLevel                 string                        `config:"compare"`
+	LineEnding               string                        `config:"compare"`
+	LogFormatRegex           *regexp.Regexp                // Not compared here
+	MaxTimeSinceLastHit      time.Duration                 `config:"compare"`
+	OutOfOrderTolerance      time.Duration                 `config:"compare"`
+	PollingInterval          time.Duration                 `config:"compare"`
+	TimestampFormat          string                        `config:"compare"`
+	UnblockOnGoodActor       bool                          `config:"compare"`
+	UnblockCooldown          time.Duration                 `config:"compare"`
+	EnableMetrics            bool                          `config:"compare"`
 	Persistence              persistence.PersistenceConfig `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error)
 }
@@ -211,29 +211,29 @@ type LoadedConfig struct {
 // --- YAML DATA STRUCTURES ---
 
 type ChainConfig struct {
-	GoodActors               []map[string]interface{} `yaml:"good_actors"`
-	Version                  string                   `yaml:"version"`
-	Chains                   []BehavioralChainYAML    `yaml:"chains"`
-	CleanupInterval          string                   `yaml:"cleanup_interval"`
-	DefaultBlockDuration     string                   `yaml:"default_block_duration"`
-	DurationTables           map[string]string        `yaml:"duration_tables"`
-	EOFPollingDelay          string                   `yaml:"eof_polling_delay"`
-	BlockerAddresses         []string                 `yaml:"blocker_addresses"`
-	BlockerDialTimeout       string                   `yaml:"blocker_dial_timeout"`
-	BlockerMaxRetries        int                      `yaml:"blocker_max_retries"`
-	BlockerRetryDelay        string                   `yaml:"blocker_retry_delay"`
-	BlockerCommandQueueSize  int                      `yaml:"blocker_command_queue_size"`
-	BlockerCommandsPerSecond int                      `yaml:"blocker_commands_per_second"`
-	IdleTimeout              string                   `yaml:"idle_timeout"`
-	LineEnding               string                   `yaml:"line_ending"`
-	LogLevel                 string                   `yaml:"log_level"`
-	LogFormatRegex           string                   `yaml:"log_format_regex"`
-	OutOfOrderTolerance      string                   `yaml:"out_of_order_tolerance"`
-	PollingInterval          string                   `yaml:"polling_interval"`
-	TimestampFormat          string                   `yaml:"timestamp_format"`
-	UnblockOnGoodActor       bool                     `yaml:"unblock_on_good_actor"`
-	UnblockCooldown          string                   `yaml:"unblock_cooldown"`
-	EnableMetrics            *bool                    `yaml:"enable_metrics"` // Changed to *bool
+	GoodActors               []map[string]interface{}      `yaml:"good_actors"`
+	Version                  string                        `yaml:"version"`
+	Chains                   []BehavioralChainYAML         `yaml:"chains"`
+	CleanupInterval          string                        `yaml:"cleanup_interval"`
+	DefaultBlockDuration     string                        `yaml:"default_block_duration"`
+	DurationTables           map[string]string             `yaml:"duration_tables"`
+	EOFPollingDelay          string                        `yaml:"eof_polling_delay"`
+	BlockerAddresses         []string                      `yaml:"blocker_addresses"`
+	BlockerDialTimeout       string                        `yaml:"blocker_dial_timeout"`
+	BlockerMaxRetries        int                           `yaml:"blocker_max_retries"`
+	BlockerRetryDelay        string                        `yaml:"blocker_retry_delay"`
+	BlockerCommandQueueSize  int                           `yaml:"blocker_command_queue_size"`
+	BlockerCommandsPerSecond int                           `yaml:"blocker_commands_per_second"`
+	IdleTimeout              string                        `yaml:"idle_timeout"`
+	LineEnding               string                        `yaml:"line_ending"`
+	LogLevel                 string                        `yaml:"log_level"`
+	LogFormatRegex           string                        `yaml:"log_format_regex"`
+	OutOfOrderTolerance      string                        `yaml:"out_of_order_tolerance"`
+	PollingInterval          string                        `yaml:"polling_interval"`
+	TimestampFormat          string                        `yaml:"timestamp_format"`
+	UnblockOnGoodActor       bool                          `yaml:"unblock_on_good_actor"`
+	UnblockCooldown          string                        `yaml:"unblock_cooldown"`
+	EnableMetrics            *bool                         `yaml:"enable_metrics"` // Changed to *bool
 	Persistence              persistence.PersistenceConfig `yaml:"persistence"`
 }
 
@@ -330,8 +330,7 @@ type BehavioralChain struct {
 // GoodActorDef represents a single compiled definition from the good_actors config.
 
 type GoodActorDef struct {
-
-	Name       string
+	Name string
 
 	IPMatchers []fieldMatcher // A list of matchers for the IP field (OR logic within the list)
 
