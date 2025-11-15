@@ -294,7 +294,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 
 	// Mock Blocker that will fail the test if called.
 	mockBlocker := &MockBlocker{
-		BlockFunc: func(ipInfo utils.IPInfo, duration time.Duration) error {
+		BlockFunc: func(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
 			t.Fatal("Blocker.Block was called in DryRun mode.")
 			return nil
 		},

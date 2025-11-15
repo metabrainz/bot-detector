@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
 	"fmt"
@@ -332,6 +333,29 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 
 // executeBlock calls the external blocker unless in DryRun mode.
 func executeBlock(p *Processor, entry *LogEntry, chain *BehavioralChain) {
+	if p.persistenceEnabled {
+		p.persistenceMutex.Lock()
+		defer p.persistenceMutex.Unlock()
+
+		unblockTime := p.NowFunc().Add(chain.BlockDuration)
+		event := &persistence.AuditEvent{
+			Timestamp: p.NowFunc(),
+			Event:     persistence.EventTypeBlock,
+			IP:        entry.IPInfo.Address,
+			Duration:  chain.BlockDuration,
+			Reason:    chain.Name,
+		}
+		if err := persistence.WriteEventToJournal(p.journalHandle, event); err != nil {
+			p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write block event to journal for %s: %v", entry.IPInfo.Address, err)
+		}
+
+		// Update in-memory state
+		p.activeBlocks[entry.IPInfo.Address] = persistence.ActiveBlockInfo{
+			UnblockTime: unblockTime,
+			Reason:      chain.Name,
+		}
+	}
+
 	if p.DryRun { // Should not happen due to caller check, but safe to keep.
 		return // Do not execute block in dry-run mode.
 	}
@@ -340,7 +364,7 @@ func executeBlock(p *Processor, entry *LogEntry, chain *BehavioralChain) {
 		Address: entry.IPInfo.Address,
 		Version: entry.IPInfo.Version,
 	}
-	if err := p.Blocker.Block(blockerIPInfo, chain.BlockDuration); err != nil {
+	if err := p.Blocker.Block(blockerIPInfo, chain.BlockDuration, chain.Name); err != nil {
 		// The error is logged inside the HAProxyBlocker, but not the RateLimitedBlocker. Log it here for safety.
 		p.LogFunc(logging.LevelError, "BLOCK_FAIL", "Failed to queue block command for %s: %v", entry.IPInfo.Address, err)
 	}
@@ -715,13 +739,32 @@ func CheckChains(p *Processor, entry *LogEntry) {
 			// Check if the cooldown has passed or if it has never been unblocked.
 			if activity.LastUnblockTime.IsZero() || time.Since(activity.LastUnblockTime) > unblockCooldown {
 				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s. Issuing unblock command.", entry.IPInfo.Address)
+
+				if p.persistenceEnabled {
+					p.persistenceMutex.Lock()
+					defer p.persistenceMutex.Unlock()
+
+					event := &persistence.AuditEvent{
+						Timestamp: p.NowFunc(),
+						Event:     persistence.EventTypeUnblock,
+						IP:        entry.IPInfo.Address,
+						Reason:    "good-actor-match",
+					}
+					if err := persistence.WriteEventToJournal(p.journalHandle, event); err != nil {
+						p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write unblock event to journal for %s: %v", entry.IPInfo.Address, err)
+					}
+
+					// Update in-memory state
+					delete(p.activeBlocks, entry.IPInfo.Address)
+				}
+
 				// Convert main.IPInfo to utils.IPInfo before calling the blocker.
 				blockerIPInfo := utils.IPInfo{
 					Address: entry.IPInfo.Address,
 					Version: entry.IPInfo.Version,
 				}
 				// The blocker's Unblock method is non-blocking and rate-limited.
-				if err := p.Blocker.Unblock(blockerIPInfo); err != nil {
+				if err := p.Blocker.Unblock(blockerIPInfo, "good-actor-match"); err != nil {
 					p.LogFunc(logging.LevelError, "UNBLOCK_FAIL", "Failed to queue unblock command for %s: %v", entry.IPInfo.Address, err)
 				}
 				activity.LastUnblockTime = time.Now()

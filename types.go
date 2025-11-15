@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
+	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
 	"fmt"
@@ -91,6 +92,14 @@ type Processor struct {
 	TopN                 int // For dry-run stats: show top N actors.
 	startTime            time.Time
 	configReloaded       bool
+
+	// Persistence fields
+	persistenceEnabled bool
+	stateDir           string
+	compactionInterval time.Duration
+	persistenceMutex   sync.Mutex
+	journalHandle      *os.File
+	activeBlocks       map[string]persistence.ActiveBlockInfo // map[IP]ActiveBlockInfo
 }
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
@@ -119,6 +128,7 @@ type AppConfig struct {
 	UnblockCooldown          time.Duration                     `config:"compare"`
 	LogFormatRegex           string                            `config:"compare"`
 	EnableMetrics            bool                              `config:"compare" summary:"enable_metrics"`
+	Persistence              persistence.PersistenceConfig     `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error) // Mockable
 	FileOpener               fileOpener                        // Mockable
 }
@@ -194,6 +204,7 @@ type LoadedConfig struct {
 	UnblockOnGoodActor       bool           `config:"compare"`
 	UnblockCooldown          time.Duration  `config:"compare"`
 	EnableMetrics            bool           `config:"compare"`
+	Persistence              persistence.PersistenceConfig `config:"compare"`
 	StatFunc                 func(string) (os.FileInfo, error)
 }
 
@@ -223,6 +234,7 @@ type ChainConfig struct {
 	UnblockOnGoodActor       bool                     `yaml:"unblock_on_good_actor"`
 	UnblockCooldown          string                   `yaml:"unblock_cooldown"`
 	EnableMetrics            *bool                    `yaml:"enable_metrics"` // Changed to *bool
+	Persistence              persistence.PersistenceConfig `yaml:"persistence"`
 }
 
 type StepDefYAML struct {
@@ -316,8 +328,13 @@ type BehavioralChain struct {
 }
 
 // GoodActorDef represents a single compiled definition from the good_actors config.
+
 type GoodActorDef struct {
+
 	Name       string
+
 	IPMatchers []fieldMatcher // A list of matchers for the IP field (OR logic within the list)
+
 	UAMatchers []fieldMatcher // A list of matchers for the UserAgent field (OR logic within the list)
+
 }

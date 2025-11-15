@@ -9,8 +9,8 @@ import (
 
 // Blocker defines the interface for external IP blocking services (e.g., HAProxy).
 type Blocker interface {
-	Block(ipInfo utils.IPInfo, duration time.Duration) error
-	Unblock(ipInfo utils.IPInfo) error
+	Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error
+	Unblock(ipInfo utils.IPInfo, reason string) error
 	ListBlocked() ([]string, error)
 	CompareHAProxyBackends(expTolerance time.Duration) ([]SyncDiscrepancy, error) // New method
 }
@@ -32,6 +32,7 @@ type BlockerCommand struct {
 	Action   string
 	IPInfo   utils.IPInfo // Use utils.IPInfo
 	Duration time.Duration
+	Reason   string
 }
 
 // RateLimitedBlocker is a Blocker that queues commands and executes them at a given rate.
@@ -64,8 +65,8 @@ func NewRateLimitedBlocker(lp LogProvider, mp MetricsProvider, wrapped Blocker, 
 }
 
 // Block adds a block command to the queue.
-func (b *RateLimitedBlocker) Block(ipInfo utils.IPInfo, duration time.Duration) error {
-	command := BlockerCommand{Action: "block", IPInfo: ipInfo, Duration: duration}
+func (b *RateLimitedBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
+	command := BlockerCommand{Action: "block", IPInfo: ipInfo, Duration: duration, Reason: reason}
 	select {
 	case b.CommandQueue <- command:
 		b.Log(logging.LevelDebug, "RATE_LIMITER", "Queued block command for IP %s.", ipInfo.Address)
@@ -78,8 +79,8 @@ func (b *RateLimitedBlocker) Block(ipInfo utils.IPInfo, duration time.Duration) 
 }
 
 // Unblock adds an unblock command to the queue.
-func (b *RateLimitedBlocker) Unblock(ipInfo utils.IPInfo) error {
-	command := BlockerCommand{Action: "unblock", IPInfo: ipInfo}
+func (b *RateLimitedBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
+	command := BlockerCommand{Action: "unblock", IPInfo: ipInfo, Reason: reason}
 	select {
 	case b.CommandQueue <- command:
 		b.Log(logging.LevelDebug, "RATE_LIMITER", "Queued unblock command for IP %s.", ipInfo.Address)

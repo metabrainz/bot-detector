@@ -93,7 +93,7 @@ func TestHAProxyBlocker_Block(t *testing.T) {
 	ipInfo := utils.NewIPInfo("192.0.2.1")
 	duration := 10 * time.Minute
 
-	err := h.blocker.Block(ipInfo, duration)
+	err := h.blocker.Block(ipInfo, duration, "test-reason")
 	if err != nil {
 		t.Fatalf("Block() failed unexpectedly: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestHAProxyBlocker_Unblock(t *testing.T) {
 
 	ipInfo := utils.NewIPInfo("192.0.2.1")
 
-	err := h.blocker.Unblock(ipInfo)
+	err := h.blocker.Unblock(ipInfo, "test-unblock")
 	if err != nil {
 		t.Fatalf("Unblock() failed unexpectedly: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestHAProxyBlocker_Block_Fallback(t *testing.T) {
 	ipInfo := utils.NewIPInfo("192.0.2.5")
 	unconfiguredDuration := 30 * time.Minute
 
-	err := h.blocker.Block(ipInfo, unconfiguredDuration)
+	err := h.blocker.Block(ipInfo, unconfiguredDuration, "fallback-reason")
 	if err != nil {
 		t.Fatalf("Block() failed unexpectedly: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestHAProxyBlocker_ErrorTolerance(t *testing.T) {
 
 	ipInfo := utils.NewIPInfo("2001:db8::1")
 
-	err := h.blocker.Unblock(ipInfo)
+	err := h.blocker.Unblock(ipInfo, "tolerance-test")
 	if err == nil {
 		t.Fatal("Expected an error due to a failed instance, but got nil.")
 	}

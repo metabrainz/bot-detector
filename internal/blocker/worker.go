@@ -29,9 +29,9 @@ func (rlb *RateLimitedBlocker) worker(commandsPerSecond int) {
 				rlb.IncrementBlockerCmdsExecuted()
 				var err error
 				if cmd.Action == "block" {
-					err = rlb.WrappedBlocker.Block(cmd.IPInfo, cmd.Duration)
+					err = rlb.WrappedBlocker.Block(cmd.IPInfo, cmd.Duration, cmd.Reason)
 				} else {
-					err = rlb.WrappedBlocker.Unblock(cmd.IPInfo)
+					err = rlb.WrappedBlocker.Unblock(cmd.IPInfo, cmd.Reason)
 				}
 				if err != nil {
 					rlb.Log(logging.LevelError, "BLOCKER_CMD_ERROR", "Error executing %s command for IP %s: %v", cmd.Action, cmd.IPInfo.Address, err)

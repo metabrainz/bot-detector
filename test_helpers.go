@@ -49,24 +49,24 @@ func resetGlobalState() {
 
 // MockBlocker implements the Blocker interface for testing, allowing Block() calls to be intercepted.
 type MockBlocker struct {
-	BlockFunc                  func(ipInfo utils.IPInfo, duration time.Duration) error
-	UnblockFunc                func(ipInfo utils.IPInfo) error
+	BlockFunc                  func(ipInfo utils.IPInfo, duration time.Duration, reason string) error
+	UnblockFunc                func(ipInfo utils.IPInfo, reason string) error
 	ListBlockedFunc            func() ([]string, error)
 	CompareHAProxyBackendsFunc func(expTolerance time.Duration) ([]blocker.SyncDiscrepancy, error)
 }
 
 // Block calls the stored mock function to simulate the blocking action.
-func (m *MockBlocker) Block(ipInfo utils.IPInfo, duration time.Duration) error {
+func (m *MockBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
 	if m.BlockFunc != nil {
-		return m.BlockFunc(ipInfo, duration)
+		return m.BlockFunc(ipInfo, duration, reason)
 	}
 	return nil
 }
 
 // Unblock calls the stored mock function to simulate the unblocking action.
-func (m *MockBlocker) Unblock(ipInfo utils.IPInfo) error {
+func (m *MockBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 	if m.UnblockFunc != nil {
-		return m.UnblockFunc(ipInfo)
+		return m.UnblockFunc(ipInfo, reason)
 	}
 	return nil
 }
@@ -212,13 +212,13 @@ func newCheckerTestHarness(t *testing.T, config *AppConfig) *checkerTestHarness 
 
 	// Setup a mock blocker to intercept calls.
 	mockBlocker := &MockBlocker{
-		BlockFunc: func(ipInfo utils.IPInfo, duration time.Duration) error {
+		BlockFunc: func(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
 			h.blockCalled = true
 			h.blockCallArgs.ipInfo = ipInfo
 			h.blockCallArgs.duration = duration
 			return nil
 		},
-		UnblockFunc: func(ipInfo utils.IPInfo) error {
+		UnblockFunc: func(ipInfo utils.IPInfo, reason string) error {
 			h.unblockCalled = true
 			return nil
 		},

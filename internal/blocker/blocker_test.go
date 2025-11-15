@@ -19,13 +19,13 @@ type mockWrappedBlocker struct {
 	blockedIPs       []string // For ListBlocked
 }
 
-func (m *mockWrappedBlocker) Block(ipInfo utils.IPInfo, duration time.Duration) error {
+func (m *mockWrappedBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
 	m.blockCount.Add(1)
 	m.processCh <- struct{}{}
 	return nil
 }
 
-func (m *mockWrappedBlocker) Unblock(ipInfo utils.IPInfo) error {
+func (m *mockWrappedBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 	m.unblockCount.Add(1)
 	m.processCh <- struct{}{}
 	return nil
@@ -91,7 +91,7 @@ func TestRateLimitedBlocker_BlockAndUnblock(t *testing.T) {
 	numBlockCommands := 5
 	for i := 0; i < numBlockCommands; i++ {
 		ip := utils.NewIPInfo(fmt.Sprintf("192.168.1.%d", i))
-		_ = h.rlb.Block(ip, 5*time.Minute)
+		_ = h.rlb.Block(ip, 5*time.Minute, "test-reason")
 	}
 
 	h.waitForCommands(numBlockCommands)
@@ -104,7 +104,7 @@ func TestRateLimitedBlocker_BlockAndUnblock(t *testing.T) {
 	numUnblockCommands := 3
 	for i := 0; i < numUnblockCommands; i++ {
 		ip := utils.NewIPInfo(fmt.Sprintf("192.168.2.%d", i))
-		_ = h.rlb.Unblock(ip)
+		_ = h.rlb.Unblock(ip, "test-unblock")
 	}
 
 	h.waitForCommands(numUnblockCommands)
@@ -122,7 +122,7 @@ func TestRateLimitedBlocker_QueueFull(t *testing.T) {
 	numCommands := 3
 	for i := 0; i < numCommands; i++ {
 		ip := utils.NewIPInfo(fmt.Sprintf("192.168.1.%d", i))
-		_ = h.rlb.Block(ip, 5*time.Minute)
+		_ = h.rlb.Block(ip, 5*time.Minute, "test-reason")
 	}
 
 	// Give a moment for the non-blocking sends to complete.
@@ -143,13 +143,13 @@ func TestRateLimitedBlocker_Stop(t *testing.T) {
 	h := newRateLimiterTestHarness(t, 10, 100) // High rate
 
 	ip := utils.NewIPInfo("192.168.1.1")
-	_ = h.rlb.Block(ip, 5*time.Minute)
+	_ = h.rlb.Block(ip, 5*time.Minute, "test-reason")
 
 	h.waitForCommands(1)
 
 	h.rlb.Stop()
 
-	_ = h.rlb.Block(ip, 5*time.Minute)
+	_ = h.rlb.Block(ip, 5*time.Minute, "test-reason")
 
 	if h.mockBlocker.blockCount.Load() != 1 {
 		t.Errorf("Expected exactly 1 block to be processed after stopping, got %d", h.mockBlocker.blockCount.Load())

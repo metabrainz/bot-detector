@@ -6,9 +6,12 @@ import (
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
+	"bot-detector/internal/persistence"
 	"bot-detector/internal/server"
 	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
+	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -139,12 +142,95 @@ func main() {
 		TopN:                 *cliFlags.TopN,
 		HTTPServer:           *cliFlags.HTTPServer,
 		configReloaded:       false,
+
+		// Initialize persistence fields
+		persistenceEnabled: loadedCfg.Persistence.Enabled,
+		stateDir:           loadedCfg.Persistence.StateDir,
+		compactionInterval: loadedCfg.Persistence.CompactionInterval,
+		activeBlocks:       make(map[string]persistence.ActiveBlockInfo),
 	}
 	p.startTime = p.NowFunc() // Record the start time.
 	// TestSignals is intentionally left nil in production.
 	// Set up the signalOooBufferFlush field to call the method.
 	p.signalOooBufferFlush = p.doSignalOooBufferFlush
 	initializeMetrics(p, loadedCfg)
+
+	if p.persistenceEnabled {
+		// -- STATE RESTORATION --
+		p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.stateDir)
+
+		// 1. Load snapshot
+		snapshot, err := persistence.LoadSnapshot(filepath.Join(p.stateDir, "state.snapshot"))
+		if err != nil {
+			p.LogFunc(logging.LevelError, "STATE_LOAD_FAIL", "Failed to load snapshot: %v", err)
+			os.Exit(1)
+		}
+		p.activeBlocks = snapshot.ActiveBlocks
+
+		// 2. Replay Journal
+		journalPath := filepath.Join(p.stateDir, "events.log")
+		journalFile, err := os.Open(journalPath)
+		if err == nil {
+			scanner := bufio.NewScanner(journalFile)
+			for scanner.Scan() {
+				var event persistence.AuditEvent
+				if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+					p.LogFunc(logging.LevelWarning, "JOURNAL_PARSE_FAIL", "Failed to parse journal event: %v", err)
+					continue
+				}
+				if event.Timestamp.After(snapshot.Timestamp) {
+					switch event.Event {
+					case persistence.EventTypeBlock:
+						p.activeBlocks[event.IP] = persistence.ActiveBlockInfo{
+							UnblockTime: event.Timestamp.Add(event.Duration),
+							Reason:      event.Reason,
+						}
+					case persistence.EventTypeUnblock:
+						delete(p.activeBlocks, event.IP)
+					}
+				}
+			}
+			journalFile.Close()
+		} else if !os.IsNotExist(err) {
+			p.LogFunc(logging.LevelWarning, "JOURNAL_OPEN_FAIL", "Could not open journal file for replay: %v", err)
+		}
+
+		// 3. State Push
+		p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Restoring %d active blocks to backend...", len(p.activeBlocks))
+		// Create a sorted list of table durations for best-fit matching
+		type tableInfo struct {
+			duration time.Duration
+			name     string
+		}
+		var sortedTables []tableInfo
+		for d, n := range p.Config.DurationToTableName {
+			sortedTables = append(sortedTables, tableInfo{duration: d, name: n})
+		}
+		sort.Slice(sortedTables, func(i, j int) bool {
+			return sortedTables[i].duration < sortedTables[j].duration
+		})
+
+		for ip, info := range p.activeBlocks {
+			remainingDuration := time.Until(info.UnblockTime)
+			if remainingDuration > 0 {
+				bestFitDuration := p.Config.DefaultBlockDuration
+				for _, t := range sortedTables {
+					if remainingDuration <= t.duration {
+						bestFitDuration = t.duration
+						break
+					}
+				}
+				p.Blocker.Block(utils.NewIPInfo(ip), bestFitDuration, info.Reason)
+			}
+		}
+
+		// 4. Open journal for appending
+		p.journalHandle, err = persistence.OpenJournalForAppend(journalPath)
+		if err != nil {
+			p.LogFunc(logging.LevelError, "JOURNAL_OPEN_FAIL", "Failed to open journal for writing: %v", err)
+			os.Exit(1)
+		}
+	}
 
 	haproxyBlocker := blocker.NewHAProxyBlocker(p, p.DryRun)
 	rateLimitedBlocker := blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.BlockerCommandQueueSize, p.Config.BlockerCommandsPerSecond)

@@ -73,9 +73,9 @@ func NewHAProxyBlocker(p HAProxyProvider, dryRun bool) *HAProxyBlocker {
 }
 
 // Block adds an IP to the appropriate HAProxy stick table.
-func (b *HAProxyBlocker) Block(ipInfo utils.IPInfo, duration time.Duration) error {
+func (b *HAProxyBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
 	if b.IsDryRun {
-		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would block IP %s for %v (Chain complete).", ipInfo.Address, duration)
+		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would block IP %s for %v (Reason: %s).", ipInfo.Address, duration, reason)
 		return nil
 	}
 
@@ -111,9 +111,9 @@ func (b *HAProxyBlocker) Block(ipInfo utils.IPInfo, duration time.Duration) erro
 }
 
 // Unblock removes an IP from all configured HAProxy stick tables.
-func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo) error {
+func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 	if b.IsDryRun {
-		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would unblock IP %s from all tables/maps.", ipInfo.Address)
+		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would unblock IP %s from all tables/maps (Reason: %s).", ipInfo.Address, reason)
 		return nil
 	}
 

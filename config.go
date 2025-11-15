@@ -2,6 +2,7 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	"bot-detector/internal/persistence"
 	"bot-detector/internal/utils"
 	"bufio"
 	"bytes"
@@ -1385,6 +1386,19 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		}
 	}
 
+	// Parse persistence settings
+	var persistenceConfig persistence.PersistenceConfig
+	if config.Persistence.Enabled {
+		persistenceConfig = persistence.PersistenceConfig{
+			Enabled:            true,
+			StateDir:           config.Persistence.StateDir,
+			CompactionInterval: config.Persistence.CompactionInterval,
+		}
+		if persistenceConfig.CompactionInterval == 0 {
+			persistenceConfig.CompactionInterval = time.Hour // Default to 1 hour
+		}
+	}
+
 	// Find the maximum min_time_since_last_hit duration across all chains for cleanup optimization.
 	var maxTimeSinceLastHit time.Duration
 	for _, chain := range newChains {
@@ -1419,6 +1433,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		UnblockOnGoodActor:       config.UnblockOnGoodActor,
 		UnblockCooldown:          unblockCooldown,
 		EnableMetrics:            enableMetrics,
+		Persistence:              persistenceConfig,
 	}, nil
 }
 
@@ -1510,6 +1525,7 @@ func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 		UnblockOnGoodActor:       loadedCfg.UnblockOnGoodActor,
 		UnblockCooldown:          loadedCfg.UnblockCooldown,
 		EnableMetrics:            loadedCfg.EnableMetrics, // New field
+		Persistence:              loadedCfg.Persistence,
 
 		// Preserve mockable functions and the original mod time unless the main config changed.
 		StatFunc:    oldConfig.StatFunc,
