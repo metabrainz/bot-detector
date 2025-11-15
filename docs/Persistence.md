@@ -79,3 +79,20 @@ In all cases, the state remains consistent.
 The system is designed to fail safely.
 - **On disk full:** It stops processing rather than continue with an un-journaled action that could lead to an inconsistent state.
 - **On network failure:** It logs the error and persistently retries sending the state to the backend in the background until the connection is restored, ensuring eventual consistency.
+
+## Disaster Recovery from a Snapshot Backup
+
+In a scenario where the entire server is lost and must be rebuilt from a backup, the `state.snapshot` file is the key asset.
+
+### Restoration Procedure
+
+1.  **Prepare New Server:** Set up a new machine with the `bot-detector` binary and its required backend (e.g., HAProxy).
+2.  **Restore Snapshot:** Place the backed-up `state.snapshot` file into the state directory. **Crucially, ensure no `events.log` file is present.**
+3.  **Start Application:** Launch `bot-detector`. It will load the snapshot, see there is no journal to replay, and proceed directly to the "Idempotent State Push." It will populate the new backend with all the blocks from the snapshot.
+4.  **Resume:** The system will create a new `events.log` and resume normal operation.
+
+### Limitations of Snapshot Recovery
+
+Restoring from a snapshot is robust, but has one primary limitation:
+
+- **Data Loss Since Last Snapshot:** All `block` and `unblock` events that occurred *after* the snapshot was created are lost. This means some recently blocked IPs will be missing, and some recently unblocked IPs may be incorrectly re-blocked. This defines the system's **Recovery Point Objective (RPO)**. The only way to minimize this window is to increase the frequency of off-site snapshot backups.
