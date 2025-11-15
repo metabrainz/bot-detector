@@ -49,9 +49,9 @@ func resetGlobalState() {
 
 // MockBlocker implements the Blocker interface for testing, allowing Block() calls to be intercepted.
 type MockBlocker struct {
-	BlockFunc             func(ipInfo utils.IPInfo, duration time.Duration) error
-	UnblockFunc           func(ipInfo utils.IPInfo) error
-	ListBlockedFunc       func() ([]string, error)
+	BlockFunc                  func(ipInfo utils.IPInfo, duration time.Duration) error
+	UnblockFunc                func(ipInfo utils.IPInfo) error
+	ListBlockedFunc            func() ([]string, error)
 	CompareHAProxyBackendsFunc func(expTolerance time.Duration) ([]blocker.SyncDiscrepancy, error)
 }
 
