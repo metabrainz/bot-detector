@@ -259,6 +259,23 @@ func main() {
 
 	// Handle --dump-backends flag. If present, list blocked IPs and exit.
 	if *cliFlags.DumpBackends {
+		logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "Checking HAProxy backend synchronization...")
+		// Use a 5-second tolerance for expiration differences
+		discrepancies, err := p.Blocker.CompareHAProxyBackends(5 * time.Second)
+		if err != nil {
+			logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "Failed to compare HAProxy backends: %v", err)
+			os.Exit(1)
+		}
+
+		if len(discrepancies) > 0 {
+			logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "HAProxy backends are out of sync. Aborting dump.")
+			for _, d := range discrepancies {
+				logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "  - IP: %s, Table: %s, Reason: %s, Details: %v", d.IP, d.TableName, d.Reason, d.Details)
+			}
+			os.Exit(1)
+		}
+
+		logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "HAProxy backends are in sync.")
 		logging.LogOutput(logging.LevelInfo, "DUMP_BACKENDS", "Retrieving currently blocked IPs from HAProxy...")
 		blockedIPs, err := p.Blocker.DumpBackends()
 		if err != nil {
