@@ -17,6 +17,7 @@ type CLIFlagValues struct {
 	TopN        *int
 	HTTPServer  *string
 	Check       *bool
+	ListBlocked *bool // New flag
 }
 
 // RegisterCLIFlags registers the command-line flags with the global flag set.
@@ -30,6 +31,7 @@ func RegisterCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 	flags.TopN = fs.Int("top-n", 0, "Optional. In dry-run mode, show top N actors per chain. Default is 0 (disabled).")
 	flags.HTTPServer = fs.String("http-server", "", "Optional. If set (e.g., \"127.0.0.1:8080\"), starts a web server on this address to display live metrics. Disabled by default.")
 	flags.Check = fs.Bool("check", false, "Optional. If true, validates the configuration file and exits. Returns a non-zero exit code on failure.")
+	flags.ListBlocked = fs.Bool("list-blocked", false, "Optional. If true, lists all currently blocked IPs and exits.")
 	return flags
 }
 

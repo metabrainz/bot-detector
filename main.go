@@ -152,6 +152,25 @@ func main() {
 	p.Blocker = rateLimitedBlocker
 	defer rateLimitedBlocker.Stop() // Ensure the rate limiter worker is stopped on exit.
 
+	// Handle --list-blocked flag. If present, list blocked IPs and exit.
+	if *cliFlags.ListBlocked {
+		logging.LogOutput(logging.LevelInfo, "LIST_BLOCKED", "Retrieving currently blocked IPs from HAProxy...")
+		blockedIPs, err := p.Blocker.ListBlocked()
+		if err != nil {
+			logging.LogOutput(logging.LevelError, "LIST_BLOCKED_FAIL", "Failed to retrieve blocked IPs: %v", err)
+			os.Exit(1)
+		}
+		if len(blockedIPs) == 0 {
+			logging.LogOutput(logging.LevelInfo, "LIST_BLOCKED", "No IPs currently blocked by HAProxy.")
+		} else {
+			logging.LogOutput(logging.LevelInfo, "LIST_BLOCKED", "Currently blocked IPs:")
+			for _, ip := range blockedIPs {
+				fmt.Println(ip)
+			}
+		}
+		os.Exit(0)
+	}
+
 	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) } // Assign the real method to the function field.
 
 	// Assign the real implementation for ProcessLogLine, which no longer uses line numbers.
