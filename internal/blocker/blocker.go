@@ -11,7 +11,7 @@ import (
 type Blocker interface {
 	Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error
 	Unblock(ipInfo utils.IPInfo, reason string) error
-	ListBlocked() ([]string, error)
+	DumpBackends() ([]string, error)
 	CompareHAProxyBackends(expTolerance time.Duration) ([]SyncDiscrepancy, error) // New method
 }
 
@@ -92,9 +92,9 @@ func (b *RateLimitedBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 	return nil
 }
 
-// ListBlocked retrieves all currently blocked IPs from the wrapped blocker.
-func (b *RateLimitedBlocker) ListBlocked() ([]string, error) {
-	return b.WrappedBlocker.ListBlocked()
+// DumpBackends retrieves all currently blocked IPs from the wrapped blocker.
+func (b *RateLimitedBlocker) DumpBackends() ([]string, error) {
+	return b.WrappedBlocker.DumpBackends()
 }
 
 // CompareHAProxyBackends compares the stick table entries across multiple HAProxy backends

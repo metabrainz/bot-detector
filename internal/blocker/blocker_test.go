@@ -12,11 +12,11 @@ import (
 
 // mockWrappedBlocker is a mock for the underlying Blocker interface.
 type mockWrappedBlocker struct {
-	blockCount       atomic.Int32
-	unblockCount     atomic.Int32
-	listBlockedCount atomic.Int32
-	processCh        chan struct{}
-	blockedIPs       []string // For ListBlocked
+	blockCount        atomic.Int32
+	unblockCount      atomic.Int32
+	dumpBackendsCount atomic.Int32
+	processCh         chan struct{}
+	blockedIPs        []string // For ListBlocked
 }
 
 func (m *mockWrappedBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
@@ -31,8 +31,8 @@ func (m *mockWrappedBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 	return nil
 }
 
-func (m *mockWrappedBlocker) ListBlocked() ([]string, error) {
-	m.listBlockedCount.Add(1)
+func (m *mockWrappedBlocker) DumpBackends() ([]string, error) {
+	m.dumpBackendsCount.Add(1)
 	return m.blockedIPs, nil
 }
 

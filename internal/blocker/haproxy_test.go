@@ -602,7 +602,7 @@ func TestCompareHAProxyBackends_ErrorDuringCollection(t *testing.T) {
 
 }
 
-func TestHAProxyBlocker_ListBlocked(t *testing.T) {
+func TestHAProxyBlocker_DumpBackends(t *testing.T) {
 
 	addresses := []string{"127.0.0.1:8080", "127.0.0.1:8081"}
 
@@ -631,11 +631,12 @@ func TestHAProxyBlocker_ListBlocked(t *testing.T) {
 
 	b := setupMockHAProxyForComparison(t, addresses, mockResponses)
 
-	blockedIPs, err := b.ListBlocked()
+	// Act
+	blockedIPs, err := b.DumpBackends()
 
 	if err != nil {
 
-		t.Fatalf("ListBlocked() failed: %v", err)
+		t.Fatalf("DumpBackends() failed: %v", err)
 
 	}
 

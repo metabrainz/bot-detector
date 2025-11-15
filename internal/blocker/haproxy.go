@@ -280,8 +280,8 @@ func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[stri
 	return nil
 }
 
-// ListBlocked retrieves all currently blocked IPs from HAProxy.
-func (b *HAProxyBlocker) ListBlocked() ([]string, error) {
+// DumpBackends retrieves all currently blocked IPs from HAProxy.
+func (b *HAProxyBlocker) DumpBackends() ([]string, error) {
 	if b.IsDryRun {
 		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would list blocked IPs.")
 		return []string{}, nil

@@ -1,13 +1,14 @@
 package main
 
 import (
-	"bot-detector/internal/blocker" // Added for blocker.SyncDiscrepancy
+	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
-	metrics "bot-detector/internal/metrics"
+	"bot-detector/internal/metrics"
 	"bot-detector/internal/store"
-	"bot-detector/internal/utils" // Added for IPInfo
+	"bot-detector/internal/utils"
 	"flag"
 	"fmt"
+	"github.com/stretchr/testify/mock"
 	"io"
 	"log"
 	"os"
@@ -49,6 +50,7 @@ func resetGlobalState() {
 
 // MockBlocker implements the Blocker interface for testing, allowing Block() calls to be intercepted.
 type MockBlocker struct {
+	mock.Mock
 	BlockFunc                  func(ipInfo utils.IPInfo, duration time.Duration, reason string) error
 	UnblockFunc                func(ipInfo utils.IPInfo, reason string) error
 	ListBlockedFunc            func() ([]string, error)
@@ -60,7 +62,8 @@ func (m *MockBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reason 
 	if m.BlockFunc != nil {
 		return m.BlockFunc(ipInfo, duration, reason)
 	}
-	return nil
+	args := m.Called(ipInfo, duration, reason)
+	return args.Error(0)
 }
 
 // Unblock calls the stored mock function to simulate the unblocking action.
@@ -68,15 +71,19 @@ func (m *MockBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 	if m.UnblockFunc != nil {
 		return m.UnblockFunc(ipInfo, reason)
 	}
-	return nil
+	args := m.Called(ipInfo, reason)
+	return args.Error(0)
 }
 
-// ListBlocked calls the stored mock function to simulate listing blocked IPs.
-func (m *MockBlocker) ListBlocked() ([]string, error) {
+func (m *MockBlocker) DumpBackends() ([]string, error) {
 	if m.ListBlockedFunc != nil {
 		return m.ListBlockedFunc()
 	}
-	return []string{}, nil
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]string), args.Error(1)
 }
 
 // CompareHAProxyBackends calls the stored mock function to simulate comparing HAProxy backends.
@@ -84,7 +91,11 @@ func (m *MockBlocker) CompareHAProxyBackends(expTolerance time.Duration) ([]bloc
 	if m.CompareHAProxyBackendsFunc != nil {
 		return m.CompareHAProxyBackendsFunc(expTolerance)
 	}
-	return []blocker.SyncDiscrepancy{}, nil
+	args := m.Called(expTolerance)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]blocker.SyncDiscrepancy), args.Error(1)
 }
 
 // newTestProcessor creates a new Processor instance with sensible defaults for testing.

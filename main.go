@@ -257,18 +257,18 @@ func main() {
 	p.Blocker = rateLimitedBlocker
 	defer rateLimitedBlocker.Stop() // Ensure the rate limiter worker is stopped on exit.
 
-	// Handle --list-blocked flag. If present, list blocked IPs and exit.
-	if *cliFlags.ListBlocked {
-		logging.LogOutput(logging.LevelInfo, "LIST_BLOCKED", "Retrieving currently blocked IPs from HAProxy...")
-		blockedIPs, err := p.Blocker.ListBlocked()
+	// Handle --dump-backends flag. If present, list blocked IPs and exit.
+	if *cliFlags.DumpBackends {
+		logging.LogOutput(logging.LevelInfo, "DUMP_BACKENDS", "Retrieving currently blocked IPs from HAProxy...")
+		blockedIPs, err := p.Blocker.DumpBackends()
 		if err != nil {
-			logging.LogOutput(logging.LevelError, "LIST_BLOCKED_FAIL", "Failed to retrieve blocked IPs: %v", err)
+			logging.LogOutput(logging.LevelError, "DUMP_FAIL", "Failed to retrieve blocked IPs: %v", err)
 			os.Exit(1)
 		}
 		if len(blockedIPs) == 0 {
-			logging.LogOutput(logging.LevelInfo, "LIST_BLOCKED", "No IPs currently blocked by HAProxy.")
+			logging.LogOutput(logging.LevelInfo, "DUMP_BACKENDS", "No IPs currently blocked by HAProxy.")
 		} else {
-			logging.LogOutput(logging.LevelInfo, "LIST_BLOCKED", "Currently blocked IPs:")
+			logging.LogOutput(logging.LevelInfo, "DUMP_BACKENDS", "Currently blocked IPs:")
 			for _, ip := range blockedIPs {
 				fmt.Println(ip)
 			}
