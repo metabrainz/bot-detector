@@ -124,3 +124,61 @@ chains:
 		t.Fatalf("Expected no error when running with a corrupted journal, but got: %v", err)
 	}
 }
+
+func TestUnwritableStateDir(t *testing.T) {
+	// Create a temporary directory for the test
+	tmpDir, err := os.MkdirTemp("", "bot-detector-test-persistence")
+	if err != nil {
+		t.Fatalf("Failed to create temporary directory: %v", err)
+	}
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Errorf("Failed to remove temporary directory: %v", err)
+		}
+	}()
+
+	// Create a dummy config file
+	configFile, err := os.CreateTemp(tmpDir, "config.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create temporary config file: %v", err)
+	}
+
+	configContent := `
+version: "1.0"
+persistence:
+  enabled: true
+chains:
+  - name: "test_chain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches:
+          uri: "/test"
+`
+	if _, err := fmt.Fprint(configFile, configContent); err != nil {
+		t.Fatalf("Failed to write to config file: %v", err)
+	}
+	if err := configFile.Close(); err != nil {
+		t.Fatalf("Failed to close config file: %v", err)
+	}
+
+	// Create an unwritable state directory
+	unwritableDir := filepath.Join(tmpDir, "unwritable")
+	if err := os.Mkdir(unwritableDir, 0500); err != nil {
+		t.Fatalf("Failed to create unwritable directory: %v", err)
+	}
+
+	// Attempt to run the application
+	args := []string{"bot-detector", "-config", configFile.Name(), "-log-path", "/dev/null", "-state-dir", unwritableDir, "-exit-on-eof"}
+	err = run(args)
+
+	// Verify the outcome
+	if err == nil {
+		t.Fatal("Expected an error when running with an unwritable state directory, but got nil")
+	}
+
+	expectedError := "permission denied"
+	if !strings.Contains(err.Error(), expectedError) {
+		t.Errorf("Expected error message to contain '%s', but got: %v", expectedError, err)
+	}
+}
