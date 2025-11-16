@@ -64,55 +64,70 @@ func (p *Processor) GetMarshalledConfig() ([]byte, time.Time, error) {
 
 // main is the application entry point.
 func main() {
-	cliFlags := RegisterCLIFlags(flag.CommandLine)
+	if err := run(os.Args); err != nil {
+		log.Printf("[FATAL] %v", err)
+		os.Exit(1)
+	}
+}
+
+// run is the main application logic.
+func run(args []string) error {
+	flagSet := flag.NewFlagSet(args[0], flag.ContinueOnError)
+	cliFlags := RegisterCLIFlags(flagSet)
+	flagSet.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "A behavioral bot detection tool that monitors logs and blocks malicious IPs via the configured blocking backend.\n\n")
+		flagSet.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nMemory and CPU are optimized by pre-compiling regexes and using the cleanup routine.\n")
+	}
+
 	// Parse CLI flags
-	flag.Parse()
+	if err := flagSet.Parse(args[1:]); err != nil {
+		return err
+	}
 
 	// Handle --check flag first. If present, validate config and exit.
 	if *cliFlags.Check {
 		if *cliFlags.ConfigPath == "" {
-			log.Println("[FATAL] --config flag is required for --check")
-			os.Exit(1)
+			return fmt.Errorf("--config flag is required for --check")
 		}
 		absConfigPath, err := filepath.Abs(*cliFlags.ConfigPath)
 		if err != nil {
-			log.Printf("[FATAL] Could not determine absolute path for config file: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("could not determine absolute path for config file: %v", err)
 		}
 		opts := LoadConfigOptions{
 			ConfigPath: absConfigPath,
 		}
 		_, err = LoadConfigFromYAML(opts)
 		if err != nil {
-			log.Printf("[FATAL] Configuration check failed: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("configuration check failed: %v", err)
 		}
 		log.Println("[SUCCESS] Configuration is valid.")
-		os.Exit(0)
+		return nil
 	}
 
 	// Handle the version flag first. If present, print version and exit.
 	if *cliFlags.ShowVersion {
 		fmt.Printf("bot-detector version %s\n", AppVersion)
-		os.Exit(0)
+		return nil
 	}
 
 	// Validate that required flags are provided.
 	// --log-path is required for live mode, but optional for other modes.
 	if *cliFlags.ConfigPath == "" || (*cliFlags.LogPath == "" && !*cliFlags.DryRun && !*cliFlags.DumpBackends) {
 		flag.Usage()
-		os.Exit(1)
+		return fmt.Errorf("missing required flags")
 	}
 
 	// Resolve the config path to an absolute path to make file matcher paths relative to it.
 	absConfigPath, err := filepath.Abs(*cliFlags.ConfigPath)
 	if err != nil {
-		log.Fatalf("[FATAL] Could not determine absolute path for config file: %v", err)
+		return fmt.Errorf("could not determine absolute path for config file: %v", err)
 	}
 	// Get the modification time of the config file to initialize LastModTime.
 	fileInfo, err := os.Stat(absConfigPath)
 	if err != nil {
-		log.Fatalf("[FATAL] Could not stat config file: %v", err)
+		return fmt.Errorf("could not stat config file: %v", err)
 	}
 	// Load initial configuration from YAML.
 	opts := LoadConfigOptions{
@@ -120,7 +135,7 @@ func main() {
 	}
 	loadedCfg, err := LoadConfigFromYAML(opts)
 	if err != nil {
-		log.Fatalf("[FATAL] Configuration Load Error: %v", err)
+		return fmt.Errorf("configuration Load Error: %v", err)
 	}
 
 	logging.SetLogLevel(loadedCfg.LogLevel)
@@ -193,7 +208,7 @@ func main() {
 
 	// Final check: if persistence is enabled in YAML but no --state-dir is given, it's a fatal error.
 	if p.persistenceEnabled && p.stateDir == "" {
-		log.Fatalf("[FATAL] Persistence is enabled in config, but no --state-dir was provided.")
+		return fmt.Errorf("persistence is enabled in config, but no --state-dir was provided")
 	}
 
 	p.startTime = p.NowFunc() // Record the start time.
@@ -209,7 +224,7 @@ func main() {
 	if p.persistenceEnabled {
 		// -- STATE RESTORATION --
 		if err := os.MkdirAll(p.stateDir, 0750); err != nil {
-			log.Fatalf("[FATAL] Failed to create state directory '%s': %v", p.stateDir, err)
+			return fmt.Errorf("failed to create state directory '%s': %v", p.stateDir, err)
 		}
 		p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.stateDir)
 
@@ -217,7 +232,7 @@ func main() {
 		snapshot, err := persistence.LoadSnapshot(filepath.Join(p.stateDir, "state.snapshot"))
 		if err != nil {
 			p.LogFunc(logging.LevelError, "STATE_LOAD_FAIL", "Failed to load snapshot: %v", err)
-			os.Exit(1)
+			return err
 		}
 		p.activeBlocks = snapshot.ActiveBlocks
 
@@ -293,7 +308,7 @@ func main() {
 		p.journalHandle, err = persistence.OpenJournalForAppend(journalPath)
 		if err != nil {
 			p.LogFunc(logging.LevelError, "JOURNAL_OPEN_FAIL", "Failed to open journal for writing: %v", err)
-			os.Exit(1)
+			return err
 		}
 	}
 
@@ -301,22 +316,6 @@ func main() {
 	rateLimitedBlocker = blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.BlockerCommandQueueSize, p.Config.BlockerCommandsPerSecond)
 
 	p.Blocker = rateLimitedBlocker
-	// --- SHUTDOWN ---
-	defer func() {
-		p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Application shutting down.")
-		if p.Blocker != nil {
-			p.Blocker.Shutdown()
-		}
-		if p.persistenceEnabled {
-			p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Waiting for persistence operations to complete...")
-			p.persistenceWg.Wait() // Wait for all persistence operations to finish.
-			p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Closing journal file.")
-			if err := p.journalHandle.Close(); err != nil {
-				p.LogFunc(logging.LevelError, "PERSISTENCE", "Error closing journal file: %v", err)
-			}
-		}
-		p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Shutdown complete.")
-	}()
 
 	// Handle --dump-backends flag. If present, list blocked IPs and exit.
 	if *cliFlags.DumpBackends {
@@ -327,7 +326,7 @@ func main() {
 			discrepancies, err := p.Blocker.CompareHAProxyBackends(5 * time.Second)
 			if err != nil {
 				logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "Failed to compare HAProxy backends: %v", err)
-				os.Exit(1)
+				return err
 			}
 
 			if len(discrepancies) > 0 {
@@ -335,7 +334,7 @@ func main() {
 				for _, d := range discrepancies {
 					logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "  - IP: %s, Table: %s, Reason: %s, Details: %v", d.IP, d.TableName, d.Reason, d.Details)
 				}
-				os.Exit(1)
+				return fmt.Errorf("HAProxy backends are out of sync")
 			}
 			logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "HAProxy backends are in sync.")
 		} else {
@@ -348,7 +347,7 @@ func main() {
 		blockedIPs, err := p.Blocker.DumpBackends()
 		if err != nil {
 			logging.LogOutput(logging.LevelError, "DUMP_FAIL", "Failed to retrieve blocked IPs: %v", err)
-			os.Exit(1)
+			return err
 		}
 		if len(blockedIPs) == 0 {
 			logging.LogOutput(logging.LevelInfo, "DUMP_BACKENDS", "No IPs currently blocked by HAProxy.")
@@ -358,7 +357,7 @@ func main() {
 				fmt.Println(ip)
 			}
 		}
-		os.Exit(0)
+		return nil
 	}
 
 	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) } // Assign the real method to the function field.
@@ -371,6 +370,38 @@ func main() {
 	logChainDetails(p, p.Chains, "Loaded chains")
 
 	start(p)
+
+	// --- GRACEFUL SHUTDOWN SEQUENCE ---
+
+	p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Graceful shutdown initiated.")
+
+	if p.Blocker != nil {
+		p.Blocker.Shutdown()
+	}
+
+	if p.persistenceEnabled {
+		// Wait for any pending writes to the journal.
+		p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Waiting for persistence operations to complete...")
+		p.persistenceWg.Wait()
+
+		// Perform final compaction if enabled.
+		if p.compactionInterval > 0 {
+			p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Performing final state compaction...")
+			runCompaction(p)
+		}
+
+		// Close the journal.
+		p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Closing journal file.")
+		if p.journalHandle != nil {
+			if err := p.journalHandle.Close(); err != nil {
+				p.LogFunc(logging.LevelError, "PERSISTENCE", "Error closing journal file: %v", err)
+			}
+		}
+	}
+	// Use a direct write to stderr for the final message to avoid logging buffers.
+	fmt.Fprintln(os.Stderr, "[SHUTDOWN] Shutdown complete.")
+
+	return nil
 }
 
 // --- MetricsProvider Interface Implementation ---
@@ -661,8 +692,7 @@ func start(p *Processor) {
 						case <-ticker.C:
 							runCompaction(p)
 						case <-stopWatcher:
-							p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Performing final state compaction...")
-							runCompaction(p)
+							p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Compaction goroutine shutting down.")
 							return
 						}
 					}
