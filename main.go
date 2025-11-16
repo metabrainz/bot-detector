@@ -267,6 +267,13 @@ func main() {
 		})
 
 		for ip, info := range p.activeBlocks {
+			// Before restoring, check if the IP is now a good actor.
+			tempEntry := &LogEntry{IPInfo: utils.NewIPInfo(ip)}
+			if isGood, reason := isGoodActor(p, tempEntry); isGood {
+				p.LogFunc(logging.LevelInfo, "STATE_RESTORE_SKIP", "Skipping restore for %s (good_actor: %s)", ip, reason)
+				continue // Don't restore blocks for good actors.
+			}
+
 			remainingDuration := time.Until(info.UnblockTime)
 			if remainingDuration > 0 {
 				bestFitDuration := p.Config.DefaultBlockDuration
