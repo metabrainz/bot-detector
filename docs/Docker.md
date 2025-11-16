@@ -1,62 +1,99 @@
-# Docker
+# Running with Docker
 
-See [Dockerfile.md](Dockerfile.md) for an example multi-stage Dockerfile to build a production-ready image.
+This guide provides instructions for building and running the bot-detector in a Docker container for production environments.
 
-## Building the image
+## Building the Docker Image
 
-```bash
-#!/bin/bash
+A multi-stage [`Dockerfile`](../Dockerfile) is provided at the root of this project. It compiles the application in a build container and then copies the static binary to a minimal `alpine` image for a small and secure result.
 
+To build the image, run the following command from the project root:
 
+```sh
 docker build -t bot-detector:latest .
 ```
 
-## Dry run / test
+## Running the Container
 
-```bash
+The recommended way to run the container is to use environment variables to define your paths and ports, which makes the command easier to read and manage.
 
-#!/bin/bash
+### **Live Mode Example**
 
-HOST_LOG_FILE="./test_access.log"
-HOST_CONFIG_PATH="./config.yaml" # Path to your local config file (e.g., config.yaml)
+This example demonstrates a robust setup for a production environment.
 
-# Define container paths (these should match the flags)
-CONTAINER_APP_DIR="/home/appuser/bot-detector"
-CONTAINER_LOG_FILE="${CONTAINER_APP_DIR}/access.log"
-CONTAINER_CONFIG_PATH="${CONTAINER_APP_DIR}/config.yaml"
+**1. Set up your environment variables:**
+```sh
+# --- Configuration ---
+# The name for this specific instance (e.g., for a specific log file)
+INSTANCE_NAME="prod-website"
+# The directory on the HOST machine where your config.yaml and its dependencies are.
+HOST_CONFIG_DIR="/etc/bot-detector/${INSTANCE_NAME}"
+# The directory on the HOST machine where the logs to be tailed are.
+HOST_LOGS_DIR="/var/log/nginx/"
+# The specific log file to tail inside the HOST_LOGS_DIR.
+LOG_FILE_NAME="access.log"
+# The directory on the HOST machine where the application's state will be persisted.
+HOST_STATE_DIR="/var/lib/bot-detector/${INSTANCE_NAME}"
+# The port on the HOST machine to expose the API server on.
+BOTDET_API_PORT=8090
 
-docker run --rm \
-    --name bot-detector-dry-run \
-    -v ${HOST_LOG_FILE}:${CONTAINER_LOG_FILE}:ro \
-    -v ${HOST_CONFIG_PATH}:${CONTAINER_CONFIG_PATH} \
-    bot-detector:latest \
-    --dry-run \
-    --log-path "${CONTAINER_LOG_FILE}" \
-    --config "${CONTAINER_CONFIG_PATH}"
+# --- Docker Settings ---
+CONTAINER_NAME="bot-detector-${INSTANCE_NAME}"
+IMAGE_NAME="bot-detector:latest"
+# The internal port the app listens on. This should match the --http-server flag.
+INTERNAL_PORT=8088
 ```
 
-## Deploying a container
+**2. Create the state directory on the host:**
+The application needs a directory to store its state. You must create it on the host machine before running the container.
+```sh
+mkdir -p "$HOST_STATE_DIR"
+```
 
-```bash
+**3. Run the `docker run` command:**
+This command stops and removes any old container with the same name before starting a new one.
+```sh
+# Stop and remove any existing container
+docker rm -f "$CONTAINER_NAME"
 
-# Define host paths based on common HAProxy and log setups
-HOST_LOG_PATH="/var/log/http/access.log"
-HOST_SOCKET_PATH="/run/haproxy/admin.sock"  # if using socket to comuunicate with HAProxy
-HOST_CONFIG_PATH="./config.yaml" # Path to your local config file (e.g., config.yaml)
-
-# Define container paths (these should match the defaults or flags used by bot-detector)
-CONTAINER_APP_DIR="/home/appuser/bot-detector"
-CONTAINER_LOG_PATH="${CONTAINER_APP_DIR}/access.log"
-CONTAINER_SOCKET_PATH="${CONTAINER_APP_DIR}/haproxy.sock"
-CONTAINER_CONFIG_PATH="${CONTAINER_APP_DIR}/config.yaml"
-
+# Run the new container
 docker run -d \
-    --name bot-detector-instance \
-    --restart unless-stopped \
-    -v ${HOST_LOG_PATH}:${CONTAINER_LOG_PATH}:ro \
-    -v ${HOST_SOCKET_PATH}:${CONTAINER_SOCKET_PATH} \
-    -v ${HOST_CONFIG_PATH}:${CONTAINER_CONFIG_PATH} \
-    bot-detector:latest \
-    --log-path "${CONTAINER_LOG_PATH}" \
-    --config "${CONTAINER_CONFIG_PATH}"
+  --name "$CONTAINER_NAME" \
+  --restart always \
+  -v "$HOST_CONFIG_DIR":/home/appuser/bot-detector/config:ro \
+  -v "$HOST_LOGS_DIR":/home/appuser/bot-detector/logs:ro \
+  -v "$HOST_STATE_DIR":/home/appuser/bot-detector/state \
+  --publish $BOTDET_API_PORT:$INTERNAL_PORT \
+  "$IMAGE_NAME" \
+  --config "config/config.yaml" \
+  --log-path "logs/$LOG_FILE_NAME" \
+  --state-dir "state" \
+  --http-server "0.0.0.0:$INTERNAL_PORT"
 ```
+
+### **Explanation of the `docker run` command:**
+
+*   `-d`: Runs the container in detached mode (in the background).
+*   `--name "$CONTAINER_NAME"`: Assigns a predictable name to the container.
+*   `--restart always`: Ensures the container will restart automatically if it stops.
+*   `-v "$HOST_CONFIG_DIR":/home/appuser/bot-detector/config:ro`: Mounts your configuration directory from the host into the container in **read-only** mode for security.
+*   `-v "$HOST_LOGS_DIR":/home/appuser/bot-detector/logs:ro`: Mounts the log directory from the host into the container in **read-only** mode.
+*   `-v "$HOST_STATE_DIR":/home/appuser/bot-detector/state`: Mounts a directory from the host for persistence. This is **critical** for preserving the application's state (like active blocks) across container restarts. This volume **must** be read-write.
+*   `--publish $BOTDET_API_PORT:$INTERNAL_PORT`: Exposes the application's web server port to the host machine.
+*   `--config "config/config.yaml"`: Points to the config file *relative to the container's working directory* (`/home/appuser/bot-detector`).
+*   `--state-dir "state"`: Enables persistence and tells the application to use the `state` directory (which is the volume mounted from the host) to store its data.
+*   `--http-server "0.0.0.0:$INTERNAL_PORT"`: Tells the application to listen on all network interfaces inside the container, which is required for the published port to be accessible from the host.
+
+### **Running Commands on a Live Container**
+
+To run one-off commands like `--dump-backends` against a running container, use `docker exec`. This executes a new command inside the existing container without stopping it.
+
+**Example: Checking Configuration**
+
+To validate the configuration file inside a running container, you can use the `--check` flag. This is a great way to verify a new configuration before signaling the application to reload it.
+
+```sh
+docker exec "$CONTAINER_NAME" ./bot-detector --check --config config/config.yaml
+```
+*   `"$CONTAINER_NAME"` is the name of the running container.
+*   `./bot-detector --check ...` is the command to execute inside it.
+*   Note that the path to the config file (`config/config.yaml`) is relative to the container's working directory (`/home/appuser/bot-detector`).

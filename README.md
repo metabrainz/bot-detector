@@ -23,6 +23,7 @@ The application operates in a continuous loop:
 *   **Graceful Shutdown:** Implements signal handlers (SIGINT, SIGTERM) for safe, controlled process termination.
 *   **Dry Run Mode:** Allows testing behavioral chains against static log files without affecting a live blocking backend.
 *   **Memory Optimization:** Automatically purges state for IPs that are no longer relevant, minimizing memory footprint.
+*   **Metrics & Configuration API:** An optional embedded web server (enabled with `--http-server`) provides live performance metrics and allows for inspecting and archiving the running configuration. See [API.md](docs/API.md) for details.
 
 ## **Setup and Usage**
 
