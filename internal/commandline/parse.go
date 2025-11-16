@@ -6,79 +6,106 @@ import (
 	"os"
 )
 
+// AppParameters holds the fully parsed and validated configuration
+// from command-line flags, ready for execution.
+type AppParameters struct {
+	Check        bool
+	ConfigPath   string
+	DryRun       bool
+	DumpBackends bool
+	ExitOnEOF    bool
+	HTTPServer   string
+	LogPath      string
+	ReloadOn     string
+	ShowVersion  bool
+	StateDir     string
+	TopN         int
+}
+
 // ParseParameters defines and parses all command-line flags, validates them,
 // and returns a populated AppParameters struct.
 func ParseParameters(args []string) (*AppParameters, error) {
 	flagSet := flag.NewFlagSet(args[0], flag.ContinueOnError)
-
 	cliFlags := registerCLIFlags(flagSet)
 
 	flagSet.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", args[0])
 		fmt.Fprintf(os.Stderr, "A behavioral bot detection tool that monitors logs and blocks malicious IPs via the configured blocking backend.\n\n")
 		flagSet.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nMemory and CPU are optimized by pre-compiling regexes and using the cleanup routine.\n")
 	}
 
 	if err := flagSet.Parse(args[1:]); err != nil {
 		return nil, err
 	}
-
-	// Perform initial validation that doesn't require loading the config.
-	if *cliFlags.Check && *cliFlags.ConfigPath == "" {
-		return nil, fmt.Errorf("--config flag is required for --check")
-	}
-	if *cliFlags.ConfigPath == "" || (*cliFlags.LogPath == "" && !*cliFlags.DryRun && !*cliFlags.DumpBackends) {
+	if flagSet.NFlag() == 0 {
+		// Display usage if no parameters
 		flagSet.Usage()
-		return nil, fmt.Errorf("missing required flags")
+		return nil, fmt.Errorf("no flag: help requested")
 	}
 
 	params := &AppParameters{
-		ConfigPath:   *cliFlags.ConfigPath,
-		LogPath:      *cliFlags.LogPath,
-		StateDir:     *cliFlags.StateDir,
-		DryRun:       *cliFlags.DryRun,
-		ExitOnEOF:    *cliFlags.ExitOnEOF,
-		ShowVersion:  *cliFlags.ShowVersion,
 		Check:        *cliFlags.Check,
+		ConfigPath:   *cliFlags.ConfigPath,
+		DryRun:       *cliFlags.DryRun,
 		DumpBackends: *cliFlags.DumpBackends,
-		ReloadOn:     *cliFlags.ReloadOn,
-		TopN:         *cliFlags.TopN,
+		ExitOnEOF:    *cliFlags.ExitOnEOF,
 		HTTPServer:   *cliFlags.HTTPServer,
+		LogPath:      *cliFlags.LogPath,
+		ReloadOn:     *cliFlags.ReloadOn,
+		ShowVersion:  *cliFlags.ShowVersion,
+		StateDir:     *cliFlags.StateDir,
+		TopN:         *cliFlags.TopN,
 	}
 
+	// Most modes require a config file. The flag has a default, so this
+	// error is mainly for cases like `--config ""`.
+	if params.ConfigPath == "" {
+		switch {
+		case params.ShowVersion:
+			return params, nil
+		case params.Check:
+			return nil, fmt.Errorf("--config flag is required for --check")
+		case params.DumpBackends:
+			return nil, fmt.Errorf("--config flag is required for --dump-backends")
+		default:
+			return nil, fmt.Errorf("--config flag is required")
+		}
+	}
+	if params.LogPath == "" && !params.DryRun {
+		return nil, fmt.Errorf("--log-path is required in live mode")
+	}
 	return params, nil
 }
 
 // CLIFlagValues holds pointers to the variables where command-line flag values will be stored.
 type CLIFlagValues struct {
-	LogPath      *string
+	Check        *bool
 	ConfigPath   *string
 	DryRun       *bool
-	ShowVersion  *bool
-	ReloadOn     *string
-	TopN         *int
-	HTTPServer   *string
 	DumpBackends *bool
-	StateDir     *string
-	Check        *bool
 	ExitOnEOF    *bool
+	HTTPServer   *string
+	LogPath      *string
+	ReloadOn     *string
+	ShowVersion  *bool
+	StateDir     *string
+	TopN         *int
 }
 
 // registerCLIFlags registers the command line flags.
 func registerCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 	flags := &CLIFlagValues{
-		ConfigPath:   fs.String("config", "config.yaml", "Path to the configuration file."),
-		LogPath:      fs.String("log-path", "", "Path to the log file to monitor."),
-		DryRun:       fs.Bool("dry-run", false, "Enable dry-run mode. Processes a static log file and exits."),
-		ShowVersion:  fs.Bool("version", false, "Show the application version and exit."),
 		Check:        fs.Bool("check", false, "Check the configuration file for validity and exit."),
-		ExitOnEOF:    fs.Bool("exit-on-eof", false, "Exit after processing the existing log file instead of tailing."),
-		ReloadOn:     fs.String("reload-on", "", "Trigger a configuration reload on a specific signal (hup, usr1, usr2) or 'watcher'. By default, both are enabled."),
-		TopN:         fs.Int("top-n", 0, "Number of top actors to display in the metrics summary."),
-		HTTPServer:   fs.String("http-server", "", "Enable the HTTP server for metrics on the given address (e.g., :8080)."),
+		ConfigPath:   fs.String("config", "", "Path to the configuration file."),
+		DryRun:       fs.Bool("dry-run", false, "Enable dry-run mode. Processes a static log file and exits."),
 		DumpBackends: fs.Bool("dump-backends", false, "List currently blocked IPs and exit."),
+		ExitOnEOF:    fs.Bool("exit-on-eof", false, "Exit after processing the existing log file instead of tailing."),
+		HTTPServer:   fs.String("http-server", "", "Enable the HTTP server for metrics on the given address (e.g., :8080)."),
+		LogPath:      fs.String("log-path", "", "Path to the log file to monitor."),
+		ReloadOn:     fs.String("reload-on", "", "Trigger a configuration reload on a specific signal (hup, usr1, usr2) or 'watcher'. By default, both are enabled."),
+		ShowVersion:  fs.Bool("version", false, "Show the application version and exit."),
 		StateDir:     fs.String("state-dir", "", "Path to the state directory. Enables persistence if set."),
+		TopN:         fs.Int("top-n", 0, "Number of top actors to display in the metrics summary."),
 	}
 	return flags
 }
