@@ -1,18 +1,22 @@
 package server
 
 import (
-	"bytes"
+	"bot-detector/internal/logging"
 	"net/http"
 )
 
-// configHandler creates an HTTP handler that displays the current config.
 func configHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data, modtime, err := p.GetMarshalledConfig()
-		if err != nil || len(data) == 0 {
+		config, modTime, err := p.GetMarshalledConfig()
+		if err != nil {
 			http.Error(w, "failed to read config file", http.StatusInternalServerError)
 			return
 		}
-		http.ServeContent(w, r, "config.yaml", modtime, bytes.NewReader(data))
+		w.Header().Set("Content-Type", "application/yaml")
+		w.Header().Set("Last-Modified", modTime.UTC().Format(http.TimeFormat))
+		_, err = w.Write(config)
+		if err != nil {
+			logging.LogOutput(logging.LevelError, "configHandler", "Error writing config: %v", err)
+		}
 	}
 }

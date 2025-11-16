@@ -1,12 +1,8 @@
 package main
 
 import (
-	"bot-detector/internal/logging"
-	"bot-detector/internal/persistence"
-	"bot-detector/internal/utils"
 	"bufio"
 	"bytes"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net"
@@ -20,6 +16,11 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"bot-detector/internal/logging"
+	"bot-detector/internal/persistence"
+	"bot-detector/internal/types"
+	"bot-detector/internal/utils"
 
 	"gopkg.in/yaml.v3"
 )
@@ -323,165 +324,14 @@ func (g *depGraph) dfs(node *depGraphNode, visiting, visited map[string]bool, pa
 	return nil, nil
 }
 
-// calculateChecksum computes the SHA256 checksum of a slice of strings.
-func calculateChecksum(lines []string) string {
-	h := sha256.New()
-	h.Write([]byte(strings.Join(lines, "\n")))
-	return fmt.Sprintf("%x", h.Sum(nil))
-}
-
 // --- New Matcher Compilation Logic ---
-
-// FileDependencyStatus holds the complete state of a file at a specific point in time.
-type FileDependencyStatus struct {
-	ModTime  time.Time
-	Status   FileStatus
-	Checksum string // SHA256 checksum of the content to detect no-op changes.
-	Error    error  // Store the error if status is Error
-}
-
-// FileDependency represents a file that the configuration depends on, tracking its state over time.
-type FileDependency struct {
-	Path           string
-	PreviousStatus *FileDependencyStatus
-	CurrentStatus  *FileDependencyStatus
-	Content        []string // Cached content from the last successful load
-}
-
-// FileStatus indicates the current state of a file dependency.
-type FileStatus int
-
-const (
-	FileStatusUnknown FileStatus = iota
-	FileStatusLoaded
-	FileStatusMissing
-	FileStatusError
-)
-
-func (fs FileStatus) String() string {
-	switch fs {
-	case FileStatusUnknown:
-		return "Unknown"
-	case FileStatusLoaded:
-		return "Loaded"
-	case FileStatusMissing:
-		return "Missing"
-	case FileStatusError:
-		return "Error"
-	default:
-		return fmt.Sprintf("FileStatus(%d)", fs)
-	}
-}
-
-// updateStatus polls the file on disk and updates its CurrentStatus.
-// It always preserves the previous state before updating.
-func (fd *FileDependency) updateStatus() {
-	debug := false
-	if debug {
-		logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "Updating status for '%s'. PreviousStatus: %+v", fd.Path, fd.PreviousStatus)
-	}
-
-	// Preserve the last known state.
-	fd.PreviousStatus = fd.CurrentStatus
-
-	newStatus := &FileDependencyStatus{}
-
-	info, err := os.Stat(fd.Path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			newStatus.Status = FileStatusMissing
-			newStatus.Error = err
-			if debug {
-				logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "File '%s' is missing. NewStatus: %+v", fd.Path, newStatus)
-			}
-		} else {
-			// Another error occurred (e.g., permissions).
-			newStatus.Status = FileStatusError
-			newStatus.Error = err
-			if debug {
-				logging.LogOutput(logging.LevelError, "FILE_DEP_UPDATE", "Error stating file '%s': %v. NewStatus: %+v", fd.Path, err, newStatus)
-			}
-		}
-		fd.CurrentStatus = newStatus
-		return
-	}
-
-	// File exists, update basic info.
-	newStatus.Status = FileStatusLoaded
-	newStatus.ModTime = info.ModTime()
-
-	// Always attempt to read the file if it exists and is loaded, to detect read errors (e.g., permissions).
-	// This also ensures the checksum is always up-to-date if content changes without ModTime update (rare, but possible).
-	content, readErr := ReadLinesFromFile(fd.Path)
-	if readErr != nil {
-		newStatus.Status = FileStatusError
-		newStatus.Error = readErr
-		if debug {
-			logging.LogOutput(logging.LevelError, "FILE_DEP_UPDATE", "Error reading file '%s': %v. NewStatus: %+v", fd.Path, readErr, newStatus)
-		}
-	} else {
-		newStatus.Checksum = calculateChecksum(content)
-		if debug {
-			logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "File '%s' read successfully. Checksum: %s", fd.Path, newStatus.Checksum)
-		}
-	}
-
-	fd.CurrentStatus = newStatus
-	if debug {
-		logging.LogOutput(logging.LevelDebug, "FILE_DEP_UPDATE", "Finished updating status for '%s'. CurrentStatus: %+v", fd.Path, fd.CurrentStatus)
-	}
-}
-
-// hasChanged compares the PreviousStatus and CurrentStatus to see if a reload is warranted.
-func (fd *FileDependency) hasChanged() bool {
-	if fd.PreviousStatus == nil {
-		// If there's no previous state, any loaded state is a "change".
-		return fd.CurrentStatus.Status == FileStatusLoaded
-	}
-
-	// A change is warranted if the status is different, or if the checksums don't match.
-	// A simple `touch` will change ModTime but not Checksum, so we rely on checksum.
-	return fd.CurrentStatus.Status != fd.PreviousStatus.Status ||
-		fd.CurrentStatus.Checksum != fd.PreviousStatus.Checksum
-}
-
-// Clone creates a deep copy of the FileDependencyStatus object.
-func (fds *FileDependencyStatus) Clone() *FileDependencyStatus {
-	if fds == nil {
-		return nil
-	}
-	return &FileDependencyStatus{
-		ModTime:  fds.ModTime,
-		Status:   fds.Status,
-		Checksum: fds.Checksum,
-		Error:    fds.Error, // errors are immutable
-	}
-}
-
-// Clone creates a deep copy of the FileDependency object.
-func (fd *FileDependency) Clone() *FileDependency {
-	if fd == nil {
-		return nil
-	}
-	// Content is a slice of strings, which is a reference type, but since the
-	// content itself is immutable strings, a shallow copy of the slice is sufficient.
-	contentCopy := make([]string, len(fd.Content))
-	copy(contentCopy, fd.Content)
-
-	return &FileDependency{
-		Path:           fd.Path,
-		PreviousStatus: fd.PreviousStatus.Clone(),
-		CurrentStatus:  fd.CurrentStatus.Clone(),
-		Content:        contentCopy,
-	}
-}
 
 // MatcherContext holds common parameters needed during matcher compilation.
 type MatcherContext struct {
 	ChainName          string
 	StepIndex          int
 	CanonicalFieldName string
-	FileDependencies   map[string]*FileDependency
+	FileDependencies   map[string]*types.FileDependency
 	FilePath           string
 }
 
@@ -490,7 +340,7 @@ type MatcherContext struct {
 type fieldMatcher func(entry *LogEntry) bool
 
 // compileMatchers parses the raw `field_matches` interface from YAML into a slice of efficient matcher functions.
-func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps map[string]*FileDependency, filePath string) ([]struct {
+func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps map[string]*types.FileDependency, filePath string) ([]struct {
 	Matcher   fieldMatcher
 	FieldName string
 }, error) {
@@ -612,23 +462,23 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 		// Check if the file is already loaded or needs to be loaded/reloaded
 		fileDep, exists := ctx.FileDependencies[absoluteFilePath]
 		if !exists || fileDep.CurrentStatus == nil {
-			fileDep = &FileDependency{Path: absoluteFilePath}
+			fileDep = &types.FileDependency{Path: absoluteFilePath}
 			ctx.FileDependencies[absoluteFilePath] = fileDep
-			fileDep.updateStatus() // Perform initial status check
+			fileDep.UpdateStatus() // Perform initial status check
 		}
 
 		// During the initial load or a reload, we need to read the file content.
 		// The watcher is responsible for detecting subsequent changes.
 		// Ensure the file's status is up-to-date before processing.
-		fileDep.updateStatus()
+		fileDep.UpdateStatus()
 		switch fileDep.CurrentStatus.Status {
-		case FileStatusLoaded:
+		case types.FileStatusLoaded:
 			// If the file is loaded, we must read its content for the matcher.
 			// The checksum is used by the watcher, but here we need the actual lines.
 			lines, readErr := ReadLinesFromFile(absoluteFilePath)
 			if readErr != nil {
 				// This can happen if the file is deleted between the stat and the read.
-				fileDep.CurrentStatus.Status = FileStatusError
+				fileDep.CurrentStatus.Status = types.FileStatusError
 				fileDep.CurrentStatus.Error = readErr
 				logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "In file '%s': chain '%s', step %d, field '%s': failed to read file '%s' during config load: %v", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, absoluteFilePath, readErr)
 				fileDep.Content = []string{}
@@ -637,7 +487,7 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 				fileDep.Content = lines
 				logging.LogOutput(logging.LevelInfo, "FILE_DEP", "Successfully loaded content from file dependency '%s' for chain '%s', step %d, field '%s'", absoluteFilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName)
 			}
-		case FileStatusMissing, FileStatusError:
+		case types.FileStatusMissing, types.FileStatusError:
 			// If the file is missing or in error, log a warning and treat it as empty.
 			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "In file '%s': chain '%s', step %d, field '%s': file matcher '%s' is %s, treating as empty. Error: %v", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, absoluteFilePath, fileDep.CurrentStatus.Status, fileDep.CurrentStatus.Error)
 			fileDep.Content = []string{}
@@ -899,7 +749,7 @@ func normalizeYAMLKeys(node *yaml.Node) {
 // LoadConfigOptions holds the parameters for loading a configuration.
 type LoadConfigOptions struct {
 	ConfigPath   string
-	ExistingDeps map[string]*FileDependency
+	ExistingDeps map[string]*types.FileDependency
 }
 
 // LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
@@ -1201,12 +1051,12 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	// --- PARSE FILE DEPENDENCIES ---
 	// Use the existing map if provided, otherwise create a new one.
 	// This preserves the PreviousStatus across reloads.
-	newFileDependencies := make(map[string]*FileDependency)
+	newFileDependencies := make(map[string]*types.FileDependency)
 	if opts.ExistingDeps != nil {
 		for path, dep := range opts.ExistingDeps {
 			// Create a new FileDependency object for the new config,
 			// but preserve the PreviousStatus from the old config.
-			newFileDependencies[path] = &FileDependency{
+			newFileDependencies[path] = &types.FileDependency{
 				Path:           path,
 				PreviousStatus: dep.PreviousStatus.Clone(), // Deep copy
 				CurrentStatus:  dep.CurrentStatus.Clone(),  // Deep copy
@@ -1439,7 +1289,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 }
 
 // logFileDependencyChanges logs changes in file dependencies between old and new configurations.
-func logFileDependencyChanges(p *Processor, oldDeps, newDeps map[string]*FileDependency) {
+func logFileDependencyChanges(p *Processor, oldDeps, newDeps map[string]*types.FileDependency) {
 	var added, removed, modified []string
 
 	// Check for added or modified files
@@ -1766,8 +1616,8 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 		} else {
 			// 2. Check all file dependencies if YAML hasn't changed
 			for path, fileDep := range p.Config.FileDependencies {
-				fileDep.updateStatus()
-				if fileDep.hasChanged() {
+				fileDep.UpdateStatus()
+				if fileDep.HasChanged() {
 					isChanged = true
 					changedFile = path
 					break

@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/logging"
 	"bot-detector/internal/parser"
 	"bot-detector/internal/store"
+	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
 	"fmt"
 	"reflect"
@@ -305,7 +306,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 		ChainName:          "dryrun_chain",
 		StepIndex:          0, // Or a suitable value for tests
 		CanonicalFieldName: "Path",
-		FileDependencies:   make(map[string]*FileDependency),
+		FileDependencies:   make(map[string]*types.FileDependency),
 		FilePath:           "",
 	}
 	matcher, _ := compileStringMatcher(ctx, "/1")

@@ -3,27 +3,48 @@
 package main
 
 import (
-	"bot-detector/internal/blocker"
-	"bot-detector/internal/logging"
-	metrics "bot-detector/internal/metrics"
-	"bot-detector/internal/persistence"
-	"bot-detector/internal/server"
-	"bot-detector/internal/store"
-	"bot-detector/internal/utils"
 	"bufio"
+
+	"bot-detector/internal/blocker"
+
+	"bot-detector/internal/logging"
+
+	"bot-detector/internal/metrics"
+
+	"bot-detector/internal/persistence"
+
+	"bot-detector/internal/server"
+
+	"bot-detector/internal/store"
+
+	"bot-detector/internal/utils"
+
 	"encoding/json"
+
 	"flag"
+
 	"fmt"
+
 	"log"
+
 	"os"
+
 	"os/signal"
+
 	"path/filepath"
+
 	"regexp"
-	"sort" // Added for sorting step metrics
+
+	"sort"
+
 	"strings"
+
 	"sync"
+
 	"sync/atomic"
+
 	"syscall"
+
 	"time"
 )
 

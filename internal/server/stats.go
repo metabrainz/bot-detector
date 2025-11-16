@@ -1,94 +1,77 @@
 package server
 
 import (
-	"bot-detector/internal/logging"
-	"bytes"
 	"fmt"
 	"net/http"
 	"os"
 	"time"
+
+	"bot-detector/internal/logging"
+	"bot-detector/internal/types"
 )
 
-// Provider defines the interface that the server needs from the main application.
+// Provider defines the interface required by the stats server to access application data.
 type Provider interface {
 	GetListenAddr() string
-	GenerateHTMLMetricsReport() string
-	GenerateStepsMetricsReport() string
 	GetShutdownChannel() chan os.Signal
 	Log(level logging.LogLevel, tag string, format string, v ...interface{})
+	GetConfigForArchive() (mainConfig []byte, modTime time.Time, deps map[string]*types.FileDependency, configPath string, err error)
+	GenerateHTMLMetricsReport() string
+	GenerateStepsMetricsReport() string
 	GetMarshalledConfig() ([]byte, time.Time, error)
 }
 
-// Start runs the web server in a goroutine.
+// Start initializes and starts the HTTP server in a separate goroutine.
 func Start(p Provider) {
 	listenAddr := p.GetListenAddr()
 	if listenAddr == "" {
-		p.Log(logging.LevelDebug, "HTTP_SERVER", "HTTP server is disabled.")
+		p.Log(logging.LevelInfo, "HTTP_SERVER", "HTTP server is disabled.")
 		return
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/stats", statsPageHandler(p))
-	mux.HandleFunc("/stats/steps", stepsStatsPageHandler(p))
-	mux.HandleFunc("/config", configHandler(p)) // Register the new handler
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/stats", http.StatusFound) // 302 Found
-	})
-
-	p.Log(logging.LevelInfo, "HTTP_SERVER", "Starting web server on http://%s", listenAddr)
+	mux.HandleFunc("/", rootHandler(p))
+	mux.HandleFunc("/stats", rootHandler(p)) // Alias for root
+	mux.HandleFunc("/stats/steps", stepsHandler(p))
+	mux.HandleFunc("/config", configHandler(p))
+	mux.HandleFunc("/config/archive", archiveHandler(p))
 
 	server := &http.Server{
 		Addr:    listenAddr,
 		Handler: mux,
 	}
 
-	// Listen for shutdown signal to gracefully close the server.
 	go func() {
-		s := <-p.GetShutdownChannel()
-		p.Log(logging.LevelInfo, "HTTP_SERVER", "Shutting down web server.")
-		if err := server.Close(); err != nil {
-			p.Log(logging.LevelError, "HTTP_SERVER", "Error closing web server: %v", err)
-		}
-
-		// Re-broadcast the signal so other listeners can also receive it.
-		select {
-		case p.GetShutdownChannel() <- s:
-		default:
+		p.Log(logging.LevelInfo, "HTTP_SERVER", "Starting web server on http://%s", listenAddr)
+		if err := server.ListenAndServe(); err != http.ErrServerClosed {
+			p.Log(logging.LevelError, "HTTP_SERVER", "Web server failed: %v", err)
 		}
 	}()
 
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		p.Log(logging.LevelCritical, "HTTP_SERVER_FATAL", "Web server failed: %v", err)
+	// Wait for shutdown signal
+	<-p.GetShutdownChannel()
+	p.Log(logging.LevelInfo, "HTTP_SERVER", "Shutting down web server.")
+	if err := server.Close(); err != nil {
+		logging.LogOutput(logging.LevelError, "StopServer", "Error stopping server: %v", err)
 	}
 }
 
-func servePage(w http.ResponseWriter, r *http.Request, title string, content string, name string) {
-	// Format the output as a simple, pre-formatted HTML page.
-	html := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-<title>%s</title>
-<meta http-equiv="refresh" content="5">
-<style>body { font-family: monospace; background-color: #f4f4f4; color: #333; }</style>
-</head>
-<body><pre>%s</pre>
-</body>
-</html>`, title, content)
-	http.ServeContent(w, r, name, time.Now(), bytes.NewReader([]byte(html)))
-}
-
-// stepsStatsPageHandler creates an HTTP handler that displays the step execution stats.
-func stepsStatsPageHandler(p Provider) http.HandlerFunc {
+func rootHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		reportContent := p.GenerateStepsMetricsReport()
-		servePage(w, r, "Bot-Detector Step Stats", reportContent, "step_stats.html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, err := fmt.Fprint(w, p.GenerateHTMLMetricsReport())
+		if err != nil {
+			logging.LogOutput(logging.LevelError, "metricsHandler", "Error writing metrics report: %v", err)
+		}
 	}
 }
 
-// statsPageHandler creates an HTTP handler that displays the current stats.
-func statsPageHandler(p Provider) http.HandlerFunc {
+func stepsHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		reportContent := p.GenerateHTMLMetricsReport()
-		servePage(w, r, "Bot-Detector Stats", reportContent, "stats.html")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, err := fmt.Fprint(w, p.GenerateStepsMetricsReport())
+		if err != nil {
+			logging.LogOutput(logging.LevelError, "stepsHandler", "Error writing steps report: %v", err)
+		}
 	}
 }

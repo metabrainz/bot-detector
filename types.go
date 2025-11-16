@@ -6,6 +6,7 @@ import (
 	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
+	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
 	"fmt"
 	"io"
@@ -110,7 +111,7 @@ type AppConfig struct {
 	DurationToTableName      map[time.Duration]string          `config:"compare" summary:"duration_tables"`
 	DefaultBlockDuration     time.Duration                     `config:"compare" summary:"default_block_duration"`
 	EOFPollingDelay          time.Duration                     `config:"compare" summary:"eof_polling_delay"`
-	FileDependencies         map[string]*FileDependency        // Map of file paths to their dependency status.
+	FileDependencies         map[string]*types.FileDependency  // Map of file paths to their dependency status.
 	BlockerAddresses         []string                          `config:"compare" summary:"blocker_addresses"`
 	BlockerDialTimeout       time.Duration                     `config:"compare" summary:"blocker_dial_timeout"`
 	BlockerMaxRetries        int                               `config:"compare" summary:"blocker_max_retries"`
@@ -168,7 +169,7 @@ func (c *AppConfig) Clone() AppConfig {
 	}
 
 	if c.FileDependencies != nil {
-		newFileDependencies := make(map[string]*FileDependency, len(c.FileDependencies))
+		newFileDependencies := make(map[string]*types.FileDependency, len(c.FileDependencies))
 		for k, v := range c.FileDependencies {
 			newFileDependencies[k] = v.Clone() // Deep copy the FileDependency object
 		}
@@ -187,7 +188,7 @@ type LoadedConfig struct {
 	DefaultBlockDuration     time.Duration            `config:"compare"`
 	DurationToTableName      map[time.Duration]string `config:"compare"`
 	EOFPollingDelay          time.Duration            `config:"compare"`
-	FileDependencies         map[string]*FileDependency
+	FileDependencies         map[string]*types.FileDependency
 	BlockerAddresses         []string                      `config:"compare"`
 	BlockerDialTimeout       time.Duration                 `config:"compare"`
 	BlockerMaxRetries        int                           `config:"compare"`

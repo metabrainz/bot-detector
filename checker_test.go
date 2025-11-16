@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/store"
+	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
 	"bufio"
 	"bytes"
@@ -496,8 +497,16 @@ func TestCheckChains_UnblockOnGoodActor(t *testing.T) {
 		ChainName:          "good_actor_test",
 		StepIndex:          0,
 		CanonicalFieldName: "IP",
-		FileDependencies:   make(map[string]*FileDependency), // Empty map for this test
-		FilePath:           "",                               // Empty for this test
+		FileDependencies: map[string]*types.FileDependency{
+			"test.txt": {
+				Path: "test.txt",
+				CurrentStatus: &types.FileDependencyStatus{
+					Status:   types.FileStatusLoaded,
+					Checksum: "checksum1",
+				},
+			},
+		},
+		FilePath: "", // Empty for this test
 	}
 	goodActorMatcher, err := compileStringMatcher(goodActorCtx, goodIP)
 	if err != nil {
@@ -559,7 +568,7 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		ChainName:          chain.Name,
 		StepIndex:          0,
 		CanonicalFieldName: "Path",
-		FileDependencies:   make(map[string]*FileDependency),
+		FileDependencies:   make(map[string]*types.FileDependency),
 		FilePath:           "",
 	}
 	matcher1, _ := compileStringMatcher(ctx1, "/step1")
@@ -568,7 +577,7 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		ChainName:          chain.Name,
 		StepIndex:          1,
 		CanonicalFieldName: "Path",
-		FileDependencies:   make(map[string]*FileDependency),
+		FileDependencies:   make(map[string]*types.FileDependency),
 		FilePath:           "",
 	}
 	matcher2, _ := compileStringMatcher(ctx2, "/step2")

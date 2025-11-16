@@ -5,10 +5,10 @@ import (
 	"bot-detector/internal/logging"
 	"bot-detector/internal/metrics"
 	"bot-detector/internal/store"
+	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
 	"flag"
 	"fmt"
-	"github.com/stretchr/testify/mock"
 	"io"
 	"log"
 	"os"
@@ -17,6 +17,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/mock"
 )
 
 // IsTesting returns true if the code is running as part of a "go test" command.
@@ -253,7 +255,7 @@ func (h *checkerTestHarness) addChain(chainYAML BehavioralChain) {
 	// This simulates the compilation part of LoadConfigFromYAML for a single chain.
 	runtimeChain := chainYAML
 	// Create an empty FileDependencies map for testing purposes.
-	testFileDependencies := make(map[string]*FileDependency)
+	testFileDependencies := make(map[string]*types.FileDependency)
 
 	for i, stepYAML := range chainYAML.StepsYAML {
 		matchers, err := compileMatchers(chainYAML.Name, i, stepYAML.FieldMatches, testFileDependencies, "")

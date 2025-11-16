@@ -2,6 +2,8 @@ package main
 
 import (
 	"bot-detector/internal/logging"
+	"bot-detector/internal/types"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,7 +22,7 @@ func newTestProcessorWithFileDeps(t *testing.T, config *AppConfig, logFunc func(
 		config = &AppConfig{}
 	}
 	if config.FileDependencies == nil {
-		config.FileDependencies = make(map[string]*FileDependency)
+		config.FileDependencies = make(map[string]*types.FileDependency)
 	}
 	p := newTestProcessor(config, nil) // Use the existing newTestProcessor
 	p.LogFunc = logFunc                // Set the log function here
@@ -119,8 +121,8 @@ chains:
 	if !reflect.DeepEqual(reloadedFileDep.Content, expectedContent) {
 		t.Errorf("FileDependency Content mismatch after reload.\nGot:  %v\nWant: %v", reloadedFileDep.Content, expectedContent)
 	}
-	if reloadedFileDep.CurrentStatus.Status != FileStatusLoaded {
-		t.Errorf("FileDependency Status mismatch after reload. Got '%s', want '%s'", reloadedFileDep.CurrentStatus.Status, FileStatusLoaded)
+	if reloadedFileDep.CurrentStatus.Status != types.FileStatusLoaded {
+		t.Errorf("FileDependency Status mismatch after reload. Got '%s', want '%s'", reloadedFileDep.CurrentStatus.Status, types.FileStatusLoaded)
 	}
 	if reloadedFileDep.CurrentStatus.Error != nil {
 		t.Errorf("FileDependency Error mismatch after reload. Got '%v', want nil", reloadedFileDep.CurrentStatus.Error)
@@ -198,8 +200,8 @@ chains:
 		t.Fatalf("Expected file dependency for '%s' not found", testFilePath)
 	}
 
-	if fileDep.CurrentStatus.Status != FileStatusMissing {
-		t.Errorf("FileDependency Status mismatch. Got '%s', want '%s'", fileDep.CurrentStatus.Status, FileStatusMissing)
+	if fileDep.CurrentStatus.Status != types.FileStatusMissing {
+		t.Errorf("FileDependency Status mismatch. Got '%s', want '%s'", fileDep.CurrentStatus.Status, types.FileStatusMissing)
 	}
 	if fileDep.CurrentStatus.Error == nil {
 		t.Error("Expected an error for missing file")
@@ -263,7 +265,7 @@ chains:
 		t.Fatal("Loaded config is nil")
 	}
 	initialFileDep, ok := loadedCfg.FileDependencies[testFilePath]
-	if !ok || initialFileDep.CurrentStatus.Status != FileStatusMissing {
+	if !ok || initialFileDep.CurrentStatus.Status != types.FileStatusMissing {
 		t.Fatalf("Expected file dependency to be initially missing, got status '%s'", initialFileDep.CurrentStatus.Status)
 	}
 
@@ -319,8 +321,8 @@ chains:
 	if !reflect.DeepEqual(reloadedFileDep.Content, expectedContent) {
 		t.Errorf("FileDependency Content mismatch after reappearance.\nGot:  %v\nWant: %v", reloadedFileDep.Content, expectedContent)
 	}
-	if reloadedFileDep.CurrentStatus.Status != FileStatusLoaded {
-		t.Errorf("FileDependency Status mismatch after reappearance. Got '%s', want '%s'", reloadedFileDep.CurrentStatus.Status, FileStatusLoaded)
+	if reloadedFileDep.CurrentStatus.Status != types.FileStatusLoaded {
+		t.Errorf("FileDependency Status mismatch after reappearance. Got '%s', want '%s'", reloadedFileDep.CurrentStatus.Status, types.FileStatusLoaded)
 	}
 	if reloadedFileDep.CurrentStatus.Error != nil {
 		t.Errorf("FileDependency Error mismatch after reappearance. Got '%v', want nil", reloadedFileDep.CurrentStatus.Error)
@@ -384,7 +386,7 @@ chains:
 		t.Fatal("Loaded config is nil")
 	}
 	initialFileDep, ok := loadedCfg.FileDependencies[testFilePath]
-	if !ok || initialFileDep.CurrentStatus.Status != FileStatusLoaded {
+	if !ok || initialFileDep.CurrentStatus.Status != types.FileStatusLoaded {
 		t.Fatalf("Expected file dependency to be initially loaded, got status '%s'", initialFileDep.CurrentStatus.Status)
 	}
 
@@ -435,8 +437,8 @@ chains:
 	if !ok {
 		t.Fatalf("File dependency '%s' not found in reloaded config", testFilePath)
 	}
-	if reloadedFileDep.CurrentStatus.Status != FileStatusMissing {
-		t.Errorf("FileDependency Status mismatch after disappearance. Got '%s', want '%s'", reloadedFileDep.CurrentStatus.Status, FileStatusMissing)
+	if reloadedFileDep.CurrentStatus.Status != types.FileStatusMissing {
+		t.Errorf("FileDependency Status mismatch after disappearance. Got '%s', want '%s'", reloadedFileDep.CurrentStatus.Status, types.FileStatusMissing)
 	}
 	if reloadedFileDep.CurrentStatus.Error == nil {
 		t.Error("Expected an error for missing file")
@@ -521,12 +523,12 @@ func TestFileDependency_UpdateStatusScenarios(t *testing.T) {
 	testFilePath := filepath.Join(tempDir, "test_file.txt")
 
 	// Helper function to create a FileDependency and perform initial updateStatus
-	createAndInitFileDep := func(path, content string) *FileDependency {
+	createAndInitFileDep := func(path, content string) *types.FileDependency {
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 			t.Fatalf("Failed to write test file %s: %v", path, err)
 		}
-		fd := &FileDependency{Path: path}
-		fd.updateStatus()
+		fd := &types.FileDependency{Path: path}
+		fd.UpdateStatus()
 		return fd
 	}
 
@@ -538,7 +540,7 @@ func TestFileDependency_UpdateStatusScenarios(t *testing.T) {
 	// Scenario 1: Initial Load
 	t.Run("Initial Load", func(t *testing.T) {
 		fd := createAndInitFileDep(testFilePath, "initial content")
-		if fd.CurrentStatus.Status != FileStatusLoaded {
+		if fd.CurrentStatus.Status != types.FileStatusLoaded {
 			t.Errorf("Expected status Loaded, got %s", fd.CurrentStatus.Status)
 		}
 		if fd.PreviousStatus != nil {
@@ -560,9 +562,9 @@ func TestFileDependency_UpdateStatusScenarios(t *testing.T) {
 
 		// Wait a bit, but don't modify the file, so ModTime should be the same
 		time.Sleep(10 * time.Millisecond)
-		fd.updateStatus()
+		fd.UpdateStatus()
 
-		if fd.CurrentStatus.Status != FileStatusLoaded {
+		if fd.CurrentStatus.Status != types.FileStatusLoaded {
 			t.Errorf("Expected status Loaded, got %s", fd.CurrentStatus.Status)
 		}
 		if fd.PreviousStatus == nil {
@@ -591,9 +593,9 @@ func TestFileDependency_UpdateStatusScenarios(t *testing.T) {
 		if err := os.WriteFile(testFilePath, []byte(newContent), 0644); err != nil {
 			t.Fatalf("Failed to write updated test file: %v", err)
 		}
-		fd.updateStatus()
+		fd.UpdateStatus()
 
-		if fd.CurrentStatus.Status != FileStatusLoaded {
+		if fd.CurrentStatus.Status != types.FileStatusLoaded {
 			t.Errorf("Expected status Loaded, got %s", fd.CurrentStatus.Status)
 		}
 		if fd.PreviousStatus == nil {
@@ -626,9 +628,9 @@ func TestFileDependency_UpdateStatusScenarios(t *testing.T) {
 		if err := os.Remove(testFilePath); err != nil {
 			t.Fatalf("Failed to remove test file: %v", err)
 		}
-		fd.updateStatus()
+		fd.UpdateStatus()
 
-		if fd.CurrentStatus.Status != FileStatusMissing {
+		if fd.CurrentStatus.Status != types.FileStatusMissing {
 			t.Errorf("Expected status Missing, got %s", fd.CurrentStatus.Status)
 		}
 		if fd.CurrentStatus.Error == nil {
@@ -649,9 +651,9 @@ func TestFileDependency_UpdateStatusScenarios(t *testing.T) {
 		if err := os.Remove(testFilePath); err != nil {
 			t.Fatalf("Failed to remove test file: %v", err)
 		}
-		fd.updateStatus() // Status should now be Missing
+		fd.UpdateStatus() // Status should now be Missing
 
-		if fd.CurrentStatus.Status != FileStatusMissing {
+		if fd.CurrentStatus.Status != types.FileStatusMissing {
 			t.Fatalf("Pre-condition failed: Expected status Missing, got %s", fd.CurrentStatus.Status)
 		}
 		missingStatus := fd.CurrentStatus.Clone()
@@ -662,9 +664,9 @@ func TestFileDependency_UpdateStatusScenarios(t *testing.T) {
 		if err := os.WriteFile(testFilePath, []byte(reappearedContent), 0644); err != nil {
 			t.Fatalf("Failed to recreate test file: %v", err)
 		}
-		fd.updateStatus()
+		fd.UpdateStatus()
 
-		if fd.CurrentStatus.Status != FileStatusLoaded {
+		if fd.CurrentStatus.Status != types.FileStatusLoaded {
 			t.Errorf("Expected status Loaded, got %s", fd.CurrentStatus.Status)
 		}
 		if fd.CurrentStatus.Error != nil {
@@ -690,10 +692,10 @@ func TestFileDependency_UpdateStatusScenarios(t *testing.T) {
 			t.Fatalf("Failed to write unreadable test file: %v", err)
 		}
 
-		fd := &FileDependency{Path: unreadableFilePath}
-		fd.updateStatus() // Initial load should be fine
+		fd := &types.FileDependency{Path: unreadableFilePath}
+		fd.UpdateStatus() // Initial load should be fine
 
-		if fd.CurrentStatus.Status != FileStatusLoaded {
+		if fd.CurrentStatus.Status != types.FileStatusLoaded {
 			t.Fatalf("Pre-condition failed: Expected status Loaded, got %s", fd.CurrentStatus.Status)
 		}
 		loadedStatus := fd.CurrentStatus.Clone()
@@ -707,9 +709,9 @@ func TestFileDependency_UpdateStatusScenarios(t *testing.T) {
 			_ = os.Chmod(unreadableFilePath, 0644)
 		}()
 
-		fd.updateStatus()
+		fd.UpdateStatus()
 
-		if fd.CurrentStatus.Status != FileStatusError {
+		if fd.CurrentStatus.Status != types.FileStatusError {
 			t.Errorf("Expected status Error, got %s", fd.CurrentStatus.Status)
 		}
 		if fd.CurrentStatus.Error == nil {
@@ -722,4 +724,10 @@ func TestFileDependency_UpdateStatusScenarios(t *testing.T) {
 			t.Errorf("Expected PreviousStatus checksum %s, got %s", loadedStatus.Checksum, fd.PreviousStatus.Checksum)
 		}
 	})
+}
+
+func calculateChecksum(lines []string) string {
+	h := sha256.New()
+	h.Write([]byte(strings.Join(lines, "\n")))
+	return fmt.Sprintf("%x", h.Sum(nil))
 }

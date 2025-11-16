@@ -2,6 +2,7 @@ package server
 
 import (
 	"bot-detector/internal/logging"
+	"bot-detector/internal/types"
 	"bufio"
 	"errors"
 	"fmt"
@@ -75,6 +76,11 @@ func (m *mockProvider) GetMarshalledConfig() ([]byte, time.Time, error) {
 		}
 	}
 	return nil, modtime, err
+}
+
+func (m *mockProvider) GetConfigForArchive() ([]byte, time.Time, map[string]*types.FileDependency, string, error) {
+	// This is a mock implementation for the archive test, not used by other tests in this file.
+	return nil, time.Time{}, nil, "", nil
 }
 
 func (m *mockProvider) Log(level logging.LogLevel, tag string, format string, v ...interface{}) {
