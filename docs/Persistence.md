@@ -49,6 +49,38 @@ This file is a complete, point-in-time snapshot of all *active* blocks known to 
 - **Reliability:** The snapshot is written using an **atomic rename** pattern (`write to .tmp -> fsync -> rename`). This ensures that a valid, non-corrupt snapshot is always available, even if the application crashes mid-write.
 - **Purpose:** Its primary role is to ensure fast application startups by avoiding the need to replay a long history of events.
 
+## Visual Overview
+
+The following diagram illustrates the lifecycle of the persistence components during startup, runtime, and compaction.
+
+```mermaid
+graph TD
+    subgraph "Application Startup"
+        A[Start bot-detector] --> B{state.snapshot exists?};
+        B -- Yes --> C[Load state.snapshot into memory];
+        B -- No --> D[Start with empty state];
+        C --> E[Replay events.log since snapshot time];
+        D --> E;
+        E --> F[Sync in-memory state with HAProxy backend];
+    end
+
+    subgraph "Runtime Operation"
+        G[Log line received] --> H{Match found?};
+        H -- Yes --> I[Action: Block/Unblock];
+        I --> J[Write event to events.log (fsync)];
+        J --> K[Execute command on HAProxy backend];
+        H -- No --> L[Discard];
+    end
+
+    subgraph "Periodic Compaction"
+        M[Compaction Interval Reached] --> N[Filter expired blocks from memory];
+        N --> O[Write in-memory state to new .tmp snapshot];
+        O --> P[fsync .tmp snapshot];
+        P --> Q[Atomic Rename: .tmp -> state.snapshot];
+        Q --> R[Truncate events.log];
+    end
+```
+
 ## Key Processes
 
 ### Startup and State Restoration
