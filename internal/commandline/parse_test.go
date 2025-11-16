@@ -85,11 +85,12 @@ func TestParseParameters(t *testing.T) {
 			errContains: "--config flag is required for --dump-backends",
 		},
 		{
-			name: "dry-run without log-path is valid",
+			name: "dry-run without log-path is valid (reads from stdin)",
 			args: []string{"bot-detector", "--config", "c.yaml", "--dry-run"},
 			want: &AppParameters{
 				ConfigPath: "c.yaml",
 				DryRun:     true,
+				LogPath:    "", // LogPath should be empty
 			},
 			wantErr: false,
 		},
