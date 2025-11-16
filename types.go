@@ -92,15 +92,17 @@ type Processor struct {
 	HTTPServer           string
 	TopN                 int // For dry-run stats: show top N actors.
 	startTime            time.Time
-	configReloaded       bool
-
 	// Persistence fields
 	persistenceEnabled bool
 	stateDir           string
 	compactionInterval time.Duration
 	persistenceMutex   sync.Mutex
 	journalHandle      *os.File
-	activeBlocks       map[string]persistence.ActiveBlockInfo // map[IP]ActiveBlockInfo
+	activeBlocks       map[string]persistence.ActiveBlockInfo
+	// configReloaded is a flag to indicate if the configuration has been reloaded at least once.
+	configReloaded bool
+	// ExitOnEOF is a flag to indicate if the tailer should exit when it reaches the end of the file.
+	ExitOnEOF bool
 }
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
