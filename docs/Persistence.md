@@ -55,7 +55,7 @@ The following diagram illustrates the lifecycle of the persistence components du
 
 ```mermaid
 graph TD
-    subgraph "Application Startup"
+    subgraph "1. Application Startup"
         A["Start bot-detector"] --> B{"state.snapshot exists?"}
         B -- Yes --> C["Load state.snapshot into memory"]
         B -- No --> D["Start with empty state"]
@@ -64,16 +64,21 @@ graph TD
         E --> F["Sync in-memory state with HAProxy backend"]
     end
 
-    subgraph "Runtime Operation"
-        G["Log line received"] --> H{"Match found?"}
+    F --> MainLoop["Application is Running"]
+    style MainLoop fill:#fff,stroke:#333,stroke-width:2px
+
+    subgraph "2. Runtime Operation (Event-Driven)"
+        MainLoop --> G["Log line received"]
+        G --> H{"Match found?"}
         H -- Yes --> I["Action: Block/Unblock"]
         I --> J["Write event to events.log (fsync)"]
         J --> K["Execute command on HAProxy backend"]
         H -- No --> L["Discard"]
     end
 
-    subgraph "Periodic Compaction"
-        M["Compaction Interval Reached"] --> N["Filter expired blocks from memory"]
+    subgraph "3. Periodic Compaction (Time-Driven)"
+        MainLoop --> M["Compaction Interval Reached"]
+        M --> N["Filter expired blocks from memory"]
         N --> O["Write in-memory state to new .tmp snapshot"]
         O --> P["fsync .tmp snapshot"]
         P --> Q["Atomic Rename: .tmp -> state.snapshot"]
