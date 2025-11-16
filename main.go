@@ -179,15 +179,20 @@ func main() {
 
 		// Initialize persistence fields
 		persistenceEnabled: loadedCfg.Persistence.Enabled,
-		stateDir:           loadedCfg.Persistence.StateDir,
 		compactionInterval: loadedCfg.Persistence.CompactionInterval,
 		activeBlocks:       make(map[string]persistence.ActiveBlockInfo),
 	}
 
-	// Command-line flag overrides YAML for persistence
+	// Command-line flag is the only way to set the state directory.
+	// It also implicitly enables persistence.
 	if cliFlags.StateDir != nil && *cliFlags.StateDir != "" {
 		p.persistenceEnabled = true
 		p.stateDir = *cliFlags.StateDir
+	}
+
+	// Final check: if persistence is enabled in YAML but no --state-dir is given, it's a fatal error.
+	if p.persistenceEnabled && p.stateDir == "" {
+		log.Fatalf("[FATAL] Persistence is enabled in config, but no --state-dir was provided.")
 	}
 
 	p.startTime = p.NowFunc() // Record the start time.

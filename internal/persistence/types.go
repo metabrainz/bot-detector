@@ -5,7 +5,6 @@ import "time"
 // PersistenceConfig holds settings for the state persistence layer.
 type PersistenceConfig struct {
 	Enabled            bool          `yaml:"enabled"`
-	StateDir           string        `yaml:"state_dir"`
 	CompactionInterval time.Duration `yaml:"compaction_interval"`
 }
 

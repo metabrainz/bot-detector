@@ -1241,7 +1241,6 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	if config.Persistence.Enabled {
 		persistenceConfig = persistence.PersistenceConfig{
 			Enabled:            true,
-			StateDir:           config.Persistence.StateDir,
 			CompactionInterval: config.Persistence.CompactionInterval,
 		}
 		if persistenceConfig.CompactionInterval == 0 {
