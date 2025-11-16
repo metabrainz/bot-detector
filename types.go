@@ -97,6 +97,7 @@ type Processor struct {
 	stateDir           string
 	compactionInterval time.Duration
 	persistenceMutex   sync.Mutex
+	persistenceWg      sync.WaitGroup
 	journalHandle      *os.File
 	activeBlocks       map[string]persistence.ActiveBlockInfo
 	// configReloaded is a flag to indicate if the configuration has been reloaded at least once.

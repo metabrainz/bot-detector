@@ -301,6 +301,8 @@ func main() {
 			p.Blocker.Shutdown()
 		}
 		if p.persistenceEnabled {
+			p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Waiting for persistence operations to complete...")
+			p.persistenceWg.Wait() // Wait for all persistence operations to finish.
 			p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Closing journal file.")
 			if err := p.journalHandle.Close(); err != nil {
 				p.LogFunc(logging.LevelError, "PERSISTENCE", "Error closing journal file: %v", err)

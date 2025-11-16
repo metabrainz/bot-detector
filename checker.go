@@ -334,7 +334,9 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 // executeBlock calls the external blocker unless in DryRun mode.
 func executeBlock(p *Processor, entry *LogEntry, chain *BehavioralChain) {
 	if p.persistenceEnabled {
-		func() {
+		p.persistenceWg.Add(1)
+		go func() {
+			defer p.persistenceWg.Done()
 			p.persistenceMutex.Lock()
 			defer p.persistenceMutex.Unlock()
 
