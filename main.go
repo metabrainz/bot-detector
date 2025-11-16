@@ -98,8 +98,8 @@ func main() {
 	}
 
 	// Validate that required flags are provided.
-	// --log-path is required for live mode, but optional for dry-run (stdin). --config is always required.
-	if *cliFlags.ConfigPath == "" || (*cliFlags.LogPath == "" && !*cliFlags.DryRun) {
+	// --log-path is required for live mode, but optional for other modes.
+	if *cliFlags.ConfigPath == "" || (*cliFlags.LogPath == "" && !*cliFlags.DryRun && !*cliFlags.DumpBackends) {
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -311,23 +311,28 @@ func main() {
 
 	// Handle --dump-backends flag. If present, list blocked IPs and exit.
 	if *cliFlags.DumpBackends {
-		logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "Checking HAProxy backend synchronization...")
-		// Use a 5-second tolerance for expiration differences
-		discrepancies, err := p.Blocker.CompareHAProxyBackends(5 * time.Second)
-		if err != nil {
-			logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "Failed to compare HAProxy backends: %v", err)
-			os.Exit(1)
-		}
-
-		if len(discrepancies) > 0 {
-			logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "HAProxy backends are out of sync. Aborting dump.")
-			for _, d := range discrepancies {
-				logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "  - IP: %s, Table: %s, Reason: %s, Details: %v", d.IP, d.TableName, d.Reason, d.Details)
+		// Only run the sync check if there are multiple backends to compare.
+		if len(p.GetBlockerAddresses()) > 1 {
+			logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "Checking HAProxy backend synchronization...")
+			// Use a 5-second tolerance for expiration differences
+			discrepancies, err := p.Blocker.CompareHAProxyBackends(5 * time.Second)
+			if err != nil {
+				logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "Failed to compare HAProxy backends: %v", err)
+				os.Exit(1)
 			}
-			os.Exit(1)
+
+			if len(discrepancies) > 0 {
+				logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "HAProxy backends are out of sync. Aborting dump.")
+				for _, d := range discrepancies {
+					logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "  - IP: %s, Table: %s, Reason: %s, Details: %v", d.IP, d.TableName, d.Reason, d.Details)
+				}
+				os.Exit(1)
+			}
+			logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "HAProxy backends are in sync.")
+		} else {
+			logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "Skipping backend synchronization check (only one backend configured).")
 		}
 
-		logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "HAProxy backends are in sync.")
 		logging.LogOutput(logging.LevelInfo, "DUMP_BACKENDS", "Retrieving currently blocked IPs from HAProxy...")
 		blockedIPs, err := p.Blocker.DumpBackends()
 		if err != nil {

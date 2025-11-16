@@ -405,12 +405,12 @@ func TestCompareHAProxyBackends_MissingEntry(t *testing.T) {
 	addresses := []string{"127.0.0.1:8080", "127.0.0.1:8081"}
 	mockResponses := map[string]map[string]string{
 		"127.0.0.1:8080": {
-			"show table":                 "table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
-			"show table table_test_ipv4": "0x1 key=1.1.1.1 use=0 exp=1000 gpc0=1\n",
+			"show table":                 "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
+			"show table table_test_ipv4": "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n0x1 key=1.1.1.1 use=0 exp=1000 gpc0=1\n",
 		},
 		"127.0.0.1:8081": {
-			"show table":                 "table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
-			"show table table_test_ipv4": "", // Missing entry
+			"show table":                 "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
+			"show table table_test_ipv4": "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n", // Missing entry
 		},
 	}
 	b := setupMockHAProxyForComparison(t, addresses, mockResponses)
@@ -436,12 +436,12 @@ func TestCompareHAProxyBackends_Gpc0Mismatch(t *testing.T) {
 	addresses := []string{"127.0.0.1:8080", "127.0.0.1:8081"}
 	mockResponses := map[string]map[string]string{
 		"127.0.0.1:8080": {
-			"show table":                 "table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
-			"show table table_test_ipv4": "0x1 key=1.1.1.1 use=0 exp=1000 gpc0=1\n",
+			"show table":                 "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
+			"show table table_test_ipv4": "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n0x1 key=1.1.1.1 use=0 exp=1000 gpc0=1\n",
 		},
 		"127.0.0.1:8081": {
-			"show table":                 "table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
-			"show table table_test_ipv4": "0x1 key=1.1.1.1 use=0 exp=1000 gpc0=0\n", // Gpc0 mismatch
+			"show table":                 "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
+			"show table table_test_ipv4": "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n0x1 key=1.1.1.1 use=0 exp=1000 gpc0=0\n", // Gpc0 mismatch
 		},
 	}
 	b := setupMockHAProxyForComparison(t, addresses, mockResponses)
@@ -467,12 +467,12 @@ func TestCompareHAProxyBackends_ExpirationMismatch(t *testing.T) {
 	addresses := []string{"127.0.0.1:8080", "127.0.0.1:8081"}
 	mockResponses := map[string]map[string]string{
 		"127.0.0.1:8080": {
-			"show table":                 "table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
-			"show table table_test_ipv4": "0x1 key=1.1.1.1 use=0 exp=10000 gpc0=1\n",
+			"show table":                 "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
+			"show table table_test_ipv4": "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n0x1 key=1.1.1.1 use=0 exp=10000 gpc0=1\n",
 		},
 		"127.0.0.1:8081": {
-			"show table":                 "table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
-			"show table table_test_ipv4": "0x1 key=1.1.1.1 use=0 exp=5000 gpc0=1\n", // Expiration mismatch
+			"show table":                 "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
+			"show table table_test_ipv4": "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n0x1 key=1.1.1.1 use=0 exp=5000 gpc0=1\n", // Expiration mismatch
 		},
 	}
 	b := setupMockHAProxyForComparison(t, addresses, mockResponses)
@@ -508,20 +508,28 @@ func TestCompareHAProxyBackends_ExpirationMismatch(t *testing.T) {
 }
 
 func TestCompareHAProxyBackends_MixedDiscrepancies(t *testing.T) {
+	// Define a local struct to avoid exporting the main one just for this test.
+	type discrepancy struct {
+		IP        string
+		TableName string
+		Reason    string
+		Details   map[string]string
+	}
+
 	addresses := []string{"127.0.0.1:8080", "127.0.0.1:8081", "127.0.0.1:8082"}
 	mockResponses := map[string]map[string]string{
 		"127.0.0.1:8080": {
-			"show table":                  "table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\ntable: table_other_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
-			"show table table_test_ipv4":  "0x1 key=1.1.1.1 use=0 exp=10000 gpc0=1\n0x2 key=1.1.1.2 use=0 exp=20000 gpc0=1\n",
-			"show table table_other_ipv4": "0x3 key=2.2.2.2 use=0 exp=5000 gpc0=1\n",
+			"show table":                  "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n# table: table_other_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
+			"show table table_test_ipv4":  "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n0x1 key=1.1.1.1 use=0 exp=10000 gpc0=1\n0x2 key=1.1.1.2 use=0 exp=20000 gpc0=1\n",
+			"show table table_other_ipv4": "# table: table_other_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n0x3 key=2.2.2.2 use=0 exp=5000 gpc0=1\n",
 		},
 		"127.0.0.1:8081": {
-			"show table":                 "table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
-			"show table table_test_ipv4": "0x1 key=1.1.1.1 use=0 exp=10000 gpc0=0\n0x2 key=1.1.1.2 use=0 exp=20000 gpc0=1\n", // 1.1.1.1 gpc0 mismatch
+			"show table":                 "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
+			"show table table_test_ipv4": "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n0x1 key=1.1.1.1 use=0 exp=10000 gpc0=0\n0x2 key=1.1.1.2 use=0 exp=20000 gpc0=1\n", // 1.1.1.1 gpc0 mismatch
 		},
 		"127.0.0.1:8082": {
-			"show table":                 "table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
-			"show table table_test_ipv4": "0x1 key=1.1.1.1 use=0 exp=10000 gpc0=1\n", // 1.1.1.2 missing, 2.2.2.2 missing
+			"show table":                 "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n",
+			"show table table_test_ipv4": "# table: table_test_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n0x1 key=1.1.1.1 use=0 exp=10000 gpc0=1\n", // 1.1.1.2 missing, 2.2.2.2 missing
 		},
 	}
 	b := setupMockHAProxyForComparison(t, addresses, mockResponses)
@@ -535,39 +543,53 @@ func TestCompareHAProxyBackends_MixedDiscrepancies(t *testing.T) {
 		t.Fatalf("Expected 3 discrepancies, got %d: %+v", len(discrepancies), discrepancies)
 	}
 
-	// Sort discrepancies for consistent checking
-	sort.Slice(discrepancies, func(i, j int) bool {
-		if discrepancies[i].IP != discrepancies[j].IP {
-			return discrepancies[i].IP < discrepancies[j].IP
+	// Use a map for order-independent checking
+	expected := map[string]discrepancy{
+		"1.1.1.1_Gpc0 Mismatch": {
+			IP: "1.1.1.1", TableName: "table_test_ipv4", Reason: "Gpc0 Mismatch",
+			Details: map[string]string{"gpc0_127.0.0.1:8080": "1", "gpc0_127.0.0.1:8081": "0"},
+		},
+		"1.1.1.2_Presence Mismatch": {
+			IP: "1.1.1.2", TableName: "table_test_ipv4", Reason: "Presence Mismatch",
+			Details: map[string]string{"present_in": "127.0.0.1:8080, 127.0.0.1:8081", "missing_in": "127.0.0.1:8082"},
+		},
+		"2.2.2.2_Presence Mismatch": {
+			IP: "2.2.2.2", TableName: "table_other_ipv4", Reason: "Presence Mismatch",
+			Details: map[string]string{"present_in": "127.0.0.1:8080", "missing_in": "127.0.0.1:8081, 127.0.0.1:8082"},
+		},
+	}
+
+	for _, d := range discrepancies {
+		key := fmt.Sprintf("%s_%s", d.IP, d.Reason)
+		e, ok := expected[key]
+		if !ok {
+			t.Fatalf("Unexpected discrepancy found: %+v", d)
 		}
-		return discrepancies[i].Reason < discrepancies[j].Reason
-	})
 
-	// Check 1.1.1.1 Gpc0 Mismatch
-	d1 := discrepancies[0]
-	if d1.IP != "1.1.1.1" || d1.TableName != "table_test_ipv4" || d1.Reason != "Gpc0 Mismatch" {
-		t.Errorf("Unexpected discrepancy 1: %+v", d1)
-	}
-	if d1.Details["gpc0_127.0.0.1:8080"] != "1" || d1.Details["gpc0_127.0.0.1:8081"] != "0" {
-		t.Errorf("Unexpected details for d1: %+v", d1.Details)
+		if d.TableName != e.TableName {
+			t.Errorf("For %s, expected table '%s', got '%s'", key, e.TableName, d.TableName)
+		}
+
+		// Order-independent check for details
+		for k, v := range e.Details {
+			// Special handling for comma-separated fields
+			if k == "present_in" || k == "missing_in" {
+				gotParts := strings.Split(d.Details[k], ", ")
+				expectedParts := strings.Split(v, ", ")
+				sort.Strings(gotParts)
+				sort.Strings(expectedParts)
+				if strings.Join(gotParts, ", ") != strings.Join(expectedParts, ", ") {
+					t.Errorf("For %s, detail '%s' mismatch. Expected '%s', got '%s'", key, k, v, d.Details[k])
+				}
+			} else if d.Details[k] != v {
+				t.Errorf("For %s, detail '%s' mismatch. Expected '%s', got '%s'", key, k, v, d.Details[k])
+			}
+		}
+		delete(expected, key) // Mark as found
 	}
 
-	// Check 1.1.1.2 Presence Mismatch (missing in 8082)
-	d2 := discrepancies[1]
-	if d2.IP != "1.1.1.2" || d2.TableName != "table_test_ipv4" || d2.Reason != "Presence Mismatch" {
-		t.Errorf("Unexpected discrepancy 2: %+v", d2)
-	}
-	if d2.Details["present_in"] != "127.0.0.1:8080, 127.0.0.1:8081" || d2.Details["missing_in"] != "127.0.0.1:8082" {
-		t.Errorf("Unexpected details for d2: %+v", d2.Details)
-	}
-
-	// Check 2.2.2.2 Presence Mismatch (missing in 8081, 8082)
-	d3 := discrepancies[2]
-	if d3.IP != "2.2.2.2" || d3.TableName != "table_other_ipv4" || d3.Reason != "Presence Mismatch" {
-		t.Errorf("Unexpected discrepancy 3: %+v", d3)
-	}
-	if d3.Details["present_in"] != "127.0.0.1:8080" || d3.Details["missing_in"] != "127.0.0.1:8081, 127.0.0.1:8082" {
-		t.Errorf("Unexpected details for d3: %+v", d3.Details)
+	if len(expected) > 0 {
+		t.Errorf("Not all expected discrepancies were found. Missing: %+v", expected)
 	}
 }
 
@@ -606,14 +628,14 @@ func TestHAProxyBlocker_DumpBackends(t *testing.T) {
 	addresses := []string{"127.0.0.1:8080", "127.0.0.1:8081"}
 	mockResponses := map[string]map[string]string{
 		"127.0.0.1:8080": {
-			"show table": "table: table_1m_ipv4\ntable: table_1h_ipv4\n",
-			"show table table_1m_ipv4": "0x1 key=1.1.1.1 use=0 exp=1000 gpc0=1\n" + // blocked
+			"show table": "# table: table_1m_ipv4\n# table: table_1h_ipv4\n",
+			"show table table_1m_ipv4": "# table: table_1m_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n0x1 key=1.1.1.1 use=0 exp=1000 gpc0=1\n" + // blocked
 				"0x2 key=2.2.2.2 use=0 exp=2000 gpc0=0\n", // unblocked
-			"show table table_1h_ipv4": "0x3 key=3.3.3.3 use=0 exp=3000 gpc0=1\n", // blocked
+			"show table table_1h_ipv4": "# table: table_1h_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n0x3 key=3.3.3.3 use=0 exp=3000 gpc0=1\n", // blocked
 		},
 		"127.0.0.1:8081": {
-			"show table": "table: table_1m_ipv4\n",
-			"show table table_1m_ipv4": "0x4 key=1.1.1.1 use=0 exp=4000 gpc0=1\n" + // Duplicate, blocked
+			"show table": "# table: table_1m_ipv4\n",
+			"show table table_1m_ipv4": "# table: table_1m_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n0x4 key=1.1.1.1 use=0 exp=4000 gpc0=1\n" + // Duplicate, blocked
 				"0x5 key=4.4.4.4 use=0 exp=5000 gpc0=1\n", // blocked
 		},
 	}
@@ -630,6 +652,48 @@ func TestHAProxyBlocker_DumpBackends(t *testing.T) {
 		"2.2.2.2|U",
 		"3.3.3.3|B",
 		"4.4.4.4|B",
+	}
+
+	sort.Strings(results)
+	sort.Strings(expected)
+
+	if len(results) != len(expected) {
+		t.Fatalf("Expected %d results, got %d: %v", len(expected), len(results), results)
+	}
+
+	for i, line := range results {
+		if line != expected[i] {
+			t.Errorf("Expected result '%s' at index %d, but got '%s'", expected[i], i, line)
+		}
+	}
+}
+
+func TestHAProxyBlocker_DumpBackends_MultipleFormats(t *testing.T) {
+	addresses := []string{"127.0.0.1:8080"}
+	mockResponses := map[string]map[string]string{
+		"127.0.0.1:8080": {
+			"show table": "# table: table_1m_ipv4\n",
+			"show table table_1m_ipv4": "# table: table_1m_ipv4,type=ip,size=100000,expire=300000,uptime=100000\n" +
+				// With shard
+				"0x1 shard=1 key=1.1.1.1 use=0 exp=1000 gpc0=1\n" +
+				// Without shard
+				"0x2 key=2.2.2.2 use=0 exp=2000 gpc0=0\n" +
+				// Different order
+				"0x3 use=0 exp=3000 gpc0=1 key=3.3.3.3\n",
+		},
+	}
+	b := setupMockHAProxyForComparison(t, addresses, mockResponses)
+
+	// Act
+	results, err := b.DumpBackends()
+	if err != nil {
+		t.Fatalf("DumpBackends() failed: %v", err)
+	}
+
+	expected := []string{
+		"1.1.1.1|B",
+		"2.2.2.2|U",
+		"3.3.3.3|B",
 	}
 
 	sort.Strings(results)

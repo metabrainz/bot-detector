@@ -17,7 +17,7 @@ import (
 
 // Regex to parse a single line from "show table <name>" output.
 // Example: "0x564f26146268: key=1.10.230.15 use=0 exp=51153745 gpc0=1"
-var haProxyTableEntryRegex = regexp.MustCompile(`^\S+\s+key=(?P<ip>\S+)\s+use=\d+\s+exp=(?P<exp>\d+)\s+gpc0=(?P<gpc0>\d+)`)
+var haProxyTableEntryRegex = regexp.MustCompile(`(?:key=(?P<ip>\S+))|(?:\s+exp=(?P<exp>\d+))|(?:\s+gpc0=(?P<gpc0>\d+))`)
 
 // HAProxyTableEntry represents a single entry in an HAProxy stick table.
 type HAProxyTableEntry struct {
@@ -238,18 +238,15 @@ func (b *HAProxyBlocker) executeHAProxyCommand(addr, command string) (string, er
 
 		reader := bufio.NewReader(conn)
 		_ = conn.SetReadDeadline(time.Now().Add(b.P.GetBlockerDialTimeout()))
-		response, err := reader.ReadString('\n')
+		response, err := io.ReadAll(reader)
 
-		if err == nil || (errors.Is(err, io.EOF) && response != "") {
-			trimmedResponse := strings.TrimSpace(response)
-			if trimmedResponse == "200 OK" {
-				b.P.IncrementCmdsPerBlocker(addr)
-				return trimmedResponse, nil
-			} else if strings.HasPrefix(trimmedResponse, "500") || strings.HasPrefix(trimmedResponse, "400") {
-				return "", fmt.Errorf("HAProxy command execution failed on %s (Response: %s)", addr, trimmedResponse)
-			}
+		if err == nil || (errors.Is(err, io.EOF) && len(response) > 0) {
+			responseStr := strings.TrimSpace(string(response))
+			// Simple commands like "set table" don't have a response, so we can't check for "200 OK"
+			// or other specific success messages. We assume success if there's no error.
+			// For "show table", the response is the table content itself.
 			b.P.IncrementCmdsPerBlocker(addr)
-			return trimmedResponse, nil
+			return responseStr, nil
 		}
 		lastErr = fmt.Errorf("HAProxy response read error from %s: %w", addr, err)
 	}
@@ -793,116 +790,81 @@ func (b *HAProxyBlocker) Shutdown() {
 }
 
 // getHAProxyTableNames executes "show table" and parses the response to get table names.
-
 func (b *HAProxyBlocker) getHAProxyTableNames(addr string) ([]string, error) {
-
 	command := "show table\n"
-
 	response, err := b.ExecuteHAProxyCommandFunc(addr, command)
-
 	if err != nil {
-
 		return nil, err
-
 	}
 
 	var tableNames []string
-
 	scanner := bufio.NewScanner(strings.NewReader(response))
-
 	for scanner.Scan() {
-
 		line := scanner.Text()
-
-		if strings.HasPrefix(line, "table: ") {
-
+		if strings.HasPrefix(line, "# table:") {
+			// Line is like: '# table: <name>, type: ip, size:..., used:...'
 			parts := strings.Split(line, ",")
-
 			if len(parts) > 0 {
-
-				tableNamePart := strings.TrimPrefix(parts[0], "table: ")
-
+				tableNamePart := strings.TrimPrefix(parts[0], "# table: ")
 				tableName := strings.TrimSpace(tableNamePart)
-
 				tableNames = append(tableNames, tableName)
-
 			}
-
 		}
-
 	}
-
 	return tableNames, scanner.Err()
-
 }
 
 // getHAProxyAllIPsInTable executes "show table <name>" and parses the response to get all IPs, regardless of gpc0 status.
 
 func (b *HAProxyBlocker) getHAProxyAllIPsInTable(addr, tableName string) ([]HAProxyTableEntry, error) {
-
 	command := fmt.Sprintf("show table %s\n", tableName)
-
 	response, err := b.ExecuteHAProxyCommandFunc(addr, command)
-
 	if err != nil {
-
 		return nil, err
-
 	}
 
 	var entries []HAProxyTableEntry
-
 	scanner := bufio.NewScanner(strings.NewReader(response))
-
 	for scanner.Scan() {
-
 		line := scanner.Text()
-
-		match := haProxyTableEntryRegex.FindStringSubmatch(line)
-
-		if match != nil {
-
-			ip := match[haProxyTableEntryRegex.SubexpIndex("ip")]
-
-			expStr := match[haProxyTableEntryRegex.SubexpIndex("exp")]
-
-			gpc0Str := match[haProxyTableEntryRegex.SubexpIndex("gpc0")]
-
-			exp, parseErr := utils.ParseInt64(expStr)
-
-			if parseErr != nil {
-
-				b.P.Log(logging.LevelError, "HAPROXY_PARSE_ERROR", "Failed to parse exp value '%s' for IP '%s' in table '%s' on '%s': %v", expStr, ip, tableName, addr, parseErr)
-
-				continue
-
-			}
-
-			gpc0, parseErr := utils.ParseInt(gpc0Str)
-
-			if parseErr != nil {
-
-				b.P.Log(logging.LevelError, "HAPROXY_PARSE_ERROR", "Failed to parse gpc0 value '%s' for IP '%s' in table '%s' on '%s': %v", gpc0Str, ip, tableName, addr, parseErr)
-
-				continue
-
-			}
-
-			entries = append(entries, HAProxyTableEntry{
-
-				IP: ip,
-
-				Exp: exp,
-
-				Gpc0: gpc0,
-
-				RawLine: line,
-			})
-
+		if !strings.Contains(line, "key=") {
+			continue
 		}
 
+		var ip, expStr, gpc0Str string
+		matches := haProxyTableEntryRegex.FindAllStringSubmatch(line, -1)
+		for _, match := range matches {
+			if len(match) > 1 {
+				if ip == "" && match[haProxyTableEntryRegex.SubexpIndex("ip")] != "" {
+					ip = match[haProxyTableEntryRegex.SubexpIndex("ip")]
+				}
+				if expStr == "" && match[haProxyTableEntryRegex.SubexpIndex("exp")] != "" {
+					expStr = match[haProxyTableEntryRegex.SubexpIndex("exp")]
+				}
+				if gpc0Str == "" && match[haProxyTableEntryRegex.SubexpIndex("gpc0")] != "" {
+					gpc0Str = match[haProxyTableEntryRegex.SubexpIndex("gpc0")]
+				}
+			}
+		}
+
+		if ip != "" && expStr != "" && gpc0Str != "" {
+			exp, parseErr := utils.ParseInt64(expStr)
+			if parseErr != nil {
+				b.P.Log(logging.LevelError, "HAPROXY_PARSE_ERROR", "Failed to parse exp value '%s' for IP '%s' in table '%s' on '%s': %v", expStr, ip, tableName, addr, parseErr)
+				continue
+			}
+			gpc0, parseErr := utils.ParseInt(gpc0Str)
+			if parseErr != nil {
+				b.P.Log(logging.LevelError, "HAPROXY_PARSE_ERROR", "Failed to parse gpc0 value '%s' for IP '%s' in table '%s' on '%s': %v", gpc0Str, ip, tableName, addr, parseErr)
+				continue
+			}
+			entries = append(entries, HAProxyTableEntry{
+				IP:      ip,
+				Exp:     exp,
+				Gpc0:    gpc0,
+				RawLine: line,
+			})
+		}
 	}
-
 	return entries, scanner.Err()
-
 }
