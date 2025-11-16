@@ -17,6 +17,8 @@ import (
 
 	"bot-detector/internal/store"
 
+	"bot-detector/internal/types"
+
 	"bot-detector/internal/utils"
 
 	"encoding/json"
@@ -338,6 +340,24 @@ func main() {
 }
 
 // --- MetricsProvider Interface Implementation ---
+
+// GetConfigForArchive safely retrieves the main config content and its dependencies for archiving.
+func (p *Processor) GetConfigForArchive() ([]byte, time.Time, map[string]*types.FileDependency, string, error) {
+	p.ConfigMutex.RLock()
+	defer p.ConfigMutex.RUnlock()
+
+	// Create a deep copy of the dependencies to avoid race conditions if the config is reloaded
+	// while the archive is being generated in a goroutine.
+	depsCopy := make(map[string]*types.FileDependency)
+	for path, dep := range p.Config.FileDependencies {
+		// We only include files that are currently loaded and exist.
+		if dep.CurrentStatus != nil && dep.CurrentStatus.Status == types.FileStatusLoaded {
+			depsCopy[path] = dep.Clone()
+		}
+	}
+
+	return p.Config.YAMLContent, p.Config.LastModTime, depsCopy, p.ConfigPath, nil
+}
 
 // GetListenAddr returns the HTTP listen address from the config.
 func (p *Processor) GetListenAddr() string {

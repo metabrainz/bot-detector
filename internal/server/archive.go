@@ -3,6 +3,7 @@ package server
 import (
 	"archive/tar"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/types"
 	"compress/gzip"
 	"fmt"
 	"net/http"
@@ -60,7 +61,8 @@ func archiveHandler(p Provider) http.HandlerFunc {
 		// Add all file dependencies to the archive.
 		configDir := filepath.Dir(configPath)
 		for path, dep := range deps {
-			if dep.CurrentStatus.Status != 0 { // Assuming 0 is FileStatusUnknown/FileStatusLoaded
+			// Only add files that are currently loaded to the archive.
+			if dep.CurrentStatus != nil && dep.CurrentStatus.Status == types.FileStatusLoaded {
 				// Get the relative path of the dependency from the main config directory.
 				relPath, err := filepath.Rel(configDir, path)
 				if err != nil {
