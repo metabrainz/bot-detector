@@ -3,6 +3,7 @@ package logging
 import (
 	"log"
 	"strings"
+	"sync"
 )
 
 // --- LOGGING STRUCTURE ---
@@ -16,7 +17,11 @@ const (
 	LevelDebug                    // 4: Verbose: All high-volume messages (skip, match, reset, cleanup, watch polling)
 )
 
-var currentLogLevel = LevelInfo // Default level set to INFO
+var (
+	currentLogLevel = LevelInfo // Default level set to INFO
+	logMutex        sync.RWMutex
+)
+
 var logLevelMap = map[string]LogLevel{
 	"critical": LevelCritical,
 	"error":    LevelError,
@@ -52,6 +57,8 @@ func init() {
 }
 
 func logOutputInternal(level LogLevel, prefix string, format string, v ...interface{}) {
+	logMutex.RLock()
+	defer logMutex.RUnlock()
 	if level <= currentLogLevel {
 		log.Printf("[%s] "+format, append([]interface{}{prefix}, v...)...)
 	}
@@ -59,15 +66,21 @@ func logOutputInternal(level LogLevel, prefix string, format string, v ...interf
 
 // SetLogLevel safely sets the global CurrentLogLevel from a string.
 func SetLogLevel(levelStr string) {
+	logMutex.Lock()
+	defer logMutex.Unlock()
 	if level, ok := logLevelMap[strings.ToLower(levelStr)]; ok {
 		currentLogLevel = level
 	} else {
-		LogOutput(LevelWarning, "CONFIG", "Invalid log_level '%s' in config. Using default 'warning'.", levelStr)
+		// We can't call LogOutput here because it would cause a deadlock.
+		// Instead, we'll just log directly.
+		log.Printf("[CONFIG] Invalid log_level '%s' in config. Using default 'warning'.", levelStr)
 		currentLogLevel = LevelWarning
 	}
 }
 
 // GetLogLevel is a new exported function to allow other packages to read the current level.
 func GetLogLevel() LogLevel {
+	logMutex.RLock()
+	defer logMutex.RUnlock()
 	return currentLogLevel
 }

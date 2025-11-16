@@ -2,28 +2,20 @@ package logging
 
 import (
 	"bytes"
-	"fmt"
 	"log"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 )
 
 func TestSetLogLevel(t *testing.T) {
 	// --- Setup ---
 	// Capture log output to verify the warning message.
-	var logMutex sync.Mutex
-	var capturedLog string
-	originalLogFunc := LogOutput
-	LogOutput = func(level LogLevel, tag string, format string, v ...interface{}) {
-		logMutex.Lock()
-		capturedLog = fmt.Sprintf(format, v...)
-		logMutex.Unlock()
-	}
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
 	t.Cleanup(func() {
-		LogOutput = originalLogFunc
 		currentLogLevel = LevelWarning // Reset to default
+		log.SetOutput(os.Stderr)       // Restore original log output
 	})
 
 	// --- Test Cases ---
@@ -41,14 +33,18 @@ func TestSetLogLevel(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Reset captured log for each run
-			capturedLog = ""
+			buf.Reset()
 
 			SetLogLevel(tt.levelStr)
 
-			if currentLogLevel != tt.expectedLevel {
-				t.Errorf("Expected currentLogLevel to be %v, but got %v", tt.expectedLevel, currentLogLevel)
+			logMutex.RLock()
+			level := currentLogLevel
+			logMutex.RUnlock()
+
+			if level != tt.expectedLevel {
+				t.Errorf("Expected currentLogLevel to be %v, but got %v", tt.expectedLevel, level)
 			}
-			if tt.expectWarning && !strings.Contains(capturedLog, "Invalid log_level") {
+			if tt.expectWarning && !strings.Contains(buf.String(), "Invalid log_level") {
 				t.Errorf("Expected a warning for invalid log level, but none was captured.")
 			}
 		})
