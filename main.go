@@ -1,52 +1,28 @@
-//go:build !test
-
 package main
 
 import (
-	"bufio"
-
 	"bot-detector/internal/blocker"
-
+	"bot-detector/internal/commandline"
 	"bot-detector/internal/logging"
-
 	"bot-detector/internal/metrics"
-
 	"bot-detector/internal/persistence"
-
 	"bot-detector/internal/server"
-
 	"bot-detector/internal/store"
-
 	"bot-detector/internal/types"
-
 	"bot-detector/internal/utils"
-
+	"bufio"
 	"encoding/json"
-
-	"flag"
-
 	"fmt"
-
 	"log"
-
 	"os"
-
 	"os/signal"
-
 	"path/filepath"
-
 	"regexp"
-
 	"sort"
-
 	"strings"
-
 	"sync"
-
 	"sync/atomic"
-
 	"syscall"
-
 	"time"
 )
 
@@ -64,34 +40,25 @@ func (p *Processor) GetMarshalledConfig() ([]byte, time.Time, error) {
 
 // main is the application entry point.
 func main() {
-	if err := run(os.Args); err != nil {
+	params, err := commandline.ParseParameters(os.Args)
+	if err != nil {
+		// A parsing error will have already printed usage information.
+		// We exit with a non-zero code after the error is logged.
+		log.Printf("[FATAL] %v", err)
+		os.Exit(1)
+	}
+
+	if err := execute(params); err != nil {
 		log.Printf("[FATAL] %v", err)
 		os.Exit(1)
 	}
 }
 
-// run is the main application logic.
-func run(args []string) error {
-	flagSet := flag.NewFlagSet(args[0], flag.ContinueOnError)
-	cliFlags := RegisterCLIFlags(flagSet)
-	flagSet.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "A behavioral bot detection tool that monitors logs and blocks malicious IPs via the configured blocking backend.\n\n")
-		flagSet.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nMemory and CPU are optimized by pre-compiling regexes and using the cleanup routine.\n")
-	}
-
-	// Parse CLI flags
-	if err := flagSet.Parse(args[1:]); err != nil {
-		return err
-	}
-
+// execute is the main application logic, decoupled from command-line parsing.
+func execute(params *commandline.AppParameters) error {
 	// Handle --check flag first. If present, validate config and exit.
-	if *cliFlags.Check {
-		if *cliFlags.ConfigPath == "" {
-			return fmt.Errorf("--config flag is required for --check")
-		}
-		absConfigPath, err := filepath.Abs(*cliFlags.ConfigPath)
+	if params.Check {
+		absConfigPath, err := filepath.Abs(params.ConfigPath)
 		if err != nil {
 			return fmt.Errorf("could not determine absolute path for config file: %v", err)
 		}
@@ -107,20 +74,13 @@ func run(args []string) error {
 	}
 
 	// Handle the version flag first. If present, print version and exit.
-	if *cliFlags.ShowVersion {
+	if params.ShowVersion {
 		fmt.Printf("bot-detector version %s\n", AppVersion)
 		return nil
 	}
 
-	// Validate that required flags are provided.
-	// --log-path is required for live mode, but optional for other modes.
-	if *cliFlags.ConfigPath == "" || (*cliFlags.LogPath == "" && !*cliFlags.DryRun && !*cliFlags.DumpBackends) {
-		flag.Usage()
-		return fmt.Errorf("missing required flags")
-	}
-
 	// Resolve the config path to an absolute path to make file matcher paths relative to it.
-	absConfigPath, err := filepath.Abs(*cliFlags.ConfigPath)
+	absConfigPath, err := filepath.Abs(params.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("could not determine absolute path for config file: %v", err)
 	}
@@ -179,18 +139,18 @@ func run(args []string) error {
 		Chains:               loadedCfg.Chains,
 		Config:               appConfig,
 		LogRegex:             loadedCfg.LogFormatRegex,
-		DryRun:               *cliFlags.DryRun,
-		ExitOnEOF:            *cliFlags.ExitOnEOF,
+		DryRun:               params.DryRun,
+		ExitOnEOF:            params.ExitOnEOF,
 		EnableMetrics:        loadedCfg.EnableMetrics,
 		oooBufferFlushSignal: make(chan struct{}, 1), // Buffered channel of size 1
 		signalCh:             make(chan os.Signal, 1),
 		LogFunc:              logging.LogOutput,
 		NowFunc:              time.Now, // Use the real time.Now in production.
 		ConfigPath:           absConfigPath,
-		LogPath:              *cliFlags.LogPath,
-		ReloadOn:             *cliFlags.ReloadOn,
-		TopN:                 *cliFlags.TopN,
-		HTTPServer:           *cliFlags.HTTPServer,
+		LogPath:              params.LogPath,
+		ReloadOn:             params.ReloadOn,
+		TopN:                 params.TopN,
+		HTTPServer:           params.HTTPServer,
 		configReloaded:       false,
 
 		// Initialize persistence fields
@@ -199,11 +159,10 @@ func run(args []string) error {
 		activeBlocks:       make(map[string]persistence.ActiveBlockInfo),
 	}
 
-	// Command-line flag is the only way to set the state directory.
-	// It also implicitly enables persistence.
-	if cliFlags.StateDir != nil && *cliFlags.StateDir != "" {
-		p.persistenceEnabled = true
-		p.stateDir = *cliFlags.StateDir
+	// The --state-dir flag provides the path for persistence, but the config file
+	// is the single source of truth for whether persistence is enabled.
+	if params.StateDir != "" {
+		p.stateDir = params.StateDir
 	}
 
 	// Final check: if persistence is enabled in YAML but no --state-dir is given, it's a fatal error.
@@ -318,7 +277,7 @@ func run(args []string) error {
 	p.Blocker = rateLimitedBlocker
 
 	// Handle --dump-backends flag. If present, list blocked IPs and exit.
-	if *cliFlags.DumpBackends {
+	if params.DumpBackends {
 		// Only run the sync check if there are multiple backends to compare.
 		if len(p.GetBlockerAddresses()) > 1 {
 			logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "Checking HAProxy backend synchronization...")

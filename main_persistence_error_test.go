@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bot-detector/internal/commandline"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,7 +17,7 @@ func TestCorruptedSnapshot(t *testing.T) {
 	}
 	defer func() {
 		if err := os.RemoveAll(tmpDir); err != nil {
-			t.Errorf("Failed to remove temporary directory: %v", err)
+			t.Logf("Warning: failed to clean up temp dir %s: %v", tmpDir, err)
 		}
 	}()
 
@@ -52,8 +53,12 @@ chains:
 	}
 
 	// Attempt to run the application
-	args := []string{"bot-detector", "-config", configFile.Name(), "-log-path", "/dev/null", "-state-dir", tmpDir}
-	err = run(args)
+	params := &commandline.AppParameters{
+		ConfigPath: configFile.Name(),
+		LogPath:    "/dev/null",
+		StateDir:   tmpDir,
+	}
+	err = execute(params)
 
 	// Verify the outcome
 	if err == nil {
@@ -74,7 +79,7 @@ func TestCorruptedJournal(t *testing.T) {
 	}
 	defer func() {
 		if err := os.RemoveAll(tmpDir); err != nil {
-			t.Errorf("Failed to remove temporary directory: %v", err)
+			t.Logf("Warning: failed to clean up temp dir %s: %v", tmpDir, err)
 		}
 	}()
 
@@ -116,8 +121,13 @@ chains:
 	}
 
 	// Attempt to run the application
-	args := []string{"bot-detector", "-config", configFile.Name(), "-log-path", "/dev/null", "-state-dir", tmpDir, "-exit-on-eof"}
-	err = run(args)
+	params := &commandline.AppParameters{
+		ConfigPath: configFile.Name(),
+		LogPath:    "/dev/null",
+		StateDir:   tmpDir,
+		ExitOnEOF:  true,
+	}
+	err = execute(params)
 
 	// Verify the outcome
 	if err != nil {
@@ -133,7 +143,7 @@ func TestUnwritableStateDir(t *testing.T) {
 	}
 	defer func() {
 		if err := os.RemoveAll(tmpDir); err != nil {
-			t.Errorf("Failed to remove temporary directory: %v", err)
+			t.Logf("Warning: failed to clean up temp dir %s: %v", tmpDir, err)
 		}
 	}()
 
@@ -169,8 +179,13 @@ chains:
 	}
 
 	// Attempt to run the application
-	args := []string{"bot-detector", "-config", configFile.Name(), "-log-path", "/dev/null", "-state-dir", unwritableDir, "-exit-on-eof"}
-	err = run(args)
+	params := &commandline.AppParameters{
+		ConfigPath: configFile.Name(),
+		LogPath:    "/dev/null",
+		StateDir:   unwritableDir,
+		ExitOnEOF:  true,
+	}
+	err = execute(params)
 
 	// Verify the outcome
 	if err == nil {
