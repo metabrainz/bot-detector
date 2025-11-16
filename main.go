@@ -165,6 +165,7 @@ func main() {
 		Config:               appConfig,
 		LogRegex:             loadedCfg.LogFormatRegex,
 		DryRun:               *cliFlags.DryRun,
+		ExitOnEOF:            *cliFlags.ExitOnEOF,
 		EnableMetrics:        loadedCfg.EnableMetrics,
 		oooBufferFlushSignal: make(chan struct{}, 1), // Buffered channel of size 1
 		signalCh:             make(chan os.Signal, 1),
@@ -204,7 +205,6 @@ func main() {
 	haproxyBlocker := blocker.NewHAProxyBlocker(p, p.DryRun)
 	rateLimitedBlocker := blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.BlockerCommandQueueSize, p.Config.BlockerCommandsPerSecond)
 	p.Blocker = rateLimitedBlocker
-	defer rateLimitedBlocker.Stop() // Ensure the rate limiter worker is stopped on exit.
 
 	if p.persistenceEnabled {
 		// -- STATE RESTORATION --
@@ -294,7 +294,20 @@ func main() {
 	rateLimitedBlocker = blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.BlockerCommandQueueSize, p.Config.BlockerCommandsPerSecond)
 
 	p.Blocker = rateLimitedBlocker
-	defer rateLimitedBlocker.Stop() // Ensure the rate limiter worker is stopped on exit.
+	// --- SHUTDOWN ---
+	defer func() {
+		p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Application shutting down.")
+		if p.Blocker != nil {
+			p.Blocker.Shutdown()
+		}
+		if p.persistenceEnabled {
+			p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Closing journal file.")
+			if err := p.journalHandle.Close(); err != nil {
+				p.LogFunc(logging.LevelError, "PERSISTENCE", "Error closing journal file: %v", err)
+			}
+		}
+		p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Shutdown complete.")
+	}()
 
 	// Handle --dump-backends flag. If present, list blocked IPs and exit.
 	if *cliFlags.DumpBackends {

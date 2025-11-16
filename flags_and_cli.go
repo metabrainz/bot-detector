@@ -19,6 +19,7 @@ type CLIFlagValues struct {
 	DumpBackends *bool
 	StateDir     *string
 	Check        *bool
+	ExitOnEOF    *bool
 }
 
 // RegisterCLIFlags registers the command line flags.
@@ -29,6 +30,7 @@ func RegisterCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 		DryRun:       fs.Bool("dry-run", false, "Enable dry-run mode. Processes a static log file and exits."),
 		ShowVersion:  fs.Bool("version", false, "Show the application version and exit."),
 		Check:        fs.Bool("check", false, "Check the configuration file for validity and exit."),
+		ExitOnEOF:    fs.Bool("exit-on-eof", false, "Exit after processing the existing log file instead of tailing."),
 		ReloadOn:     fs.String("reload-on", "", "Trigger a configuration reload on a specific signal (hup, usr1, usr2) or 'watcher'. By default, both are enabled."),
 		TopN:         fs.Int("top-n", 0, "Number of top actors to display in the metrics summary."),
 		HTTPServer:   fs.String("http-server", "", "Enable the HTTP server for metrics on the given address (e.g., :8080)."),

@@ -747,12 +747,12 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			continue
 		}
 
-		// On the very first run, seek to the end to ignore old content.
-		// On subsequent runs (after rotation), we read the new file from the beginning.
-		if firstRun {
+		// On the very first run, seek to the end to ignore old content,
+		// but only if we're not in exit-on-eof mode.
+		if firstRun && !p.ExitOnEOF {
 			_, _ = file.Seek(0, io.SeekEnd)
-			firstRun = false
 		}
+		firstRun = false
 
 		// Signal for test synchronization, if the channel is set.
 		if readySignal != nil {
@@ -790,6 +790,12 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 				}
 				if readErr == io.EOF {
 					FlushEntryBuffer(p)
+					// If the flag is set, we exit on the first EOF.
+					if p.ExitOnEOF {
+						p.LogFunc(logging.LevelInfo, "TAIL", "Reached EOF, exiting due to --exit-on-eof flag.")
+						_ = file.Close()
+						return // Exit the function entirely
+					}
 					if hasFileBeenRotated(p, p.LogPath, initialStat, p.Config.StatFunc) {
 						_ = file.Close()
 						restartTailing(FileOpenRetryDelay) // Add delay to prevent tight loop on stat errors.

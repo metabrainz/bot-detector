@@ -112,6 +112,7 @@ This will produce a single executable named `bot-detector`.
 | **`--config`** | `"config.yaml"` | Path to the YAML configuration file. |
 | **`--log-path`** | `""` | Path to the access log file to tail (or to read in dry-run mode). |
 | **`--dry-run`** | `false` | If true, runs in test mode, ignoring the configured blocking backend and live logging. |
+| **`--exit-on-eof`** | `false` | If true, exits after processing the log file to EOF instead of tailing. Useful for testing. |
 | **`--dump-backends`** | `false` | Checks if HAProxy backends are in sync. If they are, it lists all IPs with their status ('B' for blocked, 'U' for unblocked) and exits. If they are out of sync, it prints the discrepancies and exits with an error. |
 | **`--version`** | `false` | Print the application version and exit. |
 | **`--check`** | `false` | If true, validates the configuration file and exits. Returns a non-zero exit code on failure. |
