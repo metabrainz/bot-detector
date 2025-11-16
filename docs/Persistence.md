@@ -59,6 +59,8 @@ On startup, `bot-detector` follows a specific process to bring the backend's sta
 2.  **Replay Journal:** It reads `events.log` and applies any events that are newer than the snapshot's timestamp, ensuring the in-memory state is fully up-to-date.
 3.  **State Push:** `bot-detector` iterates through its complete in-memory list of active blocks and issues a `block` command to the configured backend for each one. This process is idempotent and ensures the backend converges to the correct state without causing a service interruption.
 
+> **Note:** During the "State Push" phase, the application respects the *currently loaded* configuration. This means if an IP address exists in the state snapshot but is also listed in the current `good_actors` configuration, its block will **not** be restored to the backend.
+
 ### Compaction
 
 To prevent the `events.log` from growing infinitely, a periodic compaction process runs. The interval is configurable via `compaction_interval` in the YAML config (default is 1 hour).
