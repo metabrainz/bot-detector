@@ -90,14 +90,17 @@ func (b *HAProxyBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reas
 	}
 
 	tableName := baseTableName
-	switch ipInfo.Version {
-	case 4:
-		tableName += "_ipv4"
-	case 6:
-		tableName += "_ipv6"
-	default:
-		b.P.Log(logging.LevelError, "SKIP_BLOCK", "cannot block IP %s: invalid IP version", ipInfo.Address)
-		return nil
+	// Avoid double-suffixing if the user-provided table name already has one.
+	if !strings.HasSuffix(baseTableName, "_ipv4") && !strings.HasSuffix(baseTableName, "_ipv6") {
+		switch ipInfo.Version {
+		case 4:
+			tableName += "_ipv4"
+		case 6:
+			tableName += "_ipv6"
+		default:
+			b.P.Log(logging.LevelError, "SKIP_BLOCK", "cannot block IP %s: invalid IP version", ipInfo.Address)
+			return nil
+		}
 	}
 
 	command := fmt.Sprintf("set table %s key %s data.gpc0 1\n", tableName, ipInfo.Address)
@@ -138,7 +141,10 @@ func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 
 	targets := make(map[string]map[string]string)
 	for baseName := range baseTables {
-		tableName := baseName + ipSuffix
+		tableName := baseName
+		if !strings.HasSuffix(baseName, "_ipv4") && !strings.HasSuffix(baseName, "_ipv6") {
+			tableName += ipSuffix
+		}
 		targets[tableName] = make(map[string]string)
 		command := fmt.Sprintf("set table %s key %s data.gpc0 0\n", tableName, ipInfo.Address)
 		for _, addr := range b.P.GetBlockerAddresses() {
@@ -152,8 +158,11 @@ func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 // executeCommandImpl connects to a single HAProxy instance and executes a command.
 func (b *HAProxyBlocker) executeCommandImpl(addr, ip, command string) error {
 	network := "tcp"
+	cleanAddr := addr
 	if strings.Contains(addr, "/") {
 		network = "unix"
+	} else if strings.HasPrefix(addr, "tcp:") {
+		cleanAddr = strings.TrimPrefix(addr, "tcp:")
 	}
 
 	var lastErr error
@@ -164,7 +173,7 @@ func (b *HAProxyBlocker) executeCommandImpl(addr, ip, command string) error {
 			time.Sleep(b.P.GetBlockerRetryDelay())
 		}
 
-		conn, err := net.DialTimeout(network, addr, b.P.GetBlockerDialTimeout())
+		conn, err := net.DialTimeout(network, cleanAddr, b.P.GetBlockerDialTimeout())
 		if err != nil {
 			lastErr = fmt.Errorf("failed to connect to HAProxy instance %s: %w", addr, err)
 			continue
@@ -198,8 +207,11 @@ func (b *HAProxyBlocker) executeCommandImpl(addr, ip, command string) error {
 // executeCommandImpl connects to a single HAProxy instance and executes a command.
 func (b *HAProxyBlocker) executeHAProxyCommand(addr, command string) (string, error) {
 	network := "tcp"
+	cleanAddr := addr
 	if strings.Contains(addr, "/") {
 		network = "unix"
+	} else if strings.HasPrefix(addr, "tcp:") {
+		cleanAddr = strings.TrimPrefix(addr, "tcp:")
 	}
 
 	var lastErr error
@@ -210,7 +222,7 @@ func (b *HAProxyBlocker) executeHAProxyCommand(addr, command string) (string, er
 			time.Sleep(b.P.GetBlockerRetryDelay())
 		}
 
-		conn, err := net.DialTimeout(network, addr, b.P.GetBlockerDialTimeout())
+		conn, err := net.DialTimeout(network, cleanAddr, b.P.GetBlockerDialTimeout())
 		if err != nil {
 			lastErr = fmt.Errorf("failed to connect to HAProxy instance %s: %w", addr, err)
 			continue
@@ -769,6 +781,14 @@ func (b *HAProxyBlocker) CompareHAProxyBackends(expTolerance time.Duration) ([]S
 	}
 
 	return discrepancies, nil
+
+}
+
+// Shutdown is a no-op for the HAProxyBlocker to satisfy the Blocker interface.
+
+func (b *HAProxyBlocker) Shutdown() {
+
+	// Nothing to do here.
 
 }
 

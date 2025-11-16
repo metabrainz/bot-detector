@@ -100,6 +100,11 @@ func (m *MockBlocker) CompareHAProxyBackends(expTolerance time.Duration) ([]bloc
 	return args.Get(0).([]blocker.SyncDiscrepancy), args.Error(1)
 }
 
+// Shutdown is a no-op for the mock to satisfy the Blocker interface.
+func (m *MockBlocker) Shutdown() {
+	// No-op for mock
+}
+
 // newTestProcessor creates a new Processor instance with sensible defaults for testing.
 func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 	if config == nil {

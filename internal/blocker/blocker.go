@@ -13,6 +13,7 @@ type Blocker interface {
 	Unblock(ipInfo utils.IPInfo, reason string) error
 	DumpBackends() ([]string, error)
 	CompareHAProxyBackends(expTolerance time.Duration) ([]SyncDiscrepancy, error) // New method
+	Shutdown()
 }
 
 // LogProvider defines the interface for logging, decoupling the blocker from the main logger.
@@ -109,6 +110,16 @@ func (b *RateLimitedBlocker) Stop() {
 		close(b.stopCh)
 		b.wg.Wait()
 	})
+}
+
+// Shutdown waits for the command queue to be empty and then stops the worker.
+func (b *RateLimitedBlocker) Shutdown() {
+	b.Log(logging.LevelDebug, "RATE_LIMITER", "Shutdown called. Waiting for command queue to empty...")
+	for len(b.CommandQueue) > 0 {
+		time.Sleep(10 * time.Millisecond) // Wait for the queue to drain.
+	}
+	b.Log(logging.LevelDebug, "RATE_LIMITER", "Command queue is empty. Stopping worker.")
+	b.Stop()
 }
 
 // IPInfo needs to be defined here to avoid circular dependencies.
