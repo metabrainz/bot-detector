@@ -343,6 +343,8 @@ func main() {
 		}
 
 		logging.LogOutput(logging.LevelInfo, "DUMP_BACKENDS", "Retrieving currently blocked IPs from HAProxy...")
+		// Add a small delay to allow the command queue to process restored blocks.
+		time.Sleep(1 * time.Second)
 		blockedIPs, err := p.Blocker.DumpBackends()
 		if err != nil {
 			logging.LogOutput(logging.LevelError, "DUMP_FAIL", "Failed to retrieve blocked IPs: %v", err)
