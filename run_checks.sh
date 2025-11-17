@@ -12,8 +12,8 @@ echo "Running golangci-lint..."
 golangci-lint run
 
 # Run go test -race
-echo "Running go test -race..."
-go test -race ./...
+echo 'Running go test -race...'
+timeout 10s go test -race -v ./...
 
 # Run go build
 echo "Running go build..."
