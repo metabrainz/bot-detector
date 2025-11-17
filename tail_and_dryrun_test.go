@@ -211,6 +211,104 @@ func TestNewTailer(t *testing.T) {
 	})
 }
 
+func TestTailer_ReadLine(t *testing.T) {
+	t.Run("Successful Line Read", func(t *testing.T) {
+		mockReader := strings.NewReader("hello world\n")
+		tailer := &Tailer{
+			reader: bufio.NewReader(mockReader),
+			logger: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
+		}
+		tailer.config.LineEnding = "lf"
+
+		line, err := tailer.ReadLine()
+		if err != nil {
+			t.Fatalf("Expected no error, but got: %v", err)
+		}
+		if line != "hello world" {
+			t.Errorf("Expected line to be 'hello world', but got '%s'", line)
+		}
+	})
+
+	t.Run("EOF without Rotation", func(t *testing.T) {
+		mockReader := strings.NewReader("") // Empty reader to simulate immediate EOF
+		tailer := &Tailer{
+			path:   "dummy.log",
+			reader: bufio.NewReader(mockReader),
+			logger: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
+			initialStat: &mockFileInfo{
+				size: 100,
+				sys:  &syscall.Stat_t{Dev: 1, Ino: 123},
+			},
+		}
+		tailer.config.EOFPollingDelay = 1 * time.Millisecond
+		tailer.config.LineEnding = "lf"
+		// Mock StatFunc to return the same stats (no rotation)
+		tailer.config.StatFunc = func(s string) (os.FileInfo, error) {
+			return &mockFileInfo{
+				size: 100, // Size hasn't changed
+				sys:  &syscall.Stat_t{Dev: 1, Ino: 123},
+			}, nil
+		}
+
+		_, err := tailer.ReadLine()
+		if !errors.Is(err, ErrEOF) {
+			t.Errorf("Expected error to be ErrEOF, but got: %v", err)
+		}
+	})
+
+	t.Run("EOF with Rotation (Truncation)", func(t *testing.T) {
+		mockReader := strings.NewReader("")
+		tailer := &Tailer{
+			path:   "dummy.log",
+			reader: bufio.NewReader(mockReader),
+			logger: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
+			initialStat: &mockFileInfo{
+				size: 100,
+				sys:  &syscall.Stat_t{Dev: 1, Ino: 123},
+			},
+		}
+		tailer.config.LineEnding = "lf"
+		// Mock StatFunc to return a smaller size
+		tailer.config.StatFunc = func(s string) (os.FileInfo, error) {
+			return &mockFileInfo{
+				size: 50, // Size has decreased
+				sys:  &syscall.Stat_t{Dev: 1, Ino: 123},
+			}, nil
+		}
+
+		_, err := tailer.ReadLine()
+		if !errors.Is(err, ErrFileRotated) {
+			t.Errorf("Expected error to be ErrFileRotated, but got: %v", err)
+		}
+	})
+
+	t.Run("EOF with Rotation (Inode Change)", func(t *testing.T) {
+		mockReader := strings.NewReader("")
+		tailer := &Tailer{
+			path:   "dummy.log",
+			reader: bufio.NewReader(mockReader),
+			logger: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
+			initialStat: &mockFileInfo{
+				size: 100,
+				sys:  &syscall.Stat_t{Dev: 1, Ino: 123},
+			},
+		}
+		tailer.config.LineEnding = "lf"
+		// Mock StatFunc to return a different inode
+		tailer.config.StatFunc = func(s string) (os.FileInfo, error) {
+			return &mockFileInfo{
+				size: 100,
+				sys:  &syscall.Stat_t{Dev: 1, Ino: 456}, // Inode has changed
+			}, nil
+		}
+
+		_, err := tailer.ReadLine()
+		if !errors.Is(err, ErrFileRotated) {
+			t.Errorf("Expected error to be ErrFileRotated, but got: %v", err)
+		}
+	})
+}
+
 // --- Mocks for testing hasFileBeenRotated ---
 
 // mockFileInfo implements os.FileInfo for testing purposes.

@@ -80,6 +80,75 @@ func NewTailer(p *Processor, seekToEnd bool) (*Tailer, error) {
 	return t, nil
 }
 
+// ReadLine reads a single line from the tailed file. It handles EOF by checking
+// for file rotation and returns sentinel errors to signal the outcome.
+func (t *Tailer) ReadLine() (string, error) {
+	readLine, err := getLineReader(t.config.LineEnding)
+	if err != nil {
+		return "", fmt.Errorf("configuration error with line_ending: %w", err)
+	}
+	lineLimit := MaxLogLineSize
+
+	line, readErr := readLine(t.reader, lineLimit)
+
+	if readErr != nil {
+		if errors.Is(readErr, ErrLineSkipped) {
+			t.logger(logging.LevelWarning, "TAIL_SKIP", "Skipped line (length exceeded %d bytes): %.100s...", lineLimit, line)
+			return "", ErrLineSkipped // Return the sentinel error
+		}
+		if readErr == io.EOF {
+			if t.checkForRotation() {
+				return "", ErrFileRotated
+			}
+			time.Sleep(t.config.EOFPollingDelay)
+			return "", ErrEOF
+		}
+		return "", readErr // Return other unexpected errors
+	}
+
+	return line, nil
+}
+
+// checkForRotation checks if the log file has been rotated or truncated.
+// It returns true if the file should be reopened, false otherwise.
+func (t *Tailer) checkForRotation() bool {
+	if t.initialStat == nil {
+		return false
+	}
+
+	currentStat, err := t.config.StatFunc(t.path)
+	if err != nil {
+		t.logger(logging.LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Assuming rotation.", err)
+		return true
+	}
+
+	if currentStat.Size() < t.initialStat.Size() {
+		t.logger(logging.LevelInfo, "TAIL", "Detected log file size reduction (truncation/rotation). Reopening file.")
+		return true
+	}
+
+	initialSys := t.initialStat.Sys()
+	currentSys := currentStat.Sys()
+
+	if initialSys != nil && currentSys != nil {
+		initialSysStat, ok1 := initialSys.(*syscall.Stat_t)
+		currentSysStat, ok2 := currentSys.(*syscall.Stat_t)
+
+		if ok1 && ok2 {
+			if currentSysStat.Dev != initialSysStat.Dev || currentSysStat.Ino != initialSysStat.Ino {
+				t.logger(logging.LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialSysStat.Ino, currentSysStat.Ino)
+				return true
+			}
+		} else {
+			t.logger(logging.LevelWarning, "TAIL_WARN", "Could not assert syscall.Stat_t for initial or current file. Inode/Device rotation detection impaired.")
+		}
+	} else {
+		t.logger(logging.LevelDebug, "TAIL_DEBUG", "Sys() call returned nil for initial or current file. Inode/Device rotation detection skipped.")
+	}
+
+	return false
+}
+
 // lineReader is a function type for reading lines.
 type lineReader func(reader *bufio.Reader, limit int) (string, error)
 
