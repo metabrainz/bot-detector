@@ -94,9 +94,15 @@ func main() {
 	}
 }
 
-// execute is the main application logic, decoupled from command-line parsing.
-func execute(params *commandline.AppParameters) error {
-	// Handle --check flag first. If present, validate config and exit.
+// handleStartupFlags checks for command-line flags that prevent normal startup,
+// such as --version or --check. It returns a special "exit" error to signal
+// a clean exit, an error for failures, or nil to continue execution.
+func handleStartupFlags(params *commandline.AppParameters) error {
+	if params.ShowVersion {
+		fmt.Printf("bot-detector version %s\n", AppVersion)
+		return fmt.Errorf("exit") // Signal clean exit
+	}
+
 	if params.Check {
 		absConfigPath, err := filepath.Abs(params.ConfigPath)
 		if err != nil {
@@ -105,18 +111,27 @@ func execute(params *commandline.AppParameters) error {
 		opts := LoadConfigOptions{
 			ConfigPath: absConfigPath,
 		}
-		_, err = LoadConfigFromYAML(opts)
-		if err != nil {
+		if _, err = LoadConfigFromYAML(opts); err != nil {
 			return fmt.Errorf("configuration check failed: %v", err)
 		}
 		log.Println("[SUCCESS] Configuration is valid.")
-		return nil
+		return fmt.Errorf("exit") // Signal clean exit
 	}
 
-	// Handle the version flag first. If present, print version and exit.
-	if params.ShowVersion {
-		fmt.Printf("bot-detector version %s\n", AppVersion)
-		return nil
+	return nil // Continue execution
+}
+
+// execute is the main application logic, decoupled from command-line parsing.
+func execute(params *commandline.AppParameters) error {
+	if err := handleStartupFlags(params); err != nil {
+		// If handleStartupFlags returns an error, it means an early-exit flag
+		// was handled successfully (e.g., --version) and the program should terminate
+		// without an error code. A nil error from this function indicates that
+		// normal execution should continue.
+		if err.Error() == "exit" {
+			return nil
+		}
+		return err
 	}
 
 	// Resolve the config path to an absolute path to make file matcher paths relative to it.
