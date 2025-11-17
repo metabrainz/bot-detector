@@ -118,6 +118,37 @@ func handleStartupFlags(params *commandline.AppParameters) error {
 	return nil // Continue execution
 }
 
+func initializeProcessor(params *commandline.AppParameters, appConfig *AppConfig, loadedCfg *LoadedConfig) *Processor {
+	return &Processor{
+		ActivityMutex:        &sync.RWMutex{},
+		TopActorsPerChain:    make(map[string]map[string]*store.ActorStats),
+		ActivityStore:        make(map[store.Actor]*store.ActorActivity),
+		ConfigMutex:          &sync.RWMutex{},
+		Metrics:              metrics.NewMetrics(),
+		Chains:               loadedCfg.Chains,
+		Config:               appConfig,
+		LogRegex:             loadedCfg.LogFormatRegex,
+		DryRun:               params.DryRun,
+		ExitOnEOF:            params.ExitOnEOF,
+		EnableMetrics:        loadedCfg.EnableMetrics,
+		oooBufferFlushSignal: make(chan struct{}, 1), // Buffered channel of size 1
+		signalCh:             make(chan os.Signal, 1),
+		LogFunc:              logging.LogOutput,
+		NowFunc:              time.Now, // Use the real time.Now in production.
+		ConfigPath:           params.ConfigPath,
+		LogPath:              params.LogPath,
+		ReloadOn:             params.ReloadOn,
+		TopN:                 params.TopN,
+		HTTPServer:           params.HTTPServer,
+		configReloaded:       false,
+
+		// Initialize persistence fields
+		persistenceEnabled: loadedCfg.Persistence.Enabled,
+		compactionInterval: loadedCfg.Persistence.CompactionInterval,
+		activeBlocks:       make(map[string]persistence.ActiveBlockInfo),
+	}
+}
+
 // execute is the main application logic, decoupled from command-line parsing.
 func execute(params *commandline.AppParameters) error {
 	if err := handleStartupFlags(params); err != nil {
@@ -176,35 +207,7 @@ func execute(params *commandline.AppParameters) error {
 		YAMLContent: loadedCfg.YAMLContent,
 	}
 
-	// Initialize the Processor instance.
-	p := &Processor{
-		ActivityMutex:        &sync.RWMutex{},
-		TopActorsPerChain:    make(map[string]map[string]*store.ActorStats),
-		ActivityStore:        make(map[store.Actor]*store.ActorActivity),
-		ConfigMutex:          &sync.RWMutex{},
-		Metrics:              metrics.NewMetrics(),
-		Chains:               loadedCfg.Chains,
-		Config:               appConfig,
-		LogRegex:             loadedCfg.LogFormatRegex,
-		DryRun:               params.DryRun,
-		ExitOnEOF:            params.ExitOnEOF,
-		EnableMetrics:        loadedCfg.EnableMetrics,
-		oooBufferFlushSignal: make(chan struct{}, 1), // Buffered channel of size 1
-		signalCh:             make(chan os.Signal, 1),
-		LogFunc:              logging.LogOutput,
-		NowFunc:              time.Now, // Use the real time.Now in production.
-		ConfigPath:           params.ConfigPath,
-		LogPath:              params.LogPath,
-		ReloadOn:             params.ReloadOn,
-		TopN:                 params.TopN,
-		HTTPServer:           params.HTTPServer,
-		configReloaded:       false,
-
-		// Initialize persistence fields
-		persistenceEnabled: loadedCfg.Persistence.Enabled,
-		compactionInterval: loadedCfg.Persistence.CompactionInterval,
-		activeBlocks:       make(map[string]persistence.ActiveBlockInfo),
-	}
+	p := initializeProcessor(params, appConfig, loadedCfg)
 
 	// The --state-dir flag provides the path for persistence, but the config file
 	// is the single source of truth for whether persistence is enabled.
