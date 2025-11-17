@@ -594,3 +594,215 @@ func TestRotation_RapidSequential(t *testing.T) {
 	t.Logf("✓ No duplicates found")
 	t.Logf("✓ Order preserved within each rotation")
 }
+
+// TestRotation_LargeFileGrowthPattern tests rotation detection when files grow large.
+//
+// Scenario:
+// 1. Start tailer with empty log file
+// 2. Write lines to grow file to ~50KB (simulating large log accumulation)
+// 3. Rotate the file
+// 4. Write lines to new file, growing it past the old file's size
+// 5. Verify size-based rotation detection works correctly
+// 6. Verify all lines are processed
+//
+// This test ensures that:
+// - Size-based truncation detection works (currentSize < initialSize)
+// - The tailer doesn't falsely detect rotation when new file grows past old size
+// - Large file handling doesn't cause performance issues
+func TestRotation_LargeFileGrowthPattern(t *testing.T) {
+	h := newRotationTestHarness(t)
+
+	// Use larger lines to quickly reach substantial file sizes
+	const lineSize = 500                    // bytes per line (including newline)
+	const linesBeforeRotation = 100         // ~50KB before rotation
+	const linesAfterRotation = 150          // ~75KB after rotation (larger than before)
+	const totalLines = linesBeforeRotation + linesAfterRotation
+
+	// Track rotation detection
+	rotationDetected := make(chan struct{}, 1)
+	originalLogFunc := h.processor.LogFunc
+	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		originalLogFunc(level, tag, format, args...)
+		msg := fmt.Sprintf(format, args...)
+		if (tag == "TAIL" && strings.Contains(msg, "Detected log file rotation")) ||
+			(tag == "TAIL" && strings.Contains(msg, "Detected log file size reduction")) {
+			select {
+			case rotationDetected <- struct{}{}:
+			default:
+			}
+		}
+	}
+
+	// Generate large lines (pad to desired size)
+	generateLargeLine := func(id int) string {
+		base := fmt.Sprintf("large-line-%06d", id)
+		// Pad with spaces to reach desired line size
+		padding := lineSize - len(base) - 1 // -1 for newline
+		if padding > 0 {
+			base += strings.Repeat("x", padding)
+		}
+		return base
+	}
+
+	// Step 1: Create empty log file
+	f, err := os.Create(h.logFilePath)
+	if err != nil {
+		t.Fatalf("Failed to create log file: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Failed to close log file: %v", err)
+	}
+
+	// Step 2: Start the tailer
+	h.start()
+	defer h.stop()
+
+	// Step 3: Write lines to grow file to ~50KB
+	t.Logf("Writing %d large lines (~%d KB)", linesBeforeRotation, (linesBeforeRotation*lineSize)/1024)
+	preRotationLines := make([]string, linesBeforeRotation)
+	for i := 0; i < linesBeforeRotation; i++ {
+		preRotationLines[i] = generateLargeLine(i)
+	}
+
+	batchSize := 25
+	for i := 0; i < linesBeforeRotation; i += batchSize {
+		end := i + batchSize
+		if end > linesBeforeRotation {
+			end = linesBeforeRotation
+		}
+		h.appendLines(preRotationLines[i:end]...)
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Wait for lines to be processed
+	h.waitForLineCount(linesBeforeRotation, 5*time.Second)
+	t.Logf("Processed %d lines before rotation", linesBeforeRotation)
+
+	// Check file size before rotation
+	stat, err := os.Stat(h.logFilePath)
+	if err != nil {
+		t.Fatalf("Failed to stat file before rotation: %v", err)
+	}
+	sizeBeforeRotation := stat.Size()
+	t.Logf("File size before rotation: %d bytes (~%d KB)", sizeBeforeRotation, sizeBeforeRotation/1024)
+
+	// Step 4: Rotate the file
+	t.Logf("Rotating log file")
+	h.rotateLog()
+
+	// Wait for rotation to be detected
+	select {
+	case <-rotationDetected:
+		t.Logf("Rotation detected")
+	case <-time.After(3 * time.Second):
+		t.Error("Timeout waiting for rotation to be detected")
+	}
+
+	// Brief pause for tailer to reopen
+	time.Sleep(200 * time.Millisecond)
+
+	// Step 5: Write more lines to new file, growing it LARGER than the old file
+	t.Logf("Writing %d large lines to new file (~%d KB, larger than before)", linesAfterRotation, (linesAfterRotation*lineSize)/1024)
+	postRotationLines := make([]string, linesAfterRotation)
+	for i := 0; i < linesAfterRotation; i++ {
+		postRotationLines[i] = generateLargeLine(linesBeforeRotation + i)
+	}
+
+	for i := 0; i < linesAfterRotation; i += batchSize {
+		end := i + batchSize
+		if end > linesAfterRotation {
+			end = linesAfterRotation
+		}
+		h.appendLines(postRotationLines[i:end]...)
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Step 6: Wait for all lines to be processed
+	t.Logf("Waiting for all %d lines to be processed", totalLines)
+	h.waitForLineCount(totalLines, 10*time.Second)
+
+	// Check final file size
+	stat, err = os.Stat(h.logFilePath)
+	if err != nil {
+		t.Fatalf("Failed to stat file after rotation: %v", err)
+	}
+	sizeAfterRotation := stat.Size()
+	t.Logf("File size after rotation: %d bytes (~%d KB)", sizeAfterRotation, sizeAfterRotation/1024)
+
+	if sizeAfterRotation <= sizeBeforeRotation {
+		t.Errorf("Expected new file (%d bytes) to be larger than old file (%d bytes)",
+			sizeAfterRotation, sizeBeforeRotation)
+	}
+
+	// Step 7: Verify results
+	processedLines := h.getProcessedLines()
+
+	t.Logf("Total lines processed: %d (expected %d)", len(processedLines), totalLines)
+
+	if len(processedLines) != totalLines {
+		t.Errorf("Expected %d lines, got %d", totalLines, len(processedLines))
+	}
+
+	// Verify no duplicates
+	seen := make(map[string]bool)
+	duplicates := 0
+	for _, line := range processedLines {
+		if seen[line] {
+			t.Errorf("Duplicate line found: %q", line)
+			duplicates++
+			if duplicates >= 5 {
+				t.Logf("...stopping after 5 duplicates")
+				break
+			}
+		}
+		seen[line] = true
+	}
+
+	if duplicates > 0 {
+		t.Errorf("Found %d duplicate lines", duplicates)
+	}
+
+	// Verify all expected lines were processed
+	missing := 0
+	for _, expected := range preRotationLines {
+		if !seen[expected] {
+			t.Errorf("Missing line from before rotation: %.50s...", expected)
+			missing++
+			if missing >= 5 {
+				t.Logf("...stopping after 5 missing lines")
+				break
+			}
+		}
+	}
+	for _, expected := range postRotationLines {
+		if !seen[expected] {
+			t.Errorf("Missing line from after rotation: %.50s...", expected)
+			missing++
+			if missing >= 5 {
+				t.Logf("...stopping after 5 missing lines")
+				break
+			}
+		}
+	}
+
+	if missing > 0 {
+		t.Errorf("Total missing lines: %d", missing)
+	}
+
+	// Verify order
+	for i := 0; i < len(processedLines)-1; i++ {
+		// Extract line numbers for comparison
+		current := processedLines[i]
+		next := processedLines[i+1]
+		if current > next { // String comparison works due to zero-padded numbers
+			t.Errorf("Lines out of order at position %d: %q came before %q", i, current, next)
+			break
+		}
+	}
+
+	t.Logf("✓ All %d lines processed correctly", totalLines)
+	t.Logf("✓ File grew from %d KB to %d KB after rotation", sizeBeforeRotation/1024, sizeAfterRotation/1024)
+	t.Logf("✓ Size-based rotation detection worked correctly")
+	t.Logf("✓ No duplicates found")
+	t.Logf("✓ Order preserved")
+}
