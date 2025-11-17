@@ -244,33 +244,24 @@ func restorePersistenceState(p *Processor) error {
 // execute is the main application logic, decoupled from command-line parsing.
 func execute(params *commandline.AppParameters) error {
 	if err := handleStartupFlags(params); err != nil {
-		// If handleStartupFlags returns an error, it means an early-exit flag
-		// was handled successfully (e.g., --version) and the program should terminate
-		// without an error code. A nil error from this function indicates that
-		// normal execution should continue.
 		if err.Error() == "exit" {
 			return nil
 		}
 		return err
 	}
 
-	// Get the modification time of the config file to initialize LastModTime.
 	fileInfo, err := os.Stat(params.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("could not stat config file: %v", err)
 	}
-	// Load initial configuration from YAML.
-	opts := LoadConfigOptions{
-		ConfigPath: params.ConfigPath,
-	}
-	loadedCfg, err := LoadConfigFromYAML(opts)
+
+	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: params.ConfigPath})
 	if err != nil {
 		return fmt.Errorf("configuration Load Error: %v", err)
 	}
 
 	logging.SetLogLevel(loadedCfg.LogLevel)
 
-	// Create the config struct from the loaded data.
 	appConfig := &AppConfig{
 		GoodActors:               loadedCfg.GoodActors,
 		BlockTableNameFallback:   loadedCfg.BlockTableNameFallback,
@@ -292,29 +283,22 @@ func execute(params *commandline.AppParameters) error {
 		PollingInterval:          loadedCfg.PollingInterval,
 		TimestampFormat:          loadedCfg.TimestampFormat,
 		EnableMetrics:            loadedCfg.EnableMetrics,
-		StatFunc:                 defaultStatFunc, // Initialize StatFunc to prevent nil pointer panic.
-		FileOpener: func(name string) (fileHandle, error) {
-			return os.Open(name)
-		},
-		YAMLContent: loadedCfg.YAMLContent,
+		StatFunc:                 defaultStatFunc,
+		FileOpener:               func(name string) (fileHandle, error) { return os.Open(name) },
+		YAMLContent:              loadedCfg.YAMLContent,
 	}
 
 	p := initializeProcessor(params, appConfig, loadedCfg)
 
-	// The --state-dir flag provides the path for persistence, but the config file
-	// is the single source of truth for whether persistence is enabled.
 	if params.StateDir != "" {
 		p.stateDir = params.StateDir
 	}
 
-	// Final check: if persistence is enabled in YAML but no --state-dir is given, it's a fatal error.
 	if p.persistenceEnabled && p.stateDir == "" {
 		return fmt.Errorf("persistence is enabled in config, but no --state-dir was provided")
 	}
 
-	p.startTime = p.NowFunc() // Record the start time.
-	// TestSignals is intentionally left nil in production.
-	// Set up the signalOooBufferFlush field to call the method.
+	p.startTime = p.NowFunc()
 	p.signalOooBufferFlush = p.doSignalOooBufferFlush
 	initializeMetrics(p, loadedCfg)
 
@@ -328,67 +312,66 @@ func execute(params *commandline.AppParameters) error {
 		}
 	}
 
-	haproxyBlocker = blocker.NewHAProxyBlocker(p, p.DryRun)
-	rateLimitedBlocker = blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.BlockerCommandQueueSize, p.Config.BlockerCommandsPerSecond)
-
-	p.Blocker = rateLimitedBlocker
-
-	// Handle --dump-backends flag. If present, list blocked IPs and exit.
 	if params.DumpBackends {
-		// Only run the sync check if there are multiple backends to compare.
-		if len(p.GetBlockerAddresses()) > 1 {
-			logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "Checking HAProxy backend synchronization...")
-			// Use a 5-second tolerance for expiration differences
-			discrepancies, err := p.Blocker.CompareHAProxyBackends(5 * time.Second)
-			if err != nil {
-				logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "Failed to compare HAProxy backends: %v", err)
-				return err
-			}
-
-			if len(discrepancies) > 0 {
-				logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "HAProxy backends are out of sync. Aborting dump.")
-				for _, d := range discrepancies {
-					logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "  - IP: %s, Table: %s, Reason: %s, Details: %v", d.IP, d.TableName, d.Reason, d.Details)
-				}
-				return fmt.Errorf("HAProxy backends are out of sync")
-			}
-			logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "HAProxy backends are in sync.")
-		} else {
-			logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "Skipping backend synchronization check (only one backend configured).")
-		}
-
-		logging.LogOutput(logging.LevelInfo, "DUMP_BACKENDS", "Retrieving currently blocked IPs from HAProxy...")
-		// Add a small delay to allow the command queue to process restored blocks.
-		time.Sleep(1 * time.Second)
-		blockedIPs, err := p.Blocker.DumpBackends()
-		if err != nil {
-			logging.LogOutput(logging.LevelError, "DUMP_FAIL", "Failed to retrieve blocked IPs: %v", err)
-			return err
-		}
-		if len(blockedIPs) == 0 {
-			logging.LogOutput(logging.LevelInfo, "DUMP_BACKENDS", "No IPs currently blocked by HAProxy.")
-		} else {
-			logging.LogOutput(logging.LevelInfo, "DUMP_BACKENDS", "Currently blocked IPs:")
-			for _, ip := range blockedIPs {
-				fmt.Println(ip)
-			}
-		}
-		return nil
+		return dumpBackendsAndExit(p)
 	}
 
-	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) } // Assign the real method to the function field.
-
-	// Assign the real implementation for ProcessLogLine, which no longer uses line numbers.
+	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
 	p.ProcessLogLine = func(line string) { processLogLineInternal(p, line) }
 
-	// Log the initial configuration summary just before starting the main loops.
 	logConfigurationSummary(p)
 	logChainDetails(p, p.Chains, "Loaded chains")
 
 	start(p)
 
-	// --- GRACEFUL SHUTDOWN SEQUENCE ---
+	performGracefulShutdown(p)
 
+	return nil
+}
+
+func dumpBackendsAndExit(p *Processor) error {
+	// Only run the sync check if there are multiple backends to compare.
+	if len(p.GetBlockerAddresses()) > 1 {
+		logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "Checking HAProxy backend synchronization...")
+		// Use a 5-second tolerance for expiration differences
+		discrepancies, err := p.Blocker.CompareHAProxyBackends(5 * time.Second)
+		if err != nil {
+			logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "Failed to compare HAProxy backends: %v", err)
+			return err
+		}
+
+		if len(discrepancies) > 0 {
+			logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "HAProxy backends are out of sync. Aborting dump.")
+			for _, d := range discrepancies {
+				logging.LogOutput(logging.LevelError, "SYNC_CHECK_FAIL", "  - IP: %s, Table: %s, Reason: %s, Details: %v", d.IP, d.TableName, d.Reason, d.Details)
+			}
+			return fmt.Errorf("HAProxy backends are out of sync")
+		}
+		logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "HAProxy backends are in sync.")
+	} else {
+		logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "Skipping backend synchronization check (only one backend configured).")
+	}
+
+	logging.LogOutput(logging.LevelInfo, "DUMP_BACKENDS", "Retrieving currently blocked IPs from HAProxy...")
+	// Add a small delay to allow the command queue to process restored blocks.
+	time.Sleep(1 * time.Second)
+	blockedIPs, err := p.Blocker.DumpBackends()
+	if err != nil {
+		logging.LogOutput(logging.LevelError, "DUMP_FAIL", "Failed to retrieve blocked IPs: %v", err)
+		return err
+	}
+	if len(blockedIPs) == 0 {
+		logging.LogOutput(logging.LevelInfo, "DUMP_BACKENDS", "No IPs currently blocked by HAProxy.")
+	} else {
+		logging.LogOutput(logging.LevelInfo, "DUMP_BACKENDS", "Currently blocked IPs:")
+		for _, ip := range blockedIPs {
+			fmt.Println(ip)
+		}
+	}
+	return nil
+}
+
+func performGracefulShutdown(p *Processor) {
 	p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Graceful shutdown initiated.")
 
 	if p.Blocker != nil {
@@ -396,17 +379,14 @@ func execute(params *commandline.AppParameters) error {
 	}
 
 	if p.persistenceEnabled {
-		// Wait for any pending writes to the journal.
 		p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Waiting for persistence operations to complete...")
 		p.persistenceWg.Wait()
 
-		// Perform final compaction if enabled.
 		if p.compactionInterval > 0 {
 			p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Performing final state compaction...")
 			runCompaction(p)
 		}
 
-		// Close the journal.
 		p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Closing journal file.")
 		if p.journalHandle != nil {
 			if err := p.journalHandle.Close(); err != nil {
@@ -414,10 +394,7 @@ func execute(params *commandline.AppParameters) error {
 			}
 		}
 	}
-	// Use a direct write to stderr for the final message to avoid logging buffers.
 	fmt.Fprintln(os.Stderr, "[SHUTDOWN] Shutdown complete.")
-
-	return nil
 }
 
 // --- MetricsProvider Interface Implementation ---
