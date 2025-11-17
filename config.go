@@ -752,33 +752,26 @@ type LoadConfigOptions struct {
 	ExistingDeps map[string]*types.FileDependency
 }
 
-// LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
-func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
-	// --- PHASE 1: Build Dependency Graph and Detect Cycles ---
+func buildDependencyGraph(configPath string) (*depGraph, error) {
 	depGraph := newDepGraph()
 	scannedFiles := make(map[string]bool)
 
-	// Use a recursive function to build the graph. This helps trace the correct path for cycle detection.
 	var buildGraphRecursive func(currentFile string, isMainConfig bool) error
 	buildGraphRecursive = func(currentFile string, isMainConfig bool) error {
 		if scannedFiles[currentFile] {
 			return nil
 		}
 
-		// The main config file MUST exist. Dependencies can be missing.
 		if _, err := os.Stat(currentFile); os.IsNotExist(err) {
-			if currentFile == opts.ConfigPath {
+			if currentFile == configPath {
 				return fmt.Errorf("failed to stat config file %s: %w", currentFile, err)
 			}
-			// For dependencies, this is not a fatal error for the graph building phase.
-			// The compilation phase will handle it as a warning.
 			return nil
 		}
 
 		scannedFiles[currentFile] = true
 		depGraph.addNode(currentFile)
 
-		// Errors from findFileDirectives are now considered non-fatal for this phase, so we ignore the error.
 		dependencies, _ := findFileDirectives(currentFile, isMainConfig)
 
 		for _, dep := range dependencies {
@@ -790,38 +783,32 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		return nil
 	}
 
-	if err := buildGraphRecursive(opts.ConfigPath, true); err != nil {
+	if err := buildGraphRecursive(configPath, true); err != nil {
 		return nil, err
 	}
+	return depGraph, nil
+}
 
-	// --- PHASE 2: Detect Cycles ---
-	if err := depGraph.detectCycle(opts.ConfigPath); err != nil {
-		return nil, err // Return the clear cycle error
-	}
-
-	data, err := os.ReadFile(opts.ConfigPath)
+func parseAndNormalizeYAML(configPath string) (*ChainConfig, []byte, error) {
+	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read YAML file %s: %w", opts.ConfigPath, err)
+		return nil, nil, fmt.Errorf("failed to read YAML file %s: %w", configPath, err)
 	}
 
-	// 1. Unmarshal into a generic yaml.Node to preprocess keys.
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
+		return nil, nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
 	}
 
-	// 2. Normalize all keys to lowercase for case-insensitive configuration.
 	normalizeYAMLKeys(&root)
 
-	// 3. Marshal the normalized node back to a byte slice.
 	var normalizedYAML bytes.Buffer
 	encoder := yaml.NewEncoder(&normalizedYAML)
-	encoder.SetIndent(2) // Optional: keeps the marshaled YAML readable
+	encoder.SetIndent(2)
 	if err := encoder.Encode(&root); err != nil {
-		return nil, fmt.Errorf("failed to re-marshal normalized YAML: %w", err)
+		return nil, nil, fmt.Errorf("failed to re-marshal normalized YAML: %w", err)
 	}
 
-	// 4. Decode the normalized YAML into the config struct with strict checking.
 	var config ChainConfig
 	decoder := yaml.NewDecoder(&normalizedYAML)
 	decoder.KnownFields(true)
@@ -832,213 +819,120 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 			for _, msg := range e.Errors {
 				errs = append(errs, strings.TrimPrefix(msg, "yaml: "))
 			}
-			return nil, fmt.Errorf("YAML syntax error in %s: %s", opts.ConfigPath, strings.Join(errs, "; "))
+			return nil, nil, fmt.Errorf("YAML syntax error in %s: %s", configPath, strings.Join(errs, "; "))
 		}
-		return nil, fmt.Errorf("failed to strictly unmarshal YAML from %s (unknown field found): %w", opts.ConfigPath, err)
+		return nil, nil, fmt.Errorf("failed to strictly unmarshal YAML from %s (unknown field found): %w", configPath, err)
 	}
-	// ---------------------------------------------------------------------------------
+	return &config, data, nil
+}
 
-	// Define the supported versions for this application code.
-	if config.Version == "" {
-		// Enforce that the 'version' field must be present.
-		return nil, fmt.Errorf("configuration file is missing the required 'version' field")
-	}
-
-	// Check if the version is supported.
-	isSupported := false
-	for _, v := range SupportedConfigVersions {
-		if config.Version == v {
-			isSupported = true
-			break // Found a supported version
-		}
-	}
-
-	if !isSupported {
-		// Report an error showing the unsupported version and the list of supported ones.
-		supportedList := strings.Join(SupportedConfigVersions, ", ")
-		return nil, fmt.Errorf(
-			"configuration version mismatch: got '%s', this application supports: %s",
-			config.Version,
-			supportedList,
-		)
-	}
-
-	// --- PARSE GLOBAL SETTINGS ---
-	var pollingInterval, cleanupInterval, idleTimeout, outOfOrderTolerance, eofPollingDelay time.Duration
-
-	// Set defaults for global settings
-	logLevelStr := DefaultLogLevel
+func parseDurations(config *ChainConfig) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, error) {
 	pollingIntervalStr := DefaultPollingInterval
-	cleanupIntervalStr := DefaultCleanupInterval
-	eofPollingDelayStr := DefaultEOFPollingDelay
-	idleTimeoutStr := DefaultIdleTimeout
-	lineEndingStr := DefaultLineEnding
-	outOfOrderToleranceStr := DefaultOutOfOrderTolerance
-	enableMetrics := DefaultEnableMetrics
-
-	// Override defaults with values from YAML if they exist
-	if config.LogLevel != "" {
-		logLevelStr = config.LogLevel
-	}
 	if config.PollingInterval != "" {
 		pollingIntervalStr = config.PollingInterval
 	}
+	pollingInterval, err := time.ParseDuration(pollingIntervalStr)
+	if err != nil {
+		return 0, 0, 0, 0, 0, fmt.Errorf("invalid polling_interval format: %w", err)
+	}
+
+	cleanupIntervalStr := DefaultCleanupInterval
 	if config.CleanupInterval != "" {
 		cleanupIntervalStr = config.CleanupInterval
 	}
-	if config.EOFPollingDelay != "" {
-		eofPollingDelayStr = config.EOFPollingDelay
+	cleanupInterval, err := time.ParseDuration(cleanupIntervalStr)
+	if err != nil {
+		return 0, 0, 0, 0, 0, fmt.Errorf("invalid cleanup_interval format: %w", err)
 	}
+
+	idleTimeoutStr := DefaultIdleTimeout
 	if config.IdleTimeout != "" {
 		idleTimeoutStr = config.IdleTimeout
 	}
-	if config.LineEnding != "" {
-		lineEndingStr = config.LineEnding
+	idleTimeout, err := time.ParseDuration(idleTimeoutStr)
+	if err != nil {
+		return 0, 0, 0, 0, 0, fmt.Errorf("invalid idle_timeout format: %w", err)
 	}
+
+	outOfOrderToleranceStr := DefaultOutOfOrderTolerance
 	if config.OutOfOrderTolerance != "" {
 		outOfOrderToleranceStr = config.OutOfOrderTolerance
 	}
+	outOfOrderTolerance, err := time.ParseDuration(outOfOrderToleranceStr)
+	if err != nil {
+		return 0, 0, 0, 0, 0, fmt.Errorf("invalid out_of_order_tolerance format: %w", err)
+	}
 
-	// Handle EnableMetrics with a pointer to bool
+	eofPollingDelayStr := DefaultEOFPollingDelay
+	if config.EOFPollingDelay != "" {
+		eofPollingDelayStr = config.EOFPollingDelay
+	}
+	eofPollingDelay, err := time.ParseDuration(eofPollingDelayStr)
+	if err != nil {
+		return 0, 0, 0, 0, 0, fmt.Errorf("invalid eof_polling_delay format: %w", err)
+	}
+
+	return pollingInterval, cleanupInterval, idleTimeout, outOfOrderTolerance, eofPollingDelay, nil
+}
+
+func parseStringAndBoolSettings(config *ChainConfig) (string, string, bool, string, error) {
+	logLevelStr := DefaultLogLevel
+	if config.LogLevel != "" {
+		logLevelStr = config.LogLevel
+	}
+
+	lineEndingStr := DefaultLineEnding
+	if config.LineEnding != "" {
+		lineEndingStr = config.LineEnding
+	}
+	switch lineEndingStr {
+	case "lf", "crlf", "cr":
+	default:
+		return "", "", false, "", fmt.Errorf("invalid line_ending value: '%s'. Must be one of 'lf', 'crlf', 'cr'", lineEndingStr)
+	}
+
+	enableMetrics := DefaultEnableMetrics
 	if config.EnableMetrics != nil {
 		enableMetrics = *config.EnableMetrics
 	}
 
-	// Parse unblock settings
 	unblockCooldownStr := DefaultUnblockCooldown
 	if config.UnblockCooldown != "" {
 		unblockCooldownStr = config.UnblockCooldown
 	}
 
-	// Validate line_ending
-	switch lineEndingStr {
-	case "lf", "crlf", "cr":
-		// valid
-	default:
-		return nil, fmt.Errorf("invalid line_ending value: '%s'. Must be one of 'lf', 'crlf', 'cr'", lineEndingStr)
+	return logLevelStr, lineEndingStr, enableMetrics, unblockCooldownStr, nil
+}
+
+func parseCustomLogRegex(config *ChainConfig) (*regexp.Regexp, error) {
+	if config.LogFormatRegex == "" {
+		return nil, nil
 	}
 
-	// Parse durations
-	pollingInterval, err = time.ParseDuration(pollingIntervalStr)
+	re, err := regexp.Compile(config.LogFormatRegex)
 	if err != nil {
-		return nil, fmt.Errorf("invalid polling_interval format: %w", err)
-	}
-	cleanupInterval, err = time.ParseDuration(cleanupIntervalStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid cleanup_interval format: %w", err)
-	}
-	eofPollingDelay, err = time.ParseDuration(eofPollingDelayStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid eof_polling_delay format: %w", err)
-	}
-	idleTimeout, err = time.ParseDuration(idleTimeoutStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid idle_timeout format: %w", err)
-	}
-	outOfOrderTolerance, err = time.ParseDuration(outOfOrderToleranceStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid out_of_order_tolerance format: %w", err)
-	}
-	unblockCooldown, err := time.ParseDuration(unblockCooldownStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid unblock_cooldown format: %w", err)
+		return nil, fmt.Errorf("invalid log_format_regex: %w", err)
 	}
 
-	// Parse custom timestamp format if provided, otherwise use default.
-	timestampFormat := AccessLogTimeFormat
-	if config.TimestampFormat != "" {
-		timestampFormat = config.TimestampFormat
-	}
-
-	// Parse custom log format regex if provided
-	var customLogRegex *regexp.Regexp
-	if config.LogFormatRegex != "" {
-		re, err := regexp.Compile(config.LogFormatRegex)
-		if err != nil {
-			return nil, fmt.Errorf("invalid log_format_regex: %w", err)
-		}
-		// Validate that the regex has the required named capture groups.
-		requiredGroups := []string{"IP", "Timestamp"}
-		foundGroups := make(map[string]bool)
-		for _, name := range re.SubexpNames() {
-			if name != "" {
-				foundGroups[name] = true
-			}
-		}
-
-		for _, required := range requiredGroups {
-			if !foundGroups[required] {
-				return nil, fmt.Errorf("invalid log_format_regex: missing required named capture group '(?P<%s>...)'", required)
-			}
-		}
-
-		customLogRegex = re
-	}
-
-	// --- PARSE DURATION TABLES ---
-	newDurationTables := make(map[time.Duration]string, len(config.DurationTables))
-	longestDuration := 0 * time.Second
-	newFallbackName := ""
-
-	for durationStr, tableName := range config.DurationTables {
-		duration, err := utils.ParseDuration(durationStr)
-		if err != nil {
-			return nil, fmt.Errorf("invalid duration '%s' in 'duration_tables': %w", durationStr, err)
-		}
-		newDurationTables[duration] = tableName
-
-		// Find the longest duration to set the fallback table name
-		if duration > longestDuration {
-			longestDuration = duration
-			newFallbackName = tableName
+	requiredGroups := []string{"IP", "Timestamp"}
+	foundGroups := make(map[string]bool)
+	for _, name := range re.SubexpNames() {
+		if name != "" {
+			foundGroups[name] = true
 		}
 	}
 
-	// --- PARSE BLOCKER SETTINGS ---
-	var blockerMaxRetries int
-	var blockerRetryDelay, blockerDialTimeout time.Duration
-	var blockerCommandQueueSize, blockerCommandsPerSecond int
-
-	if config.BlockerMaxRetries > 0 {
-		blockerMaxRetries = config.BlockerMaxRetries
-	} else {
-		blockerMaxRetries = DefaultBlockerMaxRetries
-	}
-
-	if config.BlockerRetryDelay != "" {
-		blockerRetryDelay, err = time.ParseDuration(config.BlockerRetryDelay)
-		if err != nil {
-			return nil, fmt.Errorf("invalid blocker_retry_delay: %w", err)
+	for _, required := range requiredGroups {
+		if !foundGroups[required] {
+			return nil, fmt.Errorf("invalid log_format_regex: missing required named capture group '(?P<%s>...)'", required)
 		}
-	} else {
-		blockerRetryDelay = DefaultBlockerRetryDelay
 	}
 
-	if config.BlockerDialTimeout != "" {
-		blockerDialTimeout, err = time.ParseDuration(config.BlockerDialTimeout)
-		if err != nil {
-			return nil, fmt.Errorf("invalid blocker_dial_timeout: %w", err)
-		}
-	} else {
-		blockerDialTimeout = DefaultBlockerDialTimeout
-	}
+	return re, nil
+}
 
-	if config.BlockerCommandQueueSize > 0 {
-		blockerCommandQueueSize = config.BlockerCommandQueueSize
-	} else {
-		blockerCommandQueueSize = DefaultBlockerCommandQueueSize
-	}
-
-	if config.BlockerCommandsPerSecond > 0 {
-		blockerCommandsPerSecond = config.BlockerCommandsPerSecond
-	} else {
-		blockerCommandsPerSecond = DefaultBlockerCommandsPerSecond
-	}
-
-	// --- PARSE CHAINS ---
-	newChains := make([]BehavioralChain, 0)
-
-	// Pre-parse the default block duration once.
+func parseChains(config *ChainConfig, fileDeps map[string]*types.FileDependency, configPath string, durationTables map[time.Duration]string) ([]BehavioralChain, error) {
+	var newChains []BehavioralChain
 	var defaultBlockDuration time.Duration
 	if config.DefaultBlockDuration != "" {
 		var err error
@@ -1048,34 +942,15 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		}
 	}
 
-	// --- PARSE FILE DEPENDENCIES ---
-	// Use the existing map if provided, otherwise create a new one.
-	// This preserves the PreviousStatus across reloads.
-	newFileDependencies := make(map[string]*types.FileDependency)
-	if opts.ExistingDeps != nil {
-		for path, dep := range opts.ExistingDeps {
-			// Create a new FileDependency object for the new config,
-			// but preserve the PreviousStatus from the old config.
-			newFileDependencies[path] = &types.FileDependency{
-				Path:           path,
-				PreviousStatus: dep.PreviousStatus.Clone(), // Deep copy
-				CurrentStatus:  dep.CurrentStatus.Clone(),  // Deep copy
-				Content:        dep.Content,
-			}
-		}
-	}
-
 	for _, yamlChain := range config.Chains {
-		// Check if the chain is explicitly disabled via the action field.
 		if strings.HasPrefix(yamlChain.Action, "!") {
-			// Log at debug level for visibility without cluttering the default output.
 			logging.LogOutput(logging.LevelDebug, "CONFIG_SKIP", "Skipping disabled chain '%s' (action: %s)", yamlChain.Name, yamlChain.Action)
-			continue // Skip this chain entirely.
+			continue
 		}
 
 		var blockDuration time.Duration
 		usesDefault := false
-		blockDurationStr := yamlChain.BlockDuration // Keep original string for logging
+		blockDurationStr := yamlChain.BlockDuration
 		if yamlChain.BlockDuration != "" {
 			var err error
 			blockDuration, err = utils.ParseDuration(yamlChain.BlockDuration)
@@ -1083,34 +958,24 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 				return nil, fmt.Errorf("chain '%s': invalid block_duration format: %w", yamlChain.Name, err)
 			}
 		} else {
-			// If the chain's duration is not set, it will use the default.
-			// We assign it here so that logging and comparison are accurate.
 			blockDuration = defaultBlockDuration
 			blockDurationStr = config.DefaultBlockDuration
-			// Mark that the default is being used, regardless of the action.
 			usesDefault = true
 		}
 
-		// 4. Enforce that 'block' actions must have a non-zero duration.
 		if yamlChain.Action == "block" && blockDuration == 0 {
-			// This is a non-fatal warning. The chain will not be loaded.
 			logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "chain '%s' has action 'block' but block_duration is missing or zero and no default is set. This chain will be skipped.", yamlChain.Name)
-			// Skip adding this invalid chain to the list of new chains.
 			continue
 		}
 
-		// Validate block durations against duration tables.
 		if yamlChain.Action == "block" && blockDuration > 0 {
-			if len(newDurationTables) == 0 {
-				// This chain needs a duration table, but none are configured.
+			if len(durationTables) == 0 {
 				logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "chain '%s' has a block_duration of '%s', but no 'duration_tables' are configured. Block actions for this chain may fail if not in dry-run mode.", yamlChain.Name, blockDurationStr)
-			} else if _, ok := newDurationTables[blockDuration]; !ok {
-				// Duration tables are configured, but this specific duration is missing.
+			} else if _, ok := durationTables[blockDuration]; !ok {
 				logging.LogOutput(logging.LevelWarning, "CONFIG_WARN", "chain '%s' has a block_duration of '%s' which is not defined in 'duration_tables'. Block actions for this chain may fail if not in dry-run mode.", yamlChain.Name, blockDurationStr)
 			}
 		}
 
-		// 2. Validate Match Key
 		if yamlChain.MatchKey == "" {
 			return nil, fmt.Errorf("chain '%s': match_key cannot be empty", yamlChain.Name)
 		}
@@ -1123,27 +988,24 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 			UsesDefaultBlockDuration: usesDefault,
 			MatchKey:                 yamlChain.MatchKey,
 			OnMatch:                  yamlChain.OnMatch,
-			StepsYAML:                yamlChain.Steps, // Store the original YAML steps for comparison
+			StepsYAML:                yamlChain.Steps,
+			MetricsCounter:           new(atomic.Int64),
+			MetricsResetCounter:      new(atomic.Int64),
+			MetricsHitsCounter:       new(atomic.Int64),
 		}
 
-		// Initialize a counter for this chain in the metrics map.
-		runtimeChain.MetricsCounter = new(atomic.Int64)
-		runtimeChain.MetricsResetCounter = new(atomic.Int64)
-		runtimeChain.MetricsHitsCounter = new(atomic.Int64)
-
-		// 3. Process Steps
 		for i, yamlStep := range yamlChain.Steps {
 			numRepeats := yamlStep.Repeated
 			if numRepeats < 1 {
-				numRepeats = 1 // Default to 1 if not specified or invalid
+				numRepeats = 1
 			}
 
 			for r := 0; r < numRepeats; r++ {
 				runtimeStep := StepDef{
-					Order: len(runtimeChain.Steps) + 1, // Assign a unique order to each generated step
+					Order: len(runtimeChain.Steps) + 1,
 				}
 
-				// Parse delays (apply to each repeated step)
+				var err error
 				if yamlStep.MaxDelay != "" {
 					runtimeStep.MaxDelayDuration, err = time.ParseDuration(yamlStep.MaxDelay)
 					if err != nil {
@@ -1156,8 +1018,6 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 						return nil, fmt.Errorf("chain '%s', step %d (repeated %d): invalid min_delay: %w", yamlChain.Name, i+1, r+1, err)
 					}
 				}
-				// min_time_since_last_hit only applies to the first step of a chain.
-				// It should only be applied to the very first step generated, not subsequent repeated steps.
 				if len(runtimeChain.Steps) == 0 && yamlStep.MinTimeSinceLastHit != "" {
 					runtimeStep.MinTimeSinceLastHit, err = time.ParseDuration(yamlStep.MinTimeSinceLastHit)
 					if err != nil {
@@ -1165,18 +1025,19 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 					}
 				}
 
-				// Compile the new flexible matchers
-				runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, newFileDependencies, opts.ConfigPath)
+				runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, fileDeps, configPath)
 				if err != nil {
-					return nil, err // Error from compilation
+					return nil, err
 				}
 				runtimeChain.Steps = append(runtimeChain.Steps, runtimeStep)
 			}
 		}
 		newChains = append(newChains, runtimeChain)
 	}
+	return newChains, nil
+}
 
-	// --- PARSE GOOD ACTORS ---
+func parseGoodActors(config *ChainConfig, fileDeps map[string]*types.FileDependency, configPath string) ([]GoodActorDef, error) {
 	var newGoodActors []GoodActorDef
 	for _, goodActorMap := range config.GoodActors {
 		nameVal, ok := goodActorMap["name"]
@@ -1190,14 +1051,12 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 
 		def := GoodActorDef{Name: name}
 
-		// Iterate over the definition map to find IP and UserAgent keys case-insensitively.
 		for key, value := range goodActorMap {
-			// Create a base context for good actors.
 			baseCtx := MatcherContext{
 				ChainName:        fmt.Sprintf("good_actor '%s'", name),
-				StepIndex:        0,                   // Good actors don't have steps, use 0 or a sentinel value
-				FileDependencies: newFileDependencies, // Now using the map
-				FilePath:         opts.ConfigPath,
+				StepIndex:        0,
+				FileDependencies: fileDeps,
+				FilePath:         configPath,
 			}
 			switch strings.ToLower(key) {
 			case "ip":
@@ -1235,8 +1094,163 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 			newGoodActors = append(newGoodActors, def)
 		}
 	}
+	return newGoodActors, nil
+}
 
-	// Parse persistence settings
+func parseDurationTables(config *ChainConfig) (map[time.Duration]string, string, error) {
+	newDurationTables := make(map[time.Duration]string, len(config.DurationTables))
+	longestDuration := 0 * time.Second
+	newFallbackName := ""
+
+	for durationStr, tableName := range config.DurationTables {
+		duration, err := utils.ParseDuration(durationStr)
+		if err != nil {
+			return nil, "", fmt.Errorf("invalid duration '%s' in 'duration_tables': %w", durationStr, err)
+		}
+		newDurationTables[duration] = tableName
+
+		if duration > longestDuration {
+			longestDuration = duration
+			newFallbackName = tableName
+		}
+	}
+	return newDurationTables, newFallbackName, nil
+}
+
+func parseBlockerSettings(config *ChainConfig) (int, time.Duration, time.Duration, int, int, error) {
+	var blockerMaxRetries int
+	var blockerRetryDelay, blockerDialTimeout time.Duration
+	var blockerCommandQueueSize, blockerCommandsPerSecond int
+	var err error
+
+	if config.BlockerMaxRetries > 0 {
+		blockerMaxRetries = config.BlockerMaxRetries
+	} else {
+		blockerMaxRetries = DefaultBlockerMaxRetries
+	}
+
+	if config.BlockerRetryDelay != "" {
+		blockerRetryDelay, err = time.ParseDuration(config.BlockerRetryDelay)
+		if err != nil {
+			return 0, 0, 0, 0, 0, fmt.Errorf("invalid blocker_retry_delay: %w", err)
+		}
+	} else {
+		blockerRetryDelay = DefaultBlockerRetryDelay
+	}
+
+	if config.BlockerDialTimeout != "" {
+		blockerDialTimeout, err = time.ParseDuration(config.BlockerDialTimeout)
+		if err != nil {
+			return 0, 0, 0, 0, 0, fmt.Errorf("invalid blocker_dial_timeout: %w", err)
+		}
+	} else {
+		blockerDialTimeout = DefaultBlockerDialTimeout
+	}
+
+	if config.BlockerCommandQueueSize > 0 {
+		blockerCommandQueueSize = config.BlockerCommandQueueSize
+	} else {
+		blockerCommandQueueSize = DefaultBlockerCommandQueueSize
+	}
+
+	if config.BlockerCommandsPerSecond > 0 {
+		blockerCommandsPerSecond = config.BlockerCommandsPerSecond
+	} else {
+		blockerCommandsPerSecond = DefaultBlockerCommandsPerSecond
+	}
+
+	return blockerMaxRetries, blockerRetryDelay, blockerDialTimeout, blockerCommandQueueSize, blockerCommandsPerSecond, nil
+}
+
+// LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
+func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
+	depGraph, err := buildDependencyGraph(opts.ConfigPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := depGraph.detectCycle(opts.ConfigPath); err != nil {
+		return nil, err
+	}
+
+	config, data, err := parseAndNormalizeYAML(opts.ConfigPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if config.Version == "" {
+		return nil, fmt.Errorf("configuration file is missing the required 'version' field")
+	}
+
+	isSupported := false
+	for _, v := range SupportedConfigVersions {
+		if config.Version == v {
+			isSupported = true
+			break
+		}
+	}
+	if !isSupported {
+		supportedList := strings.Join(SupportedConfigVersions, ", ")
+		return nil, fmt.Errorf("configuration version mismatch: got '%s', this application supports: %s", config.Version, supportedList)
+	}
+
+	pollingInterval, cleanupInterval, idleTimeout, outOfOrderTolerance, eofPollingDelay, err := parseDurations(config)
+	if err != nil {
+		return nil, err
+	}
+
+	logLevelStr, lineEndingStr, enableMetrics, unblockCooldownStr, err := parseStringAndBoolSettings(config)
+	if err != nil {
+		return nil, err
+	}
+
+	unblockCooldown, err := time.ParseDuration(unblockCooldownStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid unblock_cooldown format: %w", err)
+	}
+
+	timestampFormat := AccessLogTimeFormat
+	if config.TimestampFormat != "" {
+		timestampFormat = config.TimestampFormat
+	}
+
+	customLogRegex, err := parseCustomLogRegex(config)
+	if err != nil {
+		return nil, err
+	}
+
+	newDurationTables, newFallbackName, err := parseDurationTables(config)
+	if err != nil {
+		return nil, err
+	}
+
+	blockerMaxRetries, blockerRetryDelay, blockerDialTimeout, blockerCommandQueueSize, blockerCommandsPerSecond, err := parseBlockerSettings(config)
+	if err != nil {
+		return nil, err
+	}
+
+	newFileDependencies := make(map[string]*types.FileDependency)
+	if opts.ExistingDeps != nil {
+		for path, dep := range opts.ExistingDeps {
+			newFileDependencies[path] = &types.FileDependency{
+				Path:           path,
+				PreviousStatus: dep.PreviousStatus.Clone(),
+				CurrentStatus:  dep.CurrentStatus.Clone(),
+				Content:        dep.Content,
+			}
+		}
+	}
+
+	newChains, err := parseChains(config, newFileDependencies, opts.ConfigPath, newDurationTables)
+	if err != nil {
+		return nil, err
+	}
+
+	newGoodActors, err := parseGoodActors(config, newFileDependencies, opts.ConfigPath)
+	if err != nil {
+		return nil, err
+	}
+
 	var persistenceConfig persistence.PersistenceConfig
 	if config.Persistence.Enabled {
 		persistenceConfig = persistence.PersistenceConfig{
@@ -1244,11 +1258,10 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 			CompactionInterval: config.Persistence.CompactionInterval,
 		}
 		if persistenceConfig.CompactionInterval == 0 {
-			persistenceConfig.CompactionInterval = time.Hour // Default to 1 hour
+			persistenceConfig.CompactionInterval = time.Hour
 		}
 	}
 
-	// Find the maximum min_time_since_last_hit duration across all chains for cleanup optimization.
 	var maxTimeSinceLastHit time.Duration
 	for _, chain := range newChains {
 		if len(chain.Steps) > 0 && chain.Steps[0].MinTimeSinceLastHit > maxTimeSinceLastHit {
@@ -1260,7 +1273,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		GoodActors:               newGoodActors,
 		BlockTableNameFallback:   newFallbackName,
 		Chains:                   newChains,
-		DefaultBlockDuration:     defaultBlockDuration,
+		DefaultBlockDuration:     0, // This is now handled in parseChains
 		CleanupInterval:          cleanupInterval,
 		EOFPollingDelay:          eofPollingDelay,
 		DurationToTableName:      newDurationTables,
