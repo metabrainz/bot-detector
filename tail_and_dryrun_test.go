@@ -145,6 +145,72 @@ func TestReadLineCR(t *testing.T) {
 	testLineReader(t, readLineCR, tests)
 }
 
+func TestNewTailer(t *testing.T) {
+	// --- Setup ---
+	tempDir := t.TempDir()
+	logFilePath := filepath.Join(tempDir, "test.log")
+	_ = os.WriteFile(logFilePath, []byte("hello\n"), 0644)
+
+	p := newTestProcessor(&AppConfig{}, nil)
+	p.LogPath = logFilePath
+
+	// --- Test Cases ---
+	t.Run("Successful Creation", func(t *testing.T) {
+		tailer, err := NewTailer(p, true)
+		if err != nil {
+			t.Fatalf("Expected no error, but got: %v", err)
+		}
+		defer func(tailer *Tailer) {
+			_ = tailer.file.Close()
+		}(tailer)
+
+		if tailer == nil {
+			t.Fatal("Expected tailer to be non-nil")
+		}
+		if tailer.path != logFilePath {
+			t.Errorf("Expected path to be '%s', but got '%s'", logFilePath, tailer.path)
+		}
+		if tailer.reader == nil {
+			t.Error("Expected reader to be initialized")
+		}
+		if tailer.initialStat == nil {
+			t.Error("Expected initialStat to be captured")
+		}
+	})
+
+	t.Run("File Not Found", func(t *testing.T) {
+		p.LogPath = filepath.Join(tempDir, "nonexistent.log")
+		_, err := NewTailer(p, true)
+		if err == nil {
+			t.Fatal("Expected an error for non-existent file, but got nil")
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("Expected error to be os.ErrNotExist, but got: %v", err)
+		}
+	})
+
+	t.Run("Stat Fails", func(t *testing.T) {
+		// Simulate a stat failure by creating a mock file opener.
+		p.Config.FileOpener = func(name string) (fileHandle, error) {
+			return &statErrorFile{nil}, nil // Return a handle that will fail on Stat()
+		}
+		p.LogPath = logFilePath // Reset to a valid path
+
+		_, err := NewTailer(p, true)
+		if err == nil {
+			t.Fatal("Expected an error when stat fails, but got nil")
+		}
+		if !strings.Contains(err.Error(), "simulated stat error") {
+			t.Errorf("Expected error message to contain 'simulated stat error', but got: %v", err)
+		}
+
+		// Reset the file opener for subsequent tests.
+		p.Config.FileOpener = func(name string) (fileHandle, error) {
+			return os.Open(name)
+		}
+	})
+}
+
 // --- Mocks for testing hasFileBeenRotated ---
 
 // mockFileInfo implements os.FileInfo for testing purposes.

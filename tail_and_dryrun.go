@@ -19,6 +19,67 @@ import (
 	"time"
 )
 
+var (
+	// ErrFileRotated is a sentinel error used to signal that the tailed file
+	// has been rotated or truncated and should be reopened.
+	ErrFileRotated = errors.New("file has been rotated")
+
+	// ErrEOF is a sentinel error used to indicate that the end of the file
+	// has been reached, but no rotation was detected. The caller should retry.
+	ErrEOF = errors.New("end of file reached without rotation")
+)
+
+// Tailer is a struct that encapsulates the state and logic for tailing a single file.
+type Tailer struct {
+	path        string
+	file        fileHandle
+	reader      *bufio.Reader
+	initialStat os.FileInfo
+	logger      func(logging.LogLevel, string, string, ...interface{})
+	config      struct {
+		EOFPollingDelay time.Duration
+		LineEnding      string
+		FileOpener      func(string) (fileHandle, error)
+		StatFunc        func(string) (os.FileInfo, error)
+	}
+}
+
+// NewTailer creates and initializes a new Tailer. It opens the file, gets its
+// initial stats for rotation detection, and seeks to the end for live tailing.
+func NewTailer(p *Processor, seekToEnd bool) (*Tailer, error) {
+	t := &Tailer{
+		path:   p.LogPath,
+		logger: p.LogFunc,
+	}
+	t.config.EOFPollingDelay = p.Config.EOFPollingDelay
+	t.config.LineEnding = p.Config.LineEnding
+	t.config.FileOpener = p.Config.FileOpener
+	t.config.StatFunc = p.Config.StatFunc
+
+	var err error
+	t.file, err = t.config.FileOpener(t.path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open log file %s: %w", t.path, err)
+	}
+
+	t.initialStat, err = t.file.Stat()
+	if err != nil {
+		_ = t.file.Close()
+		return nil, fmt.Errorf("failed to get initial file stat for %s: %w", t.path, err)
+	}
+	t.logger(logging.LevelDebug, "TAIL", "Initial file state: Size=%d", t.initialStat.Size())
+
+	if seekToEnd {
+		if _, err := t.file.Seek(0, io.SeekEnd); err != nil {
+			_ = t.file.Close()
+			return nil, fmt.Errorf("failed to seek to end of file %s: %w", t.path, err)
+		}
+	}
+
+	t.reader = bufio.NewReader(t.file)
+	return t, nil
+}
+
 // lineReader is a function type for reading lines.
 type lineReader func(reader *bufio.Reader, limit int) (string, error)
 
