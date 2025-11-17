@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/parser"
+	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
 	"fmt"
@@ -1695,4 +1697,404 @@ good_actors:
 	if len(googlebotDef.UAMatchers) == 0 || !googlebotDef.UAMatchers[0](googleIPEntry) {
 		t.Error("Googlebot UserAgent matcher failed for a matching UserAgent.")
 	}
+}
+
+// TestFindNewlyAddedGoodActors verifies that the helper correctly identifies newly added good actors.
+func TestFindNewlyAddedGoodActors(t *testing.T) {
+	actor1 := GoodActorDef{Name: "actor1"}
+	actor2 := GoodActorDef{Name: "actor2"}
+	actor3 := GoodActorDef{Name: "actor3"}
+
+	tests := []struct {
+		name     string
+		old      []GoodActorDef
+		new      []GoodActorDef
+		expected []string // expected names
+	}{
+		{
+			name:     "No changes",
+			old:      []GoodActorDef{actor1, actor2},
+			new:      []GoodActorDef{actor1, actor2},
+			expected: []string{},
+		},
+		{
+			name:     "One new actor added",
+			old:      []GoodActorDef{actor1},
+			new:      []GoodActorDef{actor1, actor2},
+			expected: []string{"actor2"},
+		},
+		{
+			name:     "Multiple new actors added",
+			old:      []GoodActorDef{actor1},
+			new:      []GoodActorDef{actor1, actor2, actor3},
+			expected: []string{"actor2", "actor3"},
+		},
+		{
+			name:     "Actor removed (not in result)",
+			old:      []GoodActorDef{actor1, actor2},
+			new:      []GoodActorDef{actor1},
+			expected: []string{},
+		},
+		{
+			name:     "All new actors",
+			old:      []GoodActorDef{},
+			new:      []GoodActorDef{actor1, actor2},
+			expected: []string{"actor1", "actor2"},
+		},
+		{
+			name:     "Empty old and new",
+			old:      []GoodActorDef{},
+			new:      []GoodActorDef{},
+			expected: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := findNewlyAddedGoodActors(tt.old, tt.new)
+
+			if len(result) != len(tt.expected) {
+				t.Errorf("Expected %d new actors, got %d", len(tt.expected), len(result))
+			}
+
+			// Check that all expected names are present
+			resultNames := make(map[string]bool)
+			for _, actor := range result {
+				resultNames[actor.Name] = true
+			}
+
+			for _, expectedName := range tt.expected {
+				if !resultNames[expectedName] {
+					t.Errorf("Expected to find actor '%s' in result, but it was missing", expectedName)
+				}
+			}
+		})
+	}
+}
+
+// TestUnblockNewlyWhitelistedIPs verifies that newly whitelisted IPs are correctly unblocked.
+func TestUnblockNewlyWhitelistedIPs(t *testing.T) {
+	resetGlobalState()
+	t.Cleanup(resetGlobalState)
+
+	tests := []struct {
+		name               string
+		blockedIPs         map[string]persistence.ActiveBlockInfo
+		newGoodActorYAML   string
+		expectUnblocked    []string
+		expectRemaining    []string
+		unblockOnGoodActor bool
+	}{
+		{
+			name: "Exact IP match",
+			blockedIPs: map[string]persistence.ActiveBlockInfo{
+				"1.2.3.4": {Reason: "chain1", UnblockTime: time.Now().Add(1 * time.Hour)},
+				"5.6.7.8": {Reason: "chain2", UnblockTime: time.Now().Add(1 * time.Hour)},
+			},
+			newGoodActorYAML: `
+good_actors:
+  - name: "whitelist1"
+    ip: "1.2.3.4"
+`,
+			expectUnblocked:    []string{"1.2.3.4"},
+			expectRemaining:    []string{"5.6.7.8"},
+			unblockOnGoodActor: true,
+		},
+		{
+			name: "CIDR match",
+			blockedIPs: map[string]persistence.ActiveBlockInfo{
+				"192.168.1.10": {Reason: "chain1", UnblockTime: time.Now().Add(1 * time.Hour)},
+				"192.168.1.20": {Reason: "chain2", UnblockTime: time.Now().Add(1 * time.Hour)},
+				"10.0.0.1":     {Reason: "chain3", UnblockTime: time.Now().Add(1 * time.Hour)},
+			},
+			newGoodActorYAML: `
+good_actors:
+  - name: "local_network"
+    ip: "cidr:192.168.1.0/24"
+`,
+			expectUnblocked:    []string{"192.168.1.10", "192.168.1.20"},
+			expectRemaining:    []string{"10.0.0.1"},
+			unblockOnGoodActor: true,
+		},
+		{
+			name: "Regex match",
+			blockedIPs: map[string]persistence.ActiveBlockInfo{
+				"1.2.3.4": {Reason: "chain1", UnblockTime: time.Now().Add(1 * time.Hour)},
+				"1.2.3.5": {Reason: "chain2", UnblockTime: time.Now().Add(1 * time.Hour)},
+				"9.9.9.9": {Reason: "chain3", UnblockTime: time.Now().Add(1 * time.Hour)},
+			},
+			newGoodActorYAML: `
+good_actors:
+  - name: "pattern_match"
+    ip: "regex:^1\\.2\\."
+`,
+			expectUnblocked:    []string{"1.2.3.4", "1.2.3.5"},
+			expectRemaining:    []string{"9.9.9.9"},
+			unblockOnGoodActor: true,
+		},
+		{
+			name: "No match - IP not in activeBlocks",
+			blockedIPs: map[string]persistence.ActiveBlockInfo{
+				"1.2.3.4": {Reason: "chain1", UnblockTime: time.Now().Add(1 * time.Hour)},
+			},
+			newGoodActorYAML: `
+good_actors:
+  - name: "different_ip"
+    ip: "5.6.7.8"
+`,
+			expectUnblocked:    []string{},
+			expectRemaining:    []string{"1.2.3.4"},
+			unblockOnGoodActor: true,
+		},
+		{
+			name:       "Empty activeBlocks",
+			blockedIPs: map[string]persistence.ActiveBlockInfo{},
+			newGoodActorYAML: `
+good_actors:
+  - name: "any_ip"
+    ip: "1.2.3.4"
+`,
+			expectUnblocked:    []string{},
+			expectRemaining:    []string{},
+			unblockOnGoodActor: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup: Create a temporary config file
+			fullYAML := `version: "1.0"
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "log"
+    steps: [{field_matches: {path: "/"}}]
+` + tt.newGoodActorYAML
+
+			tmpConfigPath := setupTestYAML(t, fullYAML)
+
+			// Load the config to get the good actors
+			loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+			if err != nil {
+				t.Fatalf("LoadConfigFromYAML() failed: %v", err)
+			}
+
+			// Create processor with activeBlocks
+			unblockCalled := make(map[string]bool)
+			processor := &Processor{
+				ConfigMutex: &sync.RWMutex{},
+				Config: &AppConfig{
+					UnblockOnGoodActor: tt.unblockOnGoodActor,
+				},
+				DryRun:       false,
+				activeBlocks: make(map[string]persistence.ActiveBlockInfo),
+				Blocker: &mockUnblocker{
+					unblockFunc: func(ipInfo utils.IPInfo, reason string) error {
+						unblockCalled[ipInfo.Address] = true
+						return nil
+					},
+				},
+				LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+					// Silent
+				},
+			}
+
+			// Populate activeBlocks
+			for ip, info := range tt.blockedIPs {
+				processor.activeBlocks[ip] = info
+			}
+
+			// Act: Call the function
+			unblockNewlyWhitelistedIPs(processor, loadedCfg.GoodActors)
+
+			// Assert: Check which IPs were unblocked
+			for _, ip := range tt.expectUnblocked {
+				if !unblockCalled[ip] {
+					t.Errorf("Expected IP %s to be unblocked, but it wasn't", ip)
+				}
+				if _, stillBlocked := processor.activeBlocks[ip]; stillBlocked {
+					t.Errorf("Expected IP %s to be removed from activeBlocks, but it's still there", ip)
+				}
+			}
+
+			// Assert: Check which IPs remain blocked
+			for _, ip := range tt.expectRemaining {
+				if unblockCalled[ip] {
+					t.Errorf("Expected IP %s to remain blocked, but it was unblocked", ip)
+				}
+				if _, stillBlocked := processor.activeBlocks[ip]; !stillBlocked {
+					t.Errorf("Expected IP %s to remain in activeBlocks, but it was removed", ip)
+				}
+			}
+		})
+	}
+}
+
+// mockUnblocker is a test helper that implements the Blocker interface.
+type mockUnblocker struct {
+	unblockFunc func(ipInfo utils.IPInfo, reason string) error
+}
+
+func (m *mockUnblocker) Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
+	return nil
+}
+
+func (m *mockUnblocker) Unblock(ipInfo utils.IPInfo, reason string) error {
+	if m.unblockFunc != nil {
+		return m.unblockFunc(ipInfo, reason)
+	}
+	return nil
+}
+
+func (m *mockUnblocker) DumpBackends() ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockUnblocker) CompareHAProxyBackends(expTolerance time.Duration) ([]blocker.SyncDiscrepancy, error) {
+	return nil, nil
+}
+
+func (m *mockUnblocker) Shutdown() {}
+
+// TestConfigReload_UnblockGoodActors is an integration test that verifies
+// newly added good actors cause blocked IPs to be unblocked during config reload.
+func TestConfigReload_UnblockGoodActors(t *testing.T) {
+	resetGlobalState()
+	t.Cleanup(resetGlobalState)
+
+	// Setup: Create initial config without good actors
+	initialYAML := `
+version: "1.0"
+log_level: "info"
+unblock_on_good_actor: true
+
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "log"
+    steps: [{field_matches: {path: "/"}}]
+`
+	tmpConfigPath := setupTestYAML(t, initialYAML)
+
+	// Load initial config
+	initialLoadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+	if err != nil {
+		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
+	}
+
+	// Track unblock calls
+	unblockCalled := make(map[string]bool)
+	unblockMutex := &sync.Mutex{}
+
+	// Create processor with some blocked IPs
+	processor := &Processor{
+		ActivityMutex: &sync.RWMutex{},
+		ActivityStore: make(map[store.Actor]*store.ActorActivity),
+		ConfigMutex:   &sync.RWMutex{},
+		Metrics:       metrics.NewMetrics(),
+		Chains:        initialLoadedCfg.Chains,
+		Config: &AppConfig{
+			PollingInterval:    10 * time.Millisecond,
+			FileDependencies:   initialLoadedCfg.FileDependencies,
+			GoodActors:         initialLoadedCfg.GoodActors,
+			UnblockOnGoodActor: true,
+		},
+		DryRun:       false,
+		activeBlocks: make(map[string]persistence.ActiveBlockInfo),
+		Blocker: &mockUnblocker{
+			unblockFunc: func(ipInfo utils.IPInfo, reason string) error {
+				unblockMutex.Lock()
+				unblockCalled[ipInfo.Address] = true
+				unblockMutex.Unlock()
+				return nil
+			},
+		},
+		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+			// Silent for test
+		},
+		TestSignals: &TestSignals{
+			ForceCheckSignal: make(chan struct{}, 1),
+			ReloadDoneSignal: make(chan struct{}, 1),
+		},
+		ConfigPath: tmpConfigPath,
+	}
+
+	// Set LastModTime
+	initialFileInfo, err := os.Stat(tmpConfigPath)
+	if err != nil {
+		t.Fatalf("Failed to stat initial temp yaml file: %v", err)
+	}
+	processor.Config.LastModTime = initialFileInfo.ModTime()
+
+	// Add some blocked IPs
+	processor.activeBlocks["1.2.3.4"] = persistence.ActiveBlockInfo{
+		Reason:      "test-chain",
+		UnblockTime: time.Now().Add(1 * time.Hour),
+	}
+	processor.activeBlocks["5.6.7.8"] = persistence.ActiveBlockInfo{
+		Reason:      "test-chain",
+		UnblockTime: time.Now().Add(1 * time.Hour),
+	}
+
+	// Start ConfigWatcher
+	stopWatcher := make(chan struct{})
+	t.Cleanup(func() { close(stopWatcher) })
+	go ConfigWatcher(processor, stopWatcher)
+
+	// Act: Modify config to add a good actor for one of the blocked IPs
+	modifiedYAML := `
+version: "1.0"
+log_level: "info"
+unblock_on_good_actor: true
+
+good_actors:
+  - name: "whitelisted_ip"
+    ip: "1.2.3.4"
+
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "log"
+    steps: [{field_matches: {path: "/"}}]
+`
+	if err := os.WriteFile(tmpConfigPath, []byte(modifiedYAML), 0644); err != nil {
+		t.Fatalf("Failed to write modified temp yaml file: %v", err)
+	}
+
+	// Advance modification time
+	futureTime := time.Now().Add(1 * time.Second)
+	if err := os.Chtimes(tmpConfigPath, futureTime, futureTime); err != nil {
+		t.Fatalf("Failed to change file modification time: %v", err)
+	}
+
+	// Force watcher to check
+	processor.TestSignals.ForceCheckSignal <- struct{}{}
+
+	// Wait for reload
+	select {
+	case <-processor.TestSignals.ReloadDoneSignal:
+		// Reload completed
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for configuration reload.")
+	}
+
+	// Assert: Check that 1.2.3.4 was unblocked
+	unblockMutex.Lock()
+	if !unblockCalled["1.2.3.4"] {
+		t.Error("Expected 1.2.3.4 to be unblocked after adding to good_actors")
+	}
+	if unblockCalled["5.6.7.8"] {
+		t.Error("Expected 5.6.7.8 to remain blocked (not in good_actors)")
+	}
+	unblockMutex.Unlock()
+
+	// Check activeBlocks
+	processor.persistenceMutex.Lock()
+	if _, exists := processor.activeBlocks["1.2.3.4"]; exists {
+		t.Error("Expected 1.2.3.4 to be removed from activeBlocks")
+	}
+	if _, exists := processor.activeBlocks["5.6.7.8"]; !exists {
+		t.Error("Expected 5.6.7.8 to remain in activeBlocks")
+	}
+	processor.persistenceMutex.Unlock()
 }

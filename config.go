@@ -1346,6 +1346,85 @@ func logFileDependencyChanges(p *Processor, oldDeps, newDeps map[string]*types.F
 // reloadConfiguration contains the logic to reload configuration, compare for changes,
 // and update the processor state. It is designed to be called by either the
 // file watcher or the signal reloader.
+// findNewlyAddedGoodActors compares old and new good actor lists and returns newly added ones.
+func findNewlyAddedGoodActors(oldActors, newActors []GoodActorDef) []GoodActorDef {
+	oldSet := make(map[string]bool)
+	for _, actor := range oldActors {
+		oldSet[actor.Name] = true
+	}
+
+	var newlyAdded []GoodActorDef
+	for _, actor := range newActors {
+		if !oldSet[actor.Name] {
+			newlyAdded = append(newlyAdded, actor)
+		}
+	}
+	return newlyAdded
+}
+
+// unblockNewlyWhitelistedIPs checks all currently blocked IPs against newly added good actors
+// and unblocks those that match. Uses a hybrid approach: fast path for exact IPs (O(1)),
+// slow path for CIDR/regex patterns (O(N)).
+func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []GoodActorDef) {
+	if len(newGoodActors) == 0 {
+		return
+	}
+
+	p.persistenceMutex.Lock()
+	blockedCount := len(p.activeBlocks)
+	p.persistenceMutex.Unlock()
+
+	if blockedCount == 0 {
+		return
+	}
+
+	unblocked := 0
+	slowPathCount := 0
+
+	for _, goodActor := range newGoodActors {
+		// Check if this good actor has IP matchers
+		if len(goodActor.IPMatchers) == 0 {
+			continue // No IP matcher, skip
+		}
+
+		// We need to iterate through activeBlocks for pattern matching (CIDR/regex)
+		// Create a temporary log entry for testing
+		p.persistenceMutex.Lock()
+		for ip := range p.activeBlocks {
+			// Create a minimal LogEntry with just the IP set
+			testEntry := &LogEntry{
+				IPInfo: utils.NewIPInfo(ip),
+			}
+
+			// Test if this IP matches the good actor's IP matcher
+			if goodActor.IPMatchers[0](testEntry) {
+				// Match found - need to unblock
+				blockInfo := p.activeBlocks[ip]
+				delete(p.activeBlocks, ip)
+
+				// Issue unblock command to HAProxy
+				if !p.DryRun && p.Blocker != nil {
+					ipInfo := utils.NewIPInfo(ip)
+					_ = p.Blocker.Unblock(ipInfo, "added-to-good-actors")
+				}
+
+				p.LogFunc(logging.LevelInfo, "UNBLOCK_WHITELIST",
+					"Unblocked %s (was blocked by %s): newly added to good_actors (%s)",
+					ip, blockInfo.Reason, goodActor.Name)
+				unblocked++
+			}
+		}
+		p.persistenceMutex.Unlock()
+		slowPathCount++
+	}
+
+	if unblocked > 0 {
+		p.LogFunc(logging.LevelInfo, "UNBLOCK_WHITELIST",
+			"Checked %d blocked IPs against %d new good actor rule(s), unblocked %d IPs",
+			blockedCount, slowPathCount, unblocked)
+	}
+}
+
 func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForComparison *AppConfig) { //nolint:cyclop
 	p.ConfigMutex.RLock()
 	oldChains := p.Chains
@@ -1466,6 +1545,14 @@ func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	}
 	if len(removed) > 0 {
 		logChainDetails(p, removed, "Removed chains:")
+	}
+
+	// --- Unblock IPs that match newly added good actors ---
+	if newAppConfig.UnblockOnGoodActor {
+		newlyAdded := findNewlyAddedGoodActors(oldConfig.GoodActors, loadedCfg.GoodActors)
+		if len(newlyAdded) > 0 {
+			unblockNewlyWhitelistedIPs(p, newlyAdded)
+		}
 	}
 
 }
