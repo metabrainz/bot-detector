@@ -97,16 +97,31 @@ func (t *Tailer) ReadLine() (string, error) {
 			return "", ErrLineSkipped // Return the sentinel error
 		}
 		if readErr == io.EOF {
+			// If we read a line along with EOF (file without trailing newline),
+			// return the line without error. The next call will handle the EOF.
+			if len(line) > 0 {
+				return line, nil
+			}
 			if t.checkForRotation() {
 				return "", ErrFileRotated
 			}
-			time.Sleep(t.config.EOFPollingDelay)
+			// Return ErrEOF immediately without sleeping.
+			// The caller (LiveLogTailer) will handle the sleep, allowing
+			// it to check for shutdown signals during the delay.
 			return "", ErrEOF
 		}
 		return "", readErr // Return other unexpected errors
 	}
 
 	return line, nil
+}
+
+// Close closes the underlying file handle.
+func (t *Tailer) Close() error {
+	if t.file != nil {
+		return t.file.Close()
+	}
+	return nil
 }
 
 // checkForRotation checks if the log file has been rotated or truncated.
@@ -212,49 +227,6 @@ func getLineReader(lineEnding string) (lineReader, error) {
 	default:
 		return nil, fmt.Errorf("unsupported line ending: %s", lineEnding)
 	}
-}
-
-// hasFileBeenRotated checks if the log file has been rotated or truncated.
-// It returns true if the file should be reopened, false otherwise.
-func hasFileBeenRotated(p *Processor, filePath string, initialStat os.FileInfo, statFunc func(string) (os.FileInfo, error)) bool {
-	if initialStat == nil {
-		// If we couldn't get initial stats, we can't detect rotation.
-		return false
-	}
-
-	currentStat, err := statFunc(filePath)
-	if err != nil {
-		p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Assuming rotation.", err)
-		return true // If we can't stat the file, it might be gone. Reopen.
-	}
-
-	// Check for truncation (size decreased).
-	if currentStat.Size() < initialStat.Size() {
-		p.LogFunc(logging.LevelInfo, "TAIL", "Detected log file size reduction (truncation/rotation). Reopening file.")
-		return true
-	}
-
-	// Check for Inode/Device change (rotation).
-	initialSys := initialStat.Sys()
-	currentSys := currentStat.Sys()
-
-	if initialSys != nil && currentSys != nil {
-		initialSysStat, ok1 := initialSys.(*syscall.Stat_t)
-		currentSysStat, ok2 := currentSys.(*syscall.Stat_t)
-
-		if ok1 && ok2 {
-			if currentSysStat.Dev != initialSysStat.Dev || currentSysStat.Ino != initialSysStat.Ino {
-				p.LogFunc(logging.LevelInfo, "TAIL", "Detected log file rotation (Inode changed from %d to %d). Reopening file.", initialSysStat.Ino, currentSysStat.Ino)
-				return true
-			}
-		} else {
-			p.LogFunc(logging.LevelWarning, "TAIL_WARN", "Could not assert syscall.Stat_t for initial or current file. Inode/Device rotation detection impaired.")
-		}
-	} else {
-		p.LogFunc(logging.LevelDebug, "TAIL_DEBUG", "Sys() call returned nil for initial or current file. Inode/Device rotation detection skipped.")
-	}
-
-	return false
 }
 
 func defaultStatFunc(path string) (os.FileInfo, error) {
@@ -842,7 +814,6 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 
 	// Inner loop for re-opening the file
 	for {
-		var file fileHandle
 		if shutdown {
 			return
 		}
@@ -857,53 +828,24 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 
 		p.LogFunc(logging.LevelInfo, "TAIL", "Starting log tailer on %s...", p.LogPath)
 
-		file, err := p.Config.FileOpener(p.LogPath)
-		if err != nil {
-			// File not found on first attempt, wait and retry.
-			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", p.LogPath, err, ErrorRetryDelay)
-			if delayOrShutdown(p, ErrorRetryDelay, signalCh) {
-				shutdown = true
-				continue // Let the main loop handle the exit.
-			}
-			continue
-		}
-
-		// Get initial file stats for rotation/truncation detection
-		initialStat, statErr := file.Stat()
-		if statErr == nil {
-			p.LogFunc(logging.LevelDebug, "TAIL", "Initial file state: Size=%d", initialStat.Size())
-		} else {
-			p.LogFunc(logging.LevelWarning, "TAIL_WARN", "Failed to get initial file stat: %v. Rotation detection may be impaired.", statErr)
-			// If we can't stat the file, the handle is likely bad. Close it and restart the loop.
-			_ = file.Close()
-			restartTailing(ErrorRetryDelay) // Add a delay to prevent a tight loop on repeated stat failures.
-			if shutdown {
-				continue // Let the main loop handle the exit, consistent with other error paths.
-			}
-			continue
-		}
-
+		// Determine whether to seek to end on this iteration.
 		// On the very first run, seek to the end to ignore old content,
 		// but only if we're not in exit-on-eof mode.
-		if firstRun && !p.ExitOnEOF {
-			_, _ = file.Seek(0, io.SeekEnd)
-		}
+		seekToEnd := firstRun && !p.ExitOnEOF
 		firstRun = false
+
+		tailer, err := NewTailer(p, seekToEnd)
+		if err != nil {
+			// File not found or error on initial open, wait and retry.
+			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", p.LogPath, err, ErrorRetryDelay)
+			restartTailing(ErrorRetryDelay)
+			continue
+		}
 
 		// Signal for test synchronization, if the channel is set.
 		if readySignal != nil {
 			readySignal <- struct{}{}
 		}
-
-		reader := bufio.NewReader(file)
-		readLine, err := getLineReader(p.Config.LineEnding)
-		if err != nil {
-			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Configuration error with line_ending: %v. Retrying.", err)
-			_ = file.Close()
-			restartTailing(ErrorRetryDelay)
-			continue
-		}
-		lineLimit := MaxLogLineSize
 
 		// Inner loop for reading new lines. This loop will be broken by file rotation or shutdown.
 		for {
@@ -911,37 +853,41 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			case s := <-signalCh:
 				p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
 				FlushEntryBuffer(p) // Final flush on shutdown.
-				_ = file.Close()
+				_ = tailer.Close()
 				return
 			default:
 				// Continue to read.
 			}
 
-			line, readErr := readLine(reader, lineLimit)
+			line, readErr := tailer.ReadLine()
 
 			if readErr != nil {
 				if errors.Is(readErr, ErrLineSkipped) {
-					p.LogFunc(logging.LevelWarning, "TAIL_SKIP", "Skipped line (length exceeded %d bytes): %.100s...", lineLimit, line)
+					// Already logged by tailer, just continue
 					continue
 				}
-				if readErr == io.EOF {
+				if errors.Is(readErr, ErrEOF) {
 					FlushEntryBuffer(p)
 					// If the flag is set, we exit on the first EOF.
 					if p.ExitOnEOF {
 						p.LogFunc(logging.LevelInfo, "TAIL", "Reached EOF, exiting due to --exit-on-eof flag.")
-						_ = file.Close()
+						_ = tailer.Close()
 						return // Exit the function entirely
 					}
-					if hasFileBeenRotated(p, p.LogPath, initialStat, p.Config.StatFunc) {
-						_ = file.Close()
-						restartTailing(FileOpenRetryDelay) // Add delay to prevent tight loop on stat errors.
-						break                              // Break inner loop to reopen.
-					}
+					// ErrEOF means we hit EOF but no rotation was detected.
+					// Sleep before polling again, allowing shutdown signals to be checked.
 					time.Sleep(p.Config.EOFPollingDelay)
 					continue
 				}
+				if errors.Is(readErr, ErrFileRotated) {
+					// File has been rotated, close current tailer and reopen
+					_ = tailer.Close()
+					restartTailing(FileOpenRetryDelay)
+					break // Break inner loop to reopen.
+				}
+				// Other unexpected errors
 				p.LogFunc(logging.LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening file.", readErr)
-				_ = file.Close()
+				_ = tailer.Close()
 				restartTailing(ErrorRetryDelay)
 				break // Break the inner loop to force a file reopen via the outer loop.
 			}

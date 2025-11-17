@@ -309,8 +309,6 @@ func TestTailer_ReadLine(t *testing.T) {
 	})
 }
 
-// --- Mocks for testing hasFileBeenRotated ---
-
 // mockFileInfo implements os.FileInfo for testing purposes.
 type mockFileInfo struct {
 	size int64
@@ -323,103 +321,6 @@ func (m *mockFileInfo) Mode() os.FileMode  { return 0644 }
 func (m *mockFileInfo) ModTime() time.Time { return time.Now() }
 func (m *mockFileInfo) IsDir() bool        { return false }
 func (m *mockFileInfo) Sys() interface{}   { return m.sys }
-
-func TestHasFileBeenRotated(t *testing.T) {
-	// --- Setup ---
-	processor := &Processor{
-		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {}, // No-op logger
-	}
-
-	// Initial file state
-	initialStat := &mockFileInfo{
-		size: 1024,
-		sys: &syscall.Stat_t{
-			Dev: 1,
-			Ino: 12345,
-		},
-	}
-
-	tests := []struct {
-		name         string
-		mockStatFunc func(path string) (os.FileInfo, error) // Mocks os.Stat
-		expected     bool
-		initialStat  os.FileInfo
-	}{
-		{
-			name: "No Rotation or Truncation",
-			mockStatFunc: func(path string) (os.FileInfo, error) {
-				return &mockFileInfo{size: 2048, sys: &syscall.Stat_t{Dev: 1, Ino: 12345}}, nil
-			},
-			expected:    false,
-			initialStat: initialStat,
-		},
-		{
-			name: "File Rotated (Inode Changed)",
-			mockStatFunc: func(path string) (os.FileInfo, error) {
-				return &mockFileInfo{size: 512, sys: &syscall.Stat_t{Dev: 1, Ino: 67890}}, nil
-			},
-			expected:    true,
-			initialStat: initialStat,
-		},
-		{
-			name: "File Truncated (Size Decreased)",
-			mockStatFunc: func(path string) (os.FileInfo, error) {
-				return &mockFileInfo{size: 512, sys: &syscall.Stat_t{Dev: 1, Ino: 12345}}, nil
-			},
-			expected:    true,
-			initialStat: initialStat,
-		},
-		{
-			name: "Stat Fails",
-			mockStatFunc: func(path string) (os.FileInfo, error) {
-				return nil, os.ErrNotExist
-			},
-			expected:    true,
-			initialStat: initialStat,
-		},
-		{
-			name: "No Initial Stat",
-			mockStatFunc: func(path string) (os.FileInfo, error) {
-				return &mockFileInfo{size: 512, sys: &syscall.Stat_t{Dev: 1, Ino: 12345}}, nil
-			},
-			expected:    false, // Cannot detect rotation without initial stat
-			initialStat: nil,
-		},
-		{
-			name: "Initial Stat Sys() is nil",
-			mockStatFunc: func(path string) (os.FileInfo, error) {
-				return &mockFileInfo{size: 2048, sys: &syscall.Stat_t{Dev: 1, Ino: 12345}}, nil
-			},
-			expected: false,
-			initialStat: &mockFileInfo{
-				size: 1024,
-				sys:  nil, // Simulate Sys() returning nil
-			},
-		},
-		{
-			name: "Current Stat Sys() is nil",
-			mockStatFunc: func(path string) (os.FileInfo, error) {
-				return &mockFileInfo{size: 2048, sys: nil}, nil
-			},
-			expected:    false,
-			initialStat: initialStat,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// --- Act ---
-			// We can't directly mock os.Stat, so we pass the result of our mock function.
-			// The logic inside hasFileBeenRotated is what we're testing.
-			result := hasFileBeenRotated(processor, "dummy/path", tt.initialStat, tt.mockStatFunc)
-
-			// --- Assert ---
-			if result != tt.expected {
-				t.Errorf("Expected hasFileBeenRotated to return %v, but got %v", tt.expected, result)
-			}
-		})
-	}
-}
 
 func TestDelayOrShutdown(t *testing.T) {
 	// --- Setup ---
@@ -851,16 +752,6 @@ func TestLiveLogTailer(t *testing.T) {
 	harness.logMutex.Unlock()
 
 	// --- Act 3: Simulate log rotation ---
-	// Override LogFunc to signal when rotation is detected. This must be set
-	// before the rotation happens to avoid a race.
-	fileRotated := make(chan struct{}, 1)
-	originalLogFunc := harness.processor.LogFunc
-	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-		originalLogFunc(level, tag, format, args...) // Call original to preserve logging
-		if tag == "TAIL" && strings.Contains(fmt.Sprintf(format, args...), "Detected log file rotation") {
-			fileRotated <- struct{}{}
-		}
-	}
 	if err := os.Rename(harness.tempLogFile, harness.tempLogFile+".rotated"); err != nil {
 		t.Fatalf("Failed to simulate log rotation (rename): %v", err)
 	}
@@ -869,16 +760,8 @@ func TestLiveLogTailer(t *testing.T) {
 		t.Fatalf("Failed to create new log file after rotation: %v", err)
 	}
 
-	// Wait for the tailer to detect the rotation and be ready for the new file.
-	select {
-	case <-fileRotated:
-		// Rotation was detected.
-	case <-time.After(1 * time.Second):
-		logOutput := strings.Join(harness.capturedLogs, "\n")
-		t.Fatalf("Timed out waiting for tailer to detect file rotation. Logs:\n%s", logOutput)
-	}
-
 	// Wait for the tailer to process the line from the new file.
+	// This implicitly verifies that rotation detection and file reopening worked.
 	select {
 	case <-harness.lineProcessed:
 		// Line was processed successfully.
@@ -1162,16 +1045,18 @@ func TestLiveLogTailer_InitialStatError(t *testing.T) {
 		},
 	})
 
-	// Override LogFunc to capture the specific warning.
-	statWarnLogged := make(chan struct{}, 1)
+	// Override LogFunc to capture the specific error.
+	// With the Tailer refactoring, stat failures during NewTailer now return an error
+	// (fail fast) rather than logging a warning and continuing with impaired rotation detection.
+	statErrorLogged := make(chan struct{}, 1)
 	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMsg := fmt.Sprintf(format, args...)
 		harness.logMutex.Lock()
 		defer harness.logMutex.Unlock()
 		logLine := fmt.Sprintf("%s: %s", tag, logMsg)
 		harness.capturedLogs = append(harness.capturedLogs, logLine)
-		if tag == "TAIL_WARN" && strings.Contains(logMsg, "Failed to get initial file stat") {
-			statWarnLogged <- struct{}{}
+		if tag == "TAIL_ERROR" && strings.Contains(logMsg, "Failed to open log file") && strings.Contains(logMsg, "failed to get initial file stat") {
+			statErrorLogged <- struct{}{}
 		}
 	}
 
@@ -1183,9 +1068,9 @@ func TestLiveLogTailer_InitialStatError(t *testing.T) {
 
 	// --- Assert ---
 	select {
-	case <-statWarnLogged:
+	case <-statErrorLogged:
 	case <-time.After(1 * time.Second):
-		t.Fatalf("Timed out waiting for the initial stat warning. Logs:\n%s", strings.Join(harness.capturedLogs, "\n"))
+		t.Fatalf("Timed out waiting for the initial stat error. Logs:\n%s", strings.Join(harness.capturedLogs, "\n"))
 	}
 
 	// Now, send the shutdown signal and wait for the goroutine to exit.
@@ -1245,7 +1130,7 @@ func TestLiveLogTailer_StatError(t *testing.T) {
 	harness.start()
 	defer harness.stop()
 
-	// The tailer will open the file, read EOF, then call hasFileBeenRotated,
+	// The tailer will open the file, read EOF, then check for rotation,
 	// which will use our failing mock and log the error.
 
 	// --- Assert ---
