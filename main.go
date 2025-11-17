@@ -18,6 +18,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -38,8 +39,47 @@ func (p *Processor) GetMarshalledConfig() ([]byte, time.Time, error) {
 	return p.Config.YAMLContent, p.Config.LastModTime, nil
 }
 
+// Helper function to extract settings from the BuildInfo struct
+func findSetting(info *debug.BuildInfo, key string) string {
+	for _, setting := range info.Settings {
+		if setting.Key == key {
+			return setting.Value
+		}
+	}
+	return "unknown"
+}
+
+func buildDetails() {
+	// Use the runtime/debug package to get automatically embedded info
+	info, ok := debug.ReadBuildInfo()
+	if ok {
+		fmt.Fprintf(os.Stderr, "\n--- BUILD DETAILS:\n")
+		fmt.Fprintf(os.Stderr, "  Go Version:  %s\n", info.GoVersion)
+		fmt.Fprintf(os.Stderr, "  Commit Hash: %s\n", findSetting(info, "vcs.revision"))
+		fmt.Fprintf(os.Stderr, "  Build Time:  %s\n", findSetting(info, "vcs.time"))
+		fmt.Fprintf(os.Stderr, "  Dirty Build: %s\n", findSetting(info, "vcs.modified"))
+	}
+}
+
+func customPanic() {
+	if r := recover(); r != nil {
+		now := time.Now()
+		fmt.Fprintf(os.Stderr, "--- START OF PANIC REPORT\n")
+		fmt.Fprintf(os.Stderr, "Time: %s\n", now)
+		fmt.Fprintf(os.Stderr, "Message: %v\n", r)
+
+		fmt.Fprintf(os.Stderr, "\n--- STACK TRACE:\n")
+		debug.PrintStack()
+		buildDetails()
+		fmt.Fprintf(os.Stderr, "\n--- END OF PANIC REPORT\n")
+
+		os.Exit(1)
+	}
+}
+
 // main is the application entry point.
 func main() {
+	defer customPanic()
 	params, err := commandline.ParseParameters(os.Args)
 	if err != nil {
 		// A parsing error will have already printed usage information.
