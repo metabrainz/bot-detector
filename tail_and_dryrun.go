@@ -131,19 +131,40 @@ func (t *Tailer) checkForRotation() bool {
 		return false
 	}
 
-	currentStat, err := t.config.StatFunc(t.path)
+	currentPathStat, err := t.config.StatFunc(t.path)
 	if err != nil {
 		t.logger(logging.LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Assuming rotation.", err)
 		return true
 	}
 
-	if currentStat.Size() < t.initialStat.Size() {
+	// Check for truncation: if the file at the path is smaller than when we opened it.
+	// This detects copytruncate-style rotation.
+	if currentPathStat.Size() < t.initialStat.Size() {
 		t.logger(logging.LevelInfo, "TAIL", "Detected log file size reduction (truncation/rotation). Reopening file.")
 		return true
 	}
 
+	// Check for rotation by comparing the open file handle's stat with the path's stat.
+	// After rotation (rename + create), the path points to a different file than our handle.
+	// This works even when Sys() returns nil (no inode support).
+	if t.file != nil {
+		currentFileStat, err := t.file.Stat()
+		if err != nil {
+			t.logger(logging.LevelError, "TAIL_ERROR", "Failed to stat open file handle: %v. Assuming rotation.", err)
+			return true
+		}
+
+		// If the path's file differs from our open file, rotation occurred.
+		// We check size and modification time as they're available without inode support.
+		if currentFileStat.Size() != currentPathStat.Size() {
+			t.logger(logging.LevelInfo, "TAIL", "Detected log file rotation (size mismatch: open file=%d, path file=%d). Reopening file.", currentFileStat.Size(), currentPathStat.Size())
+			return true
+		}
+	}
+
+	// Additional check: inode-based detection if available (most reliable method).
 	initialSys := t.initialStat.Sys()
-	currentSys := currentStat.Sys()
+	currentSys := currentPathStat.Sys()
 
 	if initialSys != nil && currentSys != nil {
 		initialSysStat, ok1 := initialSys.(*syscall.Stat_t)

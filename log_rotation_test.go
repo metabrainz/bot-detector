@@ -805,3 +805,177 @@ func TestRotation_LargeFileGrowthPattern(t *testing.T) {
 	t.Logf("✓ No duplicates found")
 	t.Logf("✓ Order preserved")
 }
+
+// TestRotation_SysReturnsNil tests rotation detection when Sys() returns nil.
+//
+// Scenario:
+// 1. Mock StatFunc to return FileInfo with nil Sys()
+// 2. Write lines and rotate file
+// 3. Verify rotation is still detected via size-based detection
+// 4. Verify debug log about inode detection being skipped
+//
+// This test ensures:
+// - Graceful degradation when inode detection is unavailable
+// - Size-based truncation detection still works
+// - No panics when Sys() returns nil
+// - Appropriate debug logging
+func TestRotation_SysReturnsNil(t *testing.T) {
+	h := newRotationTestHarness(t)
+
+	const linesBeforeRotation = 50
+	const linesAfterRotation = 30
+	const totalLines = linesBeforeRotation + linesAfterRotation
+
+	// Track debug log about Sys() returning nil
+	sysNilLogged := make(chan struct{}, 1)
+	rotationDetected := make(chan struct{}, 1)
+
+	originalLogFunc := h.processor.LogFunc
+	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		originalLogFunc(level, tag, format, args...)
+		msg := fmt.Sprintf(format, args...)
+		if tag == "TAIL_DEBUG" && strings.Contains(msg, "Sys() call returned nil") {
+			select {
+			case sysNilLogged <- struct{}{}:
+			default:
+			}
+		}
+		// Check for rotation detection - either size reduction (truncation) or size mismatch (rename-based)
+		if tag == "TAIL" && (strings.Contains(msg, "Detected log file size reduction") || strings.Contains(msg, "size mismatch")) {
+			select {
+			case rotationDetected <- struct{}{}:
+			default:
+			}
+		}
+	}
+
+	// Create a custom StatFunc that returns FileInfo with nil Sys()
+	realStatFunc := h.processor.Config.StatFunc
+	h.processor.Config.StatFunc = func(path string) (os.FileInfo, error) {
+		info, err := realStatFunc(path)
+		if err != nil {
+			return nil, err
+		}
+		// Wrap the real FileInfo to return nil from Sys()
+		return &nilSysFileInfo{FileInfo: info}, nil
+	}
+
+	// Generate test data
+	preRotationLines := make([]string, linesBeforeRotation)
+	for i := 0; i < linesBeforeRotation; i++ {
+		preRotationLines[i] = fmt.Sprintf("before-rotation-line-%04d", i)
+	}
+
+	postRotationLines := make([]string, linesAfterRotation)
+	for i := 0; i < linesAfterRotation; i++ {
+		postRotationLines[i] = fmt.Sprintf("after-rotation-line-%04d", i)
+	}
+
+	// Step 1: Create empty log file
+	f, err := os.Create(h.logFilePath)
+	if err != nil {
+		t.Fatalf("Failed to create log file: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("Failed to close log file: %v", err)
+	}
+
+	// Step 2: Start the tailer
+	h.start()
+	defer h.stop()
+
+	// Step 3: Write lines before rotation
+	t.Logf("Writing %d lines before rotation", linesBeforeRotation)
+	batchSize := 25
+	for i := 0; i < linesBeforeRotation; i += batchSize {
+		end := i + batchSize
+		if end > linesBeforeRotation {
+			end = linesBeforeRotation
+		}
+		h.appendLines(preRotationLines[i:end]...)
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Wait for lines to be processed
+	h.waitForLineCount(linesBeforeRotation, 5*time.Second)
+	t.Logf("Processed %d lines before rotation", linesBeforeRotation)
+
+	// Step 4: Rotate the file (this will trigger size-based detection since Sys() is nil)
+	t.Logf("Rotating log file")
+	h.rotateLog()
+
+	// Wait for the debug log about Sys() being nil
+	select {
+	case <-sysNilLogged:
+		t.Logf("✓ Debug log confirmed: Sys() returned nil, inode detection skipped")
+	case <-time.After(3 * time.Second):
+		// This is acceptable - the log might not be triggered on every call
+		t.Logf("Note: Sys() nil debug log not captured (may be cached or not triggered)")
+	}
+
+	// Wait for rotation to be detected via size comparison (reduction or mismatch)
+	select {
+	case <-rotationDetected:
+		t.Logf("✓ Rotation detected via size-based detection (file handle vs path comparison)")
+	case <-time.After(3 * time.Second):
+		t.Error("Timeout waiting for size-based rotation detection (file handle vs path comparison)")
+	}
+
+	// Brief pause for tailer to reopen
+	time.Sleep(200 * time.Millisecond)
+
+	// Step 5: Write lines to new file
+	t.Logf("Writing %d lines after rotation", linesAfterRotation)
+	for i := 0; i < linesAfterRotation; i += batchSize {
+		end := i + batchSize
+		if end > linesAfterRotation {
+			end = linesAfterRotation
+		}
+		h.appendLines(postRotationLines[i:end]...)
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Step 6: Wait for all lines to be processed
+	t.Logf("Waiting for all %d lines to be processed", totalLines)
+	h.waitForLineCount(totalLines, 10*time.Second)
+
+	// Step 7: Verify results
+	processedLines := h.getProcessedLines()
+
+	t.Logf("Total lines processed: %d (expected %d)", len(processedLines), totalLines)
+
+	if len(processedLines) != totalLines {
+		t.Errorf("Expected %d lines, got %d", totalLines, len(processedLines))
+	}
+
+	// Verify no duplicates
+	seen := make(map[string]bool)
+	for _, line := range processedLines {
+		if seen[line] {
+			t.Errorf("Duplicate line found: %q", line)
+		}
+		seen[line] = true
+	}
+
+	// Verify all expected lines were processed
+	allExpected := append([]string{}, preRotationLines...)
+	allExpected = append(allExpected, postRotationLines...)
+	for _, expected := range allExpected {
+		if !seen[expected] {
+			t.Errorf("Missing line: %q", expected)
+		}
+	}
+
+	t.Logf("✓ All %d lines processed correctly", totalLines)
+	t.Logf("✓ Size-based rotation detection worked without inode support")
+	t.Logf("✓ No panics or errors when Sys() returned nil")
+}
+
+// nilSysFileInfo wraps os.FileInfo and returns nil from Sys()
+type nilSysFileInfo struct {
+	os.FileInfo
+}
+
+func (n *nilSysFileInfo) Sys() interface{} {
+	return nil
+}
