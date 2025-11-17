@@ -149,6 +149,98 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *AppConfig
 	}
 }
 
+func restorePersistenceState(p *Processor) error {
+	// -- STATE RESTORATION --
+	if err := os.MkdirAll(p.stateDir, 0750); err != nil {
+		return fmt.Errorf("failed to create state directory '%s': %v", p.stateDir, err)
+	}
+	p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.stateDir)
+
+	// 1. Load snapshot
+	snapshot, err := persistence.LoadSnapshot(filepath.Join(p.stateDir, "state.snapshot"))
+	if err != nil {
+		p.LogFunc(logging.LevelError, "STATE_LOAD_FAIL", "Failed to load snapshot: %v", err)
+		return err
+	}
+	p.activeBlocks = snapshot.ActiveBlocks
+
+	// 2. Replay Journal
+	journalPath := filepath.Join(p.stateDir, "events.log")
+	journalFile, err := os.Open(journalPath)
+	if err == nil {
+		scanner := bufio.NewScanner(journalFile)
+		for scanner.Scan() {
+			var event persistence.AuditEvent
+			if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+				p.LogFunc(logging.LevelWarning, "JOURNAL_PARSE_FAIL", "Failed to parse journal event: %v", err)
+				continue
+			}
+			if event.Timestamp.After(snapshot.Timestamp) {
+				switch event.Event {
+				case persistence.EventTypeBlock:
+					p.activeBlocks[event.IP] = persistence.ActiveBlockInfo{
+						UnblockTime: event.Timestamp.Add(event.Duration),
+						Reason:      event.Reason,
+					}
+				case persistence.EventTypeUnblock:
+					delete(p.activeBlocks, event.IP)
+				}
+			}
+		}
+		if err := journalFile.Close(); err != nil {
+			p.LogFunc(logging.LevelWarning, "JOURNAL_CLOSE_FAIL", "Failed to close journal file: %v", err)
+		}
+	} else if !os.IsNotExist(err) {
+		p.LogFunc(logging.LevelWarning, "JOURNAL_OPEN_FAIL", "Could not open journal file for replay: %v", err)
+	}
+
+	// 3. State Push
+	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Restoring %d active blocks to backend...", len(p.activeBlocks))
+	// Create a sorted list of table durations for best-fit matching
+	type tableInfo struct {
+		duration time.Duration
+		name     string
+	}
+	var sortedTables []tableInfo
+	for d, n := range p.Config.DurationToTableName {
+		sortedTables = append(sortedTables, tableInfo{duration: d, name: n})
+	}
+	sort.Slice(sortedTables, func(i, j int) bool {
+		return sortedTables[i].duration < sortedTables[j].duration
+	})
+
+	for ip, info := range p.activeBlocks {
+		// Before restoring, check if the IP is now a good actor.
+		tempEntry := &LogEntry{IPInfo: utils.NewIPInfo(ip)}
+		if isGood, reason := isGoodActor(p, tempEntry); isGood {
+			p.LogFunc(logging.LevelInfo, "STATE_RESTORE_SKIP", "Skipping restore for %s (good_actor: %s)", ip, reason)
+			continue // Don't restore blocks for good actors.
+		}
+
+		remainingDuration := time.Until(info.UnblockTime)
+		if remainingDuration > 0 {
+			bestFitDuration := p.Config.DefaultBlockDuration
+			for _, t := range sortedTables {
+				if remainingDuration <= t.duration {
+					bestFitDuration = t.duration
+					break
+				}
+			}
+			if err := p.Blocker.Block(utils.NewIPInfo(ip), bestFitDuration, info.Reason); err != nil {
+				p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore block for IP %s: %v", ip, err)
+			}
+		}
+	}
+
+	// 4. Open journal for appending
+	p.journalHandle, err = persistence.OpenJournalForAppend(journalPath)
+	if err != nil {
+		p.LogFunc(logging.LevelError, "JOURNAL_OPEN_FAIL", "Failed to open journal for writing: %v", err)
+		return err
+	}
+	return nil
+}
+
 // execute is the main application logic, decoupled from command-line parsing.
 func execute(params *commandline.AppParameters) error {
 	if err := handleStartupFlags(params); err != nil {
@@ -231,92 +323,7 @@ func execute(params *commandline.AppParameters) error {
 	p.Blocker = rateLimitedBlocker
 
 	if p.persistenceEnabled {
-		// -- STATE RESTORATION --
-		if err := os.MkdirAll(p.stateDir, 0750); err != nil {
-			return fmt.Errorf("failed to create state directory '%s': %v", p.stateDir, err)
-		}
-		p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.stateDir)
-
-		// 1. Load snapshot
-		snapshot, err := persistence.LoadSnapshot(filepath.Join(p.stateDir, "state.snapshot"))
-		if err != nil {
-			p.LogFunc(logging.LevelError, "STATE_LOAD_FAIL", "Failed to load snapshot: %v", err)
-			return err
-		}
-		p.activeBlocks = snapshot.ActiveBlocks
-
-		// 2. Replay Journal
-		journalPath := filepath.Join(p.stateDir, "events.log")
-		journalFile, err := os.Open(journalPath)
-		if err == nil {
-			scanner := bufio.NewScanner(journalFile)
-			for scanner.Scan() {
-				var event persistence.AuditEvent
-				if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-					p.LogFunc(logging.LevelWarning, "JOURNAL_PARSE_FAIL", "Failed to parse journal event: %v", err)
-					continue
-				}
-				if event.Timestamp.After(snapshot.Timestamp) {
-					switch event.Event {
-					case persistence.EventTypeBlock:
-						p.activeBlocks[event.IP] = persistence.ActiveBlockInfo{
-							UnblockTime: event.Timestamp.Add(event.Duration),
-							Reason:      event.Reason,
-						}
-					case persistence.EventTypeUnblock:
-						delete(p.activeBlocks, event.IP)
-					}
-				}
-			}
-			if err := journalFile.Close(); err != nil {
-				p.LogFunc(logging.LevelWarning, "JOURNAL_CLOSE_FAIL", "Failed to close journal file: %v", err)
-			}
-		} else if !os.IsNotExist(err) {
-			p.LogFunc(logging.LevelWarning, "JOURNAL_OPEN_FAIL", "Could not open journal file for replay: %v", err)
-		}
-
-		// 3. State Push
-		p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Restoring %d active blocks to backend...", len(p.activeBlocks))
-		// Create a sorted list of table durations for best-fit matching
-		type tableInfo struct {
-			duration time.Duration
-			name     string
-		}
-		var sortedTables []tableInfo
-		for d, n := range p.Config.DurationToTableName {
-			sortedTables = append(sortedTables, tableInfo{duration: d, name: n})
-		}
-		sort.Slice(sortedTables, func(i, j int) bool {
-			return sortedTables[i].duration < sortedTables[j].duration
-		})
-
-		for ip, info := range p.activeBlocks {
-			// Before restoring, check if the IP is now a good actor.
-			tempEntry := &LogEntry{IPInfo: utils.NewIPInfo(ip)}
-			if isGood, reason := isGoodActor(p, tempEntry); isGood {
-				p.LogFunc(logging.LevelInfo, "STATE_RESTORE_SKIP", "Skipping restore for %s (good_actor: %s)", ip, reason)
-				continue // Don't restore blocks for good actors.
-			}
-
-			remainingDuration := time.Until(info.UnblockTime)
-			if remainingDuration > 0 {
-				bestFitDuration := p.Config.DefaultBlockDuration
-				for _, t := range sortedTables {
-					if remainingDuration <= t.duration {
-						bestFitDuration = t.duration
-						break
-					}
-				}
-				if err := p.Blocker.Block(utils.NewIPInfo(ip), bestFitDuration, info.Reason); err != nil {
-					p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore block for IP %s: %v", ip, err)
-				}
-			}
-		}
-
-		// 4. Open journal for appending
-		p.journalHandle, err = persistence.OpenJournalForAppend(journalPath)
-		if err != nil {
-			p.LogFunc(logging.LevelError, "JOURNAL_OPEN_FAIL", "Failed to open journal for writing: %v", err)
+		if err := restorePersistenceState(p); err != nil {
 			return err
 		}
 	}
