@@ -82,15 +82,24 @@ func main() {
 	defer customPanic()
 	params, err := commandline.ParseParameters(os.Args)
 	if err != nil {
-		// A parsing error will have already printed usage information.
-		// We exit with a non-zero code after the error is logged.
-		log.Printf("[FATAL] %v", err)
-		os.Exit(1)
+		switch err.Error() {
+		case "flag: help requested", "no flag: help requested":
+			os.Exit(0)
+		default:
+			// A parsing error will have already printed usage information.
+			// We exit with a non-zero code after the error is logged.
+			log.Printf("[FATAL] %v", err)
+			os.Exit(1)
+		}
 	}
 
 	if err := execute(params); err != nil {
-		log.Printf("[FATAL] %v", err)
-		os.Exit(1)
+		if err.Error() != "exit" {
+			log.Printf("[FATAL] %v", err)
+			os.Exit(1)
+		} else {
+			os.Exit(0)
+		}
 	}
 }
 

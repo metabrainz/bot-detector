@@ -86,31 +86,55 @@ func ParseParameters(args []string) (*AppParameters, error) {
 		TopN:         *cliFlags.TopN,
 	}
 
-	// Most modes require a config file. The flag has a default, so this
-	// error is mainly for cases like `--config ""`.
-	if params.ConfigPath == "" {
-		switch {
-		case params.ShowVersion:
-			return params, nil
-		case params.Check:
-			return nil, fmt.Errorf("--config flag is required for --check")
-		case params.DumpBackends:
-			return nil, fmt.Errorf("--config flag is required for --dump-backends")
-		default:
-			return nil, fmt.Errorf("--config flag is required")
-		}
-	}
-	if params.LogPath == "" && !params.DryRun {
-		return nil, fmt.Errorf("--log-path is required in live mode")
+	// --version is a special case, returns ASAP
+	if params.ShowVersion {
+		return params, nil
 	}
 
-	// Resolve the config path to an absolute path immediately.
+	hasConfigPath := false
+	hasLogPath := false
+
+	// Resolve absolute paths immediately.
 	if params.ConfigPath != "" {
 		absPath, err := filepath.Abs(params.ConfigPath)
 		if err != nil {
 			return nil, fmt.Errorf("could not determine absolute path for config file: %v", err)
 		}
 		params.ConfigPath = absPath
+		hasConfigPath = true
+	}
+
+	if params.LogPath != "" {
+		absPath, err := filepath.Abs(params.LogPath)
+		if err != nil {
+			return nil, fmt.Errorf("could not determine absolute path for log file: %v", err)
+		}
+		params.LogPath = absPath
+		hasLogPath = true
+	}
+
+	if params.StateDir != "" {
+		absPath, err := filepath.Abs(params.StateDir)
+		if err != nil {
+			return nil, fmt.Errorf("could not determine absolute path for state directory: %v", err)
+		}
+		params.StateDir = absPath
+	}
+
+	// Dry run don't require a log path
+	requireLogPath := true
+	requireConfigPath := true
+
+	if params.Check || params.DumpBackends || params.DryRun {
+		requireLogPath = false
+	}
+
+	if requireConfigPath && !hasConfigPath {
+		return nil, fmt.Errorf("--config <path> is required")
+	}
+
+	if requireLogPath && !hasLogPath {
+		return nil, fmt.Errorf("--log-path <path> is required")
 	}
 
 	return params, nil

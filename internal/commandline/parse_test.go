@@ -1,13 +1,16 @@
 package commandline
 
 import (
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestParseParameters(t *testing.T) {
+	configPath := "/etc/bot-detector/config.yaml"
+	logPath := "/var/log/access.log"
+	expectConfigPath := "--config <path> is required"
+	expectLogPath := "--log-path <path> is required"
 	tests := []struct {
 		name        string
 		args        []string
@@ -17,10 +20,10 @@ func TestParseParameters(t *testing.T) {
 	}{
 		{
 			name: "live mode (basic valid flags)",
-			args: []string{"bot-detector", "--config", "myconfig.yaml", "--log-path", "/var/log/access.log"},
+			args: []string{"bot-detector", "--config", configPath, "--log-path", logPath},
 			want: &AppParameters{
-				ConfigPath: "myconfig.yaml",
-				LogPath:    "/var/log/access.log",
+				ConfigPath: configPath,
+				LogPath:    logPath,
 			},
 			wantErr: false,
 		},
@@ -28,8 +31,8 @@ func TestParseParameters(t *testing.T) {
 			name: "all flags set",
 			args: []string{
 				"bot-detector",
-				"--config", "c.yaml",
-				"--log-path", "l.log",
+				"--config", configPath,
+				"--log-path", logPath,
 				"--state-dir", "/state",
 				"--dry-run",
 				"--exit-on-eof",
@@ -41,8 +44,8 @@ func TestParseParameters(t *testing.T) {
 				"--http-server", ":9090",
 			},
 			want: &AppParameters{
-				ConfigPath:   "c.yaml",
-				LogPath:      "l.log",
+				ConfigPath:   configPath,
+				LogPath:      logPath,
 				StateDir:     "/state",
 				DryRun:       true,
 				ExitOnEOF:    true,
@@ -63,33 +66,33 @@ func TestParseParameters(t *testing.T) {
 		},
 		{
 			name:        "missing required log-path in live mode",
-			args:        []string{"bot-detector", "--config", "myconfig.yaml"},
+			args:        []string{"bot-detector", "--config", configPath},
 			wantErr:     true,
-			errContains: "--log-path is required in live mode",
+			errContains: expectLogPath,
 		},
 		{
 			name:        "missing required config for live mode",
-			args:        []string{"bot-detector", "--log-path", "/var/log/access.log"},
+			args:        []string{"bot-detector", "--log-path", logPath},
 			wantErr:     true,
-			errContains: "--config flag is required",
+			errContains: expectConfigPath,
 		},
 		{
 			name:        "check requires config",
 			args:        []string{"bot-detector", "--check"},
 			wantErr:     true,
-			errContains: "--config flag is required for --check",
+			errContains: expectConfigPath,
 		},
 		{
 			name:        "dump-backends requires config",
 			args:        []string{"bot-detector", "--dump-backends"},
 			wantErr:     true,
-			errContains: "--config flag is required for --dump-backends",
+			errContains: expectConfigPath,
 		},
 		{
 			name: "dry-run without log-path is valid (reads from stdin)",
-			args: []string{"bot-detector", "--config", "c.yaml", "--dry-run"},
+			args: []string{"bot-detector", "--config", configPath, "--dry-run"},
 			want: &AppParameters{
-				ConfigPath: "c.yaml",
+				ConfigPath: configPath,
 				DryRun:     true,
 				LogPath:    "", // LogPath should be empty
 			},
@@ -106,7 +109,6 @@ func TestParseParameters(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ParseParameters(tt.args)
-
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("ParseParameters() error = nil, wantErr %v", tt.wantErr)
@@ -121,17 +123,8 @@ func TestParseParameters(t *testing.T) {
 				t.Fatalf("ParseParameters() unexpected error = %v", err)
 			}
 
-			// If a config path is expected, resolve it to absolute before comparing.
-			if tt.want != nil && tt.want.ConfigPath != "" {
-				absPath, absErr := filepath.Abs(tt.want.ConfigPath)
-				if absErr != nil {
-					t.Fatalf("failed to get absolute path for expected config path: %v", absErr)
-				}
-				tt.want.ConfigPath = absPath
-			}
-
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ParseParameters() = %+v, want %+v", got, tt.want)
+				t.Errorf("ParseParameters() = got %+v, want %+v", got, tt.want)
 			}
 		})
 	}
