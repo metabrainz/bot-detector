@@ -44,9 +44,11 @@ This is an append-only log file where every state-changing action is recorded *b
 
 This file is a complete, point-in-time snapshot of all *active* blocks known to the system.
 
-- **Format:** A single JSON object.
+- **Format:** A gzip-compressed JSON object. The application automatically compresses snapshots on write and decompresses them on read.
 - **Content:** Contains the timestamp of the snapshot and a map of all currently blocked IPs to their calculated unblock time and reason.
-- **Reliability:** The snapshot is written using an **atomic rename** pattern (`write to .tmp -> fsync -> rename`). This ensures that a valid, non-corrupt snapshot is always available, even if the application crashes mid-write.
+- **Compression:** Snapshots are automatically gzipped to reduce disk usage (typically 80-90% size reduction) and improve I/O performance.
+- **Backward Compatibility:** The loader automatically detects and handles both gzipped and legacy plain JSON snapshots by checking the gzip magic number.
+- **Reliability:** The snapshot is written using an **atomic rename** pattern (`compress -> write to .tmp -> fsync -> rename`). This ensures that a valid, non-corrupt snapshot is always available, even if the application crashes mid-write.
 - **Purpose:** Its primary role is to ensure fast application startups by avoiding the need to replay a long history of events.
 
 ## Visual Overview
@@ -79,7 +81,7 @@ graph TD
     subgraph "3. Periodic Compaction (Time-Driven)"
         MainLoop --> M["Compaction Interval Reached"]
         M --> N["Filter expired blocks from memory"]
-        N --> O["Write in-memory state to new .tmp snapshot"]
+        N --> O["Compress and write in-memory state to new .tmp snapshot"]
         O --> P["fsync .tmp snapshot"]
         P --> Q["Atomic Rename: .tmp -> state.snapshot"]
         Q --> R["Truncate events.log"]
@@ -102,8 +104,8 @@ On startup, `bot-detector` follows a specific process to bring the backend's sta
 
 To prevent the `events.log` from growing infinitely, a periodic compaction process runs. The interval is configurable via `compaction_interval` in the YAML config (default is 1 hour).
 
-1.  **Snapshot:** The application creates a new, clean snapshot of the current in-memory state (after purging any expired entries) using the atomic rename pattern.
-2.  **Truncate:** Once the new snapshot is safely on disk, the `events.log` is truncated (cleared), as all its information is now consolidated in the new snapshot.
+1.  **Snapshot:** The application creates a new, clean gzipped snapshot of the current in-memory state (after purging any expired entries) using the atomic rename pattern.
+2.  **Truncate:** Once the new compressed snapshot is safely on disk, the `events.log` is truncated (cleared), as all its information is now consolidated in the new snapshot.
 
 ## Failure Scenarios
 
@@ -130,7 +132,13 @@ If the entire server is lost, the `state.snapshot` file is the key asset for rec
 
 1.  **Prepare New Server:** Set up a new machine with the `bot-detector` binary and its backend.
 2.  **Restore Snapshot:** Place the backed-up `state.snapshot` file into the state directory. **Ensure no `events.log` file is present.**
-3.  **Start Application:** Launch `bot-detector`. It will load the snapshot, see there is no journal to replay, and proceed to push the state to the backend.
+3.  **Start Application:** Launch `bot-detector`. It will load the snapshot (automatically detecting whether it's gzipped or plain JSON), see there is no journal to replay, and proceed to push the state to the backend.
 4.  **Resume:** The system will create a new `events.log` and resume normal operation.
 
 This means your Recovery Point Objective (RPO) is determined by how frequently you back up the `state.snapshot` file.
+
+### Backup Considerations
+
+- **Format Compatibility:** Snapshot files are gzip-compressed for efficiency. Both compressed and legacy plain JSON snapshots can be restored.
+- **Size:** Gzipped snapshots are typically 80-90% smaller than plain JSON, making backups faster and more storage-efficient.
+- **Inspection:** To manually inspect a gzipped snapshot, use: `gunzip -c state.snapshot | jq .`

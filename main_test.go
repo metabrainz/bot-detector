@@ -273,22 +273,37 @@ func TestCompaction(t *testing.T) {
 	// --- Assert ---
 	// 1. Check that the snapshot file was created with the correct content.
 	snapshotPath := filepath.Join(tempDir, "state.snapshot")
-	snapshotData, err := os.ReadFile(snapshotPath)
+	loadedSnapshot, err := persistence.LoadSnapshot(snapshotPath)
 	if err != nil {
-		t.Fatalf("Failed to read snapshot file: %v", err)
+		t.Fatalf("Failed to load snapshot file: %v", err)
 	}
 
-	expectedJSON := `{
-  "snapshot_time": "2025-01-01T12:00:00Z",
-  "active_blocks": {
-    "1.1.1.1": {
-      "unblock_time": "2025-01-01T13:00:00Z",
-      "reason": "chain1"
-    }
-  }
-}`
-	if strings.TrimSpace(string(snapshotData)) != strings.TrimSpace(expectedJSON) {
-		t.Errorf("Snapshot content mismatch.\nGot:\n%s\n\nExpected:\n%s", string(snapshotData), expectedJSON)
+	// Verify the snapshot timestamp
+	expectedTime := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+	if !loadedSnapshot.Timestamp.Equal(expectedTime) {
+		t.Errorf("Snapshot timestamp mismatch. Got: %v, Expected: %v", loadedSnapshot.Timestamp, expectedTime)
+	}
+
+	// Verify only the non-expired block is in the snapshot
+	if len(loadedSnapshot.ActiveBlocks) != 1 {
+		t.Errorf("Expected 1 active block in snapshot, got %d", len(loadedSnapshot.ActiveBlocks))
+	}
+
+	if block, exists := loadedSnapshot.ActiveBlocks["1.1.1.1"]; !exists {
+		t.Errorf("Expected block for 1.1.1.1 not found in snapshot")
+	} else {
+		expectedUnblockTime := time.Date(2025, 1, 1, 13, 0, 0, 0, time.UTC)
+		if !block.UnblockTime.Equal(expectedUnblockTime) {
+			t.Errorf("Block unblock time mismatch. Got: %v, Expected: %v", block.UnblockTime, expectedUnblockTime)
+		}
+		if block.Reason != "chain1" {
+			t.Errorf("Block reason mismatch. Got: %v, Expected: chain1", block.Reason)
+		}
+	}
+
+	// Verify the expired block (2.2.2.2) was filtered out
+	if _, exists := loadedSnapshot.ActiveBlocks["2.2.2.2"]; exists {
+		t.Errorf("Expired block for 2.2.2.2 should not be in snapshot")
 	}
 
 	// 2. Check that the journal file is now empty.
