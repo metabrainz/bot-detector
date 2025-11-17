@@ -1,6 +1,7 @@
 package commandline
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -118,6 +119,15 @@ func TestParseParameters(t *testing.T) {
 
 			if err != nil {
 				t.Fatalf("ParseParameters() unexpected error = %v", err)
+			}
+
+			// If a config path is expected, resolve it to absolute before comparing.
+			if tt.want != nil && tt.want.ConfigPath != "" {
+				absPath, absErr := filepath.Abs(tt.want.ConfigPath)
+				if absErr != nil {
+					t.Fatalf("failed to get absolute path for expected config path: %v", absErr)
+				}
+				tt.want.ConfigPath = absPath
 			}
 
 			if !reflect.DeepEqual(got, tt.want) {

@@ -104,13 +104,10 @@ func handleStartupFlags(params *commandline.AppParameters) error {
 	}
 
 	if params.Check {
-		absConfigPath, err := filepath.Abs(params.ConfigPath)
-		if err != nil {
-			return fmt.Errorf("could not determine absolute path for config file: %v", err)
-		}
 		opts := LoadConfigOptions{
-			ConfigPath: absConfigPath,
+			ConfigPath: params.ConfigPath,
 		}
+		var err error
 		if _, err = LoadConfigFromYAML(opts); err != nil {
 			return fmt.Errorf("configuration check failed: %v", err)
 		}
@@ -134,19 +131,14 @@ func execute(params *commandline.AppParameters) error {
 		return err
 	}
 
-	// Resolve the config path to an absolute path to make file matcher paths relative to it.
-	absConfigPath, err := filepath.Abs(params.ConfigPath)
-	if err != nil {
-		return fmt.Errorf("could not determine absolute path for config file: %v", err)
-	}
 	// Get the modification time of the config file to initialize LastModTime.
-	fileInfo, err := os.Stat(absConfigPath)
+	fileInfo, err := os.Stat(params.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("could not stat config file: %v", err)
 	}
 	// Load initial configuration from YAML.
 	opts := LoadConfigOptions{
-		ConfigPath: absConfigPath,
+		ConfigPath: params.ConfigPath,
 	}
 	loadedCfg, err := LoadConfigFromYAML(opts)
 	if err != nil {
@@ -201,7 +193,7 @@ func execute(params *commandline.AppParameters) error {
 		signalCh:             make(chan os.Signal, 1),
 		LogFunc:              logging.LogOutput,
 		NowFunc:              time.Now, // Use the real time.Now in production.
-		ConfigPath:           absConfigPath,
+		ConfigPath:           params.ConfigPath,
 		LogPath:              params.LogPath,
 		ReloadOn:             params.ReloadOn,
 		TopN:                 params.TopN,

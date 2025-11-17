@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // AppParameters holds the fully parsed and validated configuration
@@ -74,6 +75,16 @@ func ParseParameters(args []string) (*AppParameters, error) {
 	if params.LogPath == "" && !params.DryRun {
 		return nil, fmt.Errorf("--log-path is required in live mode")
 	}
+
+	// Resolve the config path to an absolute path immediately.
+	if params.ConfigPath != "" {
+		absPath, err := filepath.Abs(params.ConfigPath)
+		if err != nil {
+			return nil, fmt.Errorf("could not determine absolute path for config file: %v", err)
+		}
+		params.ConfigPath = absPath
+	}
+
 	return params, nil
 }
 
