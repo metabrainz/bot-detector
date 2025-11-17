@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // AppParameters holds the fully parsed and validated configuration
@@ -21,6 +22,33 @@ type AppParameters struct {
 	ShowVersion  bool
 	StateDir     string
 	TopN         int
+}
+
+// String implements the fmt.Stringer interface for AppParameters.
+func (p AppParameters) String() string {
+	var sb strings.Builder
+
+	const labelFormat = "  %-20s: "
+	writeField := func(label string, format string, value interface{}) {
+		sb.WriteString(fmt.Sprintf(labelFormat+format+"\n", label, value))
+	}
+
+	sb.WriteString("--- App Parameters ---\n")
+
+	writeField("Check", "%v", p.Check)
+	writeField("ConfigPath", "%q", p.ConfigPath)
+	writeField("DryRun", "%v", p.DryRun)
+	writeField("DumpBackends", "%v", p.DumpBackends)
+	writeField("ExitOnEOF", "%v", p.ExitOnEOF)
+	writeField("HTTPServer", "%q", p.HTTPServer)
+	writeField("LogPath", "%q", p.LogPath)
+	writeField("ReloadOn", "%q", p.ReloadOn)
+	writeField("ShowVersion", "%v", p.ShowVersion)
+	writeField("StateDir", "%q", p.StateDir)
+	writeField("TopN", "%v", p.TopN)
+
+	sb.WriteString("----------------------\n")
+	return sb.String()
 }
 
 // ParseParameters defines and parses all command-line flags, validates them,
