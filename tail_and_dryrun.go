@@ -832,6 +832,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 		// On the very first run, seek to the end to ignore old content,
 		// but only if we're not in exit-on-eof mode.
 		seekToEnd := firstRun && !p.ExitOnEOF
+		isFirstRun := firstRun // Save before modifying
 		firstRun = false
 
 		tailer, err := NewTailer(p, seekToEnd)
@@ -843,7 +844,9 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 		}
 
 		// Signal for test synchronization, if the channel is set.
-		if readySignal != nil {
+		// IMPORTANT: Only signal on the FIRST successful open, not on reopens after rotation.
+		// Signaling on every reopen can cause deadlock if nothing is listening.
+		if readySignal != nil && isFirstRun {
 			readySignal <- struct{}{}
 		}
 

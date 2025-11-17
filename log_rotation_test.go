@@ -384,11 +384,10 @@ func TestRotation_DuringActiveReading(t *testing.T) {
 func TestRotation_RapidSequential(t *testing.T) {
 	h := newRotationTestHarness(t)
 
-	// NOTE: Testing reveals a bug where the tailer stops responding after 2 rapid rotations.
-	// The tailer successfully handles 2 rotations but deadlocks/stops on the 3rd.
-	// TODO: Investigate and fix the bug, then increase to 5+ rotations.
-	// For now, this test validates that 2 sequential rotations work correctly.
-	const numRotations = 2
+	// Test with 5 rapid rotations to verify the readySignal deadlock bug is fixed.
+	// Previously, the tailer would deadlock after 2 rotations because readySignal
+	// was sent on every reopen, causing channel blocking when nobody was listening.
+	const numRotations = 5
 	const linesPerRotation = 100
 	const totalLines = numRotations * linesPerRotation
 
@@ -613,9 +612,9 @@ func TestRotation_LargeFileGrowthPattern(t *testing.T) {
 	h := newRotationTestHarness(t)
 
 	// Use larger lines to quickly reach substantial file sizes
-	const lineSize = 500                    // bytes per line (including newline)
-	const linesBeforeRotation = 100         // ~50KB before rotation
-	const linesAfterRotation = 150          // ~75KB after rotation (larger than before)
+	const lineSize = 500            // bytes per line (including newline)
+	const linesBeforeRotation = 100 // ~50KB before rotation
+	const linesAfterRotation = 150  // ~75KB after rotation (larger than before)
 	const totalLines = linesBeforeRotation + linesAfterRotation
 
 	// Track rotation detection
