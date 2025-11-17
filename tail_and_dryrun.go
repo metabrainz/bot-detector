@@ -502,71 +502,26 @@ func collectMetricsSummaryData(p *Processor, elapsedTime time.Duration, filterTa
 	return data
 }
 
-// logMetricsSummary calculates and logs a summary of all application metrics.
-// It is a generic function that can be used in different contexts (e.g., dry-run, periodic live summary).
-//
-// Parameters:
-//   - p: The Processor containing the metrics.
-//   - elapsedTime: The duration over which the metrics were collected.
-//   - logFunc: The logging function to use for output.
-//   - logTag: The tag to use for each log line (e.g., "METRICS").
-//   - filterTag: The struct tag to filter which general metrics to display (e.g., "dryrun").
-func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag, filterTag string) {
-	if !p.EnableMetrics { // Added check
-		logFunc(logging.LevelInfo, logTag, "Metrics are disabled.")
-		return
-	}
-
-	data := collectMetricsSummaryData(p, elapsedTime, filterTag)
-
-	// --- Collect all metrics data before printing ---
-	cmdsPerBlockerMetrics := collectMetricsFromMap(p.Metrics.CmdsPerBlocker)
-
-	var blockDurationMetrics []struct { // Keep this separate due to time.Duration key
-		Duration time.Duration
-		Count    int64
-	}
-	p.Metrics.BlockDurations.Range(func(key, value interface{}) bool {
-		duration, _ := key.(time.Duration)
-		counter, _ := value.(*atomic.Int64)
-		if count := counter.Load(); count > 0 {
-			blockDurationMetrics = append(blockDurationMetrics, struct {
-				Duration time.Duration
-				Count    int64
-			}{duration, count})
-		}
-		return true
-	})
-
-	skipsByReasonMetrics := collectMetricsFromMap(p.Metrics.SkipsByReason)
-	matchKeyHitsMetrics := collectMetricsFromMap(p.Metrics.MatchKeyHits)
-	var totalMatchKeyHits int64
-	for _, item := range matchKeyHitsMetrics {
-		totalMatchKeyHits += item.Count
-	}
-	goodActorHitsMetrics := collectMetricsFromMap(p.Metrics.GoodActorHits)
-
-	// --- General Processing Statistics ---
+func logGeneralStats(logFunc func(logging.LogLevel, string, string, ...interface{}), logTag string, data *MetricsSummaryData) {
 	logFunc(logging.LevelInfo, logTag, "--- General Processing Statistics ---")
 	logFunc(logging.LevelInfo, logTag, "Log Source: %s", data.LogSource)
 	logFunc(logging.LevelInfo, logTag, "Lines Processed: %d", data.LinesProcessed)
-	// Print Valid Hits, Parse Errors, Reordered Entries from GeneralMetrics
 	for _, metric := range data.GeneralMetrics {
 		if metric.Name == "Valid Hits" || metric.Name == "Parse Errors" || metric.Name == "Reordered Entries" {
 			logFunc(logging.LevelInfo, logTag, "%s: %d (%s)", metric.Name, metric.Value, formatPercentage(metric.Value, data.LinesProcessed))
 		}
 	}
-	logFunc(logging.LevelInfo, logTag, "Time Elapsed: %v", elapsedTime.Round(time.Second))
-	if elapsedTime.Seconds() > 0 {
-		data.LinesPerSecond = float64(data.LinesProcessed) / elapsedTime.Seconds()
+	logFunc(logging.LevelInfo, logTag, "Time Elapsed: %v", data.ElapsedTime.Round(time.Second))
+	if data.ElapsedTime.Seconds() > 0 {
+		data.LinesPerSecond = float64(data.LinesProcessed) / data.ElapsedTime.Seconds()
 		logFunc(logging.LevelInfo, logTag, "Rate: %.2f lines/sec", data.LinesPerSecond)
 	} else {
 		logFunc(logging.LevelInfo, logTag, "Rate: n/a (run too fast)")
 	}
+}
 
-	// --- Actor Statistics ---
+func logActorStats(logFunc func(logging.LogLevel, string, string, ...interface{}), logTag string, data *MetricsSummaryData, skipsByReasonMetrics, goodActorHitsMetrics []metricItem) {
 	logFunc(logging.LevelInfo, logTag, "--- Actor Statistics ---")
-	// Print Good Actors Skipped and Actors Cleaned from GeneralMetrics
 	for _, metric := range data.GeneralMetrics {
 		if metric.Name == "Good Actors Skipped" || metric.Name == "Actors Cleaned" {
 			logFunc(logging.LevelInfo, logTag, "%s: %d (%s)", metric.Name, metric.Value, formatPercentage(metric.Value, data.LinesProcessed))
@@ -584,8 +539,12 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Key, metric.Count)
 		}
 	}
+}
 
-	// --- Chain and Action Statistics ---
+func logChainAndActionStats(logFunc func(logging.LogLevel, string, string, ...interface{}), logTag string, data *MetricsSummaryData, cmdsPerBlockerMetrics, matchKeyHitsMetrics []metricItem, blockDurationMetrics []struct {
+	Duration time.Duration
+	Count    int64
+}, totalMatchKeyHits int64) {
 	logFunc(logging.LevelInfo, logTag, "--- Chain and Action Statistics ---")
 	logFunc(logging.LevelInfo, logTag, "Actions Triggered: Block: %d, Log: %d", data.BlockActionsTriggered, data.LogActionsTriggered)
 	logFunc(logging.LevelInfo, logTag, "Chains Completed: %d", data.TotalChainsCompleted)
@@ -612,10 +571,11 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Key, metric.Count)
 		}
 	}
+}
 
+func logPerChainMetrics(p *Processor, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag string, data *MetricsSummaryData) {
 	validHits := p.Metrics.ValidHits.Load()
 
-	// Log the consolidated per-chain breakdown.
 	if len(data.ChainMetrics) > 0 {
 		logFunc(logging.LevelInfo, logTag, "--- Per-Chain Metrics ---")
 		for _, metric := range data.ChainMetrics {
@@ -631,8 +591,54 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 			}
 		}
 	}
+}
 
-	// Finally, log the top actors summary if enabled.
+// logMetricsSummary calculates and logs a summary of all application metrics.
+// It is a generic function that can be used in different contexts (e.g., dry-run, periodic live summary).
+//
+// Parameters:
+//   - p: The Processor containing the metrics.
+//   - elapsedTime: The duration over which the metrics were collected.
+//   - logFunc: The logging function to use for output.
+//   - logTag: The tag to use for each log line (e.g., "METRICS").
+//   - filterTag: The struct tag to filter which general metrics to display (e.g., "dryrun").
+func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag, filterTag string) {
+	if !p.EnableMetrics {
+		logFunc(logging.LevelInfo, logTag, "Metrics are disabled.")
+		return
+	}
+
+	data := collectMetricsSummaryData(p, elapsedTime, filterTag)
+
+	cmdsPerBlockerMetrics := collectMetricsFromMap(p.Metrics.CmdsPerBlocker)
+	var blockDurationMetrics []struct {
+		Duration time.Duration
+		Count    int64
+	}
+	p.Metrics.BlockDurations.Range(func(key, value interface{}) bool {
+		duration, _ := key.(time.Duration)
+		counter, _ := value.(*atomic.Int64)
+		if count := counter.Load(); count > 0 {
+			blockDurationMetrics = append(blockDurationMetrics, struct {
+				Duration time.Duration
+				Count    int64
+			}{duration, count})
+		}
+		return true
+	})
+
+	skipsByReasonMetrics := collectMetricsFromMap(p.Metrics.SkipsByReason)
+	matchKeyHitsMetrics := collectMetricsFromMap(p.Metrics.MatchKeyHits)
+	var totalMatchKeyHits int64
+	for _, item := range matchKeyHitsMetrics {
+		totalMatchKeyHits += item.Count
+	}
+	goodActorHitsMetrics := collectMetricsFromMap(p.Metrics.GoodActorHits)
+
+	logGeneralStats(logFunc, logTag, data)
+	logActorStats(logFunc, logTag, data, skipsByReasonMetrics, goodActorHitsMetrics)
+	logChainAndActionStats(logFunc, logTag, data, cmdsPerBlockerMetrics, matchKeyHitsMetrics, blockDurationMetrics, totalMatchKeyHits)
+	logPerChainMetrics(p, logFunc, logTag, data)
 	logTopActorsSummary(p, logFunc)
 }
 
