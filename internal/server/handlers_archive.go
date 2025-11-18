@@ -4,7 +4,9 @@ import (
 	"archive/tar"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/types"
+	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -30,31 +32,19 @@ func archiveHandler(p Provider) http.HandlerFunc {
 			}
 		}
 
-		// Set headers
-		w.Header().Set("Content-Type", "application/gzip")
-		w.Header().Set("Content-Disposition", `attachment; filename="config_archive.tar.gz"`)
-		w.Header().Set("Last-Modified", latestModTime.UTC().Format(http.TimeFormat))
+		// Create a buffer to hold the entire archive so we can compute a checksum.
+		var buf bytes.Buffer
 
-		// Create a gzip writer that writes to the HTTP response writer.
-		gw := gzip.NewWriter(w)
-		defer func() {
-			if err := gw.Close(); err != nil {
-				logging.LogOutput(logging.LevelError, "archiveHandler", "Error closing gzip writer: %v", err)
-			}
-		}()
+		// Create a gzip writer that writes to the buffer.
+		gw := gzip.NewWriter(&buf)
 
 		// Create a tar writer that writes to the gzip writer.
 		tw := tar.NewWriter(gw)
-		defer func() {
-			if err := tw.Close(); err != nil {
-				logging.LogOutput(logging.LevelError, "archiveHandler", "Error closing tar writer: %v", err)
-			}
-		}()
 
 		// Add the main config.yaml to the archive.
 		if err := addBytesToTar(tw, "config.yaml", mainConfig, modTime); err != nil {
+			http.Error(w, "Failed to create archive", http.StatusInternalServerError)
 			p.Log(0, "ARCHIVE_ERROR", "Failed to add main config to archive: %v", err)
-			// Don't write an HTTP error here as headers are likely already sent.
 			return
 		}
 
@@ -78,10 +68,39 @@ func archiveHandler(p Provider) http.HandlerFunc {
 				}
 
 				if err := addBytesToTar(tw, relPath, []byte(content), dep.CurrentStatus.ModTime); err != nil {
+					http.Error(w, "Failed to create archive", http.StatusInternalServerError)
 					p.Log(0, "ARCHIVE_ERROR", "Failed to add dependency '%s' to archive: %v", path, err)
-					return // Stop processing if there's an error.
+					return
 				}
 			}
+		}
+
+		// Close the tar and gzip writers to flush all data to the buffer.
+		if err := tw.Close(); err != nil {
+			http.Error(w, "Failed to finalize archive", http.StatusInternalServerError)
+			logging.LogOutput(logging.LevelError, "archiveHandler", "Error closing tar writer: %v", err)
+			return
+		}
+		if err := gw.Close(); err != nil {
+			http.Error(w, "Failed to finalize archive", http.StatusInternalServerError)
+			logging.LogOutput(logging.LevelError, "archiveHandler", "Error closing gzip writer: %v", err)
+			return
+		}
+
+		// Compute SHA256 checksum of the archive content.
+		archiveBytes := buf.Bytes()
+		hash := sha256.Sum256(archiveBytes)
+		etag := fmt.Sprintf("\"%x\"", hash)
+
+		// Set headers (including ETag with checksum).
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", `attachment; filename="config_archive.tar.gz"`)
+		w.Header().Set("Last-Modified", latestModTime.UTC().Format(http.TimeFormat))
+		w.Header().Set("ETag", etag)
+
+		// Write the buffered archive to the response.
+		if _, err := w.Write(archiveBytes); err != nil {
+			p.Log(0, "ARCHIVE_ERROR", "Failed to write archive to response: %v", err)
 		}
 	}
 }
