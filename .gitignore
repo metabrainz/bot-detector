@@ -32,7 +32,7 @@ go.work.sum
 # .vscode/
 
 # Compiled binary
-bot-detector
+/bot-detector
 
 # AI
 .gemini/

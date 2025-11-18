@@ -39,7 +39,7 @@ func TestFileDependency_ContentChange(t *testing.T) {
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "change_file.txt")
-	configPath := filepath.Join(tempDir, "config.yaml")
+	configFilePath := filepath.Join(tempDir, "config.yaml")
 
 	// Create initial file content
 	initialContent := "old_line1\nold_line2"
@@ -58,12 +58,12 @@ chains:
       - field_matches:
           Path: "file:` + testFilePath + `"
 `
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(configFilePath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
 	}
 
 	// --- Initial Load ---
-	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: configFilePath})
 	if err != nil {
 		t.Fatalf("Initial config.LoadConfigFromYAML failed: %v", err)
 	}
@@ -90,7 +90,7 @@ chains:
 		LastModTime:      time.Now(), // Set a LastModTime for the config itself
 		FileDependencies: loadedCfg.FileDependencies,
 	}, logCaptureFunc)
-	p.ConfigPath = configPath
+	p.ConfigFilePath = configFilePath
 
 	// Setup channels for app.ConfigWatcher
 	stopCh := make(chan struct{})
@@ -160,7 +160,7 @@ func TestFileDependency_MissingFile(t *testing.T) {
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "non_existent_file.txt") // This file will not be created
-	configPath := filepath.Join(tempDir, "config.yaml")
+	configFilePath := filepath.Join(tempDir, "config.yaml")
 
 	// Create config.yaml that references the non-existent file
 	configContent := `
@@ -173,7 +173,7 @@ chains:
       - field_matches:
           Path: "file:` + testFilePath + `"
 `
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(configFilePath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
 	}
 
@@ -189,7 +189,7 @@ chains:
 	t.Cleanup(func() { logging.LogOutput = originalLogOutput })
 
 	// --- Act ---
-	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: configFilePath})
 	if err != nil {
 		t.Fatalf("config.LoadConfigFromYAML failed: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestFileDependency_FileReappears(t *testing.T) {
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "reappear_file.txt")
-	configPath := filepath.Join(tempDir, "config.yaml")
+	configFilePath := filepath.Join(tempDir, "config.yaml")
 
 	// Create config.yaml that references the file (initially missing)
 	configContent := `
@@ -259,12 +259,12 @@ chains:
       - field_matches:
           Path: "file:` + testFilePath + `"
 `
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(configFilePath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
 	}
 
 	// --- Initial Load (file is missing) ---
-	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: configFilePath})
 	if err != nil {
 		t.Fatalf("Initial config.LoadConfigFromYAML failed: %v", err)
 	}
@@ -295,7 +295,7 @@ chains:
 		LastModTime:      time.Now(), // Set a LastModTime for the config itself
 		FileDependencies: loadedCfg.FileDependencies,
 	}, logCaptureFunc)
-	p.ConfigPath = configPath
+	p.ConfigFilePath = configFilePath
 
 	// Setup channels for app.ConfigWatcher
 	stopCh := make(chan struct{})
@@ -365,7 +365,7 @@ func TestFileDependency_FileDisappears(t *testing.T) {
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "disappear_file.txt")
-	configPath := filepath.Join(tempDir, "config.yaml")
+	configFilePath := filepath.Join(tempDir, "config.yaml")
 
 	// Create initial file content
 	initialContent := "initial_line"
@@ -384,12 +384,12 @@ chains:
       - field_matches:
           Path: "file:` + testFilePath + `"
 `
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(configFilePath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
 	}
 
 	// --- Initial Load ---
-	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: configFilePath})
 	if err != nil {
 		t.Fatalf("Initial config.LoadConfigFromYAML failed: %v", err)
 	}
@@ -420,7 +420,7 @@ chains:
 		LastModTime:      time.Now(), // Set a LastModTime for the config itself
 		FileDependencies: loadedCfg.FileDependencies,
 	}, logCaptureFunc)
-	p.ConfigPath = configPath
+	p.ConfigFilePath = configFilePath
 
 	// Setup channels for app.ConfigWatcher
 	stopCh := make(chan struct{})
@@ -487,7 +487,7 @@ func TestFileDependency_CyclicDependency(t *testing.T) {
 	testutil.ResetGlobalState()
 
 	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "config.yaml")
+	configFilePath := filepath.Join(tempDir, "config.yaml")
 	fileAPath := filepath.Join(tempDir, "a.txt")
 	fileBPath := filepath.Join(tempDir, "b.txt")
 
@@ -511,19 +511,19 @@ chains:
       - field_matches:
           Path: "file:a.txt"
 `
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(configFilePath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("Failed to write config.yaml: %v", err)
 	}
 
 	// --- Act ---
-	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: configFilePath})
 
 	// --- Assert ---
 	if err == nil {
 		t.Fatal("Expected an error for cyclic dependency, but got nil")
 	}
 
-	expectedError := fmt.Sprintf("cyclic dependency detected: %s -> %s -> %s", configPath, fileAPath, fileBPath)
+	expectedError := fmt.Sprintf("cyclic dependency detected: %s -> %s -> %s", configFilePath, fileAPath, fileBPath)
 	if !strings.Contains(err.Error(), expectedError) {
 		t.Errorf("Error message mismatch.\nGot:  %s\nWant to contain: %s", err.Error(), expectedError)
 	}

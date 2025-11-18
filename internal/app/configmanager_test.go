@@ -45,7 +45,7 @@ chains:
 	// This is now set on the processor directly.
 
 	// 2. Load the initial configuration.
-	initialLoadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tempFile})
+	initialLoadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: tempFile})
 	if err != nil {
 		t.Fatalf("Initial config.LoadConfigFromYAML() failed: %v", err)
 	}
@@ -64,8 +64,8 @@ chains:
 			// This signal is used by the test to wait for the reload to complete.
 			ReloadDoneSignal: make(chan struct{}, 1),
 		},
-		ConfigPath: tempFile,
-		ReloadOn:   "HUP", // Set for this test
+		ConfigFilePath: tempFile,
+		ReloadOn:       "HUP", // Set for this test
 	}
 
 	// 4. Start the app.SignalReloader.

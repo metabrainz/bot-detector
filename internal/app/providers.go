@@ -33,7 +33,7 @@ func (p *Processor) GetConfigForArchive() ([]byte, time.Time, map[string]*types.
 		}
 	}
 
-	return p.Config.YAMLContent, p.Config.LastModTime, depsCopy, p.ConfigPath, nil
+	return p.Config.YAMLContent, p.Config.LastModTime, depsCopy, p.ConfigDir, nil
 }
 
 // GetListenAddr returns the HTTP listen address from the config.

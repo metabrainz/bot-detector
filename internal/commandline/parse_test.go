@@ -1,29 +1,16 @@
 package commandline
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestParseParameters(t *testing.T) {
-	// Create a temporary directory for testing
-	tmpDir := t.TempDir()
-	configDir := filepath.Join(tmpDir, "config")
-	if err := os.Mkdir(configDir, 0755); err != nil {
-		t.Fatalf("Failed to create test config directory: %v", err)
-	}
-
-	configPath := filepath.Join(configDir, "config.yaml")
-	logPath := filepath.Join(tmpDir, "access.log")
-	stateDir := filepath.Join(tmpDir, "state")
-	if err := os.Mkdir(stateDir, 0755); err != nil {
-		t.Fatalf("Failed to create test state directory: %v", err)
-	}
-
-	expectConfigPath := "--config <path> is required"
+	configDir := "/etc/bot-detector"
+	logPath := "/var/log/access.log"
+	stateDir := "/var/lib/bot-detector/state"
+	expectConfigDir := "--config-dir <path> is required"
 	expectLogPath := "--log-path <path> is required"
 	tests := []struct {
 		name        string
@@ -34,11 +21,10 @@ func TestParseParameters(t *testing.T) {
 	}{
 		{
 			name: "live mode (basic valid flags)",
-			args: []string{"bot-detector", "--config", configPath, "--log-path", logPath},
+			args: []string{"bot-detector", "--config-dir", configDir, "--log-path", logPath},
 			want: &AppParameters{
-				ConfigPath: configPath,
-				ConfigDir:  configDir,
-				LogPath:    logPath,
+				ConfigDir: configDir,
+				LogPath:   logPath,
 			},
 			wantErr: false,
 		},
@@ -46,7 +32,7 @@ func TestParseParameters(t *testing.T) {
 			name: "all flags set",
 			args: []string{
 				"bot-detector",
-				"--config", configPath,
+				"--config-dir", configDir,
 				"--log-path", logPath,
 				"--state-dir", stateDir,
 				"--dry-run",
@@ -59,7 +45,6 @@ func TestParseParameters(t *testing.T) {
 				"--http-server", ":9090",
 			},
 			want: &AppParameters{
-				ConfigPath:   configPath,
 				ConfigDir:    configDir,
 				LogPath:      logPath,
 				StateDir:     stateDir,
@@ -82,7 +67,7 @@ func TestParseParameters(t *testing.T) {
 		},
 		{
 			name:        "missing required log-path in live mode",
-			args:        []string{"bot-detector", "--config", configPath},
+			args:        []string{"bot-detector", "--config-dir", configDir},
 			wantErr:     true,
 			errContains: expectLogPath,
 		},
@@ -90,28 +75,27 @@ func TestParseParameters(t *testing.T) {
 			name:        "missing required config for live mode",
 			args:        []string{"bot-detector", "--log-path", logPath},
 			wantErr:     true,
-			errContains: expectConfigPath,
+			errContains: expectConfigDir,
 		},
 		{
 			name:        "check requires config",
 			args:        []string{"bot-detector", "--check"},
 			wantErr:     true,
-			errContains: expectConfigPath,
+			errContains: expectConfigDir,
 		},
 		{
 			name:        "dump-backends requires config",
 			args:        []string{"bot-detector", "--dump-backends"},
 			wantErr:     true,
-			errContains: expectConfigPath,
+			errContains: expectConfigDir,
 		},
 		{
 			name: "dry-run without log-path is valid (reads from stdin)",
-			args: []string{"bot-detector", "--config", configPath, "--dry-run"},
+			args: []string{"bot-detector", "--config-dir", configDir, "--dry-run"},
 			want: &AppParameters{
-				ConfigPath: configPath,
-				ConfigDir:  configDir,
-				DryRun:     true,
-				LogPath:    "", // LogPath should be empty
+				ConfigDir: configDir,
+				DryRun:    true,
+				LogPath:   "", // LogPath should be empty
 			},
 			wantErr: false,
 		},
@@ -120,28 +104,6 @@ func TestParseParameters(t *testing.T) {
 			args:        []string{"bot-detector"},
 			wantErr:     true,
 			errContains: "no flag: help requested",
-		},
-		{
-			name: "config directory path builds config.yaml path",
-			args: []string{"bot-detector", "--config", configDir, "--log-path", logPath},
-			want: &AppParameters{
-				ConfigPath: configPath,
-				ConfigDir:  configDir,
-				LogPath:    logPath,
-			},
-			wantErr: false,
-		},
-		{
-			name:        "config file with wrong name fails",
-			args:        []string{"bot-detector", "--config", filepath.Join(configDir, "wrong.yaml"), "--log-path", logPath},
-			wantErr:     true,
-			errContains: "config file must be named 'config.yaml'",
-		},
-		{
-			name:        "non-existent config directory fails",
-			args:        []string{"bot-detector", "--config", filepath.Join(tmpDir, "nonexistent"), "--log-path", logPath},
-			wantErr:     true,
-			errContains: "config directory does not exist",
 		},
 	}
 

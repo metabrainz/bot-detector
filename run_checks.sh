@@ -32,6 +32,6 @@ find . -name "*.go" -print0 | xargs -0 gofmt -w
 
 # Run bot-detector --dry-run with testdata
 echo "Running bot-detector --dry-run with testdata..."
-./bot-detector --dry-run --config testdata/config.yaml --log-path testdata/test_access.log --top-n 10
+./bot-detector --dry-run --config-dir testdata --log-path testdata/test_access.log --top-n 10
 
 echo "All checks passed!"

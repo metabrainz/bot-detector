@@ -687,7 +687,7 @@ regex:NastyBot`), 0644); err != nil {
 	t.Cleanup(func() { _ = os.Remove("bad_user_agents.txt") })
 	// 1. Load configuration (chains, whitelist, etc.)
 	logging.SetLogLevel("debug")
-	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: "../../testdata/config.yaml"})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: "../../testdata/config.yaml"})
 	if err != nil {
 		t.Fatalf("config.LoadConfigFromYAML() failed: %v", err)
 	}
