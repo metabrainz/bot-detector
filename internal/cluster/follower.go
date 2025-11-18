@@ -313,7 +313,7 @@ func extractTarGz(archiveData []byte, targetDir string, etag string, logFunc Log
 	if err != nil {
 		return fmt.Errorf("failed to create gzip reader: %w", err)
 	}
-	defer gzReader.Close()
+	defer func() { _ = gzReader.Close() }()
 
 	// Create tar reader
 	tarReader := tar.NewReader(gzReader)
@@ -355,11 +355,11 @@ func extractTarGz(archiveData []byte, targetDir string, etag string, logFunc Log
 
 		// Copy file contents
 		if _, err := io.Copy(outFile, tarReader); err != nil {
-			outFile.Close()
+			_ = outFile.Close()
 			return fmt.Errorf("failed to write file %s: %w", targetPath, err)
 		}
 
-		outFile.Close()
+		_ = outFile.Close()
 		logFunc(logging.LevelDebug, "CLUSTER", "Extracted: %s", header.Name)
 	}
 

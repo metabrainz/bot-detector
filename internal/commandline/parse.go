@@ -149,7 +149,7 @@ func ParseParameters(args []string) (*AppParameters, error) {
 		if err := os.WriteFile(testFile, []byte("test"), 0600); err != nil {
 			return nil, fmt.Errorf("config directory is not writable: %s (%v)", params.ConfigDir, err)
 		}
-		os.Remove(testFile)
+		_ = os.Remove(testFile)
 
 		hasConfigPath = true
 	}
