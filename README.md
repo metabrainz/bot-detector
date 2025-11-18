@@ -109,16 +109,16 @@ This will produce a single executable named `bot-detector`.
 
 | Flag | Default | Description |
 | :--- | :--- | :--- |
-| **`--config`** | `"config.yaml"` | Path to the YAML configuration file. |
+| **`--config`** | `""` | Path to the YAML configuration file. |
 | **`--log-path`** | `""` | Path to the access log file to tail (or to read in dry-run mode). |
-| **`--dry-run`** | `false` | If true, runs in test mode, ignoring the configured blocking backend and live logging. |
-| **`--exit-on-eof`** | `false` | If true, exits after processing the log file to EOF instead of tailing. Useful for testing. |
-| **`--dump-backends`** | `false` | Checks if HAProxy backends are in sync. If they are, it lists all IPs with their status ('B' for blocked, 'U' for unblocked) and exits. If they are out of sync, it prints the discrepancies and exits with an error. |
+| **`--dry-run`** | `false` | Runs in test mode, ignoring the blocking backend and live logging. |
+| **`--exit-on-eof`** | `false` | Exits after processing the log file to EOF instead of tailing. |
+| **`--dump-backends`** | `false` | Checks HAProxy backend sync status, lists all IPs, and exits. |
 | **`--version`** | `false` | Print the application version and exit. |
-| **`--check`** | `false` | If true, validates the configuration file and exits. Returns a non-zero exit code on failure. |
-| **`--reload-on`** | `""` | Controls config reloading. Use `watcher` for file-watching only, or `hup`, `usr1`, `usr2` for signal-based reloads only. If absent, both watcher and `SIGHUP` are enabled. |
-| **`--http-server`** | `""` | If set (e.g., `"127.0.0.1:8080"`), starts a web server on this address to display live metrics. Disabled by default. |
-| **`--top-n`** | `0` | In dry-run mode, show top N actors per chain. Default is 0 (disabled). |
+| **`--check`** | `false` | Validates the configuration file and exits with error code on failure. |
+| **`--reload-on`** | `""` | Controls config reloading: `watcher`, `HUP`, `USR1`, or `USR2`. |
+| **`--http-server`** | `""` | Starts a web server on this address to display live metrics. |
+| **`--top-n`** | `0` | In dry-run mode, show top N actors per chain. |
 | **`--state-dir`** | `""` | Path to the state directory. Enables persistence if set. |
 
 ---
@@ -213,7 +213,7 @@ The configuration is now organized into logical top-level sections.
 | **dial_timeout** | string | Optional. Timeout for establishing a connection to a blocker socket. Default: `5s`. |
 | **max_retries** | int | Optional. Number of attempts to send a command to a blocker instance. Default: `3`. |
 | **retry_delay** | string | Optional. Duration to wait between retry attempts. Default: `200ms`. |
-| **backends** | object | Backend-specific blocker configurations. See table [`blockers.backends.haproxy`](#blockersbackendshaproy). |
+| **backends** | object | Backend-specific blocker configurations. See table [`blockers.backends.haproxy`](#blockersbackendshaproxy). |
 
 #### `blockers.backends.haproxy`
 
@@ -577,7 +577,7 @@ graph TD;
 
 ## **Example config.yaml**
 
-This example showcases a variety of features, including different matchers, time-based conditions, and actions.
+This example showcases a variety of features, including different matchers, time-based conditions, and actions. It demonstrates the **correct nested configuration structure** required by the current version.
 
 For this example to be valid, you would also need a `bad_agents.txt` file in the same directory with content like:
 ```
@@ -588,8 +588,66 @@ regex:(?i)evil-crawler
 
 ```yaml
 version: "1.0"
-default_block_duration: "30m" # Used by chains without a specific block_duration
 
+# Application-level settings
+application:
+  log_level: "info"
+  enable_metrics: true
+  eof_polling_delay: "200ms"
+
+  config:
+    polling_interval: "5s"
+
+  persistence:
+    enabled: false
+    compaction_interval: "1h"
+
+# Parser settings
+parser:
+  line_ending: "lf"
+  out_of_order_tolerance: "5s"
+  timestamp_format: "02/Jan/2006:15:04:05 -0700"
+  # log_format_regex: ""  # Optional: Defaults to virtual-host-prefixed combined log format
+
+# Checker settings
+checker:
+  actor_cleanup_interval: "1m"
+  actor_state_idle_timeout: "30m"
+  unblock_on_good_actor: true
+  unblock_cooldown: "5m"
+
+# Blocker configuration
+blockers:
+  default_duration: "30m"  # Used by chains without a specific block_duration
+  commands_per_second: 10
+  command_queue_size: 1000
+  dial_timeout: "5s"
+  max_retries: 3
+  retry_delay: "200ms"
+
+  backends:
+    haproxy:
+      addresses:
+        - "127.0.0.1:9999"
+        - "/var/run/haproxy.sock"
+      duration_tables:
+        "30m": "thirty_min_blocks"
+        "1h": "one_hour_blocks"
+        "24h": "one_day_blocks"
+
+# Good actors (trusted IPs/User-Agents to skip)
+good_actors:
+  - name: "internal_network"
+    ip: "cidr:10.0.0.0/8"
+
+  - name: "monitoring_service"
+    useragent: "regex:(?i)HealthCheck"
+
+  - name: "trusted_bot"
+    ip: "8.8.8.8"
+    useragent: "regex:(?i)GoogleBot"
+
+# Behavioral chains
 chains:
   # --- CHAIN 1: Aggressive Scraper ---
   # Blocks an IP+UserAgent that probes with a HEAD, then a GET, then another non-GET request for forbidden content.
@@ -617,7 +675,7 @@ chains:
   # Detects a bot that probes a sensitive endpoint after a long period of inactivity.
   # This uses the global default_block_duration.
   - name: Sleepy-Bot-Probe
-    action: block # No block_duration, so it uses the 30m default
+    action: block # No block_duration, so it uses the 30m default from blockers.default_duration
     match_key: "ip" # With "ip", the 20m timer is for the IP address alone.
                     # If set to "ip_ua", the timer would be tracked separately for each User-Agent from that IP.
     steps:
