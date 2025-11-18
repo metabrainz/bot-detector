@@ -9,22 +9,11 @@ import (
 	"testing"
 )
 
-func TestCorruptedSnapshot(t *testing.T) {
-	// Create a temporary directory for the test
-	tmpDir, err := os.MkdirTemp("", "bot-detector-test-persistence")
-	if err != nil {
-		t.Fatalf("Failed to create temporary directory: %v", err)
-	}
-	defer func() {
-		if err := os.RemoveAll(tmpDir); err != nil {
-			t.Logf("Warning: failed to clean up temp dir %s: %v", tmpDir, err)
-		}
-	}()
-
+func createDummyConfig(tmpDir string) error {
 	// Create a dummy config file
-	configFile, err := os.CreateTemp(tmpDir, "config.yaml")
+	configFile, err := os.Create(filepath.Join(tmpDir, "config.yaml"))
 	if err != nil {
-		t.Fatalf("Failed to create temporary config file: %v", err)
+		return fmt.Errorf("Failed to create temporary config file: %v", err)
 	}
 
 	configContent := `
@@ -38,13 +27,32 @@ chains:
     action: "log"
     steps:
       - field_matches:
-          uri: "/test"
+          path: "/test"
 `
 	if _, err := fmt.Fprint(configFile, configContent); err != nil {
-		t.Fatalf("Failed to write to config file: %v", err)
+		return fmt.Errorf("Failed to write to config file: %v", err)
 	}
 	if err := configFile.Close(); err != nil {
-		t.Fatalf("Failed to close config file: %v", err)
+		return fmt.Errorf("Failed to close config file: %v", err)
+	}
+	return nil
+}
+
+func TestCorruptedSnapshot(t *testing.T) {
+	// Create a temporary directory for the test
+	tmpDir, err := os.MkdirTemp("", "bot-detector-test-persistence")
+	if err != nil {
+		t.Fatalf("Failed to create temporary directory: %v", err)
+	}
+	defer func() {
+		if err := os.RemoveAll(tmpDir); err != nil {
+			t.Logf("Warning: failed to clean up temp dir %s: %v", tmpDir, err)
+		}
+	}()
+
+	// Create a dummy config file
+	if err := createDummyConfig(tmpDir); err != nil {
+		t.Fatalf("Error creating dummy config file: %v", err)
 	}
 
 	// Create a corrupted snapshot file
@@ -55,9 +63,9 @@ chains:
 
 	// Attempt to run the application
 	params := &commandline.AppParameters{
-		ConfigFilePath: configFile.Name(),
-		LogPath:        "/dev/null",
-		StateDir:       tmpDir,
+		ConfigDir: tmpDir,
+		LogPath:   "/dev/null",
+		StateDir:  tmpDir,
 	}
 	err = execute(params)
 
@@ -85,29 +93,8 @@ func TestCorruptedJournal(t *testing.T) {
 	}()
 
 	// Create a dummy config file
-	configFile, err := os.CreateTemp(tmpDir, "config.yaml")
-	if err != nil {
-		t.Fatalf("Failed to create temporary config file: %v", err)
-	}
-
-	configContent := `
-version: "1.0"
-application:
-  persistence:
-    enabled: true
-chains:
-  - name: "test_chain"
-    match_key: "ip"
-    action: "log"
-    steps:
-      - field_matches:
-          uri: "/test"
-`
-	if _, err := fmt.Fprint(configFile, configContent); err != nil {
-		t.Fatalf("Failed to write to config file: %v", err)
-	}
-	if err := configFile.Close(); err != nil {
-		t.Fatalf("Failed to close config file: %v", err)
+	if err := createDummyConfig(tmpDir); err != nil {
+		t.Fatalf("Error creating dummy config file: %v", err)
 	}
 
 	// Create a valid, empty snapshot file
@@ -124,10 +111,10 @@ chains:
 
 	// Attempt to run the application
 	params := &commandline.AppParameters{
-		ConfigFilePath: configFile.Name(),
-		LogPath:        "/dev/null",
-		StateDir:       tmpDir,
-		ExitOnEOF:      true,
+		ConfigDir: tmpDir,
+		LogPath:   "/dev/null",
+		StateDir:  tmpDir,
+		ExitOnEOF: true,
 	}
 	err = execute(params)
 
@@ -150,29 +137,8 @@ func TestUnwritableStateDir(t *testing.T) {
 	}()
 
 	// Create a dummy config file
-	configFile, err := os.CreateTemp(tmpDir, "config.yaml")
-	if err != nil {
-		t.Fatalf("Failed to create temporary config file: %v", err)
-	}
-
-	configContent := `
-version: "1.0"
-application:
-  persistence:
-    enabled: true
-chains:
-  - name: "test_chain"
-    match_key: "ip"
-    action: "log"
-    steps:
-      - field_matches:
-          uri: "/test"
-`
-	if _, err := fmt.Fprint(configFile, configContent); err != nil {
-		t.Fatalf("Failed to write to config file: %v", err)
-	}
-	if err := configFile.Close(); err != nil {
-		t.Fatalf("Failed to close config file: %v", err)
+	if err := createDummyConfig(tmpDir); err != nil {
+		t.Fatalf("Error creating dummy config file: %v", err)
 	}
 
 	// Create an unwritable state directory
@@ -183,10 +149,10 @@ chains:
 
 	// Attempt to run the application
 	params := &commandline.AppParameters{
-		ConfigFilePath: configFile.Name(),
-		LogPath:        "/dev/null",
-		StateDir:       unwritableDir,
-		ExitOnEOF:      true,
+		ConfigDir: tmpDir,
+		LogPath:   "/dev/null",
+		StateDir:  unwritableDir,
+		ExitOnEOF: true,
 	}
 	err = execute(params)
 

@@ -32,7 +32,7 @@ graph TD
     end
 
     subgraph "Application Cluster"
-        D["bot-detector --config /etc/bot-detector<br/>(Leader - no --leader flag)"]
+        D["bot-detector --config-dir /etc/bot-detector<br/>(Leader - no --leader flag)"]
         E["bot-detector --leader node-1:8080<br/>(Follower)"]
         F["bot-detector --leader node-1:8080<br/>(Follower)"]
 
@@ -72,7 +72,7 @@ The node's role (leader or follower) is determined by the presence of the `--lea
 
 ```bash
 # Start as leader (no --leader flag)
-./bot-detector --config /etc/bot-detector --log-path /var/log/haproxy/access.log
+./bot-detector --config-dir /etc/bot-detector --log-path /var/log/haproxy/access.log
 
 # Start as follower (first time - will bootstrap and exit)
 ./bot-detector --leader node-1.internal:8080

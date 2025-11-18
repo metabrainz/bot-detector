@@ -94,6 +94,10 @@ func main() {
 	}
 }
 
+func GetConfigFilePath(params *commandline.AppParameters) string {
+	return filepath.Join(params.ConfigDir, "config.yaml")
+}
+
 // handleStartupFlags checks for command-line flags that prevent normal startup,
 // such as --version or --check. It returns a special "exit" error to signal
 // a clean exit, an error for failures, or nil to continue execution.
@@ -105,7 +109,7 @@ func handleStartupFlags(params *commandline.AppParameters) error {
 
 	if params.Check {
 		opts := config.LoadConfigOptions{
-			ConfigFilePath: params.ConfigFilePath,
+			ConfigFilePath: GetConfigFilePath(params),
 		}
 		var err error
 		if _, err = config.LoadConfigFromYAML(opts); err != nil {
@@ -135,7 +139,7 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		SignalCh:             make(chan os.Signal, 1),
 		LogFunc:              logging.LogOutput,
 		NowFunc:              time.Now, // Use the real time.Now in production.
-		ConfigFilePath:       params.ConfigFilePath,
+		ConfigFilePath:       GetConfigFilePath(params),
 		ConfigDir:            params.ConfigDir,
 		LogPath:              params.LogPath,
 		ReloadOn:             params.ReloadOn,
@@ -250,13 +254,13 @@ func execute(params *commandline.AppParameters) error {
 		}
 		return err
 	}
-
-	fileInfo, err := os.Stat(params.ConfigFilePath)
+	configFilePath := GetConfigFilePath(params)
+	fileInfo, err := os.Stat(configFilePath)
 	if err != nil {
-		return fmt.Errorf("could not stat config file: %v", err)
+		return fmt.Errorf("could not stat file: %q  - %v", configFilePath, err)
 	}
 
-	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: params.ConfigFilePath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: configFilePath})
 	if err != nil {
 		return fmt.Errorf("configuration Load Error: %v", err)
 	}

@@ -38,17 +38,15 @@ This is a critical prerequisite. See [HaproxySetup.md](docs/HaproxySetup.md) for
 
 The application is configured using a configuration directory containing a YAML file named `config.yaml` and a few command-line flags.
 
-**Important:** The `--config` flag specifies a **directory path**, not a file path. This directory must contain a file named `config.yaml`, which is the main configuration file. Additional dependency files referenced in the configuration (via `file:` directives) are resolved relative to this directory.
+**Important:** The `--config-dir` flag specifies a **directory path**, not a file path. This directory must contain a file named `config.yaml`, which is the main configuration file. Additional dependency files referenced in the configuration (via `file:` directives) are resolved relative to this directory.
 
 #### **Production Mode (Live Tailing and Blocking)**
 
 ```sh
 ./bot-detector \
   --log-path "/var/log/haproxy/access.log" \
-  --config "/etc/bot-detector"
+  --config-dir "/etc/bot-detector"
 ```
-
-The directory `/etc/bot-detector/` must contain a file named `config.yaml`.
 
 #### **Dry Run Mode (Testing)**
 
@@ -60,10 +58,10 @@ If `--log-path` is provided, it will read from that file. If `--log-path` is omi
 # Reading from a file (config directory contains config.yaml)
 ./bot-detector --dry-run \
   --log-path "test_access.log" \
-  --config "./testdata"
+  --config-dir "./testdata"
 
 # Reading from stdin
-cat test_access.log | ./bot-detector --dry-run --config "./testdata"
+cat test_access.log | ./bot-detector --dry-run --config-dir "./testdata"
 ```
 
 ## **Resilience and Logging**
@@ -113,7 +111,7 @@ This will produce a single executable named `bot-detector`.
 
 | Flag | Default | Description |
 | :--- | :--- | :--- |
-| **`--config`** | `""` | **Path to the configuration directory** containing `config.yaml`. |
+| **`--config-dir`** | `""` | **Path to the configuration directory** containing `config.yaml`. |
 | **`--log-path`** | `""` | Path to the access log file to tail (or to read in dry-run mode). |
 | **`--dry-run`** | `false` | Runs in test mode, ignoring the blocking backend and live logging. |
 | **`--exit-on-eof`** | `false` | Exits after processing the log file to EOF instead of tailing. |
@@ -127,7 +125,7 @@ This will produce a single executable named `bot-detector`.
 
 ---
 
-# **Behavioral Chains Configuration File (config.yaml)**
+# **Behavioral Chains Configuration**
 
 This file defines the sequential behavioral chains used by the bot-detector to identify and act upon suspicious traffic patterns.
 The file is structured as a top-level map containing a single key, chains, which holds an array of individual chain definitions.
@@ -373,7 +371,7 @@ For more complex string matching, use a prefix. Available prefixes: `exact:`, `r
     ip: "cidr:192.168.1.0/24"
     ```
 *   **File-Based Matcher:** Loads a list of values from an external file. This can be used with any field that accepts string values (e.g., `path`, `useragent`, `ip`). Each line in the file is treated as a separate value in a list (OR condition).
-    > **Path Resolution:** File paths are resolved relative to the configuration directory (the directory specified with `--config` that contains `config.yaml`). Absolute paths are also supported.
+    > **Path Resolution:** File paths are resolved relative to the configuration directory (the directory specified with `--config-dir` that contains `config.yaml`). Absolute paths are also supported.
 
     For example, given a file named `bad_paths.txt` with the following content:
     ```
