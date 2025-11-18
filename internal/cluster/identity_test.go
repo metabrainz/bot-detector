@@ -1,13 +1,17 @@
 package cluster
 
 import (
+	"os"
 	"testing"
 	"time"
 )
 
 func TestDetermineIdentity_SingleNodeLeader(t *testing.T) {
 	// Single node with no cluster config - should be leader
-	identity, err := DetermineIdentity("", ":8080", nil)
+	// No FOLLOW file = leader
+	tmpDir := t.TempDir()
+
+	identity, err := DetermineIdentity(tmpDir, ":8080", nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -30,8 +34,16 @@ func TestDetermineIdentity_SingleNodeLeader(t *testing.T) {
 }
 
 func TestDetermineIdentity_Follower(t *testing.T) {
-	// Node with --leader flag - should be follower
-	identity, err := DetermineIdentity("leader-node:8080", ":9090", nil)
+	// Node with FOLLOW file - should be follower
+	tmpDir := t.TempDir()
+
+	// Create FOLLOW file with leader address
+	followPath := tmpDir + "/FOLLOW"
+	if err := os.WriteFile(followPath, []byte("leader-node:8080"), 0644); err != nil {
+		t.Fatalf("Failed to create FOLLOW file: %v", err)
+	}
+
+	identity, err := DetermineIdentity(tmpDir, ":9090", nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -46,6 +58,8 @@ func TestDetermineIdentity_Follower(t *testing.T) {
 }
 
 func TestDetermineIdentity_WithClusterConfig_ExactMatch(t *testing.T) {
+	tmpDir := t.TempDir() // No FOLLOW file = leader
+
 	clusterCfg := &ClusterConfig{
 		Nodes: []NodeConfig{
 			{Name: "node-1", Address: "localhost:8080"},
@@ -56,7 +70,7 @@ func TestDetermineIdentity_WithClusterConfig_ExactMatch(t *testing.T) {
 		Protocol:              "http",
 	}
 
-	identity, err := DetermineIdentity("", "localhost:8080", clusterCfg)
+	identity, err := DetermineIdentity(tmpDir, "localhost:8080", clusterCfg)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -75,6 +89,8 @@ func TestDetermineIdentity_WithClusterConfig_ExactMatch(t *testing.T) {
 }
 
 func TestDetermineIdentity_WithClusterConfig_PortMatch(t *testing.T) {
+	tmpDir := t.TempDir() // No FOLLOW file = leader
+
 	clusterCfg := &ClusterConfig{
 		Nodes: []NodeConfig{
 			{Name: "node-1", Address: "node-1.example.com:8080"},
@@ -86,7 +102,7 @@ func TestDetermineIdentity_WithClusterConfig_PortMatch(t *testing.T) {
 	}
 
 	// Listen on :8080 should match node-1 by port
-	identity, err := DetermineIdentity("", ":8080", clusterCfg)
+	identity, err := DetermineIdentity(tmpDir, ":8080", clusterCfg)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -105,6 +121,8 @@ func TestDetermineIdentity_WithClusterConfig_PortMatch(t *testing.T) {
 }
 
 func TestDetermineIdentity_WithClusterConfig_0000PortMatch(t *testing.T) {
+	tmpDir := t.TempDir() // No FOLLOW file = leader
+
 	clusterCfg := &ClusterConfig{
 		Nodes: []NodeConfig{
 			{Name: "node-1", Address: "node-1.example.com:8080"},
@@ -115,7 +133,7 @@ func TestDetermineIdentity_WithClusterConfig_0000PortMatch(t *testing.T) {
 	}
 
 	// Listen on 0.0.0.0:8080 should match node-1 by port
-	identity, err := DetermineIdentity("", "0.0.0.0:8080", clusterCfg)
+	identity, err := DetermineIdentity(tmpDir, "0.0.0.0:8080", clusterCfg)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}
@@ -130,6 +148,8 @@ func TestDetermineIdentity_WithClusterConfig_0000PortMatch(t *testing.T) {
 }
 
 func TestDetermineIdentity_WithClusterConfig_NoMatch(t *testing.T) {
+	tmpDir := t.TempDir() // No FOLLOW file = leader
+
 	clusterCfg := &ClusterConfig{
 		Nodes: []NodeConfig{
 			{Name: "node-1", Address: "localhost:8080"},
@@ -141,7 +161,7 @@ func TestDetermineIdentity_WithClusterConfig_NoMatch(t *testing.T) {
 	}
 
 	// Listen on :7070 doesn't match any node
-	identity, err := DetermineIdentity("", ":7070", clusterCfg)
+	identity, err := DetermineIdentity(tmpDir, ":7070", clusterCfg)
 	if err != nil {
 		t.Fatalf("Expected no error, got: %v", err)
 	}

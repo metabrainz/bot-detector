@@ -2,6 +2,8 @@ package cluster
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -19,28 +21,39 @@ type NodeIdentity struct {
 	Address string
 
 	// LeaderAddress is the address of the leader node (only set for followers).
-	// Format: "hostname:port" as specified by --leader flag.
+	// Format: "hostname:port" as read from the FOLLOW file.
 	LeaderAddress string
 }
 
-// DetermineIdentity determines the node's identity based on the --leader flag,
+// DetermineIdentity determines the node's identity based on the FOLLOW file,
 // listen address, and cluster configuration.
 //
 // Parameters:
-//   - leaderFlag: Value of the --leader command-line flag (empty string if not set)
+//   - configDir: Directory containing config.yaml (and potentially FOLLOW file)
 //   - listenAddr: The HTTP server listen address (e.g., ":8080" or "192.168.1.10:8080")
 //   - clusterCfg: The cluster configuration from the YAML file (can be nil)
 //
 // Returns the NodeIdentity or an error if configuration is invalid.
-func DetermineIdentity(leaderFlag, listenAddr string, clusterCfg *ClusterConfig) (*NodeIdentity, error) {
+func DetermineIdentity(configDir, listenAddr string, clusterCfg *ClusterConfig) (*NodeIdentity, error) {
 	identity := &NodeIdentity{}
 
-	// Determine role based on --leader flag
-	if leaderFlag != "" {
+	// Determine role based on FOLLOW file existence
+	followPath := filepath.Join(configDir, "FOLLOW")
+	followData, err := os.ReadFile(followPath)
+	if err == nil {
+		// FOLLOW file exists - this is a follower
+		leaderAddr := strings.TrimSpace(string(followData))
+		if leaderAddr == "" {
+			return nil, fmt.Errorf("FOLLOW file exists but is empty")
+		}
 		identity.Role = RoleFollower
-		identity.LeaderAddress = leaderFlag
-	} else {
+		identity.LeaderAddress = leaderAddr
+	} else if os.IsNotExist(err) {
+		// FOLLOW file doesn't exist - this is a leader
 		identity.Role = RoleLeader
+	} else {
+		// Error reading FOLLOW file
+		return nil, fmt.Errorf("failed to read FOLLOW file: %w", err)
 	}
 
 	// If no cluster configuration, we're done (single-node mode)
@@ -56,9 +69,9 @@ func DetermineIdentity(leaderFlag, listenAddr string, clusterCfg *ClusterConfig)
 	}
 
 	// For followers, verify that the leader address makes sense
-	if identity.Role == RoleFollower && leaderFlag != "" {
+	if identity.Role == RoleFollower && identity.LeaderAddress != "" {
 		// Check if the leader address is in the cluster nodes list
-		_, _ = clusterCfg.FindNodeByAddress(leaderFlag)
+		_, _ = clusterCfg.FindNodeByAddress(identity.LeaderAddress)
 		// Note: We don't treat it as an error if the leader is not in the nodes list.
 		// The leader might use a different address format or might not be in the list.
 		// The nodes list is primarily for the leader to know which followers to poll.

@@ -258,12 +258,19 @@ func execute(params *commandline.AppParameters) error {
 		return err
 	}
 
-	// Bootstrap configuration from leader if running in follower mode
-	if params.Leader != "" {
-		// Running in follower mode, check if we need to bootstrap
+	// Check if FOLLOW file exists and determine if we need to bootstrap
+	followPath := filepath.Join(params.ConfigDir, "FOLLOW")
+	followData, err := os.ReadFile(followPath)
+	if err == nil {
+		// FOLLOW file exists - this is a follower
+		leaderAddr := strings.TrimSpace(string(followData))
+		if leaderAddr == "" {
+			return fmt.Errorf("FOLLOW file exists but is empty")
+		}
+
+		// Check if config file exists, if not, bootstrap
 		if _, err := os.Stat(params.ConfigPath); os.IsNotExist(err) {
 			// Config doesn't exist, bootstrap from leader
-			leaderAddr := params.Leader
 			// Add http:// prefix if not present
 			if !strings.HasPrefix(leaderAddr, "http://") && !strings.HasPrefix(leaderAddr, "https://") {
 				leaderAddr = "http://" + leaderAddr
@@ -280,7 +287,11 @@ func execute(params *commandline.AppParameters) error {
 				return fmt.Errorf("failed to bootstrap config from leader: %w", err)
 			}
 		}
+	} else if !os.IsNotExist(err) {
+		// Error reading FOLLOW file (but not "file doesn't exist")
+		return fmt.Errorf("failed to read FOLLOW file: %w", err)
 	}
+	// If FOLLOW doesn't exist, this is a leader - no bootstrap needed
 
 	fileInfo, err := os.Stat(params.ConfigPath)
 	if err != nil {
@@ -316,6 +327,18 @@ func execute(params *commandline.AppParameters) error {
 	if p.PersistenceEnabled && p.StateDir == "" {
 		return fmt.Errorf("persistence is enabled in config, but no --state-dir was provided")
 	}
+
+	// Determine node identity based on FOLLOW file and cluster configuration
+	identity, err := cluster.DetermineIdentity(params.ConfigDir, params.HTTPServer, loadedCfg.Cluster)
+	if err != nil {
+		return fmt.Errorf("failed to determine node identity: %w", err)
+	}
+	p.NodeRole = identity.Role.String()
+	p.NodeName = identity.Name
+	p.NodeAddress = identity.Address
+	p.NodeLeaderAddress = identity.LeaderAddress
+
+	logging.LogOutput(logging.LevelInfo, "CLUSTER", "Node identity: %s", identity.String())
 
 	p.StartTime = p.NowFunc()
 	p.SignalOooBufferFlush = func() { checker.DoSignalOooBufferFlush(p) }
