@@ -90,6 +90,11 @@ type Processor struct {
 	ConfigReloaded bool
 	// ExitOnEOF is a flag to indicate if the tailer should exit when it reaches the end of the file.
 	ExitOnEOF bool
+	// Cluster fields
+	NodeRole          string // "leader" or "follower"
+	NodeName          string // Node name from cluster config (empty if not configured)
+	NodeAddress       string // Node address from cluster config (empty if not configured)
+	NodeLeaderAddress string // Leader address (only set for followers)
 }
 
 // GetTimestampFormat returns the timestamp format from the config.

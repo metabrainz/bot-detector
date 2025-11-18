@@ -95,6 +95,15 @@ func (m *mockProvider) Log(level logging.LogLevel, tag string, format string, v 
 	}
 }
 
+func (m *mockProvider) GetNodeStatus() NodeStatus {
+	return NodeStatus{
+		Role:          "leader",
+		Name:          "test-node",
+		Address:       "localhost:8080",
+		LeaderAddress: "",
+	}
+}
+
 // TestServer_StartAndShutdown verifies the full lifecycle of the stats server.
 func TestServer_StartAndShutdown(t *testing.T) {
 	// --- Setup ---

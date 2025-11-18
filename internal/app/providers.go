@@ -2,6 +2,7 @@ package app
 
 import (
 	"bot-detector/internal/logging"
+	"bot-detector/internal/server"
 	"bot-detector/internal/store"
 	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
@@ -47,6 +48,16 @@ func (p *Processor) GetShutdownChannel() chan os.Signal {
 // Log is a wrapper around the processor's LogFunc to satisfy the interface.
 func (p *Processor) Log(level logging.LogLevel, tag string, format string, v ...interface{}) {
 	p.LogFunc(level, tag, format, v...)
+}
+
+// GetNodeStatus returns the cluster status of this node.
+func (p *Processor) GetNodeStatus() server.NodeStatus {
+	return server.NodeStatus{
+		Role:          p.NodeRole,
+		Name:          p.NodeName,
+		Address:       p.NodeAddress,
+		LeaderAddress: p.NodeLeaderAddress,
+	}
 }
 
 // --- StoreProvider Interface Implementation ---
