@@ -77,8 +77,8 @@ graph TD
 
 The node's role (leader or follower) is determined by the presence of a file named `FOLLOW` in the configuration directory.
 
--   **No `FOLLOW` file:** If `/etc/bot-detector/FOLLOW` does not exist, the instance operates as the **Leader**. It serves its on-disk configuration to followers and aggregates cluster metrics by polling all followers.
--   **`FOLLOW` file exists:** If `/etc/bot-detector/FOLLOW` exists, the instance operates as a **Follower**. The contents of this file must be the address of the leader node (e.g., `node-1.internal:8080`), which must match an entry in the `cluster.nodes` configuration. The follower polls the specified leader for configuration updates and exposes its metrics via API for the leader to collect.
+-   **No `FOLLOW` file:** If `FOLLOW` does not exist, the instance operates as the **Leader**. It serves its on-disk configuration to followers and aggregates cluster metrics by polling all followers.
+-   **`FOLLOW` file exists:** If `FOLLOW` exists, the instance operates as a **Follower**. The contents of this file must be the address of the leader node (e.g., `node-1.internal:8080`), which must match an entry in the `cluster.nodes` configuration. The follower polls the specified leader for configuration updates and exposes its metrics via API for the leader to collect.
 
 **Examples:**
 
