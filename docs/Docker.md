@@ -64,7 +64,7 @@ docker run -d \
   -v "$HOST_STATE_DIR":/home/appuser/bot-detector/state \
   --publish $BOTDET_API_PORT:$INTERNAL_PORT \
   "$IMAGE_NAME" \
-  --config "config/config.yaml" \
+  --config "config" \
   --log-path "logs/$LOG_FILE_NAME" \
   --state-dir "state" \
   --http-server "0.0.0.0:$INTERNAL_PORT"
@@ -79,7 +79,7 @@ docker run -d \
 *   `-v "$HOST_LOGS_DIR":/home/appuser/bot-detector/logs:ro`: Mounts the log directory from the host into the container in **read-only** mode.
 *   `-v "$HOST_STATE_DIR":/home/appuser/bot-detector/state`: Mounts a directory from the host for persistence. This is **critical** for preserving the application's state (like active blocks) across container restarts. This volume **must** be read-write.
 *   `--publish $BOTDET_API_PORT:$INTERNAL_PORT`: Exposes the application's web server port to the host machine.
-*   `--config "config/config.yaml"`: Points to the config file *relative to the container's working directory* (`/home/appuser/bot-detector`).
+*   `--config "config"`: Points to the config directory *relative to the container's working directory* (`/home/appuser/bot-detector`). This directory must contain `config.yaml`.
 *   `--state-dir "state"`: Enables persistence and tells the application to use the `state` directory (which is the volume mounted from the host) to store its data.
 *   `--http-server "0.0.0.0:$INTERNAL_PORT"`: Tells the application to listen on all network interfaces inside the container, which is required for the published port to be accessible from the host.
 
@@ -92,8 +92,8 @@ To run one-off commands like `--dump-backends` against a running container, use 
 To validate the configuration file inside a running container, you can use the `--check` flag. This is a great way to verify a new configuration before signaling the application to reload it.
 
 ```sh
-docker exec "$CONTAINER_NAME" ./bot-detector --check --config config/config.yaml
+docker exec "$CONTAINER_NAME" ./bot-detector --check --config config
 ```
 *   `"$CONTAINER_NAME"` is the name of the running container.
 *   `./bot-detector --check ...` is the command to execute inside it.
-*   Note that the path to the config file (`config/config.yaml`) is relative to the container's working directory (`/home/appuser/bot-detector`).
+*   Note that the path to the config directory (`config`) is relative to the container's working directory (`/home/appuser/bot-detector`).
