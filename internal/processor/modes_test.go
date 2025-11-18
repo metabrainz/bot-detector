@@ -1,4 +1,4 @@
-package main
+package processor
 
 import (
 	"bot-detector/internal/logging"
