@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"bot-detector/internal/cluster"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/types"
@@ -763,6 +764,64 @@ func parseDurations(config *ChainConfig) (time.Duration, time.Duration, time.Dur
 	return pollingInterval, cleanupInterval, idleTimeout, outOfOrderTolerance, eofPollingDelay, nil
 }
 
+// parseClusterConfig parses the cluster configuration from YAML and converts it to cluster.ClusterConfig.
+// Returns nil if no cluster configuration is provided (single-node mode).
+func parseClusterConfig(config *ChainConfig) (*cluster.ClusterConfig, error) {
+	// Cluster configuration is optional
+	if config.Cluster == nil {
+		return nil, nil
+	}
+
+	// Parse config_poll_interval
+	configPollIntervalStr := DefaultConfigPollInterval
+	if config.Cluster.ConfigPollInterval != "" {
+		configPollIntervalStr = config.Cluster.ConfigPollInterval
+	}
+	configPollInterval, err := time.ParseDuration(configPollIntervalStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cluster.config_poll_interval format: %w", err)
+	}
+
+	// Parse metrics_report_interval
+	metricsReportIntervalStr := DefaultMetricsReportInterval
+	if config.Cluster.MetricsReportInterval != "" {
+		metricsReportIntervalStr = config.Cluster.MetricsReportInterval
+	}
+	metricsReportInterval, err := time.ParseDuration(metricsReportIntervalStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid cluster.metrics_report_interval format: %w", err)
+	}
+
+	// Parse http_protocol
+	httpProtocol := DefaultClusterHTTPProtocol
+	if config.Cluster.HTTPProtocol != "" {
+		httpProtocol = config.Cluster.HTTPProtocol
+	}
+
+	// Convert nodes from YAML format to cluster format
+	var nodes []cluster.NodeConfig
+	for _, node := range config.Cluster.Nodes {
+		nodes = append(nodes, cluster.NodeConfig{
+			Name:    node.Name,
+			Address: node.Address,
+		})
+	}
+
+	clusterConfig := &cluster.ClusterConfig{
+		Nodes:                 nodes,
+		ConfigPollInterval:    configPollInterval,
+		MetricsReportInterval: metricsReportInterval,
+		HTTPProtocol:          httpProtocol,
+	}
+
+	// Validate the cluster configuration
+	if err := clusterConfig.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid cluster configuration: %w", err)
+	}
+
+	return clusterConfig, nil
+}
+
 func parseStringAndBoolSettings(config *ChainConfig) (string, string, bool, string, error) {
 	logLevelStr := DefaultLogLevel
 	if config.Application.LogLevel != "" {
@@ -1092,6 +1151,11 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		return nil, err
 	}
 
+	clusterConfig, err := parseClusterConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
 	unblockCooldown, err := time.ParseDuration(unblockCooldownStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid unblock_cooldown format: %w", err)
@@ -1197,6 +1261,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 				},
 			},
 		},
+		Cluster:          clusterConfig,
 		GoodActors:       newGoodActors,
 		Chains:           newChains,
 		FileDependencies: newFileDependencies,

@@ -17,6 +17,7 @@ type AppParameters struct {
 	DumpBackends bool
 	ExitOnEOF    bool
 	HTTPServer   string
+	Leader       string // Leader address for follower mode (e.g., "node-1:8080")
 	LogPath      string
 	ReloadOn     string
 	ShowVersion  bool
@@ -41,6 +42,7 @@ func (p AppParameters) String() string {
 	writeField("DumpBackends", "%v", p.DumpBackends)
 	writeField("ExitOnEOF", "%v", p.ExitOnEOF)
 	writeField("HTTPServer", "%q", p.HTTPServer)
+	writeField("Leader", "%q", p.Leader)
 	writeField("LogPath", "%q", p.LogPath)
 	writeField("ReloadOn", "%q", p.ReloadOn)
 	writeField("ShowVersion", "%v", p.ShowVersion)
@@ -79,6 +81,7 @@ func ParseParameters(args []string) (*AppParameters, error) {
 		DumpBackends: *cliFlags.DumpBackends,
 		ExitOnEOF:    *cliFlags.ExitOnEOF,
 		HTTPServer:   *cliFlags.HTTPServer,
+		Leader:       *cliFlags.Leader,
 		LogPath:      *cliFlags.LogPath,
 		ReloadOn:     *cliFlags.ReloadOn,
 		ShowVersion:  *cliFlags.ShowVersion,
@@ -148,6 +151,7 @@ type CLIFlagValues struct {
 	DumpBackends *bool
 	ExitOnEOF    *bool
 	HTTPServer   *string
+	Leader       *string
 	LogPath      *string
 	ReloadOn     *string
 	ShowVersion  *bool
@@ -164,6 +168,7 @@ func registerCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 		DumpBackends: fs.Bool("dump-backends", false, "List currently blocked IPs and exit."),
 		ExitOnEOF:    fs.Bool("exit-on-eof", false, "Exit after processing the existing log file instead of tailing."),
 		HTTPServer:   fs.String("http-server", "", "Enable the HTTP server for metrics on the given address (e.g., :8080)."),
+		Leader:       fs.String("leader", "", "Run in follower mode, polling the specified leader address for config updates (e.g., node-1:8080)."),
 		LogPath:      fs.String("log-path", "", "Path to the log file to monitor."),
 		ReloadOn:     fs.String("reload-on", "", "Trigger a configuration reload on a specific signal (hup, usr1, usr2) or 'watcher'. By default, both are enabled."),
 		ShowVersion:  fs.Bool("version", false, "Show the application version and exit."),
