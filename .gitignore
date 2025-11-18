@@ -35,7 +35,7 @@ go.work.sum
 bot-detector
 
 # WIP
-.work_in_progress/
+work_in_progress/
 
 # AI
 .gemini/
