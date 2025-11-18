@@ -391,33 +391,6 @@ func compileSingleMatcher(ctx MatcherContext, field string, value interface{}) (
 	return matcher, canonicalFieldName, nil
 }
 
-// readLinesFromFile is a helper to read a file into a slice of strings, ignoring comments and empty lines.
-func ReadLinesFromFile(path string) ([]string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		_ = file.Close()
-	}()
-
-	var lines []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		rawLine := scanner.Text()
-
-		// Check if the line is empty or a comment after trimming for check.
-		trimmedForCheck := strings.TrimSpace(rawLine)
-		if trimmedForCheck == "" || strings.HasPrefix(trimmedForCheck, "#") {
-			continue
-		}
-
-		// Add the raw line to be processed by the caller.
-		lines = append(lines, rawLine)
-	}
-	return lines, scanner.Err()
-}
-
 // compileStringMatcher handles string values, which can be exact, regex, glob, or status code patterns.
 func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error) {
 	if strings.HasPrefix(value, "exact:") {
@@ -774,7 +747,7 @@ func buildDependencyGraph(configPath string) (*depGraph, error) {
 	return depGraph, nil
 }
 
-func parseAndNormalizeYAML(configPath string) (*app.ChainConfig, []byte, error) {
+func parseAndNormalizeYAML(configPath string) (*config.ChainConfig, []byte, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to read YAML file %s: %w", configPath, err)
@@ -815,7 +788,7 @@ func parseAndNormalizeYAML(configPath string) (*app.ChainConfig, []byte, error) 
 	return &config, data, nil
 }
 
-func parseDurations(config *app.ChainConfig) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, error) {
+func parseDurations(config *config.ChainConfig) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, error) {
 	pollingIntervalStr := DefaultPollingInterval
 	if config.Application.Config.PollingInterval != "" {
 		pollingIntervalStr = config.Application.Config.PollingInterval
@@ -864,7 +837,7 @@ func parseDurations(config *app.ChainConfig) (time.Duration, time.Duration, time
 	return pollingInterval, cleanupInterval, idleTimeout, outOfOrderTolerance, eofPollingDelay, nil
 }
 
-func parseStringAndBoolSettings(config *app.ChainConfig) (string, string, bool, string, error) {
+func parseStringAndBoolSettings(config *config.ChainConfig) (string, string, bool, string, error) {
 	logLevelStr := DefaultLogLevel
 	if config.Application.LogLevel != "" {
 		logLevelStr = config.Application.LogLevel
@@ -893,7 +866,7 @@ func parseStringAndBoolSettings(config *app.ChainConfig) (string, string, bool, 
 	return logLevelStr, lineEndingStr, enableMetrics, unblockCooldownStr, nil
 }
 
-func parseCustomLogRegex(config *app.ChainConfig) (*regexp.Regexp, error) {
+func parseCustomLogRegex(config *config.ChainConfig) (*regexp.Regexp, error) {
 	if config.Parser.LogFormatRegex == "" {
 		return nil, nil
 	}
@@ -920,7 +893,7 @@ func parseCustomLogRegex(config *app.ChainConfig) (*regexp.Regexp, error) {
 	return re, nil
 }
 
-func parseChains(config *app.ChainConfig, fileDeps map[string]*types.FileDependency, configPath string, durationTables map[time.Duration]string) ([]app.BehavioralChain, error) {
+func parseChains(config *config.ChainConfig, fileDeps map[string]*types.FileDependency, configPath string, durationTables map[time.Duration]string) ([]app.BehavioralChain, error) {
 	var newChains []BehavioralChain
 	var defaultBlockDuration time.Duration
 	if config.Blockers.DefaultDuration != "" {
@@ -1026,7 +999,7 @@ func parseChains(config *app.ChainConfig, fileDeps map[string]*types.FileDepende
 	return newChains, nil
 }
 
-func parseGoodActors(config *app.ChainConfig, fileDeps map[string]*types.FileDependency, configPath string) ([]app.GoodActorDef, error) {
+func parseGoodActors(config *config.ChainConfig, fileDeps map[string]*types.FileDependency, configPath string) ([]app.GoodActorDef, error) {
 	var newGoodActors []GoodActorDef
 	for _, goodActorMap := range config.GoodActors {
 		nameVal, ok := goodActorMap["name"]
@@ -1086,7 +1059,7 @@ func parseGoodActors(config *app.ChainConfig, fileDeps map[string]*types.FileDep
 	return newGoodActors, nil
 }
 
-func parseDurationTables(config *app.ChainConfig) (map[time.Duration]string, string, error) {
+func parseDurationTables(config *config.ChainConfig) (map[time.Duration]string, string, error) {
 	newDurationTables := make(map[time.Duration]string, len(config.Blockers.Backends.HAProxy.DurationTables))
 	longestDuration := 0 * time.Second
 	newFallbackName := ""
@@ -1106,7 +1079,7 @@ func parseDurationTables(config *app.ChainConfig) (map[time.Duration]string, str
 	return newDurationTables, newFallbackName, nil
 }
 
-func parseBlockerSettings(config *app.ChainConfig) (int, time.Duration, time.Duration, int, int, error) {
+func parseBlockerSettings(config *config.ChainConfig) (int, time.Duration, time.Duration, int, int, error) {
 	var blockerMaxRetries int
 	var blockerRetryDelay, blockerDialTimeout time.Duration
 	var blockerCommandQueueSize, blockerCommandsPerSecond int
@@ -1152,7 +1125,7 @@ func parseBlockerSettings(config *app.ChainConfig) (int, time.Duration, time.Dur
 }
 
 // LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
-func LoadConfigFromYAML(opts LoadConfigOptions) (*app.LoadedConfig, error) {
+func LoadConfigFromYAML(opts LoadConfigOptions) (*config.LoadedConfig, error) {
 	depGraph, err := buildDependencyGraph(opts.ConfigPath)
 	if err != nil {
 		return nil, err
@@ -1431,7 +1404,7 @@ func unblockNewlyWhitelistedIPs(p *app.Processor, newGoodActors []app.GoodActorD
 	}
 }
 
-func reloadConfiguration(p *app.Processor, mainConfigChanged bool, oldConfigForComparison *app.AppConfig) { //nolint:cyclop
+func reloadConfiguration(p *app.Processor, mainConfigChanged bool, oldConfigForComparison *config.AppConfig) { //nolint:cyclop
 	p.ConfigMutex.RLock()
 	oldChains := p.Chains
 	// Use the provided oldConfigForComparison instead of cloning here.
@@ -1547,7 +1520,7 @@ func reloadConfiguration(p *app.Processor, mainConfigChanged bool, oldConfigForC
 
 // initializeMetrics sets up all the metric counters based on the loaded configuration.
 // It resets and repopulates the metric maps, making it safe to call on both startup and reload.
-func initializeMetrics(p *app.Processor, loadedCfg *app.LoadedConfig) {
+func initializeMetrics(p *app.Processor, loadedCfg *config.LoadedConfig) {
 	if !p.EnableMetrics {
 		// If metrics are disabled, ensure all metric maps are nil or empty
 		p.Metrics.ChainsCompleted = nil

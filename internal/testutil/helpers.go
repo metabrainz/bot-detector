@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/checker"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/metrics"
 	"bot-detector/internal/store"
@@ -108,7 +109,7 @@ func (m *MockBlocker) Shutdown() {
 }
 
 // newTestProcessor creates a new Processor instance with sensible defaults for testing.
-func newTestProcessor(config *app.AppConfig, chains []app.BehavioralChain) *app.Processor {
+func newTestProcessor(config *config.AppConfig, chains []app.BehavioralChain) *app.Processor {
 	if config == nil {
 		config = &AppConfig{}
 	}
@@ -158,7 +159,7 @@ type dryRunTestHarness struct {
 }
 
 // newDryRunTestHarness creates and initializes a test harness for DryRunLogProcessor.
-func newDryRunTestHarness(t *testing.T, config *app.AppConfig) *dryRunTestHarness {
+func newDryRunTestHarness(t *testing.T, config *config.AppConfig) *dryRunTestHarness {
 	t.Helper()
 
 	h := &dryRunTestHarness{t: t}
@@ -224,7 +225,7 @@ type checkerTestHarness struct {
 }
 
 // newCheckerTestHarness creates a harness for testing CheckChains logic.
-func newCheckerTestHarness(t *testing.T, config *app.AppConfig) *checkerTestHarness {
+func newCheckerTestHarness(t *testing.T, config *config.AppConfig) *checkerTestHarness {
 	t.Helper()
 	resetGlobalState()
 

@@ -2,6 +2,7 @@ package processor
 
 import (
 	"bot-detector/internal/app"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bufio"
 	"errors"
@@ -386,7 +387,7 @@ type tailerTestHarness struct {
 }
 
 // newTailerTestHarness creates and initializes a test harness for LiveLogTailer.
-func newTailerTestHarness(t *testing.T, config *app.AppConfig) *tailerTestHarness {
+func newTailerTestHarness(t *testing.T, config *config.AppConfig) *tailerTestHarness {
 	t.Helper()
 
 	h := &tailerTestHarness{

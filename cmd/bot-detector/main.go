@@ -132,7 +132,7 @@ func handleStartupFlags(params *commandline.AppParameters) error {
 	return nil // Continue execution
 }
 
-func initializeProcessor(params *commandline.AppParameters, appConfig *app.AppConfig, loadedCfg *app.LoadedConfig) *app.Processor {
+func initializeProcessor(params *commandline.AppParameters, appConfig *config.AppConfig, loadedCfg *config.LoadedConfig) *app.Processor {
 	return &Processor{
 		ActivityMutex:        &sync.RWMutex{},
 		TopActorsPerChain:    make(map[string]map[string]*store.ActorStats),

@@ -18,7 +18,7 @@ import (
 
 // newTestProcessorWithFileDeps creates a new Processor instance for testing,
 // pre-populating it with a mock AppConfig that includes a FileDependencies map.
-func newTestProcessorWithFileDeps(t *testing.T, config *app.AppConfig, logFunc func(level logging.LogLevel, tag string, format string, v ...interface{})) *app.Processor {
+func newTestProcessorWithFileDeps(t *testing.T, config *config.AppConfig, logFunc func(level logging.LogLevel, tag string, format string, v ...interface{})) *app.Processor {
 	t.Helper()
 	if config == nil {
 		config = &AppConfig{}

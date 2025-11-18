@@ -1,7 +1,7 @@
 package types
 
 import (
-	"bot-detector/internal/config"
+	"bot-detector/internal/utils"
 	"bufio"
 	"crypto/sha256"
 	"fmt"
@@ -85,7 +85,7 @@ func (fd *FileDependency) UpdateStatus() {
 
 	// Always attempt to read the file if it exists and is loaded, to detect read errors (e.g., permissions).
 	// This also ensures the checksum is always up-to-date if content changes without ModTime update (rare, but possible).
-	content, readErr := config.ReadLinesFromFile(fd.Path)
+	content, readErr := utils.ReadLinesFromFile(fd.Path)
 	if readErr != nil {
 		newStatus.Status = FileStatusError
 		newStatus.Error = readErr
@@ -116,7 +116,7 @@ func calculateChecksum(lines []string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-// config.ReadLinesFromFile is a helper to read a file into a slice of strings, ignoring comments and empty lines.
+// utils.ReadLinesFromFile is a helper to read a file into a slice of strings, ignoring comments and empty lines.
 func ReadLinesFromFile(path string) ([]string, error) {
 	file, err := os.Open(path)
 	if err != nil {
