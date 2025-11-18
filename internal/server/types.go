@@ -8,6 +8,15 @@ import (
 	"bot-detector/internal/types"
 )
 
+// NodeStatus represents the cluster status of this node.
+// This is used by the HTTP server to return node identity information.
+type NodeStatus struct {
+	Role          string // "leader" or "follower"
+	Name          string // Node name from cluster config (empty if not configured)
+	Address       string // Node address from cluster config (empty if not configured)
+	LeaderAddress string // Leader address (only set for followers)
+}
+
 // Provider defines the interface required by the HTTP server to access application data.
 // This interface decouples the server from the main application implementation,
 // allowing the server to request metrics, configuration, and lifecycle information
@@ -35,4 +44,10 @@ type Provider interface {
 
 	// GetMarshalledConfig retrieves the raw YAML configuration bytes and its modification time.
 	GetMarshalledConfig() ([]byte, time.Time, error)
+
+	// GetNodeStatus returns the cluster status of this node (role, name, address, leader).
+	GetNodeStatus() NodeStatus
+
+	// GetMetricsSnapshot returns a JSON-serializable snapshot of current metrics.
+	GetMetricsSnapshot() MetricsSnapshot
 }

@@ -19,6 +19,7 @@ The application operates in a continuous loop:
 *   **Blocker Integration:** Executes immediate IP blocking via the configured backend (e.g., HAProxy Runtime API, TCP or Unix Socket).
 *   **High Resilience:** Handles backend instance unavailability by logging the failure and continuing operation.
 *   **Configuration Hot-Reload:** Automatically detects and applies changes to the YAML configuration file and its file-based dependencies without a restart.
+*   **Cluster Support:** Run multiple nodes in a leader-follower configuration for high availability. Followers automatically sync configuration from the leader with integrity verification.
 *   **Log Rotation Safe:** Continuously tails log files, automatically re-opening the file after log rotation events.
 *   **Graceful Shutdown:** Implements signal handlers (SIGINT, SIGTERM) for safe, controlled process termination.
 *   **Dry Run Mode:** Allows testing behavioral chains against static log files without affecting a live blocking backend.
@@ -80,6 +81,94 @@ A separate worker process consumes commands from this queue at a configurable ra
 
 The queue itself has a configurable size (`blockers.command_queue_size`, default: 1000). If the rate of incoming commands exceeds the processing rate and the queue becomes full, any new commands will be dropped, and a warning will be logged. This design makes the system resilient to high-volume detection events without causing a "thundering herd" problem on the backend services.
 
+## **Cluster Configuration**
+
+Bot-detector supports running multiple nodes in a leader-follower architecture for high availability and configuration management.
+
+### **How It Works**
+
+- **Leader Node**: Serves the main configuration and all its file dependencies via an HTTP endpoint
+- **Follower Nodes**: Automatically bootstrap and synchronize configuration from the leader
+- **Role Determination**: Controlled by a `FOLLOW` file in the config directory
+  - No FOLLOW file = Leader role
+  - FOLLOW file present (containing leader address) = Follower role
+
+### **Configuration Distribution**
+
+The leader serves configuration as a tar.gz archive with SHA256 checksum verification:
+
+- **Archive Endpoint**: `/config/archive` - Returns config.yaml and all file dependencies
+- **Integrity Verification**: ETag header contains SHA256 checksum of the archive
+- **Dependency Tracking**: All file-based matchers (e.g., `file:./bad_paths.txt`) are automatically included
+- **Change Detection**: Followers poll the leader at a configurable interval (default: 5s)
+
+### **Setting Up a Cluster**
+
+#### Leader Node
+
+1. Create your main configuration file (`config.yaml`) with cluster settings:
+
+```yaml
+cluster:
+  nodes:
+    - name: leader
+      address: "node-1.example.com:8080"
+    - name: follower-1
+      address: "node-2.example.com:8080"
+  config_poll_interval: 5s
+  metrics_report_interval: 10s
+  protocol: http
+```
+
+2. Start the leader (no FOLLOW file in config directory):
+
+```sh
+./bot-detector --config /etc/bot-detector/config.yaml --http-server :8080
+```
+
+#### Follower Node
+
+1. Create a `FOLLOW` file in the config directory pointing to the leader:
+
+```sh
+echo "http://node-1.example.com:8080" > /etc/bot-detector/FOLLOW
+```
+
+2. Start the follower (it will auto-bootstrap configuration from leader):
+
+```sh
+./bot-detector --config /etc/bot-detector/config.yaml --http-server :8080
+```
+
+The follower will:
+- Automatically download the configuration archive from the leader on first start
+- Poll the leader for configuration updates at the configured interval
+- Verify archive integrity using SHA256 checksums
+- Reload configuration automatically when changes are detected
+
+### **Dynamic Role Changes**
+
+The configuration watcher monitors the FOLLOW file for changes:
+
+- **FOLLOW file created**: Node switches from leader to follower (requires restart)
+- **FOLLOW file deleted**: Node switches from follower to leader (requires restart)
+- **FOLLOW file modified**: Leader address changed (requires restart)
+
+Role changes are logged with warnings indicating that a restart is required.
+
+### **Testing Your Cluster**
+
+See `testing/2-nodes-cluster/` for a complete integration test setup with:
+- Example leader and follower configurations
+- Automated test script
+- Documentation of expected behavior
+
+Run the test:
+
+```sh
+cd testing/2-nodes-cluster
+./test-cluster.sh
+```
 
 ## **Building the Application**
 
@@ -139,6 +228,7 @@ The configuration is now organized into logical top-level sections.
 | **parser** | object | Settings related to parsing log lines. See table [`parser`](#parser). |
 | **checker** | object | Settings that control the behavior of the chain checker and state management. See table [`checker`](#checker). |
 | **blockers** | object | Configuration for the blocking backend(s). See table [`blockers`](#blockers). |
+| **cluster** | object | Optional. Cluster configuration for multi-node deployments. See table [`cluster`](#cluster). |
 | **good_actors** | list of objects | Optional. A list of trusted actors to skip from all processing. See table [`good_actors`](#good_actors). |
 | **chains** | list of objects | The list of behavioral chains to be loaded. See table [`chains`](#chains). |
 
@@ -209,6 +299,28 @@ The configuration is now organized into logical top-level sections.
 | :---- | :---- | :---- |
 | **addresses** | array of string | A list of all HAProxy control endpoints (TCP `host:port` or Unix socket paths) across the cluster. |
 | **duration_tables** | map | A map of Go duration strings to HAProxy stick table names (e.g., `"30m": "thirty_min_blocks"`). |
+
+---
+
+### `cluster`
+
+Optional cluster configuration for running multiple bot-detector nodes in a leader-follower architecture.
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
+| **nodes** | list of objects | List of cluster nodes. See table [`cluster.nodes`](#clusternodes). |
+| **config_poll_interval** | string | Optional. How often follower nodes poll the leader for configuration updates. Default: `30s`. |
+| **metrics_report_interval** | string | Optional. How often nodes report metrics to the cluster (future use). Default: `60s`. |
+| **protocol** | string | Optional. Protocol for cluster communication (`http` or `https`). Default: `http`. |
+
+#### `cluster.nodes`
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
+| **name** | string | Unique name for this node (e.g., `leader`, `follower-1`). |
+| **address** | string | Network address for this node (e.g., `node-1.example.com:8080` or `127.0.0.1:8080`). |
+
+**Note**: Node identity is determined by matching the `--http-server` bind address to a node's address or port. If no FOLLOW file exists in the config directory, the node assumes the leader role. If a FOLLOW file exists, the node assumes the follower role and uses the address in the FOLLOW file to contact the leader.
 
 ---
 

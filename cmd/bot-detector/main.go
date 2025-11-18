@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/checker"
+	"bot-detector/internal/cluster"
 	"bot-detector/internal/commandline"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
@@ -136,6 +137,7 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		LogFunc:              logging.LogOutput,
 		NowFunc:              time.Now, // Use the real time.Now in production.
 		ConfigPath:           params.ConfigPath,
+		ConfigDir:            params.ConfigDir,
 		LogPath:              params.LogPath,
 		ReloadOn:             params.ReloadOn,
 		TopN:                 params.TopN,
@@ -146,6 +148,12 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		PersistenceEnabled: loadedCfg.Application.Persistence.Enabled,
 		CompactionInterval: loadedCfg.Application.Persistence.CompactionInterval,
 		ActiveBlocks:       make(map[string]persistence.ActiveBlockInfo),
+
+		// Initialize cluster fields with defaults (will be set properly in later phases)
+		NodeRole:          "leader",
+		NodeName:          "",
+		NodeAddress:       "",
+		NodeLeaderAddress: "",
 	}
 }
 
@@ -250,6 +258,41 @@ func execute(params *commandline.AppParameters) error {
 		return err
 	}
 
+	// Check if FOLLOW file exists and determine if we need to bootstrap
+	followPath := filepath.Join(params.ConfigDir, "FOLLOW")
+	followData, err := os.ReadFile(followPath)
+	if err == nil {
+		// FOLLOW file exists - this is a follower
+		leaderAddr := strings.TrimSpace(string(followData))
+		if leaderAddr == "" {
+			return fmt.Errorf("FOLLOW file exists but is empty")
+		}
+
+		// Check if config file exists, if not, bootstrap
+		if _, err := os.Stat(params.ConfigPath); os.IsNotExist(err) {
+			// Config doesn't exist, bootstrap from leader
+			// Add http:// prefix if not present
+			if !strings.HasPrefix(leaderAddr, "http://") && !strings.HasPrefix(leaderAddr, "https://") {
+				leaderAddr = "http://" + leaderAddr
+			}
+
+			logging.LogOutput(logging.LevelInfo, "CLUSTER", "Config file not found, bootstrapping from leader at %s", leaderAddr)
+			if err := cluster.Bootstrap(cluster.BootstrapOptions{
+				LeaderAddress: leaderAddr,
+				ConfigPath:    params.ConfigPath,
+				LogFunc:       logging.LogOutput,
+				HTTPTimeout:   10 * time.Second,
+				ForceUpdate:   false,
+			}); err != nil {
+				return fmt.Errorf("failed to bootstrap config from leader: %w", err)
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		// Error reading FOLLOW file (but not "file doesn't exist")
+		return fmt.Errorf("failed to read FOLLOW file: %w", err)
+	}
+	// If FOLLOW doesn't exist, this is a leader - no bootstrap needed
+
 	fileInfo, err := os.Stat(params.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("could not stat config file: %v", err)
@@ -284,6 +327,18 @@ func execute(params *commandline.AppParameters) error {
 	if p.PersistenceEnabled && p.StateDir == "" {
 		return fmt.Errorf("persistence is enabled in config, but no --state-dir was provided")
 	}
+
+	// Determine node identity based on FOLLOW file and cluster configuration
+	identity, err := cluster.DetermineIdentity(params.ConfigDir, params.HTTPServer, loadedCfg.Cluster)
+	if err != nil {
+		return fmt.Errorf("failed to determine node identity: %w", err)
+	}
+	p.NodeRole = identity.Role.String()
+	p.NodeName = identity.Name
+	p.NodeAddress = identity.Address
+	p.NodeLeaderAddress = identity.LeaderAddress
+
+	logging.LogOutput(logging.LevelInfo, "CLUSTER", "Node identity: %s", identity.String())
 
 	p.StartTime = p.NowFunc()
 	p.SignalOooBufferFlush = func() { checker.DoSignalOooBufferFlush(p) }
@@ -497,6 +552,42 @@ func start(p *app.Processor) {
 			go store.CleanUpIdleActors(p, stopWatcher)
 			go checker.EntryBufferWorker(p, stopWatcher)
 			go server.Start(p)
+
+			// Start config poller for follower nodes
+			if p.NodeRole == "follower" && p.NodeLeaderAddress != "" {
+				// Create a channel for config reload signals
+				configReloadCh := make(chan struct{}, 1)
+
+				// Start the config poller
+				poller := cluster.NewConfigPoller(cluster.ConfigPollerOptions{
+					LeaderAddress:  p.NodeLeaderAddress,
+					ConfigPath:     p.ConfigPath,
+					PollInterval:   30 * time.Second, // Poll every 30 seconds
+					ConfigReloadCh: configReloadCh,
+					ShutdownCh:     p.SignalCh,
+					LogFunc:        p.LogFunc,
+					HTTPTimeout:    10 * time.Second,
+				})
+				go poller.Start()
+
+				// Handle config reload signals
+				go func() {
+					for {
+						select {
+						case <-configReloadCh:
+							p.LogFunc(logging.LevelInfo, "CLUSTER", "Config reload triggered by leader update")
+							// Make a copy of the old config for comparison
+							p.ConfigMutex.RLock()
+							oldConfig := p.Config.Clone()
+							p.ConfigMutex.RUnlock()
+							// Trigger config reload
+							app.ReloadConfiguration(p, true, &oldConfig)
+						case <-stopWatcher:
+							return
+						}
+					}
+				}()
+			}
 		}
 		// Listen for OS signals on the processor's channel
 		signal.Notify(p.SignalCh, syscall.SIGINT, syscall.SIGTERM)

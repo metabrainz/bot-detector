@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bot-detector/internal/cluster"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/types"
 	"io"
@@ -27,6 +28,7 @@ type AppConfig struct {
 	Parser           ParserConfig                      `config:"compare"`
 	Checker          CheckerConfig                     `config:"compare"`
 	Blockers         BlockersConfig                    `config:"compare"`
+	Cluster          *cluster.ClusterConfig            `config:"compare"` // Cluster configuration (optional)
 	GoodActors       []GoodActorDef                    `config:"compare"`
 	FileDependencies map[string]*types.FileDependency  // Map of file paths to their dependency status.
 	LastModTime      time.Time                         // Not compared
@@ -87,8 +89,9 @@ type LoadedConfig struct {
 	Parser           ParserConfig
 	Checker          CheckerConfig
 	Blockers         BlockersConfig
-	GoodActors       []GoodActorDef    `config:"compare"`
-	Chains           []BehavioralChain // Not compared here
+	Cluster          *cluster.ClusterConfig // Cluster configuration (optional)
+	GoodActors       []GoodActorDef         `config:"compare"`
+	Chains           []BehavioralChain      // Not compared here
 	FileDependencies map[string]*types.FileDependency
 	LogFormatRegex   *regexp.Regexp // Not compared here
 	StatFunc         func(string) (os.FileInfo, error)
@@ -101,6 +104,7 @@ type ChainConfig struct {
 	Parser      ParserConfigYAML         `yaml:"parser"`
 	Checker     CheckerConfigYAML        `yaml:"checker"`
 	Blockers    BlockersConfigYAML       `yaml:"blockers"`
+	Cluster     *ClusterConfigYAML       `yaml:"cluster"` // Optional cluster configuration
 	GoodActors  []map[string]interface{} `yaml:"good_actors"`
 	Chains      []BehavioralChainYAML    `yaml:"chains"`
 }
@@ -149,6 +153,21 @@ type HAProxyConfigYAML struct {
 	Addresses      []string          `yaml:"addresses"`
 	DurationTables map[string]string `yaml:"duration_tables"`
 }
+
+// ClusterConfigYAML represents the cluster configuration in YAML format.
+type ClusterConfigYAML struct {
+	Nodes                 []NodeConfigYAML `yaml:"nodes"`
+	ConfigPollInterval    string           `yaml:"config_poll_interval"`
+	MetricsReportInterval string           `yaml:"metrics_report_interval"`
+	Protocol              string           `yaml:"protocol"`
+}
+
+// NodeConfigYAML represents a single node in the cluster in YAML format.
+type NodeConfigYAML struct {
+	Name    string `yaml:"name"`
+	Address string `yaml:"address"`
+}
+
 type StepDefYAML struct {
 	Order               int
 	FieldMatches        map[string]interface{} `yaml:"field_matches"`

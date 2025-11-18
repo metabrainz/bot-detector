@@ -72,6 +72,7 @@ type Processor struct {
 	SignalOooBufferFlush func()
 	TestSignals          *TestSignals // Test-only signals for synchronization.
 	ConfigPath           string
+	ConfigDir            string // Directory containing config.yaml (derived from ConfigPath)
 	LogPath              string `test:"-"`
 	ReloadOn             string
 	TopActorsPerChain    map[string]map[string]*store.ActorStats // Dry-run only: tracks top actors per chain.
@@ -90,6 +91,11 @@ type Processor struct {
 	ConfigReloaded bool
 	// ExitOnEOF is a flag to indicate if the tailer should exit when it reaches the end of the file.
 	ExitOnEOF bool
+	// Cluster fields
+	NodeRole          string // "leader" or "follower"
+	NodeName          string // Node name from cluster config (empty if not configured)
+	NodeAddress       string // Node address from cluster config (empty if not configured)
+	NodeLeaderAddress string // Leader address (only set for followers)
 }
 
 // GetTimestampFormat returns the timestamp format from the config.

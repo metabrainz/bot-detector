@@ -1,4 +1,5 @@
 > **Note:** This document outlines a proposed design and is currently a Work in Progress.
+FIXME: We need to pass a config directory on the command line rather than a config file
 
 # Multi-Instance Cluster Architecture
 
@@ -61,25 +62,39 @@ graph TD
 
 ## Configuration
 
-### Command-Line Flags
+### Role Designation (Leader/Follower)
 
-The node's role (leader or follower) is determined by the presence of the `--leader` flag:
+The node's role (leader or follower) is determined by the presence of a file named `FOLLOW` in the configuration directory.
 
--   **No `--leader` flag:** The instance operates as the **Leader**. It serves its on-disk configuration to followers and aggregates cluster metrics by polling all followers.
--   `--leader <hostname:port>`: The instance operates as a **Follower**. It polls the specified leader for configuration updates and exposes its metrics via API for the leader to collect. On first connection (or if no local config exists), the follower automatically bootstraps by downloading the configuration, saving it locally, and exiting. On subsequent starts, it operates normally.
+-   **No `FOLLOW` file:** If `/etc/bot-detector/FOLLOW` does not exist, the instance operates as the **Leader**. It serves its on-disk configuration to followers and aggregates cluster metrics by polling all followers.
+-   **`FOLLOW` file exists:** If `/etc/bot-detector/FOLLOW` exists, the instance operates as a **Follower**. The contents of this file must be the address of the leader node (e.g., `node-1.internal:8080`), which must match an entry in the `cluster.nodes` configuration. The follower polls the specified leader for configuration updates and exposes its metrics via API for the leader to collect.
 
 **Examples:**
 
 ```bash
-# Start as leader (no --leader flag)
-./bot-detector --config config.yaml --log-path /var/log/haproxy/access.log
+# Start as leader (/etc/bot-detector/FOLLOW does not exist)
+./bot-detector --config-dir /etc/bot-detector --log-path /var/log/haproxy/access.log
 
-# Start as follower (first time - will bootstrap and exit)
-./bot-detector --leader node-1.internal:8080
-
-# Start as follower (normal operation after bootstrap)
-./bot-detector --leader node-1.internal:8080
+# Start as follower (/etc/bot-detector/FOLLOW contains "node-1.internal:8080")
+./bot-detector --config-dir /etc/bot-detector --log-path /var/log/haproxy/access.log
 ```
+
+### Operational Scenarios
+
+The instance's behavior is determined by the state of the configuration files at startup and any changes detected during runtime.
+
+| Scenario | Trigger | `config.yaml` State | `FOLLOW` File State | Expected Behavior |
+| :--- | :--- | :--- | :--- | :--- |
+| **Standalone** | App Start | `present (no cluster section)` | `absent` | Runs as a standalone instance. No cluster activity. |
+| **Leader** | App Start | `present (with cluster section)` | `absent` | Runs as **Leader**. Serves config and polls metrics from followers. |
+| **Follower** | App Start | `present` | `present (valid)` | Runs as **Follower**. Polls leader specified in `FOLLOW`. |
+| **Bootstrap Follower**| App Start | `absent` | `present` | **Bootstraps.** Fetches config from leader, validates it, and starts as Follower. |
+| **Promote to Leader** | File deleted | `present` | `deleted` | **Transitions to Leader.** Stops polling and begins serving config/polling others. |
+| **Demote to Follower** | File created | `present` | `created (valid)` | **Transitions to Follower.** Stops serving and begins polling the new leader. |
+| **Re-point Follower** | File modified | `present` | `modified (valid)` | **Switches leader.** Begins polling the new leader. |
+| **Error - Invalid Bootstrap** | App Start | `absent` | `present (invalid after check)` | Logs a **fatal error** and exits. The instance has no valid config. |
+| **Error - Invalid Runtime** | File modified | `present` | `modified (invalid)` | Logs an **error**, **rejects the change**, and continues polling the old leader. |
+| **Error - Invalid Demotion**| File created | `present (no cluster section)` | `created` | Logs an **error**. Ignores `FOLLOW` file. Remains Standalone. |
 
 ### Configuration Archive Format
 
@@ -171,37 +186,32 @@ When the leader adds new `good_actors` entries and reloads its config:
 
 ### 2. Bootstrapping a New Follower
 
-This scenario covers adding a brand new, unconfigured instance to an existing cluster.
+This scenario covers adding a brand new, unconfigured instance to an existing cluster. The process is dynamic and does not require restarts.
 
 **Automatic Bootstrap Process:**
 
-The application automatically detects when it's being run for the first time and handles the bootstrap process without requiring a separate flag or command.
-
-1.  **First Start:** Administrator starts `bot-detector` with `--leader` flag pointing at the leader node:
+1.  **Prepare Follower:** An administrator prepares the new follower node by creating the configuration directory and a `FOLLOW` file containing the leader's address:
     ```sh
-    ./bot-detector --leader node-1.internal:8080
+    mkdir -p /etc/bot-detector
+    echo "node-1.internal:8080" > /etc/bot-detector/FOLLOW
     ```
 
-2.  **Bootstrap Detection:** The application detects that no local `config.yaml` file exists.
-
-3.  **One-Time Fetch:** The instance makes a single API call to the leader's `/config/archive` endpoint to download the complete configuration package.
-
-4.  **Extract & Exit:** The instance:
-    - Extracts the archive to the local configuration directory (e.g., `/etc/bot-detector/`)
-    - Logs success and **exits with code 0**
-
-5.  **Normal Operation:** The administrator restarts the service with the same command:
+2.  **Start Service:** The administrator starts the `bot-detector` service.
     ```sh
-    ./bot-detector --leader node-1.internal:8080
+    ./bot-detector --config-dir /etc/bot-detector
     ```
-    This time, the local config exists, so the instance skips bootstrap and starts normally as a follower.
 
-**Bootstrap Re-trigger:**
-If a follower with an existing local config is restarted with the `--leader` flag:
-- Bootstrap is **skipped** (config already exists)
-- The follower starts normally and immediately begins polling the leader
-- On the first poll, if the leader's config is newer (based on `Last-Modified`), the follower downloads and hot-reloads it
-- This ensures followers with stale configs quickly catch up without manual intervention
+3.  **Bootstrap Detection:** On startup, the instance detects that `/etc/bot-detector/FOLLOW` exists, but `config.yaml` does not. This triggers the bootstrap process.
+
+4.  **Fetch Configuration:** The instance reads the leader's address from the `FOLLOW` file and downloads the complete configuration package from the leader's `/config/archive` endpoint.
+
+5.  **Validate and Extract:**
+    - The instance extracts the `config.yaml` from the archive.
+    - **Crucially, it validates that the leader address from the `FOLLOW` file exists in the `cluster.nodes` list within the newly downloaded configuration.**
+    - If the address is not found, the instance logs a fatal error and exits. This prevents configuration mismatches.
+    - If validation succeeds, it extracts the rest of the archive to the configuration directory.
+
+6.  **Transition to Follower:** After a successful bootstrap, the instance proceeds to start normal operation as a follower without needing a restart.
 
 #### Interaction Diagram
 
@@ -211,68 +221,54 @@ sequenceDiagram
     participant NewFollower as New Follower Node
     participant Leader as Leader Node
 
-    Admin->>NewFollower: ./bot-detector --leader node-1:8080 (first time)
-    NewFollower->>NewFollower: Detects no local config.yaml
+    Admin->>NewFollower: echo "leader:port" > /etc/bot-detector/FOLLOW
+    Admin->>NewFollower: Starts bot-detector service
+    NewFollower->>NewFollower: Detects FOLLOW file but no config.yaml
     NewFollower->>Leader: GET /config/archive
     Leader-->>NewFollower: 200 OK [.tar.gz archive]
-    NewFollower->>NewFollower: Extracts to config directory
-    NewFollower->>Admin: Exits with code 0 (bootstrap complete)
-
-    Admin->>NewFollower: ./bot-detector --leader node-1:8080 (restart)
-    NewFollower->>NewFollower: Loads local config.yaml
-    NewFollower->>NewFollower: Starts normal operation
-    NewFollower->>Leader: HEAD /config/archive (check Last-Modified, every 30s)
-    Leader->>NewFollower: GET /api/v1/metrics (pull metrics, every 10s)
+    NewFollower->>NewFollower: Extracts archive
+    NewFollower->>NewFollower: Validates leader address from FOLLOW file against cluster.nodes in new config
+    alt Validation Fails
+        NewFollower->>Admin: Exits with fatal error
+    else Validation Succeeds
+        NewFollower->>NewFollower: Bootstrap complete, starts as Follower
+        NewFollower->>Leader: Begins normal polling
+    end
 ```
 
 ### 3. Failover Procedure
 
-This model uses a straightforward manual failover process that ensures consistency and maintains operational simplicity.
+This model uses a dynamic, manual failover process that does not require service restarts, ensuring high availability.
 
 **Scenario:** The Leader node fails or becomes unreachable.
 
 **Impact During Leader Failure:**
-- ✅ **Threat detection continues:** All followers continue to parse logs, detect threats, and send commands to HAProxy
-- ✅ **Blocking continues:** No impact on core security functionality
-- ❌ **No config updates:** Followers cannot receive new configuration changes
-- ❌ **No centralized metrics:** Cluster-wide metrics dashboard is unavailable
+- ✅ **Threat detection continues:** All followers continue to parse logs, detect threats, and send commands to HAProxy.
+- ✅ **Blocking continues:** No impact on core security functionality.
+- ❌ **No config updates:** Followers cannot receive new configuration changes.
+- ❌ **No centralized metrics:** Cluster-wide metrics dashboard is unavailable.
 
-**Failover Steps:**
+**Dynamic Failover Steps:**
 
-1.  **Choose New Leader:** Administrator selects an existing follower to promote to leader.
+1.  **Choose New Leader:** Administrator selects an existing follower to promote (e.g., "node-2").
 
-2.  **Ensure Consistency:** Connect to the chosen node and verify its configuration is up-to-date:
+2.  **Ensure Consistency:** Connect to the chosen node and verify its configuration is up-to-date. **This is a critical manual step.**
     ```sh
     cd /etc/bot-detector
     git pull  # or deploy updated config files
     ```
-    **This is a critical manual step** to ensure the new leader has the latest configuration.
 
-3.  **Promote to Leader:** Restart the chosen instance **without** the `--leader` flag:
+3.  **Promote to Leader:** On the chosen node ("node-2"), **delete** the `FOLLOW` file. The running `bot-detector` instance will detect this change and dynamically transition its role to Leader.
     ```sh
-    systemctl stop bot-detector
-    # Update systemd service file to REMOVE --leader flag
-    systemctl start bot-detector
-    ```
-    The instance will now operate as the leader.
-
-4.  **Update Followers:** Restart all other followers, pointing them at the new leader:
-    ```sh
-    systemctl stop bot-detector
-    # Update systemd service file: --leader new-leader-hostname:8080
-    systemctl start bot-detector
+    rm /etc/bot-detector/FOLLOW
     ```
 
-**Alternative - DNS-Based Failover:**
+4.  **Update Other Followers:** On all other follower nodes, **modify** the `FOLLOW` file to point to the new leader's address. The running instances will detect the change and start polling the new leader.
+    ```sh
+    echo "node-2.internal:8080" > /etc/bot-detector/FOLLOW
+    ```
 
-For operational simplicity, use a stable DNS name for the leader:
-
-```bash
-# Followers always use the same DNS name
-./bot-detector --leader bot-leader.internal:8080
-```
-
-During failover, update the DNS record to point at the new leader. Followers will automatically reconnect on their next poll cycle (default: 30s).
+The entire cluster is now operating with a new leader without any downtime.
 
 #### Interaction Diagram
 
@@ -280,7 +276,7 @@ During failover, update the DNS record to point at the new leader. Followers wil
 sequenceDiagram
     participant Admin
     participant OldLeader as Old Leader (Failed)
-    participant FollowerA as Follower A
+    participant FollowerA
     participant NewLeader as Follower B → New Leader
 
     OldLeader--xOldLeader: Fails / Becomes Unreachable
@@ -288,16 +284,15 @@ sequenceDiagram
     Note over FollowerA: Continues operating independently<br/>Polls fail, but detection/blocking unaffected
 
     Admin->>NewLeader: git pull (ensure latest config)
-    Admin->>NewLeader: Stops service
-    Admin->>NewLeader: Restarts WITHOUT --leader flag
-    NewLeader->>NewLeader: Becomes Leader, serves config & collects metrics
+    Admin->>NewLeader: rm /etc/bot-detector/FOLLOW
+    NewLeader->>NewLeader: Detects file deletion, transitions to Leader role
 
-    Admin->>FollowerA: Updates --leader flag to new-leader:8080
-    Admin->>FollowerA: Restarts service
+    Admin->>FollowerA: echo "new-leader:port" > /etc/bot-detector/FOLLOW
+    FollowerA->>FollowerA: Detects file change, starts polling NewLeader
     FollowerA->>NewLeader: HEAD /config/archive (resume polling)
     NewLeader->>FollowerA: GET /api/v1/metrics (resumes pulling metrics)
 
-    Note over FollowerA,NewLeader: Cluster fully operational
+    Note over FollowerA,NewLeader: Cluster fully operational without restarts
 ```
 
 ---

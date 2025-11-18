@@ -48,6 +48,11 @@ const (
 	DefaultBlockerCommandsPerSecond = 10   // Default rate limit
 	DefaultUnblockCooldown          = "5m"
 	DefaultEnableMetrics            = true
+
+	// Default Cluster settings
+	DefaultConfigPollInterval    = "30s"  // How often followers check for config updates
+	DefaultMetricsReportInterval = "10s"  // How often leader polls followers for metrics
+	DefaultClusterProtocol       = "http" // Protocol for cluster communication
 )
 
 // Define constants for Top N table formatting

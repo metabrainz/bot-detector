@@ -29,6 +29,17 @@ func (m *MockProvider) GetMarshalledConfig() ([]byte, time.Time, error) {
 func (m *MockProvider) GetConfigForArchive() ([]byte, time.Time, map[string]*types.FileDependency, string, error) {
 	return nil, time.Time{}, nil, "", nil
 }
+func (m *MockProvider) GetNodeStatus() NodeStatus {
+	return NodeStatus{Role: "leader", Name: "", Address: "", LeaderAddress: ""}
+}
+func (m *MockProvider) GetMetricsSnapshot() MetricsSnapshot {
+	return MetricsSnapshot{
+		Timestamp:       time.Now(),
+		ProcessingStats: ProcessingStats{},
+		ActorStats:      ActorStats{},
+		ChainStats:      ChainStats{},
+	}
+}
 
 // MockFileDependency and MockProvider for testing
 type MockFileDependency struct {

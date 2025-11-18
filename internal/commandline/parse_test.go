@@ -1,14 +1,28 @@
 package commandline
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
 
 func TestParseParameters(t *testing.T) {
-	configPath := "/etc/bot-detector/config.yaml"
-	logPath := "/var/log/access.log"
+	// Create a temporary directory for testing
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, "config")
+	if err := os.Mkdir(configDir, 0755); err != nil {
+		t.Fatalf("Failed to create test config directory: %v", err)
+	}
+
+	configPath := filepath.Join(configDir, "config.yaml")
+	logPath := filepath.Join(tmpDir, "access.log")
+	stateDir := filepath.Join(tmpDir, "state")
+	if err := os.Mkdir(stateDir, 0755); err != nil {
+		t.Fatalf("Failed to create test state directory: %v", err)
+	}
+
 	expectConfigPath := "--config <path> is required"
 	expectLogPath := "--log-path <path> is required"
 	tests := []struct {
@@ -23,6 +37,7 @@ func TestParseParameters(t *testing.T) {
 			args: []string{"bot-detector", "--config", configPath, "--log-path", logPath},
 			want: &AppParameters{
 				ConfigPath: configPath,
+				ConfigDir:  configDir,
 				LogPath:    logPath,
 			},
 			wantErr: false,
@@ -33,7 +48,7 @@ func TestParseParameters(t *testing.T) {
 				"bot-detector",
 				"--config", configPath,
 				"--log-path", logPath,
-				"--state-dir", "/state",
+				"--state-dir", stateDir,
 				"--dry-run",
 				"--exit-on-eof",
 				"--version",
@@ -45,8 +60,9 @@ func TestParseParameters(t *testing.T) {
 			},
 			want: &AppParameters{
 				ConfigPath:   configPath,
+				ConfigDir:    configDir,
 				LogPath:      logPath,
-				StateDir:     "/state",
+				StateDir:     stateDir,
 				DryRun:       true,
 				ExitOnEOF:    true,
 				ShowVersion:  true,
@@ -93,6 +109,7 @@ func TestParseParameters(t *testing.T) {
 			args: []string{"bot-detector", "--config", configPath, "--dry-run"},
 			want: &AppParameters{
 				ConfigPath: configPath,
+				ConfigDir:  configDir,
 				DryRun:     true,
 				LogPath:    "", // LogPath should be empty
 			},
@@ -103,6 +120,28 @@ func TestParseParameters(t *testing.T) {
 			args:        []string{"bot-detector"},
 			wantErr:     true,
 			errContains: "no flag: help requested",
+		},
+		{
+			name: "config directory path builds config.yaml path",
+			args: []string{"bot-detector", "--config", configDir, "--log-path", logPath},
+			want: &AppParameters{
+				ConfigPath: configPath,
+				ConfigDir:  configDir,
+				LogPath:    logPath,
+			},
+			wantErr: false,
+		},
+		{
+			name:        "config file with wrong name fails",
+			args:        []string{"bot-detector", "--config", filepath.Join(configDir, "wrong.yaml"), "--log-path", logPath},
+			wantErr:     true,
+			errContains: "config file must be named 'config.yaml'",
+		},
+		{
+			name:        "non-existent config directory fails",
+			args:        []string{"bot-detector", "--config", filepath.Join(tmpDir, "nonexistent"), "--log-path", logPath},
+			wantErr:     true,
+			errContains: "config directory does not exist",
 		},
 	}
 

@@ -1884,3 +1884,389 @@ chains:
 	}
 	processor.PersistenceMutex.Unlock()
 }
+
+// --- Cluster Configuration Tests ---
+
+func TestLoadConfigFromYAML_ClusterConfig_Success(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+
+cluster:
+  nodes:
+    - name: "node-1"
+      address: "localhost:8080"
+    - name: "node-2"
+      address: "localhost:9090"
+  config_poll_interval: "30s"
+  metrics_report_interval: "10s"
+  protocol: "http"
+
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "block"
+    block_duration: "5m"
+    steps:
+      - field_matches: { path: "/test" }
+`
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
+	if err != nil {
+		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
+	}
+
+	// Verify cluster config was loaded
+	if loadedCfg.Cluster == nil {
+		t.Fatal("Expected cluster config to be loaded, got nil")
+	}
+
+	// Verify nodes
+	if len(loadedCfg.Cluster.Nodes) != 2 {
+		t.Errorf("Expected 2 cluster nodes, got %d", len(loadedCfg.Cluster.Nodes))
+	}
+
+	if loadedCfg.Cluster.Nodes[0].Name != "node-1" {
+		t.Errorf("Expected node name 'node-1', got %q", loadedCfg.Cluster.Nodes[0].Name)
+	}
+	if loadedCfg.Cluster.Nodes[0].Address != "localhost:8080" {
+		t.Errorf("Expected node address 'localhost:8080', got %q", loadedCfg.Cluster.Nodes[0].Address)
+	}
+
+	if loadedCfg.Cluster.Nodes[1].Name != "node-2" {
+		t.Errorf("Expected node name 'node-2', got %q", loadedCfg.Cluster.Nodes[1].Name)
+	}
+	if loadedCfg.Cluster.Nodes[1].Address != "localhost:9090" {
+		t.Errorf("Expected node address 'localhost:9090', got %q", loadedCfg.Cluster.Nodes[1].Address)
+	}
+
+	// Verify intervals
+	if loadedCfg.Cluster.ConfigPollInterval != 30*time.Second {
+		t.Errorf("Expected config_poll_interval 30s, got %v", loadedCfg.Cluster.ConfigPollInterval)
+	}
+
+	if loadedCfg.Cluster.MetricsReportInterval != 10*time.Second {
+		t.Errorf("Expected metrics_report_interval 10s, got %v", loadedCfg.Cluster.MetricsReportInterval)
+	}
+
+	// Verify protocol
+	if loadedCfg.Cluster.Protocol != "http" {
+		t.Errorf("Expected protocol 'http', got %q", loadedCfg.Cluster.Protocol)
+	}
+}
+
+func TestLoadConfigFromYAML_ClusterConfig_Optional(t *testing.T) {
+	// Config without cluster section should work fine (cluster is optional)
+	yamlContent := `
+version: "1.0"
+
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "block"
+    block_duration: "5m"
+    steps:
+      - field_matches: { path: "/test" }
+`
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
+	if err != nil {
+		t.Fatalf("LoadConfigFromYAML() should succeed without cluster config: %v", err)
+	}
+
+	// Verify cluster config is nil when not specified
+	if loadedCfg.Cluster != nil {
+		t.Errorf("Expected cluster config to be nil when not specified, got: %+v", loadedCfg.Cluster)
+	}
+}
+
+func TestLoadConfigFromYAML_ClusterConfig_Defaults(t *testing.T) {
+	// Test that default values are applied correctly
+	yamlContent := `
+version: "1.0"
+
+cluster:
+  nodes:
+    - name: "node-1"
+      address: "localhost:8080"
+  # config_poll_interval, metrics_report_interval, protocol will use defaults
+
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "block"
+    block_duration: "5m"
+    steps:
+      - field_matches: { path: "/test" }
+`
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
+	if err != nil {
+		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
+	}
+
+	if loadedCfg.Cluster == nil {
+		t.Fatal("Expected cluster config to be loaded, got nil")
+	}
+
+	// Verify defaults (from constants.go)
+	if loadedCfg.Cluster.ConfigPollInterval != 30*time.Second {
+		t.Errorf("Expected default config_poll_interval 30s, got %v", loadedCfg.Cluster.ConfigPollInterval)
+	}
+
+	if loadedCfg.Cluster.MetricsReportInterval != 10*time.Second {
+		t.Errorf("Expected default metrics_report_interval 10s, got %v", loadedCfg.Cluster.MetricsReportInterval)
+	}
+
+	if loadedCfg.Cluster.Protocol != "http" {
+		t.Errorf("Expected default protocol 'http', got %q", loadedCfg.Cluster.Protocol)
+	}
+}
+
+func TestLoadConfigFromYAML_ClusterConfig_HTTPS(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+
+cluster:
+  nodes:
+    - name: "node-1"
+      address: "secure.example.com:8443"
+  protocol: "https"
+
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "block"
+    block_duration: "5m"
+    steps:
+      - field_matches: { path: "/test" }
+`
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
+	if err != nil {
+		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
+	}
+
+	if loadedCfg.Cluster == nil {
+		t.Fatal("Expected cluster config to be loaded, got nil")
+	}
+
+	if loadedCfg.Cluster.Protocol != "https" {
+		t.Errorf("Expected protocol 'https', got %q", loadedCfg.Cluster.Protocol)
+	}
+}
+
+func TestLoadConfigFromYAML_ClusterConfig_InvalidNoNodes(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+
+cluster:
+  nodes: []  # Empty nodes list
+  config_poll_interval: "30s"
+
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "block"
+    steps:
+      - field_matches: { path: "/test" }
+`
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
+	if err == nil {
+		t.Fatal("Expected error for cluster config with no nodes, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "cluster must have at least one node") {
+		t.Errorf("Expected error about missing nodes, got: %v", err)
+	}
+}
+
+func TestLoadConfigFromYAML_ClusterConfig_InvalidDuplicateNames(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+
+cluster:
+  nodes:
+    - name: "node-1"
+      address: "localhost:8080"
+    - name: "node-1"  # Duplicate name
+      address: "localhost:9090"
+
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "block"
+    steps:
+      - field_matches: { path: "/test" }
+`
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
+	if err == nil {
+		t.Fatal("Expected error for duplicate node names, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "duplicate node name") {
+		t.Errorf("Expected error about duplicate node names, got: %v", err)
+	}
+}
+
+func TestLoadConfigFromYAML_ClusterConfig_InvalidDuplicateAddresses(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+
+cluster:
+  nodes:
+    - name: "node-1"
+      address: "localhost:8080"
+    - name: "node-2"
+      address: "localhost:8080"  # Duplicate address
+
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "block"
+    steps:
+      - field_matches: { path: "/test" }
+`
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
+	if err == nil {
+		t.Fatal("Expected error for duplicate node addresses, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "duplicate node address") {
+		t.Errorf("Expected error about duplicate node addresses, got: %v", err)
+	}
+}
+
+func TestLoadConfigFromYAML_ClusterConfig_InvalidProtocol(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+
+cluster:
+  nodes:
+    - name: "node-1"
+      address: "localhost:8080"
+  protocol: "ftp"  # Invalid protocol
+
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "block"
+    steps:
+      - field_matches: { path: "/test" }
+`
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
+	if err == nil {
+		t.Fatal("Expected error for invalid protocol, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "protocol must be") {
+		t.Errorf("Expected error about invalid protocol, got: %v", err)
+	}
+}
+
+func TestLoadConfigFromYAML_ClusterConfig_InvalidInterval(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+
+cluster:
+  nodes:
+    - name: "node-1"
+      address: "localhost:8080"
+  config_poll_interval: "invalid"  # Invalid duration
+
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "block"
+    steps:
+      - field_matches: { path: "/test" }
+`
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
+	if err == nil {
+		t.Fatal("Expected error for invalid config_poll_interval, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "config_poll_interval") {
+		t.Errorf("Expected error about invalid interval, got: %v", err)
+	}
+}
+
+func TestLoadConfigFromYAML_ClusterConfig_MissingNodeName(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+
+cluster:
+  nodes:
+    - name: ""  # Empty name
+      address: "localhost:8080"
+
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "block"
+    steps:
+      - field_matches: { path: "/test" }
+`
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
+	if err == nil {
+		t.Fatal("Expected error for missing node name, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "node name cannot be empty") {
+		t.Errorf("Expected error about empty node name, got: %v", err)
+	}
+}
+
+func TestLoadConfigFromYAML_ClusterConfig_MissingNodeAddress(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+
+cluster:
+  nodes:
+    - name: "node-1"
+      address: ""  # Empty address
+
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "block"
+    steps:
+      - field_matches: { path: "/test" }
+`
+	tmpConfigPath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
+	if err == nil {
+		t.Fatal("Expected error for missing node address, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "address cannot be empty") {
+		t.Errorf("Expected error about empty node address, got: %v", err)
+	}
+}

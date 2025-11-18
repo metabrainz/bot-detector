@@ -438,7 +438,8 @@ func SignalReloader(p *Processor, stop <-chan struct{}, signalCh chan os.Signal)
 	}
 }
 
-// ConfigWatcher monitors the YAML config file for modifications and reloads the chains dynamically.
+// ConfigWatcher monitors the YAML config file and FOLLOW file for modifications.
+// It reloads config dynamically and detects role changes.
 func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 	if p.DryRun {
 		return
@@ -450,7 +451,18 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 		pollingInterval = config.DefaultMinPollingInterval
 	}
 
-	p.LogFunc(logging.LevelDebug, "WATCH", "Starting ConfigWatcher, polling every %v", pollingInterval)
+	// Track FOLLOW file state for change detection
+	followPath := p.ConfigDir + "/FOLLOW"
+	lastFollowExists := false
+	lastFollowContent := ""
+
+	// Initialize FOLLOW file state
+	if followData, err := os.ReadFile(followPath); err == nil {
+		lastFollowExists = true
+		lastFollowContent = string(followData)
+	}
+
+	p.LogFunc(logging.LevelDebug, "WATCH", "Starting ConfigWatcher, polling every %v (monitoring config and FOLLOW file)", pollingInterval)
 	timer := time.NewTicker(pollingInterval)
 	defer timer.Stop()
 
@@ -472,6 +484,28 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 			}
 		case <-timer.C:
 			// Timer fired, continue with polling.
+		}
+
+		// Check FOLLOW file for role changes
+		followExists := false
+		followContent := ""
+		if followData, err := os.ReadFile(followPath); err == nil {
+			followExists = true
+			followContent = string(followData)
+		}
+
+		// Detect FOLLOW file changes
+		if followExists != lastFollowExists {
+			if followExists {
+				p.LogFunc(logging.LevelWarning, "CLUSTER_ROLE", "FOLLOW file created - node role changed to FOLLOWER (leader: %s). Restart required for role switch.", strings.TrimSpace(followContent))
+			} else {
+				p.LogFunc(logging.LevelWarning, "CLUSTER_ROLE", "FOLLOW file deleted - node role changed to LEADER. Restart required for role switch.")
+			}
+			lastFollowExists = followExists
+			lastFollowContent = followContent
+		} else if followExists && followContent != lastFollowContent {
+			p.LogFunc(logging.LevelWarning, "CLUSTER_ROLE", "FOLLOW file modified - leader address changed to: %s. Restart required to apply changes.", strings.TrimSpace(followContent))
+			lastFollowContent = followContent
 		}
 
 		// Clone the current config *before* checking for changes in file dependencies.
