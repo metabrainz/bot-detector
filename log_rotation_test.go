@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/metrics"
+	"bot-detector/internal/processor"
 	"bot-detector/internal/store"
 	"bufio"
 	"fmt"
@@ -54,7 +56,7 @@ func newRotationTestHarness(t *testing.T) *rotationTestHarness {
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		Metrics:       metrics.NewMetrics(),
 		ConfigMutex:   &sync.RWMutex{},
-		Chains:        []BehavioralChain{},
+		Chains:        []app.BehavioralChain{},
 		Config: &AppConfig{
 			Application: ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
@@ -99,7 +101,7 @@ func (h *rotationTestHarness) start() {
 	go func() {
 		defer h.wg.Done()
 		defer close(h.doneCh)
-		LiveLogTailer(h.processor, h.signalCh, h.readySignal)
+		processor.LiveLogTailer(h.processor, h.signalCh, h.readySignal)
 	}()
 
 	// Wait for tailer to be ready

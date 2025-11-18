@@ -1,6 +1,7 @@
 package processor
 
 import (
+	"bot-detector/internal/app"
 	"bot-detector/internal/logging"
 	"bufio"
 	"errors"
@@ -385,7 +386,7 @@ type tailerTestHarness struct {
 }
 
 // newTailerTestHarness creates and initializes a test harness for LiveLogTailer.
-func newTailerTestHarness(t *testing.T, config *AppConfig) *tailerTestHarness {
+func newTailerTestHarness(t *testing.T, config *app.AppConfig) *tailerTestHarness {
 	t.Helper()
 
 	h := &tailerTestHarness{
@@ -603,15 +604,19 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 		MatchKey: "ip",
 	}
 	// Correctly create matchers without capturing loop variables.
-	chain1.Steps = []StepDef{
+	chain1.Steps = []app.StepDef{
 		{Matchers: []struct {
 			Matcher   fieldMatcher
 			FieldName string
-		}{{Matcher: func(path string) func(e *LogEntry) bool { return func(e *LogEntry) bool { return e.Path == path } }("/step1"), FieldName: "Path"}}},
+		}{{Matcher: func(path string) func(e *app.LogEntry) bool {
+			return func(e *app.LogEntry) bool { return e.Path == path }
+		}("/step1"), FieldName: "Path"}}},
 		{MaxDelayDuration: 3 * time.Second, Matchers: []struct {
 			Matcher   fieldMatcher
 			FieldName string
-		}{{Matcher: func(path string) func(e *LogEntry) bool { return func(e *LogEntry) bool { return e.Path == path } }("/step2"), FieldName: "Path"}}},
+		}{{Matcher: func(path string) func(e *app.LogEntry) bool {
+			return func(e *app.LogEntry) bool { return e.Path == path }
+		}("/step2"), FieldName: "Path"}}},
 	}
 
 	chain2 := BehavioralChain{
@@ -619,11 +624,13 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 		Action:   "log",
 		MatchKey: "ip",
 	}
-	chain2.Steps = []StepDef{
+	chain2.Steps = []app.StepDef{
 		{Matchers: []struct {
 			Matcher   fieldMatcher
 			FieldName string
-		}{{Matcher: func(path string) func(e *LogEntry) bool { return func(e *LogEntry) bool { return e.Path == path } }("/other-chain-trigger"), FieldName: "Path"}}},
+		}{{Matcher: func(path string) func(e *app.LogEntry) bool {
+			return func(e *app.LogEntry) bool { return e.Path == path }
+		}("/other-chain-trigger"), FieldName: "Path"}}},
 	}
 
 	tests := []struct {
@@ -685,7 +692,7 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 				},
 			})
 			_ = os.WriteFile(harness.tempLogFile, []byte(logContent), 0644)
-			harness.processor.Chains = []BehavioralChain{chain1, chain2}
+			harness.processor.Chains = []app.BehavioralChain{chain1, chain2}
 			harness.processor.TopN = tt.topN
 			harness.processor.DryRun = true // Explicitly set DryRun mode for this test.
 
@@ -1193,7 +1200,7 @@ func (f *statErrorFile) Stat() (os.FileInfo, error) {
 func TestLogMetricsSummary(t *testing.T) {
 	// --- Setup ---
 	// 1. Create a processor with some chains.
-	chains := []BehavioralChain{
+	chains := []app.BehavioralChain{
 		{Name: "ChainA", MetricsCounter: new(atomic.Int64), MetricsResetCounter: new(atomic.Int64), MetricsHitsCounter: new(atomic.Int64)},
 		{Name: "ChainB", MetricsCounter: new(atomic.Int64), MetricsResetCounter: new(atomic.Int64), MetricsHitsCounter: new(atomic.Int64)},
 	}

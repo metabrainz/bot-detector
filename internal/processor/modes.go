@@ -1,6 +1,8 @@
 package processor
 
 import (
+	"bot-detector/internal/app"
+	"bot-detector/internal/checker"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
@@ -46,7 +48,7 @@ type Tailer struct {
 
 // NewTailer creates and initializes a new Tailer. It opens the file, gets its
 // initial stats for rotation detection, and seeks to the end for live tailing.
-func NewTailer(p *Processor, seekToEnd bool) (*Tailer, error) {
+func NewTailer(p *app.Processor, seekToEnd bool) (*Tailer, error) {
 	t := &Tailer{
 		path:   p.LogPath,
 		logger: p.LogFunc,
@@ -256,7 +258,7 @@ func defaultStatFunc(path string) (os.FileInfo, error) {
 
 // delayOrShutdown waits for a specified duration but will return early if a shutdown
 // signal is received on the provided channel. It returns true if a shutdown was triggered.
-func delayOrShutdown(p *Processor, delay time.Duration, signalCh <-chan os.Signal) bool {
+func delayOrShutdown(p *app.Processor, delay time.Duration, signalCh <-chan os.Signal) bool {
 	select {
 	case <-time.After(delay):
 		return false // Delay completed
@@ -273,7 +275,7 @@ func delayOrShutdown(p *Processor, delay time.Duration, signalCh <-chan os.Signa
 
 // processFileLines is a shared helper function that reads a file line by line,
 // handling different line endings and line length limits, and calls a processor function for each line.
-func processFileLines(p *Processor, file io.Reader, lineProcessor func(line string)) error {
+func processFileLines(p *app.Processor, file io.Reader, lineProcessor func(line string)) error {
 	// Select the line reader function based on config.
 	readLine, err := getLineReader(p.Config.Parser.LineEnding)
 	if err != nil {
@@ -309,7 +311,7 @@ func processFileLines(p *Processor, file io.Reader, lineProcessor func(line stri
 }
 
 // DryRunLogProcessor reads and processes a static log file for testing.
-func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
+func DryRunLogProcessor(p *app.Processor, done chan<- struct{}) {
 	defer close(done)
 
 	var reader io.Reader
@@ -374,7 +376,7 @@ func DryRunLogProcessor(p *Processor, done chan<- struct{}) {
 		p.LogFunc(logging.LevelError, "DRY_RUN_ERROR", "Error during file processing: %v", err)
 	}
 	// After processing all lines, flush any remaining entries in the buffer.
-	FlushEntryBuffer(p)
+	checker.FlushEntryBuffer(p)
 	elapsedTime := time.Since(startTime)
 
 	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Dry-run finished.")
@@ -410,7 +412,7 @@ func formatLastSeen(t time.Time, now time.Time) string {
 }
 
 // logTopActorsSummary displays the top N actors per chain if the feature is enabled.
-func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, string, ...interface{})) {
+func logTopActorsSummary(p *app.Processor, logFunc func(logging.LogLevel, string, string, ...interface{})) {
 	p.ActivityMutex.RLock()
 	defer p.ActivityMutex.RUnlock()
 	if p.TopN <= 0 {
@@ -550,7 +552,7 @@ type MetricsSummaryData struct {
 }
 
 // collectMetricsSummaryData gathers all metrics from the processor and returns them in a structured format.
-func collectMetricsSummaryData(p *Processor, elapsedTime time.Duration, filterTag string) *MetricsSummaryData {
+func collectMetricsSummaryData(p *app.Processor, elapsedTime time.Duration, filterTag string) *MetricsSummaryData {
 	data := &MetricsSummaryData{
 		ElapsedTime:       elapsedTime,
 		LinesProcessed:    p.Metrics.LinesProcessed.Load(),
@@ -696,7 +698,7 @@ func logChainAndActionStats(logFunc func(logging.LogLevel, string, string, ...in
 	}
 }
 
-func logPerChainMetrics(p *Processor, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag string, data *MetricsSummaryData) {
+func logPerChainMetrics(p *app.Processor, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag string, data *MetricsSummaryData) {
 	validHits := p.Metrics.ValidHits.Load()
 
 	if len(data.ChainMetrics) > 0 {
@@ -725,7 +727,7 @@ func logPerChainMetrics(p *Processor, logFunc func(logging.LogLevel, string, str
 //   - logFunc: The logging function to use for output.
 //   - logTag: The tag to use for each log line (e.g., "METRICS").
 //   - filterTag: The struct tag to filter which general metrics to display (e.g., "dryrun").
-func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag, filterTag string) {
+func logMetricsSummary(p *app.Processor, elapsedTime time.Duration, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag, filterTag string) {
 	if !p.EnableMetrics {
 		logFunc(logging.LevelInfo, logTag, "Metrics are disabled.")
 		return
@@ -767,7 +769,7 @@ func logMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(log
 
 // cleanupTopActors is a background goroutine that periodically cleans the TopActorsPerChain map
 // to prevent unbounded memory growth in live mode when TopN is enabled.
-func cleanupTopActors(p *Processor, stop <-chan struct{}) {
+func cleanupTopActors(p *app.Processor, stop <-chan struct{}) {
 	if p.TopN <= 0 {
 		p.LogFunc(logging.LevelDebug, "CLEANUP_TOPN", "Top-N cleanup routine is disabled (top-n <= 0).")
 		return // Cleanup is disabled.
@@ -827,7 +829,7 @@ func cleanupTopActors(p *Processor, stop <-chan struct{}) {
 }
 
 // LiveLogTailer continuously tails a log file, handling rotation and truncation.
-func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- struct{}) {
+func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan<- struct{}) {
 	var (
 		firstRun = true // Flag to control initial seek behavior.
 		shutdown = false
@@ -876,7 +878,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 			select {
 			case s := <-signalCh:
 				p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
-				FlushEntryBuffer(p) // Final flush on shutdown.
+				checker.FlushEntryBuffer(p) // Final flush on shutdown.
 				_ = tailer.Close()
 				return
 			default:
@@ -891,7 +893,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 					continue
 				}
 				if errors.Is(readErr, ErrEOF) {
-					FlushEntryBuffer(p)
+					checker.FlushEntryBuffer(p)
 					// If the flag is set, we exit on the first EOF.
 					if p.ExitOnEOF {
 						p.LogFunc(logging.LevelInfo, "TAIL", "Reached EOF, exiting due to --exit-on-eof flag.")

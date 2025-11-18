@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
+	"bot-detector/internal/checker"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
+	"bot-detector/internal/processor"
 	"bot-detector/internal/store"
 	"bufio"
 	"bytes"
@@ -46,7 +50,7 @@ func (b *concurrentBuffer) Reset() {
 
 // setupTestProcessor initializes a Processor for testing with a given dryRun mode.
 // It captures log output for verification.
-func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Processor, *concurrentBuffer, chan struct{}) {
+func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*app.Processor, *concurrentBuffer, chan struct{}) {
 	t.Helper()
 
 	var logOutput concurrentBuffer
@@ -79,7 +83,7 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 
 	logging.SetLogLevel("debug")
 	// Load base configuration from a test file.
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: "testdata/config.yaml"})
+	loadedCfg, err := config.LoadConfigFromYAML(LoadConfigOptions{ConfigPath: "testdata/config.yaml"})
 	if err != nil {
 		t.Fatalf("Failed to load test YAML config: %v", err)
 	}
@@ -137,7 +141,7 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 	p.oooBufferFlushSignal = make(chan struct{}, 1)
 	p.signalOooBufferFlush = p.doSignalOooBufferFlush
 
-	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
+	p.CheckChainsFunc = func(entry *app.LogEntry) { checker.CheckChains(p, entry) }
 	p.Blocker = blocker.NewHAProxyBlocker(p, dryRun) // Initialize the blocker to prevent nil pointer panic.
 
 	lineProcessedCh := make(chan struct{}, 100) // Buffered channel to prevent blocking
@@ -216,7 +220,7 @@ func TestDryRunVsLiveModeComparison(t *testing.T) {
 	// --- Run in Dry-Run Mode ---
 	dryRunProcessor, dryRunLogs, _ := setupTestProcessor(t, true, dryRunLogFilePath) // No need for lineProcessedCh in dry-run
 	dryRunDone := make(chan struct{})
-	go DryRunLogProcessor(dryRunProcessor, dryRunDone)
+	go processor.DryRunLogProcessor(dryRunProcessor, dryRunDone)
 	<-dryRunDone
 
 	// --- Run in Live Mode ---
@@ -239,7 +243,7 @@ func TestDryRunVsLiveModeComparison(t *testing.T) {
 	// 3. Start the tailer in a goroutine.
 	go func() {
 		defer wg.Done()
-		LiveLogTailer(liveProcessor, liveSignalCh, liveReadySignal)
+		processor.LiveLogTailer(liveProcessor, liveSignalCh, liveReadySignal)
 	}()
 
 	// 4. Wait for the tailer to be ready (i.e., watching the file).

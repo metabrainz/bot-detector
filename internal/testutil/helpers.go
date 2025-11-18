@@ -1,7 +1,9 @@
 package testutil
 
 import (
+	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
+	"bot-detector/internal/checker"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/metrics"
 	"bot-detector/internal/store"
@@ -106,7 +108,7 @@ func (m *MockBlocker) Shutdown() {
 }
 
 // newTestProcessor creates a new Processor instance with sensible defaults for testing.
-func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
+func newTestProcessor(config *app.AppConfig, chains []app.BehavioralChain) *app.Processor {
 	if config == nil {
 		config = &AppConfig{}
 	}
@@ -119,7 +121,7 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 		Chains:            chains,
 		Config:            config,
 		LogFunc:           func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
-		EntryBuffer:       make([]*LogEntry, 0),
+		EntryBuffer:       make([]*app.LogEntry, 0),
 		TopActorsPerChain: make(map[string]map[string]*store.ActorStats),
 		EnableMetrics:     config.Application.EnableMetrics,
 
@@ -141,7 +143,7 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 	// Initialize signalFlush to prevent nil pointer dereference in tests.
 	p.oooBufferFlushSignal = make(chan struct{}, 1)
 	p.signalOooBufferFlush = p.doSignalOooBufferFlush
-	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
+	p.CheckChainsFunc = func(entry *app.LogEntry) { checker.CheckChains(p, entry) }
 	return p
 }
 
@@ -156,7 +158,7 @@ type dryRunTestHarness struct {
 }
 
 // newDryRunTestHarness creates and initializes a test harness for DryRunLogProcessor.
-func newDryRunTestHarness(t *testing.T, config *AppConfig) *dryRunTestHarness {
+func newDryRunTestHarness(t *testing.T, config *app.AppConfig) *dryRunTestHarness {
 	t.Helper()
 
 	h := &dryRunTestHarness{t: t}
@@ -222,7 +224,7 @@ type checkerTestHarness struct {
 }
 
 // newCheckerTestHarness creates a harness for testing CheckChains logic.
-func newCheckerTestHarness(t *testing.T, config *AppConfig) *checkerTestHarness {
+func newCheckerTestHarness(t *testing.T, config *app.AppConfig) *checkerTestHarness {
 	t.Helper()
 	resetGlobalState()
 
@@ -257,7 +259,7 @@ func newCheckerTestHarness(t *testing.T, config *AppConfig) *checkerTestHarness 
 // addChain compiles a chain from its YAML definition and adds it to the processor.
 func (h *checkerTestHarness) addChain(chainYAML BehavioralChain) {
 	h.t.Helper()
-	// This simulates the compilation part of LoadConfigFromYAML for a single chain.
+	// This simulates the compilation part of config.LoadConfigFromYAML for a single chain.
 	runtimeChain := chainYAML
 	// Create an empty FileDependencies map for testing purposes.
 	testFileDependencies := make(map[string]*types.FileDependency)
@@ -276,15 +278,15 @@ func (h *checkerTestHarness) addChain(chainYAML BehavioralChain) {
 }
 
 // processEntry runs a single log entry through the CheckChains logic.
-func (h *checkerTestHarness) processEntry(entry *LogEntry) {
+func (h *checkerTestHarness) processEntry(entry *app.LogEntry) {
 	h.t.Helper()
-	CheckChains(h.processor, entry)
+	checker.CheckChains(h.processor, entry)
 }
 
 // assertChainProgress checks if a given key is at the expected step for a chain.
-func (h *checkerTestHarness) assertChainProgress(chainName string, entry *LogEntry, expectedStep int) {
+func (h *checkerTestHarness) assertChainProgress(chainName string, entry *app.LogEntry, expectedStep int) {
 	h.t.Helper()
-	key := GetActor(&h.processor.Chains[0], entry)
+	key := checker.GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
 	activity, exists := h.processor.ActivityStore[store.Actor(key)]
@@ -294,9 +296,9 @@ func (h *checkerTestHarness) assertChainProgress(chainName string, entry *LogEnt
 }
 
 // assertBlocked checks if a given key is marked as blocked.
-func (h *checkerTestHarness) assertBlocked(entry *LogEntry, expected bool) { //nolint:thelper
+func (h *checkerTestHarness) assertBlocked(entry *app.LogEntry, expected bool) { //nolint:thelper
 	h.t.Helper()
-	key := GetActor(&h.processor.Chains[0], entry)
+	key := checker.GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
 	activity, exists := h.processor.ActivityStore[store.Actor(key)]
@@ -310,9 +312,9 @@ func (h *checkerTestHarness) assertBlocked(entry *LogEntry, expected bool) { //n
 }
 
 // assertChainProgressCleared checks that a chain's progress has been removed from the activity store.
-func (h *checkerTestHarness) assertChainProgressCleared(chainName string, entry *LogEntry) {
+func (h *checkerTestHarness) assertChainProgressCleared(chainName string, entry *app.LogEntry) {
 	h.t.Helper()
-	key := GetActor(&h.processor.Chains[0], entry)
+	key := checker.GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
 	activity, exists := h.processor.ActivityStore[store.Actor(key)]

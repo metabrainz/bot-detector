@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
+	"bot-detector/internal/checker"
 	"bot-detector/internal/commandline"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/metrics"
 	"bot-detector/internal/persistence"
+	"bot-detector/internal/processor"
 	"bot-detector/internal/server"
 	"bot-detector/internal/store"
+	"bot-detector/internal/testutil"
 	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
 	"bufio"
@@ -35,7 +40,7 @@ var signalMap = map[string]os.Signal{
 }
 
 // GetMarshalledConfig reads the raw configuration file from disk.
-func (p *Processor) GetMarshalledConfig() ([]byte, time.Time, error) {
+func (p *app.Processor) GetMarshalledConfig() ([]byte, time.Time, error) {
 	return p.Config.YAMLContent, p.Config.LastModTime, nil
 }
 
@@ -117,7 +122,7 @@ func handleStartupFlags(params *commandline.AppParameters) error {
 			ConfigPath: params.ConfigPath,
 		}
 		var err error
-		if _, err = LoadConfigFromYAML(opts); err != nil {
+		if _, err = config.LoadConfigFromYAML(opts); err != nil {
 			return fmt.Errorf("configuration check failed: %v", err)
 		}
 		log.Println("[SUCCESS] Configuration is valid.")
@@ -127,7 +132,7 @@ func handleStartupFlags(params *commandline.AppParameters) error {
 	return nil // Continue execution
 }
 
-func initializeProcessor(params *commandline.AppParameters, appConfig *AppConfig, loadedCfg *LoadedConfig) *Processor {
+func initializeProcessor(params *commandline.AppParameters, appConfig *app.AppConfig, loadedCfg *app.LoadedConfig) *app.Processor {
 	return &Processor{
 		ActivityMutex:        &sync.RWMutex{},
 		TopActorsPerChain:    make(map[string]map[string]*store.ActorStats),
@@ -158,7 +163,7 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *AppConfig
 	}
 }
 
-func restorePersistenceState(p *Processor) error {
+func restorePersistenceState(p *app.Processor) error {
 	// -- STATE RESTORATION --
 	if err := os.MkdirAll(p.stateDir, 0750); err != nil {
 		return fmt.Errorf("failed to create state directory '%s': %v", p.stateDir, err)
@@ -264,7 +269,7 @@ func execute(params *commandline.AppParameters) error {
 		return fmt.Errorf("could not stat config file: %v", err)
 	}
 
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: params.ConfigPath})
+	loadedCfg, err := config.LoadConfigFromYAML(LoadConfigOptions{ConfigPath: params.ConfigPath})
 	if err != nil {
 		return fmt.Errorf("configuration Load Error: %v", err)
 	}
@@ -312,7 +317,7 @@ func execute(params *commandline.AppParameters) error {
 		return dumpBackendsAndExit(p)
 	}
 
-	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
+	p.CheckChainsFunc = func(entry *app.LogEntry) { checker.CheckChains(p, entry) }
 	p.ProcessLogLine = func(line string) { processLogLineInternal(p, line) }
 
 	logConfigurationSummary(p)
@@ -325,7 +330,7 @@ func execute(params *commandline.AppParameters) error {
 	return nil
 }
 
-func dumpBackendsAndExit(p *Processor) error {
+func dumpBackendsAndExit(p *app.Processor) error {
 	// Only run the sync check if there are multiple backends to compare.
 	if len(p.GetBlockerAddresses()) > 1 {
 		logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "Checking HAProxy backend synchronization...")
@@ -367,7 +372,7 @@ func dumpBackendsAndExit(p *Processor) error {
 	return nil
 }
 
-func performGracefulShutdown(p *Processor) {
+func performGracefulShutdown(p *app.Processor) {
 	p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Graceful shutdown initiated.")
 
 	if p.Blocker != nil {
@@ -396,7 +401,7 @@ func performGracefulShutdown(p *Processor) {
 // --- MetricsProvider Interface Implementation ---
 
 // GetConfigForArchive safely retrieves the main config content and its dependencies for archiving.
-func (p *Processor) GetConfigForArchive() ([]byte, time.Time, map[string]*types.FileDependency, string, error) {
+func (p *app.Processor) GetConfigForArchive() ([]byte, time.Time, map[string]*types.FileDependency, string, error) {
 	p.ConfigMutex.RLock()
 	defer p.ConfigMutex.RUnlock()
 
@@ -414,22 +419,22 @@ func (p *Processor) GetConfigForArchive() ([]byte, time.Time, map[string]*types.
 }
 
 // GetListenAddr returns the HTTP listen address from the config.
-func (p *Processor) GetListenAddr() string {
+func (p *app.Processor) GetListenAddr() string {
 	return p.HTTPServer
 }
 
 // GetShutdownChannel returns the channel used for shutdown signals.
-func (p *Processor) GetShutdownChannel() chan os.Signal {
+func (p *app.Processor) GetShutdownChannel() chan os.Signal {
 	return p.signalCh
 }
 
 // Log is a wrapper around the processor's LogFunc to satisfy the interface.
-func (p *Processor) Log(level logging.LogLevel, tag string, format string, v ...interface{}) {
+func (p *app.Processor) Log(level logging.LogLevel, tag string, format string, v ...interface{}) {
 	p.LogFunc(level, tag, format, v...)
 }
 
 // GenerateHTMLMetricsReport creates the full metrics report as an HTML-safe string.
-func (p *Processor) GenerateHTMLMetricsReport() string {
+func (p *app.Processor) GenerateHTMLMetricsReport() string {
 	var report strings.Builder
 	webLogFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		// Sanitize the formatted string before writing it to the HTML report.
@@ -440,7 +445,7 @@ func (p *Processor) GenerateHTMLMetricsReport() string {
 }
 
 // GenerateStepsMetricsReport creates a report of step execution counts as an HTML-safe string.
-func (p *Processor) GenerateStepsMetricsReport() string {
+func (p *app.Processor) GenerateStepsMetricsReport() string {
 	var report strings.Builder
 	report.WriteString("--- Step Execution Counts ---\n")
 	if p.Metrics.StepExecutionCounts == nil {
@@ -476,11 +481,11 @@ func (p *Processor) GenerateStepsMetricsReport() string {
 
 // --- ParserProvider Interface Implementation ---
 
-func (p *Processor) GetTimestampFormat() string {
+func (p *app.Processor) GetTimestampFormat() string {
 	return p.Config.Parser.TimestampFormat
 }
 
-func (p *Processor) GetLogRegex() *regexp.Regexp {
+func (p *app.Processor) GetLogRegex() *regexp.Regexp {
 	p.ConfigMutex.RLock()
 	defer p.ConfigMutex.RUnlock()
 	return p.LogRegex
@@ -488,35 +493,35 @@ func (p *Processor) GetLogRegex() *regexp.Regexp {
 
 // --- StoreProvider Interface Implementation ---
 
-func (p *Processor) GetCleanupInterval() time.Duration {
+func (p *app.Processor) GetCleanupInterval() time.Duration {
 	return p.Config.Checker.ActorCleanupInterval
 }
 
-func (p *Processor) GetIdleTimeout() time.Duration {
+func (p *app.Processor) GetIdleTimeout() time.Duration {
 	return p.Config.Checker.ActorStateIdleTimeout
 }
 
-func (p *Processor) GetMaxTimeSinceLastHit() time.Duration {
+func (p *app.Processor) GetMaxTimeSinceLastHit() time.Duration {
 	return p.Config.Checker.MaxTimeSinceLastHit
 }
 
-func (p *Processor) GetTopN() int {
+func (p *app.Processor) GetTopN() int {
 	return p.TopN
 }
 
-func (p *Processor) GetTopActorsPerChain() map[string]map[string]*store.ActorStats {
+func (p *app.Processor) GetTopActorsPerChain() map[string]map[string]*store.ActorStats {
 	return p.TopActorsPerChain
 }
 
-func (p *Processor) GetActivityStore() map[store.Actor]*store.ActorActivity {
+func (p *app.Processor) GetActivityStore() map[store.Actor]*store.ActorActivity {
 	return p.ActivityStore
 }
 
-func (p *Processor) GetActivityMutex() *sync.RWMutex {
+func (p *app.Processor) GetActivityMutex() *sync.RWMutex {
 	return p.ActivityMutex
 }
 
-func (p *Processor) GetTestSignals() *store.TestSignals {
+func (p *app.Processor) GetTestSignals() *store.TestSignals {
 	if p.TestSignals == nil {
 		return nil
 	}
@@ -526,62 +531,62 @@ func (p *Processor) GetTestSignals() *store.TestSignals {
 	}
 }
 
-func (p *Processor) IncrementActorsCleaned() {
+func (p *app.Processor) IncrementActorsCleaned() {
 	p.Metrics.ActorsCleaned.Add(1)
 }
 
 // --- MetricsProvider Interface Implementation ---
 
-func (p *Processor) IncrementBlockerCmdsQueued() {
+func (p *app.Processor) IncrementBlockerCmdsQueued() {
 	p.Metrics.BlockerCmdsQueued.Add(1)
 }
 
-func (p *Processor) IncrementBlockerCmdsDropped() {
+func (p *app.Processor) IncrementBlockerCmdsDropped() {
 	p.Metrics.BlockerCmdsDropped.Add(1)
 }
 
-func (p *Processor) IncrementBlockerCmdsExecuted() {
+func (p *app.Processor) IncrementBlockerCmdsExecuted() {
 	p.Metrics.BlockerCmdsExecuted.Add(1)
 }
 
 // --- HAProxyProvider Interface Implementation ---
 
-func (p *Processor) GetBlockerAddresses() []string {
+func (p *app.Processor) GetBlockerAddresses() []string {
 	return p.Config.Blockers.Backends.HAProxy.Addresses
 }
 
-func (p *Processor) GetDurationTables() map[time.Duration]string {
+func (p *app.Processor) GetDurationTables() map[time.Duration]string {
 	return p.Config.Blockers.Backends.HAProxy.DurationTables
 }
 
-func (p *Processor) GetBlockTableNameFallback() string {
+func (p *app.Processor) GetBlockTableNameFallback() string {
 	return p.Config.Blockers.Backends.HAProxy.TableNameFallback
 }
 
-func (p *Processor) GetBlockerMaxRetries() int {
+func (p *app.Processor) GetBlockerMaxRetries() int {
 	return p.Config.Blockers.MaxRetries
 }
 
-func (p *Processor) GetBlockerRetryDelay() time.Duration {
+func (p *app.Processor) GetBlockerRetryDelay() time.Duration {
 	return p.Config.Blockers.RetryDelay
 }
 
-func (p *Processor) GetBlockerDialTimeout() time.Duration {
+func (p *app.Processor) GetBlockerDialTimeout() time.Duration {
 	return p.Config.Blockers.DialTimeout
 }
 
-func (p *Processor) IncrementBlockerRetries() {
+func (p *app.Processor) IncrementBlockerRetries() {
 	p.Metrics.BlockerRetries.Add(1)
 }
 
-func (p *Processor) IncrementCmdsPerBlocker(addr string) {
+func (p *app.Processor) IncrementCmdsPerBlocker(addr string) {
 	if val, ok := p.Metrics.CmdsPerBlocker.Load(addr); ok {
 		val.(*atomic.Int64).Add(1)
 	}
 }
 
 // runCompaction creates a new snapshot and truncates the journal.
-func runCompaction(p *Processor) {
+func runCompaction(p *app.Processor) {
 	p.persistenceMutex.Lock()
 	defer p.persistenceMutex.Unlock()
 
@@ -624,12 +629,12 @@ func runCompaction(p *Processor) {
 
 // start is the unexported function that contains the main application logic,
 // which is called by the tests and the main function.
-func start(p *Processor) {
+func start(p *app.Processor) {
 	if p.DryRun {
 		// DryRun mode: Process a static log file and exit when done.
 		done := make(chan struct{})
 		// Pass the Processor instance P
-		go DryRunLogProcessor(p, done)
+		go processor.DryRunLogProcessor(p, done)
 
 		// Wait for the processor to finish in dry-run mode
 		<-done
@@ -641,7 +646,7 @@ func start(p *Processor) {
 		// Only start these background tasks if not in a test that bypasses them.
 		// This allows tests to focus on specific components like the tailer without
 		// interference from other goroutines like the config watcher.
-		if !IsTesting() {
+		if !testutil.IsTesting() {
 			// The ConfigWatcher is not started in test mode to prevent race conditions where
 			// the test's config is overwritten by a reload from the default config file.
 			reloadSignalCh := make(chan os.Signal, 1)
@@ -699,6 +704,6 @@ func start(p *Processor) {
 		signal.Notify(p.signalCh, syscall.SIGINT, syscall.SIGTERM)
 
 		// LiveLogTailer is the blocking main loop
-		LiveLogTailer(p, p.signalCh, nil) // Pass the processor's channel to the tailer
+		processor.LiveLogTailer(p, p.signalCh, nil) // Pass the processor's channel to the tailer
 	}
 }

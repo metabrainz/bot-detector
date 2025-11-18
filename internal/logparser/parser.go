@@ -1,22 +1,24 @@
 package logparser
 
 import (
+	"bot-detector/internal/app"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/parser"
+	"bot-detector/internal/testutil"
 	"bot-detector/internal/utils"
 )
 
 // AccessLogTimeFormat defines the timestamp format used in standard access logs.
 const AccessLogTimeFormat = "02/Jan/2006:15:04:05 -0700"
 
-func processLogLineInternal(p *Processor, line string) {
+func processLogLineInternal(p *app.Processor, line string) {
 	// 1. Parse the line
 	parsedEntry, err := parser.ParseLogLine(p, line)
 
 	if err != nil {
 		// Downgrade parse failures to debug during testing, as they are expected in some tests.
 		logLevel := logging.LevelError
-		if IsTesting() {
+		if testutil.IsTesting() {
 			logLevel = logging.LevelDebug
 		}
 		p.LogFunc(logLevel, "PARSE_FAIL", "Parsing failed for line \"%s\": %v", line, err)

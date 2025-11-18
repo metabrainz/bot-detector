@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bot-detector/internal/app"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/utils"
 	"sync"
@@ -31,8 +32,8 @@ func (m *mockStoreProvider) GetActivityMutex() *sync.RWMutex            { return
 func (m *mockStoreProvider) GetTopActorsPerChain() map[string]map[string]*ActorStats {
 	return m.topActorsPerChain
 }
-func (m *mockStoreProvider) GetTestSignals() *TestSignals { return m.testSignals }
-func (m *mockStoreProvider) IncrementActorsCleaned()      { m.actorsCleaned.Add(1) }
+func (m *mockStoreProvider) GetTestSignals() *app.TestSignals { return m.testSignals }
+func (m *mockStoreProvider) IncrementActorsCleaned()          { m.actorsCleaned.Add(1) }
 func (m *mockStoreProvider) Log(level logging.LogLevel, tag string, format string, v ...interface{}) {
 }
 

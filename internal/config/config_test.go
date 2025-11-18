@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
@@ -1495,7 +1496,7 @@ chains:
 	var logMutex sync.Mutex
 	processor := &Processor{
 		ConfigMutex: &sync.RWMutex{},
-		Chains:      []BehavioralChain{{Name: "InitialChain"}}, // Simplified initial state
+		Chains:      []app.BehavioralChain{{Name: "InitialChain"}}, // Simplified initial state
 		Config:      &AppConfig{Application: ApplicationConfig{Config: ConfigManagement{}}},
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 			logMutex.Lock()
@@ -1744,38 +1745,38 @@ func TestFindNewlyAddedGoodActors(t *testing.T) {
 	}{
 		{
 			name:     "No changes",
-			old:      []GoodActorDef{actor1, actor2},
-			new:      []GoodActorDef{actor1, actor2},
+			old:      []app.GoodActorDef{actor1, actor2},
+			new:      []app.GoodActorDef{actor1, actor2},
 			expected: []string{},
 		},
 		{
 			name:     "One new actor added",
-			old:      []GoodActorDef{actor1},
-			new:      []GoodActorDef{actor1, actor2},
+			old:      []app.GoodActorDef{actor1},
+			new:      []app.GoodActorDef{actor1, actor2},
 			expected: []string{"actor2"},
 		},
 		{
 			name:     "Multiple new actors added",
-			old:      []GoodActorDef{actor1},
-			new:      []GoodActorDef{actor1, actor2, actor3},
+			old:      []app.GoodActorDef{actor1},
+			new:      []app.GoodActorDef{actor1, actor2, actor3},
 			expected: []string{"actor2", "actor3"},
 		},
 		{
 			name:     "Actor removed (not in result)",
-			old:      []GoodActorDef{actor1, actor2},
-			new:      []GoodActorDef{actor1},
+			old:      []app.GoodActorDef{actor1, actor2},
+			new:      []app.GoodActorDef{actor1},
 			expected: []string{},
 		},
 		{
 			name:     "All new actors",
-			old:      []GoodActorDef{},
-			new:      []GoodActorDef{actor1, actor2},
+			old:      []app.GoodActorDef{},
+			new:      []app.GoodActorDef{actor1, actor2},
 			expected: []string{"actor1", "actor2"},
 		},
 		{
 			name:     "Empty old and new",
-			old:      []GoodActorDef{},
-			new:      []GoodActorDef{},
+			old:      []app.GoodActorDef{},
+			new:      []app.GoodActorDef{},
 			expected: []string{},
 		},
 	}

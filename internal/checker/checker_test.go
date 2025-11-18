@@ -1,6 +1,8 @@
 package checker
 
 import (
+	"bot-detector/internal/app"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/store"
@@ -202,7 +204,7 @@ func TestProcessChainForEntry_AlreadyCompleted(t *testing.T) {
 
 	chain := BehavioralChain{
 		Name:  "CompletedChain",
-		Steps: []StepDef{{Order: 1}}, // A simple one-step chain
+		Steps: []app.StepDef{{Order: 1}}, // A simple one-step chain
 	}
 
 	// Create an activity state where the chain is already completed.
@@ -514,7 +516,7 @@ func TestCheckChains_UnblockOnGoodActor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to compile good actor matcher: %v", err)
 	}
-	h.processor.Config.GoodActors = []GoodActorDef{
+	h.processor.Config.GoodActors = []app.GoodActorDef{
 		{
 			Name:       "test_good_ips",
 			IPMatchers: []fieldMatcher{goodActorMatcher},
@@ -583,7 +585,7 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		FilePath:           "",
 	}
 	matcher2, _ := compileStringMatcher(ctx2, "/step2")
-	chain.Steps = []StepDef{
+	chain.Steps = []app.StepDef{
 		{Order: 1, MinTimeSinceLastHit: 2 * time.Second, Matchers: []struct {
 			Matcher   fieldMatcher
 			FieldName string
@@ -594,9 +596,9 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		}{{Matcher: matcher2, FieldName: "Path"}}},
 	}
 
-	chains := []BehavioralChain{chain}
+	chains := []app.BehavioralChain{chain}
 
-	baseProcessor := func() *Processor {
+	baseProcessor := func() *app.Processor {
 		return newTestProcessor(&AppConfig{}, chains)
 	}
 
@@ -683,9 +685,9 @@ regex:NastyBot`), 0644); err != nil {
 	t.Cleanup(func() { _ = os.Remove("bad_user_agents.txt") })
 	// 1. Load configuration (chains, whitelist, etc.)
 	logging.SetLogLevel("debug")
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: "testdata/config.yaml"})
+	loadedCfg, err := config.LoadConfigFromYAML(LoadConfigOptions{ConfigPath: "testdata/config.yaml"})
 	if err != nil {
-		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
+		t.Fatalf("config.LoadConfigFromYAML() failed: %v", err)
 	}
 	logging.SetLogLevel(loadedCfg.Application.LogLevel)
 
@@ -711,7 +713,7 @@ regex:NastyBot`), 0644); err != nil {
 	}
 
 	// Set the CheckChainsFunc on the processor instance to avoid nil pointers.
-	processor.CheckChainsFunc = func(entry *LogEntry) { CheckChains(processor, entry) }
+	processor.CheckChainsFunc = func(entry *app.LogEntry) { CheckChains(processor, entry) }
 	processor.ProcessLogLine = func(line string) { processLogLineInternal(processor, line) }
 
 	// 2. Read test_access.log and extract expected log outputs from comments
@@ -764,7 +766,7 @@ regex:NastyBot`), 0644); err != nil {
 	// --- Assert ---
 	// 4. Verify that the captured log output matches the expected log entries
 	// Use a map to track unique SKIP messages that have been found, to account for anti-spam logic.
-	// The key will be "SKIP: Actor <IP> (blocked:<Source>)" or "SKIP: Actor <IP> (good_actor:<Source>)".
+	// The key will be "SKIP: app.Actor <IP> (blocked:<Source>)" or "SKIP: app.Actor <IP> (good_actor:<Source>)".
 	foundUniqueSkipLogs := make(map[string]bool)
 
 	for commentLineNumber, expectedLog := range expectedLogs {
@@ -774,17 +776,17 @@ regex:NastyBot`), 0644); err != nil {
 		// Special handling for SKIP messages due to anti-spam logic in production code.
 		if strings.HasPrefix(formattedExpectedLog, "SKIP: Actor") {
 			// Extract the unique identifier for the skip message (IP and source).
-			// Example: "SKIP: Actor 10.0.0.2 (UA: TestAgent): Skipped (blocked:SimpleBlockChain)."
-			// We want to normalize this to "SKIP: Actor 10.0.0.2 (blocked:SimpleBlockChain)"
+			// Example: "SKIP: app.Actor 10.0.0.2 (UA: TestAgent): Skipped (blocked:SimpleBlockChain)."
+			// We want to normalize this to "SKIP: app.Actor 10.0.0.2 (blocked:SimpleBlockChain)"
 			// to check for uniqueness, ignoring the UA part for this specific check.
-			re := regexp.MustCompile(`SKIP: Actor (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[0-9a-fA-F:]+) \(UA: .*?\): Skipped \((blocked|good_actor):(.+?)\)\.?`)
+			re := regexp.MustCompile(`SKIP: app.Actor (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[0-9a-fA-F:]+) \(UA: .*?\): Skipped \((blocked|good_actor):(.+?)\)\.?`)
 			matches := re.FindStringSubmatch(formattedExpectedLog)
 
 			if len(matches) == 4 {
 				ip := matches[1]
 				skipType := matches[2]
 				source := matches[3]
-				uniqueSkipKey := fmt.Sprintf("SKIP: Actor %s (%s:%s)", ip, skipType, source)
+				uniqueSkipKey := fmt.Sprintf("SKIP: app.Actor %s (%s:%s)", ip, skipType, source)
 
 				if foundUniqueSkipLogs[uniqueSkipKey] {
 					// This unique skip message has already been found, so we don't expect it again.
@@ -894,7 +896,7 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 				MatchKey: "ip",
 				Action:   "log",
 			}
-			chains := []BehavioralChain{chain}
+			chains := []app.BehavioralChain{chain}
 
 			processor := newTestProcessor(&AppConfig{
 				Parser: ParserConfig{
@@ -908,7 +910,7 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 			// Use a mock checkChainsInternal to see what gets processed immediately
 			var processedImmediately []*LogEntry
 			originalCheck := checkChainsInternal
-			checkChainsInternal = func(p *Processor, entry *LogEntry) {
+			checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 				processedImmediately = append(processedImmediately, entry)
 			}
 			t.Cleanup(func() { checkChainsInternal = originalCheck })
@@ -1016,7 +1018,7 @@ func TestEntryBufferWorker(t *testing.T) {
 	e4 := &LogEntry{Timestamp: baseTime, Path: "/path4"} // Newest
 
 	// Add entries to the buffer out of order.
-	h.processor.EntryBuffer = []*LogEntry{e2, e1, e4, e3}
+	h.processor.EntryBuffer = []*app.LogEntry{e2, e1, e4, e3}
 
 	// --- Act 1: Start worker and wait for one processing cycle ---
 	h.start()
@@ -1099,7 +1101,7 @@ func TestOooBufferFunctions(t *testing.T) {
 		p := newTestProcessor(nil, nil)
 		e1 := &LogEntry{Timestamp: baseTime.Add(-10 * time.Second)}
 		e3 := &LogEntry{Timestamp: baseTime.Add(-2 * time.Second)}
-		p.EntryBuffer = []*LogEntry{e1, e3}
+		p.EntryBuffer = []*app.LogEntry{e1, e3}
 
 		e2 := &LogEntry{Timestamp: baseTime.Add(-5 * time.Second)}  // To be inserted in the middle
 		e0 := &LogEntry{Timestamp: baseTime.Add(-15 * time.Second)} // To be inserted at the start
@@ -1109,7 +1111,7 @@ func TestOooBufferFunctions(t *testing.T) {
 		addToOooBuffer(p, e0)
 		addToOooBuffer(p, e4)
 
-		expectedOrder := []*LogEntry{e0, e1, e2, e3, e4}
+		expectedOrder := []*app.LogEntry{e0, e1, e2, e3, e4}
 		if len(p.EntryBuffer) != len(expectedOrder) {
 			t.Fatalf("Expected buffer length %d, got %d", len(expectedOrder), len(p.EntryBuffer))
 		}
@@ -1126,7 +1128,7 @@ func TestOooBufferFunctions(t *testing.T) {
 		e1 := &LogEntry{Timestamp: baseTime.Add(-10 * time.Second)} // Should be a candidate
 		e2 := &LogEntry{Timestamp: baseTime.Add(-8 * time.Second)}  // Should be a candidate
 		e3 := &LogEntry{Timestamp: baseTime.Add(-3 * time.Second)}  // Too new
-		p.EntryBuffer = []*LogEntry{e1, e2, e3}
+		p.EntryBuffer = []*app.LogEntry{e1, e2, e3}
 
 		// Horizon is 5 seconds before baseTime. Only e1 and e2 are older.
 		processingHorizon := baseTime.Add(-5 * time.Second)
@@ -1165,14 +1167,14 @@ func TestOooBufferFunctions(t *testing.T) {
 		p := newTestProcessor(nil, nil)
 		// Override checkChainsInternal to just count calls
 		originalCheck := checkChainsInternal
-		checkChainsInternal = func(proc *Processor, entry *LogEntry) {
+		checkChainsInternal = func(proc *app.Processor, entry *app.LogEntry) {
 			processedCount.Add(1)
 		}
 		t.Cleanup(func() { checkChainsInternal = originalCheck })
 
 		e1 := &LogEntry{Timestamp: baseTime.Add(-10 * time.Second)}
 		e2 := &LogEntry{Timestamp: baseTime.Add(-8 * time.Second)}
-		p.EntryBuffer = []*LogEntry{e1, e2}
+		p.EntryBuffer = []*app.LogEntry{e1, e2}
 
 		flushOooBuffer(p)
 
@@ -1198,7 +1200,7 @@ func TestOutOfOrder_ComplexScenario(t *testing.T) {
 	var processedEntries []*LogEntry
 	var processedMutex sync.Mutex
 	originalCheck := checkChainsInternal
-	checkChainsInternal = func(proc *Processor, entry *LogEntry) {
+	checkChainsInternal = func(proc *app.Processor, entry *app.LogEntry) {
 		processedMutex.Lock()
 		defer processedMutex.Unlock()
 		processedEntries = append(processedEntries, entry)
@@ -1273,7 +1275,7 @@ func TestOutOfOrder_ComplexScenario(t *testing.T) {
 	// The final processing order should be hit3 (immediate), then the sorted buffer.
 	// The user's expected order was 1, 4, 2, 3. Our total order is 5, 3, 1, 4, 2.
 	// Let's verify the final chronological order of all processed entries.
-	expectedOrder := []*LogEntry{hit5, hit1, hit4, hit2, hit3}
+	expectedOrder := []*app.LogEntry{hit5, hit1, hit4, hit2, hit3}
 	// Sort the actual processed entries by timestamp to verify against the ideal chronological order
 	sort.Slice(processedEntries, func(i, j int) bool {
 		if processedEntries[i].Timestamp.Equal(processedEntries[j].Timestamp) {

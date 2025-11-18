@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bot-detector/internal/app"
+	"bot-detector/internal/checker"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/parser"
 	"bot-detector/internal/store"
@@ -312,7 +314,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 	matcher, _ := compileStringMatcher(ctx, "/1")
 	chain := BehavioralChain{
 		Name: "dryrun_chain",
-		Steps: []StepDef{
+		Steps: []app.StepDef{
 			{Order: 1, Matchers: []struct {
 				Matcher   fieldMatcher
 				FieldName string
@@ -327,7 +329,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 		Parser: ParserConfig{
 			TimestampFormat: AccessLogTimeFormat, // Set the required timestamp format
 		},
-	}, []BehavioralChain{chain})
+	}, []app.BehavioralChain{chain})
 	p.DryRun = true
 	p.Blocker = mockBlocker
 
@@ -338,7 +340,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 	key := Actor{IPInfo: utils.NewIPInfo(ip)}
 
 	// Set the CheckChainsFunc to the real method on the processor instance.
-	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
+	p.CheckChainsFunc = func(entry *app.LogEntry) { checker.CheckChains(p, entry) }
 
 	// 1. Process the line
 	p.ProcessLogLine(logLine)
@@ -380,7 +382,7 @@ func TestProcessLogLineInternal_ParseError(t *testing.T) {
 
 	p := newTestProcessor(nil, nil)
 	p.LogFunc = logCaptureFunc
-	p.CheckChainsFunc = func(entry *LogEntry) {
+	p.CheckChainsFunc = func(entry *app.LogEntry) {
 		t.Error("CheckChains was called, but should have been skipped due to a parse error.")
 	}
 
@@ -402,7 +404,7 @@ func TestProcessLogLineInternal_ParseError(t *testing.T) {
 func TestGetMatchValue_UnknownField(t *testing.T) {
 	entry := &LogEntry{}
 
-	_, _, err := GetMatchValue("UnknownField", entry)
+	_, _, err := checker.GetMatchValue("UnknownField", entry)
 
 	if err == nil {
 		t.Fatal("Expected an error for unknown field, but got nil")
@@ -441,7 +443,7 @@ func TestGetMatchValue_Success(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.fieldName, func(t *testing.T) {
-			value, fieldType, err := GetMatchValue(tc.fieldName, entry)
+			value, fieldType, err := checker.GetMatchValue(tc.fieldName, entry)
 			if err != nil {
 				t.Fatalf("Expected no error, but got: %v", err)
 			}

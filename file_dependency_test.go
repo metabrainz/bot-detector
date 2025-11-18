@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bot-detector/internal/app"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/types"
 	"crypto/sha256"
@@ -16,7 +18,7 @@ import (
 
 // newTestProcessorWithFileDeps creates a new Processor instance for testing,
 // pre-populating it with a mock AppConfig that includes a FileDependencies map.
-func newTestProcessorWithFileDeps(t *testing.T, config *AppConfig, logFunc func(level logging.LogLevel, tag string, format string, v ...interface{})) *Processor {
+func newTestProcessorWithFileDeps(t *testing.T, config *app.AppConfig, logFunc func(level logging.LogLevel, tag string, format string, v ...interface{})) *app.Processor {
 	t.Helper()
 	if config == nil {
 		config = &AppConfig{}
@@ -30,7 +32,7 @@ func newTestProcessorWithFileDeps(t *testing.T, config *AppConfig, logFunc func(
 }
 
 // TestFileDependency_ContentChange verifies that ConfigWatcher detects a file content change
-// and triggers a reload, and LoadConfigFromYAML re-reads the new content.
+// and triggers a reload, and config.LoadConfigFromYAML re-reads the new content.
 func TestFileDependency_ContentChange(t *testing.T) {
 	resetGlobalState()
 
@@ -60,9 +62,9 @@ chains:
 	}
 
 	// --- Initial Load ---
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
-		t.Fatalf("Initial LoadConfigFromYAML failed: %v", err)
+		t.Fatalf("Initial config.LoadConfigFromYAML failed: %v", err)
 	}
 	var capturedLogs []string
 	var logMutex sync.Mutex
@@ -186,9 +188,9 @@ chains:
 	t.Cleanup(func() { logging.LogOutput = originalLogOutput })
 
 	// --- Act ---
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
-		t.Fatalf("LoadConfigFromYAML failed: %v", err)
+		t.Fatalf("config.LoadConfigFromYAML failed: %v", err)
 	}
 
 	// --- Assert ---
@@ -237,7 +239,7 @@ chains:
 }
 
 // TestFileDependency_FileReappears verifies that if a missing file reappears,
-// ConfigWatcher detects it and triggers a reload, and LoadConfigFromYAML successfully loads it.
+// ConfigWatcher detects it and triggers a reload, and config.LoadConfigFromYAML successfully loads it.
 func TestFileDependency_FileReappears(t *testing.T) {
 	resetGlobalState()
 
@@ -261,9 +263,9 @@ chains:
 	}
 
 	// --- Initial Load (file is missing) ---
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
-		t.Fatalf("Initial LoadConfigFromYAML failed: %v", err)
+		t.Fatalf("Initial config.LoadConfigFromYAML failed: %v", err)
 	}
 	if loadedCfg == nil {
 		t.Fatal("Loaded config is nil")
@@ -356,7 +358,7 @@ chains:
 }
 
 // TestFileDependency_FileDisappears verifies that if a loaded file disappears,
-// ConfigWatcher detects it and triggers a reload, and LoadConfigFromYAML marks it as FileStatusMissing.
+// ConfigWatcher detects it and triggers a reload, and config.LoadConfigFromYAML marks it as FileStatusMissing.
 func TestFileDependency_FileDisappears(t *testing.T) {
 	resetGlobalState()
 
@@ -386,9 +388,9 @@ chains:
 	}
 
 	// --- Initial Load ---
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
-		t.Fatalf("Initial LoadConfigFromYAML failed: %v", err)
+		t.Fatalf("Initial config.LoadConfigFromYAML failed: %v", err)
 	}
 	if loadedCfg == nil {
 		t.Fatal("Loaded config is nil")
@@ -478,7 +480,7 @@ chains:
 	}
 }
 
-// TestFileDependency_CyclicDependency verifies that LoadConfigFromYAML correctly
+// TestFileDependency_CyclicDependency verifies that config.LoadConfigFromYAML correctly
 // detects and reports a cyclic dependency between files.
 func TestFileDependency_CyclicDependency(t *testing.T) {
 	resetGlobalState()
@@ -513,7 +515,7 @@ chains:
 	}
 
 	// --- Act ---
-	_, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	_, err := config.LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
 
 	// --- Assert ---
 	if err == nil {

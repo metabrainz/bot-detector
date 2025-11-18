@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"bot-detector/internal/app"
+	"bot-detector/internal/checker"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/types"
@@ -26,7 +28,7 @@ import (
 )
 
 // logStructFields recursively logs the fields of a struct that have a "summary" tag.
-func logStructFields(p *Processor, val reflect.Value, typ reflect.Type) {
+func logStructFields(p *app.Processor, val reflect.Value, typ reflect.Type) {
 	for i := 0; i < val.NumField(); i++ {
 		structField := typ.Field(i)
 		fieldValue := val.Field(i)
@@ -48,7 +50,7 @@ func logStructFields(p *Processor, val reflect.Value, typ reflect.Type) {
 
 // logConfigurationSummary logs the key-value pairs of the current application configuration.
 // This is useful for visibility on startup and after a configuration reload.
-func logConfigurationSummary(p *Processor) {
+func logConfigurationSummary(p *app.Processor) {
 	p.ConfigMutex.RLock()
 	config := p.Config
 	logRegex := p.LogRegex
@@ -84,7 +86,7 @@ func logConfigurationSummary(p *Processor) {
 }
 
 // logChainDetails logs details for a given list of chains, one per line.
-func logChainDetails(p *Processor, chains []BehavioralChain, header string) {
+func logChainDetails(p *app.Processor, chains []app.BehavioralChain, header string) {
 	p.LogFunc(logging.LevelDebug, "CONFIG", "%s (%d total)", header, len(chains))
 	for _, chain := range chains {
 		details := fmt.Sprintf("Name: '%s', Action: %s, Steps: %d, MatchKey: %s", chain.Name, chain.Action, len(chain.Steps), chain.MatchKey)
@@ -320,7 +322,7 @@ type MatcherContext struct {
 
 // fieldMatcher is a function type that represents a compiled matching rule.
 // It takes a LogEntry and returns true if the entry satisfies the rule.
-type fieldMatcher func(entry *LogEntry) bool
+type fieldMatcher func(entry *app.LogEntry) bool
 
 // compileMatchers parses the raw `field_matches` interface from YAML into a slice of efficient matcher functions.
 func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps map[string]*types.FileDependency, filePath string) ([]struct {
@@ -420,7 +422,7 @@ func ReadLinesFromFile(path string) ([]string, error) {
 func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error) {
 	if strings.HasPrefix(value, "exact:") {
 		literalValue := strings.TrimPrefix(value, "exact:")
-		return func(entry *LogEntry) bool {
+		return func(entry *app.LogEntry) bool {
 			fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, StringField)
 			if fieldVal == nil {
 				return false
@@ -492,7 +494,7 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 		if err != nil {
 			return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': invalid regex '%s': %w", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, pattern, err)
 		}
-		return func(entry *LogEntry) bool {
+		return func(entry *app.LogEntry) bool {
 			fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, StringField)
 			if fieldVal == nil {
 				return false
@@ -508,7 +510,7 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 		if err != nil {
 			return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': invalid CIDR '%s' for 'cidr:' matcher: %w", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, cidrStr, err)
 		}
-		return func(entry *LogEntry) bool {
+		return func(entry *app.LogEntry) bool {
 			fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, StringField)
 			if fieldVal == nil {
 				return false
@@ -529,7 +531,7 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 			prefix := value[:xIndex]
 			// Ensure the prefix is numeric before creating the matcher.
 			if _, err := strconv.Atoi(prefix); err == nil {
-				return func(entry *LogEntry) bool {
+				return func(entry *app.LogEntry) bool {
 					fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, IntField)
 					if fieldVal == nil {
 						return false
@@ -550,7 +552,7 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 		strings.HasPrefix(trimmedValue, "cidr:") ||
 		strings.HasPrefix(trimmedValue, "file:") {
 		// This is a "spaced-out" directive, treat as literal on the raw value.
-		return func(entry *LogEntry) bool {
+		return func(entry *app.LogEntry) bool {
 			fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, StringField)
 			if fieldVal == nil {
 				return false
@@ -560,7 +562,7 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 	}
 
 	// Otherwise, it's a plain value, use the trimmed value for exact match.
-	return func(entry *LogEntry) bool {
+	return func(entry *app.LogEntry) bool {
 		fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, StringField)
 		if fieldVal == nil {
 			return false
@@ -571,7 +573,7 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 
 // compileIntMatcher handles exact integer matches.
 func compileIntMatcher(ctx MatcherContext, value int) fieldMatcher {
-	return func(entry *LogEntry) bool {
+	return func(entry *app.LogEntry) bool {
 		fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, IntField)
 		if fieldVal == nil {
 			return false
@@ -593,7 +595,7 @@ func compileListMatcher(ctx MatcherContext, values []interface{}) (fieldMatcher,
 		subMatchers = append(subMatchers, matcher)
 	}
 
-	return func(entry *LogEntry) bool {
+	return func(entry *app.LogEntry) bool {
 		for _, matcher := range subMatchers {
 			if matcher(entry) {
 				return true // OR logic: one match is enough
@@ -630,7 +632,7 @@ func compileObjectMatcher(ctx MatcherContext, obj map[string]interface{}) (field
 		return nil, errors.New("object matcher must not be empty")
 	}
 
-	return func(entry *LogEntry) bool {
+	return func(entry *app.LogEntry) bool {
 		for _, matcher := range subMatchers {
 			if !matcher(entry) {
 				return false // AND logic: one failure means total failure
@@ -649,14 +651,14 @@ func compileRangeMatcher(ctx MatcherContext, op string, value interface{}) (fiel
 
 	// Validate that the field is a known numeric field at compile time.
 	// We can do this by calling GetMatchValue with a nil entry and checking the returned type.
-	_, fieldType, _ := GetMatchValue(ctx.CanonicalFieldName, nil)
+	_, fieldType, _ := checker.GetMatchValue(ctx.CanonicalFieldName, nil)
 	if fieldType != IntField {
 		// This error message is now more generic, which is good.
 		return nil, fmt.Errorf("in file '%s': chain '%s', step %d: operator '%s' is only supported for numeric fields, not '%s'", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, op, ctx.CanonicalFieldName)
 	}
 
 	// Return a function that performs the comparison on the generic numeric field.
-	return func(entry *LogEntry) bool {
+	return func(entry *app.LogEntry) bool {
 		fieldVal := GetMatchValueIfType(ctx.CanonicalFieldName, entry, IntField)
 		if fieldVal == nil {
 			return false
@@ -697,7 +699,7 @@ func compileNotMatcher(ctx MatcherContext, value interface{}) (fieldMatcher, err
 	}
 
 	// The final matcher is the inverse of the sub-matcher.
-	return func(entry *LogEntry) bool {
+	return func(entry *app.LogEntry) bool {
 		return !subMatcher(entry)
 	}, nil
 }
@@ -772,7 +774,7 @@ func buildDependencyGraph(configPath string) (*depGraph, error) {
 	return depGraph, nil
 }
 
-func parseAndNormalizeYAML(configPath string) (*ChainConfig, []byte, error) {
+func parseAndNormalizeYAML(configPath string) (*app.ChainConfig, []byte, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to read YAML file %s: %w", configPath, err)
@@ -813,7 +815,7 @@ func parseAndNormalizeYAML(configPath string) (*ChainConfig, []byte, error) {
 	return &config, data, nil
 }
 
-func parseDurations(config *ChainConfig) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, error) {
+func parseDurations(config *app.ChainConfig) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, error) {
 	pollingIntervalStr := DefaultPollingInterval
 	if config.Application.Config.PollingInterval != "" {
 		pollingIntervalStr = config.Application.Config.PollingInterval
@@ -862,7 +864,7 @@ func parseDurations(config *ChainConfig) (time.Duration, time.Duration, time.Dur
 	return pollingInterval, cleanupInterval, idleTimeout, outOfOrderTolerance, eofPollingDelay, nil
 }
 
-func parseStringAndBoolSettings(config *ChainConfig) (string, string, bool, string, error) {
+func parseStringAndBoolSettings(config *app.ChainConfig) (string, string, bool, string, error) {
 	logLevelStr := DefaultLogLevel
 	if config.Application.LogLevel != "" {
 		logLevelStr = config.Application.LogLevel
@@ -891,7 +893,7 @@ func parseStringAndBoolSettings(config *ChainConfig) (string, string, bool, stri
 	return logLevelStr, lineEndingStr, enableMetrics, unblockCooldownStr, nil
 }
 
-func parseCustomLogRegex(config *ChainConfig) (*regexp.Regexp, error) {
+func parseCustomLogRegex(config *app.ChainConfig) (*regexp.Regexp, error) {
 	if config.Parser.LogFormatRegex == "" {
 		return nil, nil
 	}
@@ -918,7 +920,7 @@ func parseCustomLogRegex(config *ChainConfig) (*regexp.Regexp, error) {
 	return re, nil
 }
 
-func parseChains(config *ChainConfig, fileDeps map[string]*types.FileDependency, configPath string, durationTables map[time.Duration]string) ([]BehavioralChain, error) {
+func parseChains(config *app.ChainConfig, fileDeps map[string]*types.FileDependency, configPath string, durationTables map[time.Duration]string) ([]app.BehavioralChain, error) {
 	var newChains []BehavioralChain
 	var defaultBlockDuration time.Duration
 	if config.Blockers.DefaultDuration != "" {
@@ -1024,7 +1026,7 @@ func parseChains(config *ChainConfig, fileDeps map[string]*types.FileDependency,
 	return newChains, nil
 }
 
-func parseGoodActors(config *ChainConfig, fileDeps map[string]*types.FileDependency, configPath string) ([]GoodActorDef, error) {
+func parseGoodActors(config *app.ChainConfig, fileDeps map[string]*types.FileDependency, configPath string) ([]app.GoodActorDef, error) {
 	var newGoodActors []GoodActorDef
 	for _, goodActorMap := range config.GoodActors {
 		nameVal, ok := goodActorMap["name"]
@@ -1084,7 +1086,7 @@ func parseGoodActors(config *ChainConfig, fileDeps map[string]*types.FileDepende
 	return newGoodActors, nil
 }
 
-func parseDurationTables(config *ChainConfig) (map[time.Duration]string, string, error) {
+func parseDurationTables(config *app.ChainConfig) (map[time.Duration]string, string, error) {
 	newDurationTables := make(map[time.Duration]string, len(config.Blockers.Backends.HAProxy.DurationTables))
 	longestDuration := 0 * time.Second
 	newFallbackName := ""
@@ -1104,7 +1106,7 @@ func parseDurationTables(config *ChainConfig) (map[time.Duration]string, string,
 	return newDurationTables, newFallbackName, nil
 }
 
-func parseBlockerSettings(config *ChainConfig) (int, time.Duration, time.Duration, int, int, error) {
+func parseBlockerSettings(config *app.ChainConfig) (int, time.Duration, time.Duration, int, int, error) {
 	var blockerMaxRetries int
 	var blockerRetryDelay, blockerDialTimeout time.Duration
 	var blockerCommandQueueSize, blockerCommandsPerSecond int
@@ -1150,7 +1152,7 @@ func parseBlockerSettings(config *ChainConfig) (int, time.Duration, time.Duratio
 }
 
 // LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
-func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
+func LoadConfigFromYAML(opts LoadConfigOptions) (*app.LoadedConfig, error) {
 	depGraph, err := buildDependencyGraph(opts.ConfigPath)
 	if err != nil {
 		return nil, err
@@ -1305,7 +1307,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 }
 
 // logFileDependencyChanges logs changes in file dependencies between old and new configurations.
-func logFileDependencyChanges(p *Processor, oldDeps, newDeps map[string]*types.FileDependency) {
+func logFileDependencyChanges(p *app.Processor, oldDeps, newDeps map[string]*types.FileDependency) {
 	var added, removed, modified []string
 
 	// Check for added or modified files
@@ -1351,7 +1353,7 @@ func logFileDependencyChanges(p *Processor, oldDeps, newDeps map[string]*types.F
 // and update the processor state. It is designed to be called by either the
 // file watcher or the signal reloader.
 // findNewlyAddedGoodActors compares old and new good actor lists and returns newly added ones.
-func findNewlyAddedGoodActors(oldActors, newActors []GoodActorDef) []GoodActorDef {
+func findNewlyAddedGoodActors(oldActors, newActors []app.GoodActorDef) []app.GoodActorDef {
 	oldSet := make(map[string]bool)
 	for _, actor := range oldActors {
 		oldSet[actor.Name] = true
@@ -1369,7 +1371,7 @@ func findNewlyAddedGoodActors(oldActors, newActors []GoodActorDef) []GoodActorDe
 // unblockNewlyWhitelistedIPs checks all currently blocked IPs against newly added good actors
 // and unblocks those that match. Uses a hybrid approach: fast path for exact IPs (O(1)),
 // slow path for CIDR/regex patterns (O(N)).
-func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []GoodActorDef) {
+func unblockNewlyWhitelistedIPs(p *app.Processor, newGoodActors []app.GoodActorDef) {
 	if len(newGoodActors) == 0 {
 		return
 	}
@@ -1429,7 +1431,7 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []GoodActorDef) {
 	}
 }
 
-func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForComparison *AppConfig) { //nolint:cyclop
+func reloadConfiguration(p *app.Processor, mainConfigChanged bool, oldConfigForComparison *app.AppConfig) { //nolint:cyclop
 	p.ConfigMutex.RLock()
 	oldChains := p.Chains
 	// Use the provided oldConfigForComparison instead of cloning here.
@@ -1545,7 +1547,7 @@ func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 
 // initializeMetrics sets up all the metric counters based on the loaded configuration.
 // It resets and repopulates the metric maps, making it safe to call on both startup and reload.
-func initializeMetrics(p *Processor, loadedCfg *LoadedConfig) {
+func initializeMetrics(p *app.Processor, loadedCfg *app.LoadedConfig) {
 	if !p.EnableMetrics {
 		// If metrics are disabled, ensure all metric maps are nil or empty
 		p.Metrics.ChainsCompleted = nil
@@ -1597,7 +1599,7 @@ func initializeMetrics(p *Processor, loadedCfg *LoadedConfig) {
 }
 
 // SignalReloader listens for a specific OS signal to trigger a configuration reload. //nolint:cyclop
-func SignalReloader(p *Processor, stop <-chan struct{}, signalCh chan os.Signal) {
+func SignalReloader(p *app.Processor, stop <-chan struct{}, signalCh chan os.Signal) {
 	var signalName string
 	// If ReloadOn is not specified, default to SIGHUP.
 	if p.ReloadOn == "" {
@@ -1641,7 +1643,7 @@ func SignalReloader(p *Processor, stop <-chan struct{}, signalCh chan os.Signal)
 }
 
 // ConfigWatcher monitors the YAML config file for modifications and reloads the chains dynamically.
-func ConfigWatcher(p *Processor, stop <-chan struct{}) {
+func ConfigWatcher(p *app.Processor, stop <-chan struct{}) {
 	if p.DryRun {
 		return
 	}

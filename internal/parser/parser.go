@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"bot-detector/internal/app"
 	"bot-detector/internal/utils"
 	"fmt"
 	"regexp"
@@ -43,7 +44,7 @@ func getMatch(name string, matches []string, regex *regexp.Regexp) string {
 }
 
 // ParseLogLine parses a single log line string into a structured LogEntry.
-func ParseLogLine(p Provider, line string) (*LogEntry, error) {
+func ParseLogLine(p Provider, line string) (*app.LogEntry, error) {
 	if len(line) == 0 || line[0] == '#' {
 		return nil, nil
 	}

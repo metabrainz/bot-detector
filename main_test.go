@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/persistence"
+	"bot-detector/internal/processor"
 	"bot-detector/internal/store"
 	"fmt"
 	"os"
@@ -115,7 +117,7 @@ func TestStart_LiveMode(t *testing.T) {
 	go func() {
 		// We call LiveLogTailer directly to test it in isolation, avoiding the
 		// complexity and other goroutines (like ChainWatcher) started by start().
-		LiveLogTailer(p, p.signalCh, readyCh)
+		processor.LiveLogTailer(p, p.signalCh, readyCh)
 	}()
 
 	<-readyCh // Wait until the tailer is actually running and has opened the file.
@@ -179,9 +181,9 @@ chains:
 	// This is now set on the processor directly.
 
 	// 2. Load the initial configuration.
-	initialLoadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tempFile})
+	initialLoadedCfg, err := config.LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tempFile})
 	if err != nil {
-		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
+		t.Fatalf("Initial config.LoadConfigFromYAML() failed: %v", err)
 	}
 
 	// 3. Create the processor with the initial config.
