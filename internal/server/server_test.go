@@ -23,7 +23,7 @@ type mockProvider struct {
 	listenAddr         string
 	reportContent      string
 	stepsReportContent string // New field for step metrics report
-	configPath         string // New field for the config file path
+	configFilePath     string // New field for the config file path
 	shutdownCh         chan os.Signal
 	readyCh            chan struct{} // Closed when the server is ready to accept connections.
 	logMutex           sync.Mutex
@@ -57,10 +57,10 @@ func (m *mockProvider) GetShutdownChannel() chan os.Signal {
 
 func (m *mockProvider) GetMarshalledConfig() ([]byte, time.Time, error) {
 	var modtime time.Time
-	if m.configPath == "" {
+	if m.configFilePath == "" {
 		return nil, modtime, errors.New("config path not set in mock")
 	}
-	file, err := os.Open(m.configPath)
+	file, err := os.Open(m.configFilePath)
 	defer func() {
 		_ = file.Close()
 	}()
@@ -236,7 +236,7 @@ func TestServer_ConfigEndpoint(t *testing.T) {
 	if err := os.WriteFile(configFile, []byte(expectedConfig), 0600); err != nil {
 		t.Fatalf("Failed to write temp config file: %v", err)
 	}
-	mockProvider.configPath = configFile
+	mockProvider.configFilePath = configFile
 
 	resp, err := http.Get("http://" + addr + "/config")
 	if err != nil {
@@ -253,7 +253,7 @@ func TestServer_ConfigEndpoint(t *testing.T) {
 	}
 
 	// --- Test Case 2: Error retrieving config (file not found) ---
-	mockProvider.configPath = filepath.Join(tempDir, "non-existent.yaml")
+	mockProvider.configFilePath = filepath.Join(tempDir, "non-existent.yaml")
 
 	resp, err = http.Get("http://" + addr + "/config")
 	if err != nil {

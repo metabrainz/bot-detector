@@ -71,7 +71,7 @@ type Processor struct {
 	NowFunc              func() time.Time // Mockable time function.
 	SignalOooBufferFlush func()
 	TestSignals          *TestSignals // Test-only signals for synchronization.
-	ConfigPath           string       // Full path to config.yaml file
+	ConfigFilePath       string       // Full path to config.yaml file
 	ConfigDir            string       // Directory containing config.yaml
 	LogPath              string       `test:"-"`
 	ReloadOn             string

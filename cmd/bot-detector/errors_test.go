@@ -56,8 +56,8 @@ chains:
 	// Attempt to run the application
 	params := &commandline.AppParameters{
 		ConfigFilePath: configFile.Name(),
-		LogPath:    "/dev/null",
-		StateDir:   tmpDir,
+		LogPath:        "/dev/null",
+		StateDir:       tmpDir,
 	}
 	err = execute(params)
 
@@ -124,10 +124,10 @@ chains:
 
 	// Attempt to run the application
 	params := &commandline.AppParameters{
-		ConfigPath: configFile.Name(),
-		LogPath:    "/dev/null",
-		StateDir:   tmpDir,
-		ExitOnEOF:  true,
+		ConfigFilePath: configFile.Name(),
+		LogPath:        "/dev/null",
+		StateDir:       tmpDir,
+		ExitOnEOF:      true,
 	}
 	err = execute(params)
 
@@ -183,10 +183,10 @@ chains:
 
 	// Attempt to run the application
 	params := &commandline.AppParameters{
-		ConfigPath: configFile.Name(),
-		LogPath:    "/dev/null",
-		StateDir:   unwritableDir,
-		ExitOnEOF:  true,
+		ConfigFilePath: configFile.Name(),
+		LogPath:        "/dev/null",
+		StateDir:       unwritableDir,
+		ExitOnEOF:      true,
 	}
 	err = execute(params)
 

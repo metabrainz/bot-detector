@@ -11,18 +11,18 @@ import (
 // AppParameters holds the fully parsed and validated configuration
 // from command-line flags, ready for execution.
 type AppParameters struct {
-	Check        bool
-	ConfigPath   string // Full path to config.yaml file
-	ConfigDir    string // Directory containing config.yaml
-	DryRun       bool
-	DumpBackends bool
-	ExitOnEOF    bool
-	HTTPServer   string
-	LogPath      string
-	ReloadOn     string
-	ShowVersion  bool
-	StateDir     string
-	TopN         int
+	Check          bool
+	ConfigFilePath string // Full path to config.yaml file
+	ConfigDir      string // Directory containing config.yaml
+	DryRun         bool
+	DumpBackends   bool
+	ExitOnEOF      bool
+	HTTPServer     string
+	LogPath        string
+	ReloadOn       string
+	ShowVersion    bool
+	StateDir       string
+	TopN           int
 }
 
 // String implements the fmt.Stringer interface for AppParameters.
@@ -37,7 +37,7 @@ func (p AppParameters) String() string {
 	sb.WriteString("--- App Parameters ---\n")
 
 	writeField("Check", "%v", p.Check)
-	writeField("ConfigPath", "%q", p.ConfigPath)
+	writeField("ConfigFilePath", "%q", p.ConfigFilePath)
 	writeField("ConfigDir", "%q", p.ConfigDir)
 	writeField("DryRun", "%v", p.DryRun)
 	writeField("DumpBackends", "%v", p.DumpBackends)
@@ -75,17 +75,17 @@ func ParseParameters(args []string) (*AppParameters, error) {
 	}
 
 	params := &AppParameters{
-		Check:        *cliFlags.Check,
-		ConfigPath:   *cliFlags.ConfigPath,
-		DryRun:       *cliFlags.DryRun,
-		DumpBackends: *cliFlags.DumpBackends,
-		ExitOnEOF:    *cliFlags.ExitOnEOF,
-		HTTPServer:   *cliFlags.HTTPServer,
-		LogPath:      *cliFlags.LogPath,
-		ReloadOn:     *cliFlags.ReloadOn,
-		ShowVersion:  *cliFlags.ShowVersion,
-		StateDir:     *cliFlags.StateDir,
-		TopN:         *cliFlags.TopN,
+		Check:          *cliFlags.Check,
+		ConfigFilePath: *cliFlags.ConfigFilePath,
+		DryRun:         *cliFlags.DryRun,
+		DumpBackends:   *cliFlags.DumpBackends,
+		ExitOnEOF:      *cliFlags.ExitOnEOF,
+		HTTPServer:     *cliFlags.HTTPServer,
+		LogPath:        *cliFlags.LogPath,
+		ReloadOn:       *cliFlags.ReloadOn,
+		ShowVersion:    *cliFlags.ShowVersion,
+		StateDir:       *cliFlags.StateDir,
+		TopN:           *cliFlags.TopN,
 	}
 
 	// --version is a special case, returns ASAP
@@ -99,8 +99,8 @@ func ParseParameters(args []string) (*AppParameters, error) {
 	// Resolve absolute paths immediately.
 	// --config can be either a directory or a file path ending with config.yaml
 	// We support both for backward compatibility, but prefer directory
-	if params.ConfigPath != "" {
-		absPath, err := filepath.Abs(params.ConfigPath)
+	if params.ConfigFilePath != "" {
+		absPath, err := filepath.Abs(params.ConfigFilePath)
 		if err != nil {
 			return nil, fmt.Errorf("could not determine absolute path for config file: %v", err)
 		}
@@ -108,11 +108,11 @@ func ParseParameters(args []string) (*AppParameters, error) {
 		// If the path ends with config.yaml, strip it to get the directory
 		if filepath.Base(absPath) == "config.yaml" {
 			params.ConfigDir = filepath.Dir(absPath)
-			params.ConfigPath = absPath
+			params.ConfigFilePath = absPath
 		} else {
 			// Path is a directory
 			params.ConfigDir = absPath
-			params.ConfigPath = filepath.Join(absPath, "config.yaml")
+			params.ConfigFilePath = filepath.Join(absPath, "config.yaml")
 		}
 		hasConfigPath = true
 	}
@@ -155,33 +155,33 @@ func ParseParameters(args []string) (*AppParameters, error) {
 
 // CLIFlagValues holds pointers to the variables where command-line flag values will be stored.
 type CLIFlagValues struct {
-	Check        *bool
-	ConfigPath   *string
-	DryRun       *bool
-	DumpBackends *bool
-	ExitOnEOF    *bool
-	HTTPServer   *string
-	LogPath      *string
-	ReloadOn     *string
-	ShowVersion  *bool
-	StateDir     *string
-	TopN         *int
+	Check          *bool
+	ConfigFilePath *string
+	DryRun         *bool
+	DumpBackends   *bool
+	ExitOnEOF      *bool
+	HTTPServer     *string
+	LogPath        *string
+	ReloadOn       *string
+	ShowVersion    *bool
+	StateDir       *string
+	TopN           *int
 }
 
 // registerCLIFlags registers the command line flags.
 func registerCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 	flags := &CLIFlagValues{
-		Check:        fs.Bool("check", false, "Check the configuration file for validity and exit."),
-		ConfigPath:   fs.String("config", "", "Path to the configuration file."),
-		DryRun:       fs.Bool("dry-run", false, "Enable dry-run mode. Processes a static log file and exits."),
-		DumpBackends: fs.Bool("dump-backends", false, "List currently blocked IPs and exit."),
-		ExitOnEOF:    fs.Bool("exit-on-eof", false, "Exit after processing the existing log file instead of tailing."),
-		HTTPServer:   fs.String("http-server", "", "Enable the HTTP server for metrics on the given address (e.g., :8080)."),
-		LogPath:      fs.String("log-path", "", "Path to the log file to monitor."),
-		ReloadOn:     fs.String("reload-on", "", "Trigger a configuration reload on a specific signal (hup, usr1, usr2) or 'watcher'. By default, both are enabled."),
-		ShowVersion:  fs.Bool("version", false, "Show the application version and exit."),
-		StateDir:     fs.String("state-dir", "", "Path to the state directory. Enables persistence if set."),
-		TopN:         fs.Int("top-n", 0, "Number of top actors to display in the metrics summary."),
+		Check:          fs.Bool("check", false, "Check the configuration file for validity and exit."),
+		ConfigFilePath: fs.String("config", "", "Path to the configuration file."),
+		DryRun:         fs.Bool("dry-run", false, "Enable dry-run mode. Processes a static log file and exits."),
+		DumpBackends:   fs.Bool("dump-backends", false, "List currently blocked IPs and exit."),
+		ExitOnEOF:      fs.Bool("exit-on-eof", false, "Exit after processing the existing log file instead of tailing."),
+		HTTPServer:     fs.String("http-server", "", "Enable the HTTP server for metrics on the given address (e.g., :8080)."),
+		LogPath:        fs.String("log-path", "", "Path to the log file to monitor."),
+		ReloadOn:       fs.String("reload-on", "", "Trigger a configuration reload on a specific signal (hup, usr1, usr2) or 'watcher'. By default, both are enabled."),
+		ShowVersion:    fs.Bool("version", false, "Show the application version and exit."),
+		StateDir:       fs.String("state-dir", "", "Path to the state directory. Enables persistence if set."),
+		TopN:           fs.Int("top-n", 0, "Number of top actors to display in the metrics summary."),
 	}
 	return flags
 }

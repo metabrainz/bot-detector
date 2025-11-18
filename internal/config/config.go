@@ -197,14 +197,14 @@ func findFileDirectives(path string, isMainConfig bool) ([]string, error) {
 }
 
 // detectCycle performs a DFS traversal to find cycles.
-func (g *depGraph) detectCycle(configPath string) error {
+func (g *depGraph) detectCycle(configFilePath string) error {
 	visiting := make(map[string]bool)
 	visited := make(map[string]bool)
 	// Start the DFS from the first node added to the graph, which is the main config file.
 	// This makes cycle detection deterministic, which is important for testing.
 	// We find the root node by looking for a node that is not a dependency of any other node.
 	// A simpler and sufficient approach for this codebase is to start from the known root config path.
-	if path, err := g.dfs(g.Nodes[configPath], visiting, visited, nil); err != nil {
+	if path, err := g.dfs(g.Nodes[configFilePath], visiting, visited, nil); err != nil {
 		return fmt.Errorf("cyclic dependency detected: %s", strings.Join(path, " -> "))
 	}
 	return nil
@@ -632,11 +632,11 @@ func normalizeYAMLKeys(node *yaml.Node) {
 
 // LoadConfigOptions holds the parameters for loading a configuration.
 type LoadConfigOptions struct {
-	ConfigPath   string
-	ExistingDeps map[string]*types.FileDependency
+	ConfigFilePath string
+	ExistingDeps   map[string]*types.FileDependency
 }
 
-func buildDependencyGraph(configPath string) (*depGraph, error) {
+func buildDependencyGraph(configFilePath string) (*depGraph, error) {
 	depGraph := newDepGraph()
 	scannedFiles := make(map[string]bool)
 
@@ -647,7 +647,7 @@ func buildDependencyGraph(configPath string) (*depGraph, error) {
 		}
 
 		if _, err := os.Stat(currentFile); os.IsNotExist(err) {
-			if currentFile == configPath {
+			if currentFile == configFilePath {
 				return fmt.Errorf("failed to stat config file %s: %w", currentFile, err)
 			}
 			return nil
@@ -667,23 +667,23 @@ func buildDependencyGraph(configPath string) (*depGraph, error) {
 		return nil
 	}
 
-	if err := buildGraphRecursive(configPath, true); err != nil {
+	if err := buildGraphRecursive(configFilePath, true); err != nil {
 		return nil, err
 	}
 	return depGraph, nil
 }
 
-func parseAndNormalizeYAML(configPath string) (*ChainConfig, []byte, error) {
-	data, err := os.ReadFile(configPath)
+func parseAndNormalizeYAML(configFilePath string) (*ChainConfig, []byte, error) {
+	data, err := os.ReadFile(configFilePath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read YAML file %s: %w", configPath, err)
+		return nil, nil, fmt.Errorf("failed to read YAML file %s: %w", configFilePath, err)
 	}
 
-	logging.LogOutput(logging.LevelDebug, "YAML_DEBUG", "Attempting to unmarshal YAML from %s:\n%s", configPath, string(data))
+	logging.LogOutput(logging.LevelDebug, "YAML_DEBUG", "Attempting to unmarshal YAML from %s:\n%s", configFilePath, string(data))
 
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
-		fmt.Fprintf(os.Stderr, "[YAML_ERROR] YAML unmarshalling failed in %s: %v\n", configPath, err)
+		fmt.Fprintf(os.Stderr, "[YAML_ERROR] YAML unmarshalling failed in %s: %v\n", configFilePath, err)
 		return nil, nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
 	}
 
@@ -702,14 +702,14 @@ func parseAndNormalizeYAML(configPath string) (*ChainConfig, []byte, error) {
 	if err := decoder.Decode(&config); err != nil {
 		var e *yaml.TypeError
 		if errors.As(err, &e) {
-			fmt.Fprintf(os.Stderr, "[YAML_ERROR] YAML unmarshalling failed in %s: %v\n", configPath, err)
+			fmt.Fprintf(os.Stderr, "[YAML_ERROR] YAML unmarshalling failed in %s: %v\n", configFilePath, err)
 			var errs []string
 			for _, msg := range e.Errors {
 				errs = append(errs, strings.TrimPrefix(msg, "yaml: "))
 			}
-			return nil, nil, fmt.Errorf("YAML syntax error in %s: %s", configPath, strings.Join(errs, "; "))
+			return nil, nil, fmt.Errorf("YAML syntax error in %s: %s", configFilePath, strings.Join(errs, "; "))
 		}
-		return nil, nil, fmt.Errorf("failed to strictly unmarshal YAML from %s (unknown field found): %w", configPath, err)
+		return nil, nil, fmt.Errorf("failed to strictly unmarshal YAML from %s (unknown field found): %w", configFilePath, err)
 	}
 	return &config, data, nil
 }
@@ -819,7 +819,7 @@ func parseCustomLogRegex(config *ChainConfig) (*regexp.Regexp, error) {
 	return re, nil
 }
 
-func parseChains(config *ChainConfig, fileDeps map[string]*types.FileDependency, configPath string, durationTables map[time.Duration]string) ([]BehavioralChain, error) {
+func parseChains(config *ChainConfig, fileDeps map[string]*types.FileDependency, configFilePath string, durationTables map[time.Duration]string) ([]BehavioralChain, error) {
 	var newChains []BehavioralChain
 	var defaultBlockDuration time.Duration
 	if config.Blockers.DefaultDuration != "" {
@@ -913,7 +913,7 @@ func parseChains(config *ChainConfig, fileDeps map[string]*types.FileDependency,
 					}
 				}
 
-				runtimeStep.Matchers, err = CompileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, fileDeps, configPath)
+				runtimeStep.Matchers, err = CompileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, fileDeps, configFilePath)
 				if err != nil {
 					return nil, err
 				}
@@ -925,7 +925,7 @@ func parseChains(config *ChainConfig, fileDeps map[string]*types.FileDependency,
 	return newChains, nil
 }
 
-func parseGoodActors(config *ChainConfig, fileDeps map[string]*types.FileDependency, configPath string) ([]GoodActorDef, error) {
+func parseGoodActors(config *ChainConfig, fileDeps map[string]*types.FileDependency, configFilePath string) ([]GoodActorDef, error) {
 	var newGoodActors []GoodActorDef
 	for _, goodActorMap := range config.GoodActors {
 		nameVal, ok := goodActorMap["name"]
@@ -944,7 +944,7 @@ func parseGoodActors(config *ChainConfig, fileDeps map[string]*types.FileDepende
 				ChainName:        fmt.Sprintf("good_actor '%s'", name),
 				StepIndex:        0,
 				FileDependencies: fileDeps,
-				FilePath:         configPath,
+				FilePath:         configFilePath,
 			}
 			switch strings.ToLower(key) {
 			case "ip":
@@ -1052,16 +1052,16 @@ func parseBlockerSettings(config *ChainConfig) (int, time.Duration, time.Duratio
 
 // LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
 func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
-	depGraph, err := buildDependencyGraph(opts.ConfigPath)
+	depGraph, err := buildDependencyGraph(opts.ConfigFilePath)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := depGraph.detectCycle(opts.ConfigPath); err != nil {
+	if err := depGraph.detectCycle(opts.ConfigFilePath); err != nil {
 		return nil, err
 	}
 
-	config, data, err := parseAndNormalizeYAML(opts.ConfigPath)
+	config, data, err := parseAndNormalizeYAML(opts.ConfigFilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -1129,12 +1129,12 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		}
 	}
 
-	newChains, err := parseChains(config, newFileDependencies, opts.ConfigPath, newDurationTables)
+	newChains, err := parseChains(config, newFileDependencies, opts.ConfigFilePath, newDurationTables)
 	if err != nil {
 		return nil, err
 	}
 
-	newGoodActors, err := parseGoodActors(config, newFileDependencies, opts.ConfigPath)
+	newGoodActors, err := parseGoodActors(config, newFileDependencies, opts.ConfigFilePath)
 	if err != nil {
 		return nil, err
 	}

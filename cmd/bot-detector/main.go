@@ -105,7 +105,7 @@ func handleStartupFlags(params *commandline.AppParameters) error {
 
 	if params.Check {
 		opts := config.LoadConfigOptions{
-			ConfigPath: params.ConfigPath,
+			ConfigFilePath: params.ConfigFilePath,
 		}
 		var err error
 		if _, err = config.LoadConfigFromYAML(opts); err != nil {
@@ -135,7 +135,7 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		SignalCh:             make(chan os.Signal, 1),
 		LogFunc:              logging.LogOutput,
 		NowFunc:              time.Now, // Use the real time.Now in production.
-		ConfigPath:           params.ConfigPath,
+		ConfigFilePath:       params.ConfigFilePath,
 		ConfigDir:            params.ConfigDir,
 		LogPath:              params.LogPath,
 		ReloadOn:             params.ReloadOn,
@@ -251,12 +251,12 @@ func execute(params *commandline.AppParameters) error {
 		return err
 	}
 
-	fileInfo, err := os.Stat(params.ConfigPath)
+	fileInfo, err := os.Stat(params.ConfigFilePath)
 	if err != nil {
 		return fmt.Errorf("could not stat config file: %v", err)
 	}
 
-	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: params.ConfigPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: params.ConfigFilePath})
 	if err != nil {
 		return fmt.Errorf("configuration Load Error: %v", err)
 	}

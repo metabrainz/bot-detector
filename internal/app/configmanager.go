@@ -56,10 +56,10 @@ func LogConfigurationSummary(p *Processor) {
 	p.ConfigMutex.RUnlock()
 
 	if p.ConfigReloaded {
-		p.LogFunc(logging.LevelInfo, "CONFIG_RELOAD", "Successfully reloaded main configuration from '%s'", p.ConfigPath)
+		p.LogFunc(logging.LevelInfo, "CONFIG_RELOAD", "Successfully reloaded main configuration from '%s'", p.ConfigFilePath)
 	} else {
 		p.ConfigReloaded = true
-		p.LogFunc(logging.LevelInfo, "CONFIG", "Successfully loaded main configuration from '%s'", p.ConfigPath)
+		p.LogFunc(logging.LevelInfo, "CONFIG", "Successfully loaded main configuration from '%s'", p.ConfigFilePath)
 	}
 
 	p.LogFunc(logging.LevelDebug, "CONFIG", "Loaded configuration:")
@@ -236,9 +236,9 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 
 	var newLastModTime time.Time
 	if mainConfigChanged {
-		fileInfo, err := os.Stat(p.ConfigPath)
+		fileInfo, err := os.Stat(p.ConfigFilePath)
 		if err != nil {
-			p.LogFunc(logging.LevelError, "WATCH_ERROR", "Failed to stat file for ModTime update %s: %v", p.ConfigPath, err)
+			p.LogFunc(logging.LevelError, "WATCH_ERROR", "Failed to stat file for ModTime update %s: %v", p.ConfigFilePath, err)
 			newLastModTime = oldConfig.LastModTime // Fallback to old time on error
 		} else {
 			newLastModTime = fileInfo.ModTime()
@@ -248,8 +248,8 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	}
 
 	opts := config.LoadConfigOptions{
-		ConfigPath:   p.ConfigPath,
-		ExistingDeps: oldConfig.FileDependencies,
+		ConfigFilePath: p.ConfigFilePath,
+		ExistingDeps:   oldConfig.FileDependencies,
 	}
 	loadedCfg, err := config.LoadConfigFromYAML(opts)
 	if err != nil {
@@ -485,9 +485,9 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 		mainFileChanged := false
 
 		// 1. Check the main YAML file
-		fileInfo, err := os.Stat(p.ConfigPath)
+		fileInfo, err := os.Stat(p.ConfigFilePath)
 		if err != nil {
-			p.LogFunc(logging.LevelError, "WATCH_ERROR", "Failed to stat file %s: %v", p.ConfigPath, err)
+			p.LogFunc(logging.LevelError, "WATCH_ERROR", "Failed to stat file %s: %v", p.ConfigFilePath, err)
 			continue
 		}
 
@@ -495,7 +495,7 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 		if fileInfo.ModTime().After(p.Config.LastModTime) {
 			isChanged = true
 			mainFileChanged = true
-			changedFile = p.ConfigPath
+			changedFile = p.ConfigFilePath
 		} else {
 			// 2. Check all file dependencies if YAML hasn't changed
 			for path, fileDep := range p.Config.FileDependencies {

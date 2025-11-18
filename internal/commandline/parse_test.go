@@ -7,7 +7,7 @@ import (
 )
 
 func TestParseParameters(t *testing.T) {
-	configPath := "/etc/bot-detector/config.yaml"
+	configFilePath := "/etc/bot-detector/config.yaml"
 	logPath := "/var/log/access.log"
 	expectConfigPath := "--config <path> is required"
 	expectLogPath := "--log-path <path> is required"
@@ -20,11 +20,11 @@ func TestParseParameters(t *testing.T) {
 	}{
 		{
 			name: "live mode (basic valid flags)",
-			args: []string{"bot-detector", "--config", configPath, "--log-path", logPath},
+			args: []string{"bot-detector", "--config", configFilePath, "--log-path", logPath},
 			want: &AppParameters{
-				ConfigPath: configPath,
-				ConfigDir:  "/etc/bot-detector",
-				LogPath:    logPath,
+				ConfigFilePath: configFilePath,
+				ConfigDir:      "/etc/bot-detector",
+				LogPath:        logPath,
 			},
 			wantErr: false,
 		},
@@ -32,7 +32,7 @@ func TestParseParameters(t *testing.T) {
 			name: "all flags set",
 			args: []string{
 				"bot-detector",
-				"--config", configPath,
+				"--config", configFilePath,
 				"--log-path", logPath,
 				"--state-dir", "/state",
 				"--dry-run",
@@ -45,18 +45,18 @@ func TestParseParameters(t *testing.T) {
 				"--http-server", ":9090",
 			},
 			want: &AppParameters{
-				ConfigPath:   configPath,
-				ConfigDir:    "", // ConfigDir is not set when --version causes early return
-				LogPath:      logPath,
-				StateDir:     "/state",
-				DryRun:       true,
-				ExitOnEOF:    true,
-				ShowVersion:  true,
-				Check:        true,
-				DumpBackends: true,
-				ReloadOn:     "hup",
-				TopN:         15,
-				HTTPServer:   ":9090",
+				ConfigFilePath: configFilePath,
+				ConfigDir:      "", // ConfigDir is not set when --version causes early return
+				LogPath:        logPath,
+				StateDir:       "/state",
+				DryRun:         true,
+				ExitOnEOF:      true,
+				ShowVersion:    true,
+				Check:          true,
+				DumpBackends:   true,
+				ReloadOn:       "hup",
+				TopN:           15,
+				HTTPServer:     ":9090",
 			},
 			wantErr: false,
 		},
@@ -68,7 +68,7 @@ func TestParseParameters(t *testing.T) {
 		},
 		{
 			name:        "missing required log-path in live mode",
-			args:        []string{"bot-detector", "--config", configPath},
+			args:        []string{"bot-detector", "--config", configFilePath},
 			wantErr:     true,
 			errContains: expectLogPath,
 		},
@@ -92,12 +92,12 @@ func TestParseParameters(t *testing.T) {
 		},
 		{
 			name: "dry-run without log-path is valid (reads from stdin)",
-			args: []string{"bot-detector", "--config", configPath, "--dry-run"},
+			args: []string{"bot-detector", "--config", configFilePath, "--dry-run"},
 			want: &AppParameters{
-				ConfigPath: configPath,
-				ConfigDir:  "/etc/bot-detector",
-				DryRun:     true,
-				LogPath:    "", // LogPath should be empty
+				ConfigFilePath: configFilePath,
+				ConfigDir:      "/etc/bot-detector",
+				DryRun:         true,
+				LogPath:        "", // LogPath should be empty
 			},
 			wantErr: false,
 		},
