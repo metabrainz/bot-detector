@@ -12,7 +12,8 @@ import (
 // from command-line flags, ready for execution.
 type AppParameters struct {
 	Check        bool
-	ConfigPath   string
+	ConfigPath   string // Full path to config.yaml file
+	ConfigDir    string // Directory containing config.yaml
 	DryRun       bool
 	DumpBackends bool
 	ExitOnEOF    bool
@@ -37,6 +38,7 @@ func (p AppParameters) String() string {
 
 	writeField("Check", "%v", p.Check)
 	writeField("ConfigPath", "%q", p.ConfigPath)
+	writeField("ConfigDir", "%q", p.ConfigDir)
 	writeField("DryRun", "%v", p.DryRun)
 	writeField("DumpBackends", "%v", p.DumpBackends)
 	writeField("ExitOnEOF", "%v", p.ExitOnEOF)
@@ -95,12 +97,23 @@ func ParseParameters(args []string) (*AppParameters, error) {
 	hasLogPath := false
 
 	// Resolve absolute paths immediately.
+	// --config can be either a directory or a file path ending with config.yaml
+	// We support both for backward compatibility, but prefer directory
 	if params.ConfigPath != "" {
 		absPath, err := filepath.Abs(params.ConfigPath)
 		if err != nil {
 			return nil, fmt.Errorf("could not determine absolute path for config file: %v", err)
 		}
-		params.ConfigPath = absPath
+
+		// If the path ends with config.yaml, strip it to get the directory
+		if filepath.Base(absPath) == "config.yaml" {
+			params.ConfigDir = filepath.Dir(absPath)
+			params.ConfigPath = absPath
+		} else {
+			// Path is a directory
+			params.ConfigDir = absPath
+			params.ConfigPath = filepath.Join(absPath, "config.yaml")
+		}
 		hasConfigPath = true
 	}
 

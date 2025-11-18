@@ -23,6 +23,7 @@ func TestParseParameters(t *testing.T) {
 			args: []string{"bot-detector", "--config", configPath, "--log-path", logPath},
 			want: &AppParameters{
 				ConfigPath: configPath,
+				ConfigDir:  "/etc/bot-detector",
 				LogPath:    logPath,
 			},
 			wantErr: false,
@@ -45,6 +46,7 @@ func TestParseParameters(t *testing.T) {
 			},
 			want: &AppParameters{
 				ConfigPath:   configPath,
+				ConfigDir:    "", // ConfigDir is not set when --version causes early return
 				LogPath:      logPath,
 				StateDir:     "/state",
 				DryRun:       true,
@@ -93,6 +95,7 @@ func TestParseParameters(t *testing.T) {
 			args: []string{"bot-detector", "--config", configPath, "--dry-run"},
 			want: &AppParameters{
 				ConfigPath: configPath,
+				ConfigDir:  "/etc/bot-detector",
 				DryRun:     true,
 				LogPath:    "", // LogPath should be empty
 			},
