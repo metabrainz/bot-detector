@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/checker"
+	"bot-detector/internal/cluster"
 	"bot-detector/internal/commandline"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
@@ -503,6 +504,42 @@ func start(p *app.Processor) {
 			go store.CleanUpIdleActors(p, stopWatcher)
 			go checker.EntryBufferWorker(p, stopWatcher)
 			go server.Start(p)
+
+			// Start config poller for follower nodes
+			if p.NodeRole == "follower" && p.NodeLeaderAddress != "" {
+				// Create a channel for config reload signals
+				configReloadCh := make(chan struct{}, 1)
+
+				// Start the config poller
+				poller := cluster.NewConfigPoller(cluster.ConfigPollerOptions{
+					LeaderAddress:  p.NodeLeaderAddress,
+					ConfigPath:     p.ConfigPath,
+					PollInterval:   30 * time.Second, // Poll every 30 seconds
+					ConfigReloadCh: configReloadCh,
+					ShutdownCh:     p.SignalCh,
+					LogFunc:        p.LogFunc,
+					HTTPTimeout:    10 * time.Second,
+				})
+				go poller.Start()
+
+				// Handle config reload signals
+				go func() {
+					for {
+						select {
+						case <-configReloadCh:
+							p.LogFunc(logging.LevelInfo, "CLUSTER", "Config reload triggered by leader update")
+							// Make a copy of the old config for comparison
+							p.ConfigMutex.RLock()
+							oldConfig := p.Config.Clone()
+							p.ConfigMutex.RUnlock()
+							// Trigger config reload
+							app.ReloadConfiguration(p, true, &oldConfig)
+						case <-stopWatcher:
+							return
+						}
+					}
+				}()
+			}
 		}
 		// Listen for OS signals on the processor's channel
 		signal.Notify(p.SignalCh, syscall.SIGINT, syscall.SIGTERM)
