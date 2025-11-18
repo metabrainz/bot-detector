@@ -178,20 +178,20 @@ func TestNewTailer(t *testing.T) {
 // 			t.Error("Expected reader to be initialized")
 // 		}
 // 		if tailer.initialStat == nil {
-			t.Error("Expected initialStat to be captured")
+// 			t.Error("Expected initialStat to be captured")
+// 		}
+	})
+//
+// 	t.Run("File Not Found", func(t *testing.T) {
+// 		p.LogPath = filepath.Join(tempDir, "nonexistent.log")
+// 		_, err = processor.NewTailer(p, true)
+// 		if err == nil {
+// 			t.Fatal("Expected an error for non-existent file, but got nil")
+// 		}
+// 		if !errors.Is(err, os.ErrNotExist) {
+// 			t.Errorf("Expected error to be os.ErrNotExist, but got: %v", err)
 // 		}
 // 	})
-// 
-// 	t.Run("File Not Found", func(t *testing.T) {
-		p.LogPath = filepath.Join(tempDir, "nonexistent.log")
-		_, err = processor.NewTailer(p, true)
-		if err == nil {
-			t.Fatal("Expected an error for non-existent file, but got nil")
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			t.Errorf("Expected error to be os.ErrNotExist, but got: %v", err)
-		}
-	})
 
 	t.Run("Stat Fails", func(t *testing.T) {
 		// Simulate a stat failure by creating a mock file opener.

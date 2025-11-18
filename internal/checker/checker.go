@@ -851,10 +851,9 @@ func EntryBufferWorker(p *app.Processor, stop <-chan struct{}) {
 		}
 
 		// Signal for tests that a tick has been processed.
-		// Removed IsTesting check to avoid import cycle with testutil
-		// if testutil.IsTesting() {
-		// 	// Use a very specific tag that the test harness can listen for.
-		// 	p.LogFunc(logging.LevelDebug, "BUFFER_WORKER_TICK_DONE", "Tick processed.")
-		// }
+		if utils.IsTesting() {
+			// Use a very specific tag that the test harness can listen for.
+			p.LogFunc(logging.LevelDebug, "BUFFER_WORKER_TICK_DONE", "Tick processed.")
+		}
 	}
 }
