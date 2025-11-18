@@ -10,6 +10,7 @@
 //   - GET /config/archive - Tar.gz archive of config + dependencies
 //   - GET /cluster/status - Node cluster status (role, name, address, leader)
 //   - GET /cluster/metrics - Node metrics snapshot in JSON format
+//   - GET /cluster/metrics/aggregate - Cluster-wide aggregated metrics (leader only)
 package server
 
 import (
@@ -39,6 +40,7 @@ func Start(p Provider) {
 	mux.HandleFunc("/config/archive", archiveHandler(p))
 	mux.HandleFunc("/cluster/status", clusterStatusHandler(p))
 	mux.HandleFunc("/cluster/metrics", clusterMetricsHandler(p))
+	mux.HandleFunc("/cluster/metrics/aggregate", clusterMetricsAggregateHandler(p))
 
 	server := &http.Server{
 		Addr:    listenAddr,

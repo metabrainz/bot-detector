@@ -150,6 +150,7 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		ActiveBlocks:       make(map[string]persistence.ActiveBlockInfo),
 
 		// Initialize cluster fields with defaults (will be set properly in later phases)
+		Cluster:           loadedCfg.Cluster,
 		NodeRole:          "leader",
 		NodeName:          "",
 		NodeAddress:       "",
@@ -559,10 +560,15 @@ func start(p *app.Processor) {
 				configReloadCh := make(chan struct{}, 1)
 
 				// Start the config poller
+				pollInterval := 30 * time.Second // Default
+				if p.Cluster != nil && p.Cluster.ConfigPollInterval > 0 {
+					pollInterval = p.Cluster.ConfigPollInterval
+				}
+
 				poller := cluster.NewConfigPoller(cluster.ConfigPollerOptions{
 					LeaderAddress:  p.NodeLeaderAddress,
 					ConfigPath:     p.ConfigPath,
-					PollInterval:   30 * time.Second, // Poll every 30 seconds
+					PollInterval:   pollInterval,
 					ConfigReloadCh: configReloadCh,
 					ShutdownCh:     p.SignalCh,
 					LogFunc:        p.LogFunc,
@@ -587,6 +593,26 @@ func start(p *app.Processor) {
 						}
 					}
 				}()
+			}
+
+			// Start metrics collector for leader nodes
+			if p.NodeRole == "leader" && p.Cluster != nil && len(p.Cluster.Nodes) > 0 {
+				metricsInterval := 60 * time.Second // Default
+				if p.Cluster.MetricsReportInterval > 0 {
+					metricsInterval = p.Cluster.MetricsReportInterval
+				}
+
+				collector := cluster.NewMetricsCollector(cluster.MetricsCollectorOptions{
+					Nodes:        p.Cluster.Nodes,
+					PollInterval: metricsInterval,
+					ShutdownCh:   p.SignalCh,
+					LogFunc:      p.LogFunc,
+					HTTPTimeout:  10 * time.Second,
+					Protocol:     p.Cluster.Protocol,
+				})
+				// Store collector reference in processor for access by HTTP handlers
+				p.MetricsCollector = collector
+				go collector.Start()
 			}
 		}
 		// Listen for OS signals on the processor's channel

@@ -50,4 +50,8 @@ type Provider interface {
 
 	// GetMetricsSnapshot returns a JSON-serializable snapshot of current metrics.
 	GetMetricsSnapshot() MetricsSnapshot
+
+	// GetAggregatedMetrics returns cluster-wide aggregated metrics (leader only).
+	// Returns nil if this node is not a leader or if cluster is not configured.
+	GetAggregatedMetrics() interface{}
 }

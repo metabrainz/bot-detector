@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bot-detector/internal/cluster"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/server"
 	"bot-detector/internal/store"
@@ -114,6 +115,42 @@ func (p *Processor) GetMetricsSnapshot() server.MetricsSnapshot {
 	}
 
 	return snapshot
+}
+
+// GetAggregatedMetrics returns cluster-wide aggregated metrics (leader only).
+// Returns nil if this node is not a leader or if the metrics collector is not available.
+func (p *Processor) GetAggregatedMetrics() interface{} {
+	// Only leaders have a metrics collector
+	if p.MetricsCollector == nil {
+		return nil
+	}
+
+	// Only leaders should aggregate metrics
+	if p.NodeRole != "leader" {
+		return nil
+	}
+
+	// Get collected metrics from all nodes
+	collectedMetrics := p.MetricsCollector.GetCollectedMetrics()
+
+	// Determine stale threshold (3x the poll interval is a reasonable default)
+	var staleThreshold time.Duration
+	if p.Cluster != nil && p.Cluster.MetricsReportInterval > 0 {
+		staleThreshold = p.Cluster.MetricsReportInterval * 3
+	} else {
+		staleThreshold = 180 * time.Second // 3 minutes default
+	}
+
+	// Get the nodes list from cluster config
+	var nodes []cluster.NodeConfig
+	if p.Cluster != nil {
+		nodes = p.Cluster.Nodes
+	}
+
+	// Aggregate metrics using the cluster aggregator
+	aggregated := cluster.AggregateMetrics(collectedMetrics, nodes, staleThreshold)
+
+	return aggregated
 }
 
 // extractSyncMapInt64 extracts a sync.Map of string->*atomic.Int64 into a regular map.
