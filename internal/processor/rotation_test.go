@@ -1,11 +1,11 @@
-package main
+package processor
 
 import (
+	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/metrics"
-	"bot-detector/internal/processor"
 	"bot-detector/internal/store"
 	"bufio"
 	"fmt"
@@ -24,7 +24,7 @@ type rotationTestHarness struct {
 	t              *testing.T
 	tempDir        string
 	logFilePath    string
-	processor      *Processor
+	processor      *app.Processor
 	signalCh       chan os.Signal
 	readySignal    chan struct{}
 	doneCh         chan struct{}
@@ -51,17 +51,17 @@ func newRotationTestHarness(t *testing.T) *rotationTestHarness {
 	}
 
 	// Create processor with realistic configuration
-	h.processor = &Processor{
+	h.processor = &app.Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		Metrics:       metrics.NewMetrics(),
 		ConfigMutex:   &sync.RWMutex{},
 		Chains:        []config.BehavioralChain{},
-		Config: &AppConfig{
-			Application: ApplicationConfig{
+		Config: &config.AppConfig{
+			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
 			},
-			Parser: ParserConfig{
+			Parser: config.ParserConfig{
 				LineEnding: "lf",
 			},
 			FileOpener: func(name string) (fileHandle, error) { return os.Open(name) },
@@ -101,7 +101,7 @@ func (h *rotationTestHarness) start() {
 	go func() {
 		defer h.wg.Done()
 		defer close(h.doneCh)
-		processor.LiveLogTailer(h.processor, h.signalCh, h.readySignal)
+		LiveLogTailer(h.processor, h.signalCh, h.readySignal)
 	}()
 
 	// Wait for tailer to be ready

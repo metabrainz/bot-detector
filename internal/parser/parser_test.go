@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
 	"reflect"
 	"regexp"
@@ -35,13 +36,13 @@ func TestParseLogLine(t *testing.T) {
 		line        string
 		provider    Provider
 		expectError bool
-		expected    *LogEntry
+		expected    *types.LogEntry
 	}{
 		{
 			name:     "Valid IPv4 Line",
 			line:     `www.example.com 192.168.1.1 - userx [06/Nov/2025:09:00:00 +0100] "GET /path HTTP/1.1" 200 1234 "-" "TestAgent"`,
 			provider: defaultProvider,
-			expected: &LogEntry{
+			expected: &types.LogEntry{
 				Timestamp:  testTime,
 				IPInfo:     utils.NewIPInfo("192.168.1.1"),
 				Method:     "GET",
@@ -58,7 +59,7 @@ func TestParseLogLine(t *testing.T) {
 			name:     "Valid IPv6 Line",
 			line:     `www.example.com 2001:db8::1 - userx [06/Nov/2025:09:00:00 +0100] "GET /path HTTP/1.1" 200 1234 "-" "TestAgent"`,
 			provider: defaultProvider,
-			expected: &LogEntry{
+			expected: &types.LogEntry{
 				Timestamp:  testTime,
 				IPInfo:     utils.NewIPInfo("2001:db8::1"),
 				Method:     "GET",
@@ -75,7 +76,7 @@ func TestParseLogLine(t *testing.T) {
 			name:     "Valid Line with Dash for Size",
 			line:     `www.example.com 192.168.1.5 - userx [06/Nov/2025:09:00:00 +0100] "GET /no-content HTTP/1.1" 204 - "-" "-"`,
 			provider: defaultProvider,
-			expected: &LogEntry{
+			expected: &types.LogEntry{
 				Timestamp:  testTime,
 				IPInfo:     utils.NewIPInfo("192.168.1.5"),
 				Method:     "GET",
@@ -92,7 +93,7 @@ func TestParseLogLine(t *testing.T) {
 			name:     "Valid Line with Quoted Hyphen Request",
 			line:     `musicbrainz.org 212.159.74.61 - - [14/Nov/2025:14:07:26 +0000] "-" 400 154 "-" "-"`,
 			provider: defaultProvider,
-			expected: &LogEntry{
+			expected: &types.LogEntry{
 				Timestamp: func() time.Time {
 					t, _ := time.Parse("02/Jan/2006:15:04:05 -0700", "14/Nov/2025:14:07:26 +0000")
 					return t
@@ -147,7 +148,7 @@ func TestParseLogLine(t *testing.T) {
 				timestampFormat: "02/Jan/2006:15:04:05 -0700",
 				logRegex:        regexp.MustCompile(`^(?P<IP>\S+) \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+)"$`),
 			},
-			expected: &LogEntry{
+			expected: &types.LogEntry{
 				// Parse the expected timestamp from a string to ensure the Location matches
 				// what time.Parse produces, avoiding DeepEqual issues with time.UTC.
 				Timestamp: func() time.Time {
@@ -171,10 +172,11 @@ func TestParseLogLine(t *testing.T) {
 				}
 			} else {
 				if err != nil {
-					t.Fatalf("Unexpected error for line:\n%s\nError: %v", tt.line, err)
+					t.Fatalf("Unexpected error: %v", err)
 				}
+
 				if !reflect.DeepEqual(entry, tt.expected) {
-					t.Errorf("LogEntry mismatch.\nGot:  %+v\nWant: %+v", entry, tt.expected)
+					t.Errorf("Entry mismatch.\nGot:      %+v\nExpected: %+v", entry, tt.expected)
 				}
 			}
 		})

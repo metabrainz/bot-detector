@@ -1,9 +1,10 @@
-package main
+package app_test
 
 import (
 	"bot-detector/internal/app"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/testutil"
 	"bot-detector/internal/types"
 	"crypto/sha256"
 	"fmt"
@@ -16,25 +17,25 @@ import (
 	"time"
 )
 
-// newTestProcessorWithFileDeps creates a new Processor instance for testing,
-// pre-populating it with a mock AppConfig that includes a FileDependencies map.
+// newTestProcessorWithFileDeps creates a new app.Processor instance for testing,
+// pre-populating it with a mock config.AppConfig that includes a FileDependencies map.
 func newTestProcessorWithFileDeps(t *testing.T, config *config.AppConfig, logFunc func(level logging.LogLevel, tag string, format string, v ...interface{})) *app.Processor {
 	t.Helper()
 	if config == nil {
-		config = &AppConfig{}
+		config = &config.AppConfig{}
 	}
 	if config.FileDependencies == nil {
 		config.FileDependencies = make(map[string]*types.FileDependency)
 	}
-	p := newTestProcessor(config, nil) // Use the existing newTestProcessor
+	p := testutil.NewTestProcessor(config, nil) // Use the existing testutil.NewTestProcessor
 	p.LogFunc = logFunc                // Set the log function here
 	return p
 }
 
-// TestFileDependency_ContentChange verifies that ConfigWatcher detects a file content change
+// TestFileDependency_ContentChange verifies that app.ConfigWatcher detects a file content change
 // and triggers a reload, and config.LoadConfigFromYAML re-reads the new content.
 func TestFileDependency_ContentChange(t *testing.T) {
-	resetGlobalState()
+	testutil.ResetGlobalState()
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "change_file.txt")
@@ -80,7 +81,7 @@ chains:
 	t.Cleanup(func() { logging.LogOutput = originalLogOutput })
 
 	// Create a processor with the loaded config
-	p := newTestProcessorWithFileDeps(t, &AppConfig{
+	p := newTestProcessorWithFileDeps(t, &config.AppConfig{
 		Application: ApplicationConfig{
 			Config: ConfigManagement{
 				PollingInterval: 10 * time.Millisecond, // Short polling interval for test
@@ -91,12 +92,12 @@ chains:
 	}, logCaptureFunc)
 	p.ConfigPath = configPath
 
-	// Setup channels for ConfigWatcher
+	// Setup channels for app.ConfigWatcher
 	stopCh := make(chan struct{})
 	reloadDoneCh := make(chan struct{})
-	p.TestSignals = &TestSignals{ReloadDoneSignal: reloadDoneCh}
+	p.app.TestSignals = &app.TestSignals{ReloadDoneSignal: reloadDoneCh}
 
-	go ConfigWatcher(p, stopCh)
+	go app.ConfigWatcher(p, stopCh)
 	defer close(stopCh)
 
 	// --- Act 1: Modify the file content ---
@@ -155,7 +156,7 @@ chains:
 
 // TestFileDependency_MissingFile verifies that a missing file dependency is correctly handled.
 func TestFileDependency_MissingFile(t *testing.T) {
-	resetGlobalState()
+	testutil.ResetGlobalState()
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "non_existent_file.txt") // This file will not be created
@@ -239,9 +240,9 @@ chains:
 }
 
 // TestFileDependency_FileReappears verifies that if a missing file reappears,
-// ConfigWatcher detects it and triggers a reload, and config.LoadConfigFromYAML successfully loads it.
+// app.ConfigWatcher detects it and triggers a reload, and config.LoadConfigFromYAML successfully loads it.
 func TestFileDependency_FileReappears(t *testing.T) {
-	resetGlobalState()
+	testutil.ResetGlobalState()
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "reappear_file.txt")
@@ -285,7 +286,7 @@ chains:
 	}
 
 	// Create a processor with the loaded config
-	p := newTestProcessorWithFileDeps(t, &AppConfig{
+	p := newTestProcessorWithFileDeps(t, &config.AppConfig{
 		Application: ApplicationConfig{
 			Config: ConfigManagement{
 				PollingInterval: 10 * time.Millisecond, // Short polling interval for test
@@ -296,12 +297,12 @@ chains:
 	}, logCaptureFunc)
 	p.ConfigPath = configPath
 
-	// Setup channels for ConfigWatcher
+	// Setup channels for app.ConfigWatcher
 	stopCh := make(chan struct{})
 	reloadDoneCh := make(chan struct{})
-	p.TestSignals = &TestSignals{ReloadDoneSignal: reloadDoneCh}
+	p.app.TestSignals = &app.TestSignals{ReloadDoneSignal: reloadDoneCh}
 
-	go ConfigWatcher(p, stopCh)
+	go app.ConfigWatcher(p, stopCh)
 	defer close(stopCh)
 
 	// --- Act 1: Create the missing file ---
@@ -358,9 +359,9 @@ chains:
 }
 
 // TestFileDependency_FileDisappears verifies that if a loaded file disappears,
-// ConfigWatcher detects it and triggers a reload, and config.LoadConfigFromYAML marks it as FileStatusMissing.
+// app.ConfigWatcher detects it and triggers a reload, and config.LoadConfigFromYAML marks it as FileStatusMissing.
 func TestFileDependency_FileDisappears(t *testing.T) {
-	resetGlobalState()
+	testutil.ResetGlobalState()
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "disappear_file.txt")
@@ -410,7 +411,7 @@ chains:
 	}
 
 	// Create a processor with the loaded config
-	p := newTestProcessorWithFileDeps(t, &AppConfig{
+	p := newTestProcessorWithFileDeps(t, &config.AppConfig{
 		Application: ApplicationConfig{
 			Config: ConfigManagement{
 				PollingInterval: 10 * time.Millisecond, // Short polling interval for test
@@ -421,12 +422,12 @@ chains:
 	}, logCaptureFunc)
 	p.ConfigPath = configPath
 
-	// Setup channels for ConfigWatcher
+	// Setup channels for app.ConfigWatcher
 	stopCh := make(chan struct{})
 	reloadDoneCh := make(chan struct{})
-	p.TestSignals = &TestSignals{ReloadDoneSignal: reloadDoneCh}
+	p.app.TestSignals = &app.TestSignals{ReloadDoneSignal: reloadDoneCh}
 
-	go ConfigWatcher(p, stopCh)
+	go app.ConfigWatcher(p, stopCh)
 	defer close(stopCh)
 
 	// --- Act 1: Delete the file ---
@@ -483,7 +484,7 @@ chains:
 // TestFileDependency_CyclicDependency verifies that config.LoadConfigFromYAML correctly
 // detects and reports a cyclic dependency between files.
 func TestFileDependency_CyclicDependency(t *testing.T) {
-	resetGlobalState()
+	testutil.ResetGlobalState()
 
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "config.yaml")
@@ -531,7 +532,7 @@ chains:
 // TestFileDependency_UpdateStatusScenarios verifies the correct behavior of FileDependency.updateStatus()
 // under various file state changes (initial load, no change, content change, disappearance, reappearance).
 func TestFileDependency_UpdateStatusScenarios(t *testing.T) {
-	resetGlobalState()
+	testutil.ResetGlobalState()
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "test_file.txt")

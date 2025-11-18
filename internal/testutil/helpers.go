@@ -1,16 +1,15 @@
 package testutil
 
 import (
+	"bot-detector/internal/checker"
 	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
-	"bot-detector/internal/checker"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/logparser"
 	"bot-detector/internal/metrics"
 	"bot-detector/internal/processor"
 	"bot-detector/internal/store"
-	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
 	"flag"
 	"fmt"
@@ -37,7 +36,7 @@ func muteGlobalLogger() {
 
 // resetGlobalState resets global variables to their default state for test isolation.
 // This is critical for tests that modify global state, such as command-line flags.
-func resetGlobalState() {
+func ResetGlobalState() {
 	muteGlobalLogger()
 
 	// Reset the global flag set to clear any flags parsed in other tests. This is still
@@ -101,7 +100,7 @@ func (m *MockBlocker) Shutdown() {
 }
 
 // newTestProcessor creates a new Processor instance with sensible defaults for testing.
-func newTestProcessor(cfg *config.AppConfig, chains []config.BehavioralChain) *app.Processor {
+func NewTestProcessor(cfg *config.AppConfig, chains []config.BehavioralChain) *app.Processor {
 	if cfg == nil {
 		cfg = &config.AppConfig{}
 	}
@@ -165,7 +164,7 @@ func newDryRunTestHarness(t *testing.T, cfg *config.AppConfig) *dryRunTestHarnes
 	h.tempLogFile = filepath.Join(tempDir, "test_dryrun.log")
 
 	// Create processor with mock/capture functions
-	h.processor = newTestProcessor(cfg, nil)
+	h.processor = NewTestProcessor(cfg, nil)
 	h.processor.NowFunc = func() time.Time { return time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC) } // Mock time.Now()
 
 	// Use a custom LogFunc to capture logs and identify skipped lines.
@@ -202,116 +201,3 @@ func newDryRunTestHarness(t *testing.T, cfg *config.AppConfig) *dryRunTestHarnes
 	return h
 }
 
-// checkerTestHarness encapsulates common setup for CheckChains tests.
-type checkerTestHarness struct {
-	t             *testing.T
-	processor     *app.Processor
-	blockCalled   bool
-	unblockCalled bool
-	blockCallArgs struct {
-		ipInfo   utils.IPInfo
-		duration time.Duration
-	}
-	capturedLogs []string
-	logMutex     sync.Mutex
-}
-
-// newCheckerTestHarness creates a harness for testing CheckChains logic.
-func newCheckerTestHarness(t *testing.T, cfg *config.AppConfig) *checkerTestHarness {
-	t.Helper()
-	resetGlobalState()
-
-	h := &checkerTestHarness{t: t}
-
-	// Setup a mock blocker to intercept calls.
-	mockBlocker := &MockBlocker{
-		BlockFunc: func(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
-			h.blockCalled = true
-			h.blockCallArgs.ipInfo = ipInfo
-			h.blockCallArgs.duration = duration
-			return nil
-		},
-		UnblockFunc: func(ipInfo utils.IPInfo, reason string) error {
-			h.unblockCalled = true
-			return nil
-		},
-	}
-
-	// Create the processor with mock functions.
-	h.processor = newTestProcessor(cfg, nil) // Start with no chains.
-	h.processor.Blocker = mockBlocker
-	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-		h.logMutex.Lock()
-		defer h.logMutex.Unlock()
-		h.capturedLogs = append(h.capturedLogs, fmt.Sprintf(tag+": "+format, args...))
-	}
-
-	return h
-}
-
-// addChain compiles a chain from its YAML definition and adds it to the processor.
-func (h *checkerTestHarness) addChain(chainYAML config.BehavioralChain) {
-	h.t.Helper()
-	// This simulates the compilation part of config.LoadConfigFromYAML for a single chain.
-	runtimeChain := chainYAML
-	// Create an empty FileDependencies map for testing purposes.
-	testFileDependencies := make(map[string]*types.FileDependency)
-
-	for i, stepYAML := range chainYAML.StepsYAML {
-		matchers, err := config.CompileMatchers(chainYAML.Name, i, stepYAML.FieldMatches, testFileDependencies, "")
-		if err != nil {
-			h.t.Fatalf("Failed to compile matchers for chain '%s': %v", chainYAML.Name, err)
-		}
-		runtimeChain.Steps = append(runtimeChain.Steps, config.StepDef{
-			Order:    i + 1,
-			Matchers: matchers,
-		})
-	}
-	h.processor.Chains = append(h.processor.Chains, runtimeChain)
-}
-
-// processEntry runs a single log entry through the CheckChains logic.
-func (h *checkerTestHarness) processEntry(entry *app.LogEntry) {
-	h.t.Helper()
-	checker.CheckChains(h.processor, entry)
-}
-
-// assertChainProgress checks if a given key is at the expected step for a chain.
-func (h *checkerTestHarness) assertChainProgress(chainName string, entry *app.LogEntry, expectedStep int) {
-	h.t.Helper()
-	key := checker.GetActor(&h.processor.Chains[0], entry)
-	h.processor.ActivityMutex.RLock()
-	defer h.processor.ActivityMutex.RUnlock()
-	activity, exists := h.processor.ActivityStore[store.Actor(key)]
-	if !exists || activity.ChainProgress[chainName].CurrentStep != expectedStep {
-		h.t.Errorf("Expected chain '%s' to be at step %d, but it was not. Activity: %+v", chainName, expectedStep, activity)
-	}
-}
-
-// assertBlocked checks if a given key is marked as blocked.
-func (h *checkerTestHarness) assertBlocked(entry *app.LogEntry, expected bool) { //nolint:thelper
-	h.t.Helper()
-	key := checker.GetActor(&h.processor.Chains[0], entry)
-	h.processor.ActivityMutex.RLock()
-	defer h.processor.ActivityMutex.RUnlock()
-	activity, exists := h.processor.ActivityStore[store.Actor(key)]
-	if !exists && expected {
-		h.t.Errorf("Expected activity for key %+v to exist and be blocked, but it doesn't exist.", key)
-		return
-	}
-	if exists && activity.IsBlocked != expected {
-		h.t.Errorf("Expected IsBlocked to be %t, but it was %t for key %+v", expected, activity.IsBlocked, key)
-	}
-}
-
-// assertChainProgressCleared checks that a chain's progress has been removed from the activity store.
-func (h *checkerTestHarness) assertChainProgressCleared(chainName string, entry *app.LogEntry) {
-	h.t.Helper()
-	key := checker.GetActor(&h.processor.Chains[0], entry)
-	h.processor.ActivityMutex.RLock()
-	defer h.processor.ActivityMutex.RUnlock()
-	activity, exists := h.processor.ActivityStore[store.Actor(key)]
-	if exists && len(activity.ChainProgress) != 0 {
-		h.t.Errorf("Expected ChainProgress to be cleared for key %+v, but it has %d entries: %v", key, len(activity.ChainProgress), activity.ChainProgress)
-	}
-}
