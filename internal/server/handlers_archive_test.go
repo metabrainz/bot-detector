@@ -40,6 +40,7 @@ func (m *MockProvider) GetMetricsSnapshot() MetricsSnapshot {
 		ChainStats:      ChainStats{},
 	}
 }
+func (m *MockProvider) GetAggregatedMetrics() interface{} { return nil }
 
 // MockFileDependency and MockProvider for testing
 type MockFileDependency struct {

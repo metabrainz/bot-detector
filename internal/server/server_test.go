@@ -116,6 +116,10 @@ func (m *mockProvider) GetMetricsSnapshot() MetricsSnapshot {
 	}
 }
 
+func (m *mockProvider) GetAggregatedMetrics() interface{} {
+	return nil // Mock returns nil (not a leader)
+}
+
 // TestServer_StartAndShutdown verifies the full lifecycle of the stats server.
 func TestServer_StartAndShutdown(t *testing.T) {
 	// --- Setup ---

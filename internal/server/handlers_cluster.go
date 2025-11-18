@@ -130,3 +130,59 @@ func clusterMetricsHandler(p Provider) http.HandlerFunc {
 		}
 	}
 }
+
+// clusterMetricsAggregateHandler returns cluster-wide aggregated metrics (leader only).
+// GET /cluster/metrics/aggregate
+//
+// Response format:
+//
+//	{
+//	  "timestamp": "2025-01-15T10:30:00Z",
+//	  "total_nodes": 3,
+//	  "healthy_nodes": 2,
+//	  "stale_nodes": 0,
+//	  "error_nodes": 1,
+//	  "aggregated": {
+//	    "timestamp": "2025-01-15T10:30:00Z",
+//	    "processing_stats": { ... },
+//	    "actor_stats": { ... },
+//	    "chain_stats": { ... },
+//	    ...
+//	  },
+//	  "nodes": [
+//	    {
+//	      "node_name": "follower-1",
+//	      "address": "localhost:9090",
+//	      "status": "healthy",
+//	      "last_collected": "2025-01-15T10:29:55Z",
+//	      "consecutive_errors": 0,
+//	      "metrics": { ... }
+//	    },
+//	    ...
+//	  ]
+//	}
+//
+// Returns 404 if this node is not a leader or if clustering is not enabled.
+func clusterMetricsAggregateHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Get aggregated metrics from provider (returns nil if not a leader)
+		aggregated := p.GetAggregatedMetrics()
+
+		// If nil, this node is not a leader or clustering is not enabled
+		if aggregated == nil {
+			http.Error(w, "Aggregated metrics only available on leader nodes", http.StatusNotFound)
+			return
+		}
+
+		// Set content type
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+
+		// Encode and send response
+		if err := json.NewEncoder(w).Encode(aggregated); err != nil {
+			p.Log(3, "CLUSTER", "Failed to encode aggregated metrics response: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+	}
+}

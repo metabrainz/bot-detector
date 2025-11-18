@@ -610,6 +610,8 @@ func start(p *app.Processor) {
 					HTTPTimeout:  10 * time.Second,
 					Protocol:     p.Cluster.Protocol,
 				})
+				// Store collector reference in processor for access by HTTP handlers
+				p.MetricsCollector = collector
 				go collector.Start()
 			}
 		}
