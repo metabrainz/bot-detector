@@ -29,8 +29,9 @@ func TestCorruptedSnapshot(t *testing.T) {
 
 	configContent := `
 version: "1.0"
-persistence:
-  enabled: true
+application:
+  persistence:
+    enabled: true
 chains:
   - name: "test_chain"
     match_key: "ip"
@@ -91,8 +92,9 @@ func TestCorruptedJournal(t *testing.T) {
 
 	configContent := `
 version: "1.0"
-persistence:
-  enabled: true
+application:
+  persistence:
+    enabled: true
 chains:
   - name: "test_chain"
     match_key: "ip"
@@ -155,8 +157,9 @@ func TestUnwritableStateDir(t *testing.T) {
 
 	configContent := `
 version: "1.0"
-persistence:
-  enabled: true
+application:
+  persistence:
+    enabled: true
 chains:
   - name: "test_chain"
     match_key: "ip"

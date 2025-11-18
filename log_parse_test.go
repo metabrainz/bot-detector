@@ -178,7 +178,7 @@ func TestParseLogLine(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a processor to call the method on.
-			p := newTestProcessor(&AppConfig{TimestampFormat: AccessLogTimeFormat}, nil)
+			p := newTestProcessor(&AppConfig{Parser: ParserConfig{TimestampFormat: AccessLogTimeFormat}}, nil)
 			parsedEntry, err := parser.ParseLogLine(p, tt.line)
 
 			var entry *LogEntry
@@ -227,7 +227,7 @@ func TestParseLogLine_CustomRegex(t *testing.T) {
 	customLogLine := `198.51.100.5 - - [10/Nov/2025:13:55:36 +0000] "GET /custom/path HTTP/1.1" 404 500 "http://custom.referrer/from" "CustomAgent/1.0"`
 
 	// 3. Create a processor and assign the custom regex.
-	p := newTestProcessor(&AppConfig{TimestampFormat: AccessLogTimeFormat}, nil)
+	p := newTestProcessor(&AppConfig{Parser: ParserConfig{TimestampFormat: AccessLogTimeFormat}}, nil)
 	p.LogRegex = customRegex
 
 	// 4. Act: Parse the log line using the processor with the custom regex.
@@ -273,7 +273,7 @@ func TestParseLogLine_CustomRegex(t *testing.T) {
 	}
 
 	// 6. Control Assertion: Verify the default parser (processor with nil regex) FAILS.
-	defaultProcessor := newTestProcessor(&AppConfig{TimestampFormat: AccessLogTimeFormat}, nil)
+	defaultProcessor := newTestProcessor(&AppConfig{Parser: ParserConfig{TimestampFormat: AccessLogTimeFormat}}, nil)
 	// We need to call the parser function directly for this control test.
 	// The processor's ProcessLogLine would handle the error internally.
 	_, defaultErr := parser.ParseLogLine(defaultProcessor, customLogLine)
@@ -324,7 +324,9 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 	}
 
 	p := newTestProcessor(&AppConfig{
-		TimestampFormat: AccessLogTimeFormat, // Set the required timestamp format
+		Parser: ParserConfig{
+			TimestampFormat: AccessLogTimeFormat, // Set the required timestamp format
+		},
 	}, []BehavioralChain{chain})
 	p.DryRun = true
 	p.Blocker = mockBlocker

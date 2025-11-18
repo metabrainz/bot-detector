@@ -486,8 +486,10 @@ func TestCheckChains_UnblockOnGoodActor(t *testing.T) {
 
 	// 1. Create a harness with the unblock feature enabled and a short cooldown.
 	h := newCheckerTestHarness(t, &AppConfig{
-		UnblockOnGoodActor: true,
-		UnblockCooldown:    cooldown,
+		Checker: CheckerConfig{
+			UnblockOnGoodActor: true,
+			UnblockCooldown:    cooldown,
+		},
 	})
 
 	// 2. Define a "good actor" rule directly in the processor's config.
@@ -667,22 +669,25 @@ func TestDryRunMode(t *testing.T) {
 	// The config.yaml file now references a file matcher. We need to create it.
 	tempDir := t.TempDir()
 	uaFile := filepath.Join(tempDir, "bad_user_agents.txt")
-	if err := os.WriteFile(uaFile, []byte("BadUA/1.0\nregex:NastyBot"), 0644); err != nil {
+	if err := os.WriteFile(uaFile, []byte(`BadUA/1.0
+regex:NastyBot`), 0644); err != nil {
 		t.Fatalf("Failed to create dummy user agent file: %v", err)
 	}
 	// The test config.yaml is hardcoded to look for this relative path.
 	// We need to create it in the current working directory.
 	// A better long-term solution would be to make the path in config.yaml absolute or configurable for tests.
-	if err := os.WriteFile("bad_user_agents.txt", []byte("BadUA/1.0\nregex:NastyBot"), 0644); err != nil {
+	if err := os.WriteFile("bad_user_agents.txt", []byte(`BadUA/1.0
+regex:NastyBot`), 0644); err != nil {
 		t.Fatalf("Failed to create dummy user agent file in current directory: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Remove("bad_user_agents.txt") })
 	// 1. Load configuration (chains, whitelist, etc.)
+	logging.SetLogLevel("debug")
 	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: "testdata/config.yaml"})
 	if err != nil {
 		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 	}
-	logging.SetLogLevel(loadedCfg.LogLevel)
+	logging.SetLogLevel(loadedCfg.Application.LogLevel)
 
 	// Create a processor (but don't start any background processes like ChainWatcher).
 	processor := &Processor{
@@ -693,9 +698,13 @@ func TestDryRunMode(t *testing.T) {
 		Metrics:           metrics.NewMetrics(),
 		Chains:            loadedCfg.Chains,
 		Config: &AppConfig{
-			OutOfOrderTolerance: 0, // Disable buffering for this specific test.
-			MaxTimeSinceLastHit: loadedCfg.MaxTimeSinceLastHit,
-			TimestampFormat:     loadedCfg.TimestampFormat,
+			Parser: ParserConfig{
+				OutOfOrderTolerance: 0, // Disable buffering for this specific test.
+				TimestampFormat:     loadedCfg.Parser.TimestampFormat,
+			},
+			Checker: CheckerConfig{
+				MaxTimeSinceLastHit: loadedCfg.Checker.MaxTimeSinceLastHit,
+			},
 		},
 		DryRun:  true,                                                                            // Simulate dry-run mode
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {}, // Will be replaced
@@ -733,11 +742,9 @@ func TestDryRunMode(t *testing.T) {
 	// 3. Process test_access.log in dry-run mode, capturing the log output
 	var capturedLogs []string // Collect captured log lines.
 	processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-		// Our custom LogFunc only captures the output. We do NOT call LogOutput here
-		// to prevent verbose output during test runs unless explicitly requested via t.Logf.
-
 		logLine := tag + ": " + fmt.Sprintf(format, args...)
 		capturedLogs = append(capturedLogs, logLine)
+		t.Logf("%s", logLine) // Also print to test output for debugging
 	}
 
 	// Read in each line of the test log, and run CheckChains on it, to simulate log tailing.
@@ -889,7 +896,14 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 			}
 			chains := []BehavioralChain{chain}
 
-			processor := newTestProcessor(&AppConfig{OutOfOrderTolerance: tt.tolerance, MaxTimeSinceLastHit: 1 * time.Minute}, chains)
+			processor := newTestProcessor(&AppConfig{
+				Parser: ParserConfig{
+					OutOfOrderTolerance: tt.tolerance,
+				},
+				Checker: CheckerConfig{
+					MaxTimeSinceLastHit: 1 * time.Minute,
+				},
+			}, chains)
 
 			// Use a mock checkChainsInternal to see what gets processed immediately
 			var processedImmediately []*LogEntry
@@ -944,7 +958,7 @@ func newBufferWorkerTestHarness(t *testing.T, tolerance time.Duration) *bufferWo
 	}
 
 	// Create a processor with a mock checkChainsInternal function to capture processed entries.
-	p := newTestProcessor(&AppConfig{OutOfOrderTolerance: tolerance}, nil)
+	p := newTestProcessor(&AppConfig{Parser: ParserConfig{OutOfOrderTolerance: tolerance}}, nil)
 	h.processor = p
 
 	// Override the LogFunc to detect when the worker has finished a tick.
@@ -1180,7 +1194,7 @@ func TestOutOfOrder_ComplexScenario(t *testing.T) {
 	baseTime := time.Now()
 
 	// Create a processor and a mock for checkChainsInternal to capture the final processing order.
-	p := newTestProcessor(&AppConfig{OutOfOrderTolerance: tolerance}, nil)
+	p := newTestProcessor(&AppConfig{Parser: ParserConfig{OutOfOrderTolerance: tolerance}}, nil)
 	var processedEntries []*LogEntry
 	var processedMutex sync.Mutex
 	originalCheck := checkChainsInternal

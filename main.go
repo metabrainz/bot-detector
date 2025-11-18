@@ -139,7 +139,7 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *AppConfig
 		LogRegex:             loadedCfg.LogFormatRegex,
 		DryRun:               params.DryRun,
 		ExitOnEOF:            params.ExitOnEOF,
-		EnableMetrics:        loadedCfg.EnableMetrics,
+		EnableMetrics:        loadedCfg.Application.EnableMetrics,
 		oooBufferFlushSignal: make(chan struct{}, 1), // Buffered channel of size 1
 		signalCh:             make(chan os.Signal, 1),
 		LogFunc:              logging.LogOutput,
@@ -152,8 +152,8 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *AppConfig
 		configReloaded:       false,
 
 		// Initialize persistence fields
-		persistenceEnabled: loadedCfg.Persistence.Enabled,
-		compactionInterval: loadedCfg.Persistence.CompactionInterval,
+		persistenceEnabled: loadedCfg.Application.Persistence.Enabled,
+		compactionInterval: loadedCfg.Application.Persistence.CompactionInterval,
 		activeBlocks:       make(map[string]persistence.ActiveBlockInfo),
 	}
 }
@@ -211,7 +211,7 @@ func restorePersistenceState(p *Processor) error {
 		name     string
 	}
 	var sortedTables []tableInfo
-	for d, n := range p.Config.DurationToTableName {
+	for d, n := range p.Config.Blockers.Backends.HAProxy.DurationTables {
 		sortedTables = append(sortedTables, tableInfo{duration: d, name: n})
 	}
 	sort.Slice(sortedTables, func(i, j int) bool {
@@ -228,7 +228,7 @@ func restorePersistenceState(p *Processor) error {
 
 		remainingDuration := time.Until(info.UnblockTime)
 		if remainingDuration > 0 {
-			bestFitDuration := p.Config.DefaultBlockDuration
+			bestFitDuration := p.Config.Blockers.DefaultDuration
 			for _, t := range sortedTables {
 				if remainingDuration <= t.duration {
 					bestFitDuration = t.duration
@@ -269,32 +269,19 @@ func execute(params *commandline.AppParameters) error {
 		return fmt.Errorf("configuration Load Error: %v", err)
 	}
 
-	logging.SetLogLevel(loadedCfg.LogLevel)
+	logging.SetLogLevel(loadedCfg.Application.LogLevel)
 
 	appConfig := &AppConfig{
-		GoodActors:               loadedCfg.GoodActors,
-		BlockTableNameFallback:   loadedCfg.BlockTableNameFallback,
-		CleanupInterval:          loadedCfg.CleanupInterval,
-		DefaultBlockDuration:     loadedCfg.DefaultBlockDuration,
-		DurationToTableName:      loadedCfg.DurationToTableName,
-		EOFPollingDelay:          loadedCfg.EOFPollingDelay,
-		FileDependencies:         loadedCfg.FileDependencies,
-		BlockerAddresses:         loadedCfg.BlockerAddresses,
-		BlockerDialTimeout:       loadedCfg.BlockerDialTimeout,
-		BlockerMaxRetries:        loadedCfg.BlockerMaxRetries,
-		BlockerRetryDelay:        loadedCfg.BlockerRetryDelay,
-		BlockerCommandQueueSize:  loadedCfg.BlockerCommandQueueSize,
-		BlockerCommandsPerSecond: loadedCfg.BlockerCommandsPerSecond,
-		IdleTimeout:              loadedCfg.IdleTimeout,
-		LastModTime:              fileInfo.ModTime(),
-		MaxTimeSinceLastHit:      loadedCfg.MaxTimeSinceLastHit,
-		OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
-		PollingInterval:          loadedCfg.PollingInterval,
-		TimestampFormat:          loadedCfg.TimestampFormat,
-		EnableMetrics:            loadedCfg.EnableMetrics,
-		StatFunc:                 defaultStatFunc,
-		FileOpener:               func(name string) (fileHandle, error) { return os.Open(name) },
-		YAMLContent:              loadedCfg.YAMLContent,
+		Application:      loadedCfg.Application,
+		Parser:           loadedCfg.Parser,
+		Checker:          loadedCfg.Checker,
+		Blockers:         loadedCfg.Blockers,
+		GoodActors:       loadedCfg.GoodActors,
+		FileDependencies: loadedCfg.FileDependencies,
+		LastModTime:      fileInfo.ModTime(),
+		StatFunc:         defaultStatFunc,
+		FileOpener:       func(name string) (fileHandle, error) { return os.Open(name) },
+		YAMLContent:      loadedCfg.YAMLContent,
 	}
 
 	p := initializeProcessor(params, appConfig, loadedCfg)
@@ -312,7 +299,7 @@ func execute(params *commandline.AppParameters) error {
 	initializeMetrics(p, loadedCfg)
 
 	haproxyBlocker := blocker.NewHAProxyBlocker(p, p.DryRun)
-	rateLimitedBlocker := blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.BlockerCommandQueueSize, p.Config.BlockerCommandsPerSecond)
+	rateLimitedBlocker := blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.Blockers.CommandQueueSize, p.Config.Blockers.CommandsPerSecond)
 	p.Blocker = rateLimitedBlocker
 
 	if p.persistenceEnabled {
@@ -490,7 +477,7 @@ func (p *Processor) GenerateStepsMetricsReport() string {
 // --- ParserProvider Interface Implementation ---
 
 func (p *Processor) GetTimestampFormat() string {
-	return p.Config.TimestampFormat
+	return p.Config.Parser.TimestampFormat
 }
 
 func (p *Processor) GetLogRegex() *regexp.Regexp {
@@ -502,15 +489,15 @@ func (p *Processor) GetLogRegex() *regexp.Regexp {
 // --- StoreProvider Interface Implementation ---
 
 func (p *Processor) GetCleanupInterval() time.Duration {
-	return p.Config.CleanupInterval
+	return p.Config.Checker.ActorCleanupInterval
 }
 
 func (p *Processor) GetIdleTimeout() time.Duration {
-	return p.Config.IdleTimeout
+	return p.Config.Checker.ActorStateIdleTimeout
 }
 
 func (p *Processor) GetMaxTimeSinceLastHit() time.Duration {
-	return p.Config.MaxTimeSinceLastHit
+	return p.Config.Checker.MaxTimeSinceLastHit
 }
 
 func (p *Processor) GetTopN() int {
@@ -560,27 +547,27 @@ func (p *Processor) IncrementBlockerCmdsExecuted() {
 // --- HAProxyProvider Interface Implementation ---
 
 func (p *Processor) GetBlockerAddresses() []string {
-	return p.Config.BlockerAddresses
+	return p.Config.Blockers.Backends.HAProxy.Addresses
 }
 
 func (p *Processor) GetDurationTables() map[time.Duration]string {
-	return p.Config.DurationToTableName
+	return p.Config.Blockers.Backends.HAProxy.DurationTables
 }
 
 func (p *Processor) GetBlockTableNameFallback() string {
-	return p.Config.BlockTableNameFallback
+	return p.Config.Blockers.Backends.HAProxy.TableNameFallback
 }
 
 func (p *Processor) GetBlockerMaxRetries() int {
-	return p.Config.BlockerMaxRetries
+	return p.Config.Blockers.MaxRetries
 }
 
 func (p *Processor) GetBlockerRetryDelay() time.Duration {
-	return p.Config.BlockerRetryDelay
+	return p.Config.Blockers.RetryDelay
 }
 
 func (p *Processor) GetBlockerDialTimeout() time.Duration {
-	return p.Config.BlockerDialTimeout
+	return p.Config.Blockers.DialTimeout
 }
 
 func (p *Processor) IncrementBlockerRetries() {

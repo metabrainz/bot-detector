@@ -25,6 +25,27 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// logStructFields recursively logs the fields of a struct that have a "summary" tag.
+func logStructFields(p *Processor, val reflect.Value, typ reflect.Type) {
+	for i := 0; i < val.NumField(); i++ {
+		structField := typ.Field(i)
+		fieldValue := val.Field(i)
+
+		// Recurse into nested structs
+		if fieldValue.Kind() == reflect.Struct {
+			logStructFields(p, fieldValue, fieldValue.Type())
+			continue
+		}
+
+		tag := structField.Tag.Get("summary")
+		if tag == "" {
+			continue // Skip fields without the summary tag
+		}
+
+		p.LogFunc(logging.LevelDebug, "CONFIG", "  - %s: %v", tag, fieldValue.Interface())
+	}
+}
+
 // logConfigurationSummary logs the key-value pairs of the current application configuration.
 // This is useful for visibility on startup and after a configuration reload.
 func logConfigurationSummary(p *Processor) {
@@ -44,26 +65,15 @@ func logConfigurationSummary(p *Processor) {
 	p.LogFunc(logging.LevelDebug, "CONFIG", "Loaded configuration:")
 
 	// Handle special cases first
-	p.LogFunc(logging.LevelDebug, "CONFIG", "  - line_ending: %s", config.LineEnding)
 	p.LogFunc(logging.LevelDebug, "CONFIG", "  - log_level: %s", currentLogLevel)
 
 	// Use reflection to iterate over tagged fields in AppConfig
 	val := reflect.ValueOf(*config)
 	typ := val.Type()
-
-	for i := 0; i < val.NumField(); i++ {
-		structField := typ.Field(i)
-		tag := structField.Tag.Get("summary")
-		if tag == "" {
-			continue // Skip fields without the summary tag
-		}
-
-		fieldValue := val.Field(i).Interface()
-		p.LogFunc(logging.LevelDebug, "CONFIG", "  - %s: %v", tag, fieldValue)
-	}
+	logStructFields(p, val, typ)
 
 	// Only show timestamp format if it's not the default.
-	if config.TimestampFormat != AccessLogTimeFormat {
+	if config.Parser.TimestampFormat != AccessLogTimeFormat {
 		p.LogFunc(logging.LevelDebug, "CONFIG", "  - timestamp_format: custom")
 	}
 
@@ -110,46 +120,19 @@ func areChainsSemanticallyEqual(a, b BehavioralChain) bool {
 	return reflect.DeepEqual(a.StepsYAML, b.StepsYAML)
 }
 
-// compareConfigsByTag uses reflection to compare fields of two config structs
-// that are marked with the `config:"compare"` tag. It returns true if any
-// of the tagged fields have different values.
-func compareConfigsByTag(oldCfg AppConfig, newCfg LoadedConfig) bool {
-	newVal := reflect.ValueOf(newCfg)
-	oldVal := reflect.ValueOf(oldCfg)
-	newType := newVal.Type()
-
-	for i := 0; i < newVal.NumField(); i++ {
-		field := newType.Field(i)
-		tag := field.Tag.Get("config")
-
-		// Only compare fields that have the "compare" tag.
-		if tag != "compare" {
-			continue
-		}
-
-		fieldName := field.Name
-		newFieldValue := newVal.FieldByName(fieldName)
-		oldFieldValue := oldVal.FieldByName(fieldName)
-
-		if !oldFieldValue.IsValid() {
-			// This should not happen if AppConfig and LoadedConfig are kept in sync.
-			continue
-		}
-
-		// Use DeepEqual for slices and maps, otherwise compare interfaces.
-		// Note: LogLevel is a special case handled outside this function.
-		if newFieldValue.Kind() == reflect.Slice || newFieldValue.Kind() == reflect.Map {
-			if !reflect.DeepEqual(newFieldValue.Interface(), oldFieldValue.Interface()) {
-				return true // Found a difference
-			}
-		} else {
-			if newFieldValue.Interface() != oldFieldValue.Interface() {
-				return true // Found a difference
-			}
-		}
+// compareConfigs checks if two configurations are semantically different.
+func compareConfigs(oldCfg AppConfig, newCfg LoadedConfig) bool {
+	// Compare the main configuration sections using DeepEqual.
+	// This is simpler and more robust than tag-based reflection for nested structs.
+	if !reflect.DeepEqual(oldCfg.Application, newCfg.Application) ||
+		!reflect.DeepEqual(oldCfg.Parser, newCfg.Parser) ||
+		!reflect.DeepEqual(oldCfg.Checker, newCfg.Checker) ||
+		!reflect.DeepEqual(oldCfg.Blockers, newCfg.Blockers) ||
+		!reflect.DeepEqual(oldCfg.GoodActors, newCfg.GoodActors) {
+		return true
 	}
 
-	return false // No differences found in tagged fields.
+	return false // No differences found.
 }
 
 // --- Dependency Graph for Cycle Detection ---
@@ -795,8 +778,11 @@ func parseAndNormalizeYAML(configPath string) (*ChainConfig, []byte, error) {
 		return nil, nil, fmt.Errorf("failed to read YAML file %s: %w", configPath, err)
 	}
 
+	logging.LogOutput(logging.LevelDebug, "YAML_DEBUG", "Attempting to unmarshal YAML from %s:\n%s", configPath, string(data))
+
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
+		fmt.Fprintf(os.Stderr, "[YAML_ERROR] YAML unmarshalling failed in %s: %v\n", configPath, err)
 		return nil, nil, fmt.Errorf("failed to unmarshal YAML: %w", err)
 	}
 
@@ -815,6 +801,7 @@ func parseAndNormalizeYAML(configPath string) (*ChainConfig, []byte, error) {
 	if err := decoder.Decode(&config); err != nil {
 		var e *yaml.TypeError
 		if errors.As(err, &e) {
+			fmt.Fprintf(os.Stderr, "[YAML_ERROR] YAML unmarshalling failed in %s: %v\n", configPath, err)
 			var errs []string
 			for _, msg := range e.Errors {
 				errs = append(errs, strings.TrimPrefix(msg, "yaml: "))
@@ -828,8 +815,8 @@ func parseAndNormalizeYAML(configPath string) (*ChainConfig, []byte, error) {
 
 func parseDurations(config *ChainConfig) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, error) {
 	pollingIntervalStr := DefaultPollingInterval
-	if config.PollingInterval != "" {
-		pollingIntervalStr = config.PollingInterval
+	if config.Application.Config.PollingInterval != "" {
+		pollingIntervalStr = config.Application.Config.PollingInterval
 	}
 	pollingInterval, err := time.ParseDuration(pollingIntervalStr)
 	if err != nil {
@@ -837,8 +824,8 @@ func parseDurations(config *ChainConfig) (time.Duration, time.Duration, time.Dur
 	}
 
 	cleanupIntervalStr := DefaultCleanupInterval
-	if config.CleanupInterval != "" {
-		cleanupIntervalStr = config.CleanupInterval
+	if config.Checker.ActorCleanupInterval != "" {
+		cleanupIntervalStr = config.Checker.ActorCleanupInterval
 	}
 	cleanupInterval, err := time.ParseDuration(cleanupIntervalStr)
 	if err != nil {
@@ -846,8 +833,8 @@ func parseDurations(config *ChainConfig) (time.Duration, time.Duration, time.Dur
 	}
 
 	idleTimeoutStr := DefaultIdleTimeout
-	if config.IdleTimeout != "" {
-		idleTimeoutStr = config.IdleTimeout
+	if config.Checker.ActorStateIdleTimeout != "" {
+		idleTimeoutStr = config.Checker.ActorStateIdleTimeout
 	}
 	idleTimeout, err := time.ParseDuration(idleTimeoutStr)
 	if err != nil {
@@ -855,8 +842,8 @@ func parseDurations(config *ChainConfig) (time.Duration, time.Duration, time.Dur
 	}
 
 	outOfOrderToleranceStr := DefaultOutOfOrderTolerance
-	if config.OutOfOrderTolerance != "" {
-		outOfOrderToleranceStr = config.OutOfOrderTolerance
+	if config.Parser.OutOfOrderTolerance != "" {
+		outOfOrderToleranceStr = config.Parser.OutOfOrderTolerance
 	}
 	outOfOrderTolerance, err := time.ParseDuration(outOfOrderToleranceStr)
 	if err != nil {
@@ -864,8 +851,8 @@ func parseDurations(config *ChainConfig) (time.Duration, time.Duration, time.Dur
 	}
 
 	eofPollingDelayStr := DefaultEOFPollingDelay
-	if config.EOFPollingDelay != "" {
-		eofPollingDelayStr = config.EOFPollingDelay
+	if config.Application.EOFPollingDelay != "" {
+		eofPollingDelayStr = config.Application.EOFPollingDelay
 	}
 	eofPollingDelay, err := time.ParseDuration(eofPollingDelayStr)
 	if err != nil {
@@ -877,13 +864,13 @@ func parseDurations(config *ChainConfig) (time.Duration, time.Duration, time.Dur
 
 func parseStringAndBoolSettings(config *ChainConfig) (string, string, bool, string, error) {
 	logLevelStr := DefaultLogLevel
-	if config.LogLevel != "" {
-		logLevelStr = config.LogLevel
+	if config.Application.LogLevel != "" {
+		logLevelStr = config.Application.LogLevel
 	}
 
 	lineEndingStr := DefaultLineEnding
-	if config.LineEnding != "" {
-		lineEndingStr = config.LineEnding
+	if config.Parser.LineEnding != "" {
+		lineEndingStr = config.Parser.LineEnding
 	}
 	switch lineEndingStr {
 	case "lf", "crlf", "cr":
@@ -892,24 +879,24 @@ func parseStringAndBoolSettings(config *ChainConfig) (string, string, bool, stri
 	}
 
 	enableMetrics := DefaultEnableMetrics
-	if config.EnableMetrics != nil {
-		enableMetrics = *config.EnableMetrics
+	if config.Application.EnableMetrics != nil {
+		enableMetrics = *config.Application.EnableMetrics
 	}
 
 	unblockCooldownStr := DefaultUnblockCooldown
-	if config.UnblockCooldown != "" {
-		unblockCooldownStr = config.UnblockCooldown
+	if config.Checker.UnblockCooldown != "" {
+		unblockCooldownStr = config.Checker.UnblockCooldown
 	}
 
 	return logLevelStr, lineEndingStr, enableMetrics, unblockCooldownStr, nil
 }
 
 func parseCustomLogRegex(config *ChainConfig) (*regexp.Regexp, error) {
-	if config.LogFormatRegex == "" {
+	if config.Parser.LogFormatRegex == "" {
 		return nil, nil
 	}
 
-	re, err := regexp.Compile(config.LogFormatRegex)
+	re, err := regexp.Compile(config.Parser.LogFormatRegex)
 	if err != nil {
 		return nil, fmt.Errorf("invalid log_format_regex: %w", err)
 	}
@@ -934,9 +921,9 @@ func parseCustomLogRegex(config *ChainConfig) (*regexp.Regexp, error) {
 func parseChains(config *ChainConfig, fileDeps map[string]*types.FileDependency, configPath string, durationTables map[time.Duration]string) ([]BehavioralChain, error) {
 	var newChains []BehavioralChain
 	var defaultBlockDuration time.Duration
-	if config.DefaultBlockDuration != "" {
+	if config.Blockers.DefaultDuration != "" {
 		var err error
-		defaultBlockDuration, err = utils.ParseDuration(config.DefaultBlockDuration)
+		defaultBlockDuration, err = utils.ParseDuration(config.Blockers.DefaultDuration)
 		if err != nil {
 			return nil, fmt.Errorf("invalid block_duration format for default_block_duration: %w", err)
 		}
@@ -959,7 +946,7 @@ func parseChains(config *ChainConfig, fileDeps map[string]*types.FileDependency,
 			}
 		} else {
 			blockDuration = defaultBlockDuration
-			blockDurationStr = config.DefaultBlockDuration
+			blockDurationStr = config.Blockers.DefaultDuration
 			usesDefault = true
 		}
 
@@ -1098,11 +1085,11 @@ func parseGoodActors(config *ChainConfig, fileDeps map[string]*types.FileDepende
 }
 
 func parseDurationTables(config *ChainConfig) (map[time.Duration]string, string, error) {
-	newDurationTables := make(map[time.Duration]string, len(config.DurationTables))
+	newDurationTables := make(map[time.Duration]string, len(config.Blockers.Backends.HAProxy.DurationTables))
 	longestDuration := 0 * time.Second
 	newFallbackName := ""
 
-	for durationStr, tableName := range config.DurationTables {
+	for durationStr, tableName := range config.Blockers.Backends.HAProxy.DurationTables {
 		duration, err := utils.ParseDuration(durationStr)
 		if err != nil {
 			return nil, "", fmt.Errorf("invalid duration '%s' in 'duration_tables': %w", durationStr, err)
@@ -1123,14 +1110,14 @@ func parseBlockerSettings(config *ChainConfig) (int, time.Duration, time.Duratio
 	var blockerCommandQueueSize, blockerCommandsPerSecond int
 	var err error
 
-	if config.BlockerMaxRetries > 0 {
-		blockerMaxRetries = config.BlockerMaxRetries
+	if config.Blockers.MaxRetries > 0 {
+		blockerMaxRetries = config.Blockers.MaxRetries
 	} else {
 		blockerMaxRetries = DefaultBlockerMaxRetries
 	}
 
-	if config.BlockerRetryDelay != "" {
-		blockerRetryDelay, err = time.ParseDuration(config.BlockerRetryDelay)
+	if config.Blockers.RetryDelay != "" {
+		blockerRetryDelay, err = time.ParseDuration(config.Blockers.RetryDelay)
 		if err != nil {
 			return 0, 0, 0, 0, 0, fmt.Errorf("invalid blocker_retry_delay: %w", err)
 		}
@@ -1138,8 +1125,8 @@ func parseBlockerSettings(config *ChainConfig) (int, time.Duration, time.Duratio
 		blockerRetryDelay = DefaultBlockerRetryDelay
 	}
 
-	if config.BlockerDialTimeout != "" {
-		blockerDialTimeout, err = time.ParseDuration(config.BlockerDialTimeout)
+	if config.Blockers.DialTimeout != "" {
+		blockerDialTimeout, err = time.ParseDuration(config.Blockers.DialTimeout)
 		if err != nil {
 			return 0, 0, 0, 0, 0, fmt.Errorf("invalid blocker_dial_timeout: %w", err)
 		}
@@ -1147,14 +1134,14 @@ func parseBlockerSettings(config *ChainConfig) (int, time.Duration, time.Duratio
 		blockerDialTimeout = DefaultBlockerDialTimeout
 	}
 
-	if config.BlockerCommandQueueSize > 0 {
-		blockerCommandQueueSize = config.BlockerCommandQueueSize
+	if config.Blockers.CommandQueueSize > 0 {
+		blockerCommandQueueSize = config.Blockers.CommandQueueSize
 	} else {
 		blockerCommandQueueSize = DefaultBlockerCommandQueueSize
 	}
 
-	if config.BlockerCommandsPerSecond > 0 {
-		blockerCommandsPerSecond = config.BlockerCommandsPerSecond
+	if config.Blockers.CommandsPerSecond > 0 {
+		blockerCommandsPerSecond = config.Blockers.CommandsPerSecond
 	} else {
 		blockerCommandsPerSecond = DefaultBlockerCommandsPerSecond
 	}
@@ -1210,8 +1197,8 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	}
 
 	timestampFormat := AccessLogTimeFormat
-	if config.TimestampFormat != "" {
-		timestampFormat = config.TimestampFormat
+	if config.Parser.TimestampFormat != "" {
+		timestampFormat = config.Parser.TimestampFormat
 	}
 
 	customLogRegex, err := parseCustomLogRegex(config)
@@ -1252,10 +1239,10 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	}
 
 	var persistenceConfig persistence.PersistenceConfig
-	if config.Persistence.Enabled {
+	if config.Application.Persistence.Enabled {
 		persistenceConfig = persistence.PersistenceConfig{
 			Enabled:            true,
-			CompactionInterval: config.Persistence.CompactionInterval,
+			CompactionInterval: config.Application.Persistence.CompactionInterval,
 		}
 		if persistenceConfig.CompactionInterval == 0 {
 			persistenceConfig.CompactionInterval = time.Hour
@@ -1269,34 +1256,51 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		}
 	}
 
+	var defaultBlockDuration time.Duration
+	if config.Blockers.DefaultDuration != "" {
+		defaultBlockDuration, _ = utils.ParseDuration(config.Blockers.DefaultDuration)
+	}
+
 	return &LoadedConfig{
-		GoodActors:               newGoodActors,
-		BlockTableNameFallback:   newFallbackName,
-		Chains:                   newChains,
-		DefaultBlockDuration:     0, // This is now handled in parseChains
-		CleanupInterval:          cleanupInterval,
-		EOFPollingDelay:          eofPollingDelay,
-		DurationToTableName:      newDurationTables,
-		FileDependencies:         newFileDependencies,
-		BlockerAddresses:         config.BlockerAddresses,
-		BlockerDialTimeout:       blockerDialTimeout,
-		BlockerMaxRetries:        blockerMaxRetries,
-		BlockerRetryDelay:        blockerRetryDelay,
-		BlockerCommandQueueSize:  blockerCommandQueueSize,
-		BlockerCommandsPerSecond: blockerCommandsPerSecond,
-		IdleTimeout:              idleTimeout,
-		LogLevel:                 logLevelStr,
-		LineEnding:               lineEndingStr,
-		LogFormatRegex:           customLogRegex,
-		MaxTimeSinceLastHit:      maxTimeSinceLastHit,
-		OutOfOrderTolerance:      outOfOrderTolerance,
-		PollingInterval:          pollingInterval,
-		TimestampFormat:          timestampFormat,
-		UnblockOnGoodActor:       config.UnblockOnGoodActor,
-		UnblockCooldown:          unblockCooldown,
-		EnableMetrics:            enableMetrics,
-		Persistence:              persistenceConfig,
-		YAMLContent:              data,
+		Application: ApplicationConfig{
+			LogLevel:        logLevelStr,
+			EnableMetrics:   enableMetrics,
+			Config:          ConfigManagement{PollingInterval: pollingInterval},
+			Persistence:     persistenceConfig,
+			EOFPollingDelay: eofPollingDelay,
+		},
+		Parser: ParserConfig{
+			LineEnding:          lineEndingStr,
+			OutOfOrderTolerance: outOfOrderTolerance,
+			TimestampFormat:     timestampFormat,
+		},
+		Checker: CheckerConfig{
+			UnblockOnGoodActor:    config.Checker.UnblockOnGoodActor,
+			UnblockCooldown:       unblockCooldown,
+			ActorCleanupInterval:  cleanupInterval,
+			ActorStateIdleTimeout: idleTimeout,
+			MaxTimeSinceLastHit:   maxTimeSinceLastHit,
+		},
+		Blockers: BlockersConfig{
+			DefaultDuration:   defaultBlockDuration,
+			CommandsPerSecond: blockerCommandsPerSecond,
+			CommandQueueSize:  blockerCommandQueueSize,
+			DialTimeout:       blockerDialTimeout,
+			MaxRetries:        blockerMaxRetries,
+			RetryDelay:        blockerRetryDelay,
+			Backends: Backends{
+				HAProxy: HAProxyConfig{
+					Addresses:         config.Blockers.Backends.HAProxy.Addresses,
+					DurationTables:    newDurationTables,
+					TableNameFallback: newFallbackName,
+				},
+			},
+		},
+		GoodActors:       newGoodActors,
+		Chains:           newChains,
+		FileDependencies: newFileDependencies,
+		LogFormatRegex:   customLogRegex,
+		YAMLContent:      data,
 	}, nil
 }
 
@@ -1458,29 +1462,12 @@ func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 
 	// Create a new AppConfig from the loaded configuration.
 	newAppConfig := &AppConfig{
-		GoodActors:               loadedCfg.GoodActors,
-		BlockTableNameFallback:   loadedCfg.BlockTableNameFallback,
-		CleanupInterval:          loadedCfg.CleanupInterval,
-		DefaultBlockDuration:     loadedCfg.DefaultBlockDuration,
-		DurationToTableName:      loadedCfg.DurationToTableName,
-		EOFPollingDelay:          loadedCfg.EOFPollingDelay,
-		FileDependencies:         loadedCfg.FileDependencies,
-		BlockerAddresses:         loadedCfg.BlockerAddresses,
-		BlockerDialTimeout:       loadedCfg.BlockerDialTimeout,
-		BlockerMaxRetries:        loadedCfg.BlockerMaxRetries,
-		BlockerRetryDelay:        loadedCfg.BlockerRetryDelay,
-		BlockerCommandQueueSize:  loadedCfg.BlockerCommandQueueSize,
-		BlockerCommandsPerSecond: loadedCfg.BlockerCommandsPerSecond,
-		IdleTimeout:              loadedCfg.IdleTimeout,
-		LineEnding:               loadedCfg.LineEnding,
-		MaxTimeSinceLastHit:      loadedCfg.MaxTimeSinceLastHit,
-		OutOfOrderTolerance:      loadedCfg.OutOfOrderTolerance,
-		PollingInterval:          loadedCfg.PollingInterval,
-		TimestampFormat:          loadedCfg.TimestampFormat,
-		UnblockOnGoodActor:       loadedCfg.UnblockOnGoodActor,
-		UnblockCooldown:          loadedCfg.UnblockCooldown,
-		EnableMetrics:            loadedCfg.EnableMetrics,
-		Persistence:              loadedCfg.Persistence,
+		Application:      loadedCfg.Application,
+		Parser:           loadedCfg.Parser,
+		Checker:          loadedCfg.Checker,
+		Blockers:         loadedCfg.Blockers,
+		GoodActors:       loadedCfg.GoodActors,
+		FileDependencies: loadedCfg.FileDependencies,
 
 		// Preserve mockable functions and set the correct LastModTime.
 		StatFunc:    oldConfig.StatFunc,
@@ -1495,15 +1482,14 @@ func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	p.Config = newAppConfig // Atomically swap the config pointer.
 	// The LastModTime is already set correctly in newAppConfig, no need to update here.
 	p.LogRegex = loadedCfg.LogFormatRegex
-	p.EnableMetrics = loadedCfg.EnableMetrics // Set the processor's EnableMetrics field
+	p.EnableMetrics = loadedCfg.Application.EnableMetrics // Set the processor's EnableMetrics field
 	initializeMetrics(p, loadedCfg)
 
-	logging.SetLogLevel(loadedCfg.LogLevel)
+	logging.SetLogLevel(loadedCfg.Application.LogLevel)
 	p.ConfigMutex.Unlock()
 
 	// --- Compare and log general config changes ---
-	configChanged := compareConfigsByTag(*oldConfig, *loadedCfg) ||
-		loadedCfg.LogLevel != logging.GetLogLevel().String() ||
+	configChanged := compareConfigs(*oldConfig, *loadedCfg) ||
 		(oldLogRegex != nil) != (loadedCfg.LogFormatRegex != nil)
 
 	if configChanged {
@@ -1548,7 +1534,7 @@ func reloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	}
 
 	// --- Unblock IPs that match newly added good actors ---
-	if newAppConfig.UnblockOnGoodActor {
+	if newAppConfig.Checker.UnblockOnGoodActor {
 		newlyAdded := findNewlyAddedGoodActors(oldConfig.GoodActors, loadedCfg.GoodActors)
 		if len(newlyAdded) > 0 {
 			unblockNewlyWhitelistedIPs(p, newlyAdded)
@@ -1591,16 +1577,16 @@ func initializeMetrics(p *Processor, loadedCfg *LoadedConfig) {
 
 	// Initialize block duration counters.
 	p.Metrics.BlockDurations = &sync.Map{}
-	for duration := range loadedCfg.DurationToTableName {
+	for duration := range loadedCfg.Blockers.Backends.HAProxy.DurationTables {
 		p.Metrics.BlockDurations.Store(duration, new(atomic.Int64))
 	}
-	if loadedCfg.DefaultBlockDuration > 0 {
-		p.Metrics.BlockDurations.Store(loadedCfg.DefaultBlockDuration, new(atomic.Int64))
+	if loadedCfg.Blockers.DefaultDuration > 0 {
+		p.Metrics.BlockDurations.Store(loadedCfg.Blockers.DefaultDuration, new(atomic.Int64))
 	}
 
 	// Initialize per-blocker command counters.
 	p.Metrics.CmdsPerBlocker = &sync.Map{}
-	for _, addr := range loadedCfg.BlockerAddresses {
+	for _, addr := range loadedCfg.Blockers.Backends.HAProxy.Addresses {
 		p.Metrics.CmdsPerBlocker.Store(addr, new(atomic.Int64))
 	}
 	// Initialize good actor hit counters.
@@ -1661,7 +1647,7 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 	}
 
 	// Enforce a minimum safe interval.
-	pollingInterval := p.Config.PollingInterval
+	pollingInterval := p.Config.Application.Config.PollingInterval
 	if pollingInterval < DefaultMinPollingInterval {
 		pollingInterval = DefaultMinPollingInterval
 	}

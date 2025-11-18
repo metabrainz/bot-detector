@@ -51,8 +51,8 @@ func NewTailer(p *Processor, seekToEnd bool) (*Tailer, error) {
 		path:   p.LogPath,
 		logger: p.LogFunc,
 	}
-	t.config.EOFPollingDelay = p.Config.EOFPollingDelay
-	t.config.LineEnding = p.Config.LineEnding
+	t.config.EOFPollingDelay = p.Config.Application.EOFPollingDelay
+	t.config.LineEnding = p.Config.Parser.LineEnding
 	t.config.FileOpener = p.Config.FileOpener
 	t.config.StatFunc = p.Config.StatFunc
 
@@ -275,7 +275,7 @@ func delayOrShutdown(p *Processor, delay time.Duration, signalCh <-chan os.Signa
 // handling different line endings and line length limits, and calls a processor function for each line.
 func processFileLines(p *Processor, file io.Reader, lineProcessor func(line string)) error {
 	// Select the line reader function based on config.
-	readLine, err := getLineReader(p.Config.LineEnding)
+	readLine, err := getLineReader(p.Config.Parser.LineEnding)
 	if err != nil {
 		return fmt.Errorf("configuration error with line_ending: %w", err)
 	}
@@ -774,7 +774,7 @@ func cleanupTopActors(p *Processor, stop <-chan struct{}) {
 	}
 
 	p.ConfigMutex.RLock()
-	cleanupInterval := p.Config.CleanupInterval
+	cleanupInterval := p.Config.Checker.ActorCleanupInterval
 	p.ConfigMutex.RUnlock()
 
 	if cleanupInterval == 0 {
@@ -900,7 +900,7 @@ func LiveLogTailer(p *Processor, signalCh <-chan os.Signal, readySignal chan<- s
 					}
 					// ErrEOF means we hit EOF but no rotation was detected.
 					// Sleep before polling again, allowing shutdown signals to be checked.
-					time.Sleep(p.Config.EOFPollingDelay)
+					time.Sleep(p.Config.Application.EOFPollingDelay)
 					continue
 				}
 				if errors.Is(readErr, ErrFileRotated) {

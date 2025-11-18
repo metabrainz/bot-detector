@@ -77,6 +77,7 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 		}
 	}
 
+	logging.SetLogLevel("debug")
 	// Load base configuration from a test file.
 	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: "testdata/config.yaml"})
 	if err != nil {
@@ -86,13 +87,21 @@ func setupTestProcessor(t *testing.T, dryRun bool, logFilePath string) (*Process
 	// Create a minimal AppConfig for the test.
 	// We load the full config to get settings like out_of_order_tolerance and whitelist_cidrs.
 	appConfig := &AppConfig{
-		CleanupInterval:      loadedCfg.CleanupInterval,
-		DefaultBlockDuration: loadedCfg.DefaultBlockDuration,
-		EOFPollingDelay:      10 * time.Millisecond, // Keep this fast for testing.
-		FileDependencies:     loadedCfg.FileDependencies,
-		MaxTimeSinceLastHit:  loadedCfg.MaxTimeSinceLastHit,
-		OutOfOrderTolerance:  loadedCfg.OutOfOrderTolerance,
-		TimestampFormat:      loadedCfg.TimestampFormat,
+		Checker: CheckerConfig{
+			ActorCleanupInterval: loadedCfg.Checker.ActorCleanupInterval,
+			MaxTimeSinceLastHit:  loadedCfg.Checker.MaxTimeSinceLastHit,
+		},
+		Blockers: BlockersConfig{
+			DefaultDuration: loadedCfg.Blockers.DefaultDuration,
+		},
+		Application: ApplicationConfig{
+			EOFPollingDelay: 10 * time.Millisecond, // Keep this fast for testing.
+		},
+		Parser: ParserConfig{
+			OutOfOrderTolerance: loadedCfg.Parser.OutOfOrderTolerance,
+			TimestampFormat:     loadedCfg.Parser.TimestampFormat,
+		},
+		FileDependencies: loadedCfg.FileDependencies,
 
 		StatFunc: func(path string) (os.FileInfo, error) {
 			// For the purpose of this test, we only need to return a mock FileInfo

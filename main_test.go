@@ -81,10 +81,16 @@ func TestStart_LiveMode(t *testing.T) {
 	mockStatInfo = initialStat // Initially, the mock returns the original file info.
 
 	p := newTestProcessor(&AppConfig{
-		CleanupInterval: 10 * time.Millisecond,
-		PollingInterval: 10 * time.Millisecond,
-		EOFPollingDelay: 1 * time.Millisecond, // Poll quickly for the test
-		StatFunc:        mockStat,             // Use the mock stat function
+		Checker: CheckerConfig{
+			ActorCleanupInterval: 10 * time.Millisecond,
+		},
+		Application: ApplicationConfig{
+			Config: ConfigManagement{
+				PollingInterval: 10 * time.Millisecond,
+			},
+			EOFPollingDelay: 1 * time.Millisecond, // Poll quickly for the test
+		},
+		StatFunc: mockStat, // Use the mock stat function
 	}, nil)
 	p.DryRun = false // Ensure live mode.
 	// Use a channel to know when the rotation log has been seen.
@@ -155,7 +161,8 @@ func TestSignalReloader_Reload(t *testing.T) {
 	// 1. Create a temporary YAML file with initial content.
 	initialYAMLContent := `
 version: "1.0"
-log_level: "info"
+application:
+  log_level: "info"
 chains:
   - name: "InitialChain"
     match_key: "ip"
@@ -204,7 +211,8 @@ chains:
 	// 5. Modify the YAML file on disk.
 	modifiedYAMLContent := `
 version: "1.0"
-log_level: "debug" # Changed log level
+application:
+  log_level: "debug" # Changed log level
 chains:
   - name: "ReloadedChain" # Changed chain name
     match_key: "ip"

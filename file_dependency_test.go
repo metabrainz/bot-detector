@@ -79,8 +79,12 @@ chains:
 
 	// Create a processor with the loaded config
 	p := newTestProcessorWithFileDeps(t, &AppConfig{
-		PollingInterval:  10 * time.Millisecond, // Short polling interval for test
-		LastModTime:      time.Now(),            // Set a LastModTime for the config itself
+		Application: ApplicationConfig{
+			Config: ConfigManagement{
+				PollingInterval: 10 * time.Millisecond, // Short polling interval for test
+			},
+		},
+		LastModTime:      time.Now(), // Set a LastModTime for the config itself
 		FileDependencies: loadedCfg.FileDependencies,
 	}, logCaptureFunc)
 	p.ConfigPath = configPath
@@ -280,8 +284,12 @@ chains:
 
 	// Create a processor with the loaded config
 	p := newTestProcessorWithFileDeps(t, &AppConfig{
-		PollingInterval:  10 * time.Millisecond, // Short polling interval for test
-		LastModTime:      time.Now(),            // Set a LastModTime for the config itself
+		Application: ApplicationConfig{
+			Config: ConfigManagement{
+				PollingInterval: 10 * time.Millisecond, // Short polling interval for test
+			},
+		},
+		LastModTime:      time.Now(), // Set a LastModTime for the config itself
 		FileDependencies: loadedCfg.FileDependencies,
 	}, logCaptureFunc)
 	p.ConfigPath = configPath
@@ -401,8 +409,12 @@ chains:
 
 	// Create a processor with the loaded config
 	p := newTestProcessorWithFileDeps(t, &AppConfig{
-		PollingInterval:  10 * time.Millisecond, // Short polling interval for test
-		LastModTime:      time.Now(),            // Set a LastModTime for the config itself
+		Application: ApplicationConfig{
+			Config: ConfigManagement{
+				PollingInterval: 10 * time.Millisecond, // Short polling interval for test
+			},
+		},
+		LastModTime:      time.Now(), // Set a LastModTime for the config itself
 		FileDependencies: loadedCfg.FileDependencies,
 	}, logCaptureFunc)
 	p.ConfigPath = configPath

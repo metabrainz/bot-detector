@@ -221,7 +221,7 @@ func shouldBufferOutOfOrder(lastRequestTime, entryTimestamp time.Time, tolerance
 // It returns true if the entry was buffered, and false if it was processed immediately.
 func handleOutOfOrder(p *Processor, entry *LogEntry) (buffered bool) {
 	p.ConfigMutex.RLock()
-	tolerance := p.Config.OutOfOrderTolerance
+	tolerance := p.Config.Parser.OutOfOrderTolerance
 	p.ConfigMutex.RUnlock()
 
 	if tolerance == 0 {
@@ -730,8 +730,8 @@ func CheckChains(p *Processor, entry *LogEntry) {
 		// This logic is placed here to ensure it runs for every good actor match,
 		// even if the skip message has already been logged.
 		p.ConfigMutex.RLock()
-		unblockEnabled := p.Config.UnblockOnGoodActor
-		unblockCooldown := p.Config.UnblockCooldown
+		unblockEnabled := p.Config.Checker.UnblockOnGoodActor
+		unblockCooldown := p.Config.Checker.UnblockCooldown
 		p.ConfigMutex.RUnlock()
 
 		if unblockEnabled {
@@ -820,7 +820,7 @@ func entryBufferWorker(p *Processor, stop <-chan struct{}) {
 	// Use a ticker that is half the tolerance duration for responsiveness,
 	// with a minimum floor to prevent busy-looping.
 	p.ConfigMutex.RLock()
-	tolerance := p.Config.OutOfOrderTolerance
+	tolerance := p.Config.Parser.OutOfOrderTolerance
 	p.ConfigMutex.RUnlock()
 
 	if tolerance == 0 {

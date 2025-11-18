@@ -121,7 +121,7 @@ func newTestProcessor(config *AppConfig, chains []BehavioralChain) *Processor {
 		LogFunc:           func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 		EntryBuffer:       make([]*LogEntry, 0),
 		TopActorsPerChain: make(map[string]map[string]*store.ActorStats),
-		EnableMetrics:     config.EnableMetrics,
+		EnableMetrics:     config.Application.EnableMetrics,
 
 		NowFunc: time.Now, // Default to real time for tests unless overridden.
 	}

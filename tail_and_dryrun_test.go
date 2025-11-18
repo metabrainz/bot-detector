@@ -556,10 +556,13 @@ func TestDryRunLogProcessor_Decompression(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			harness := newDryRunTestHarness(t, &AppConfig{
-				// This config is now passed to the helper function.
-				LogFormatRegex:  `^(?P<VHost>\S+) (?P<IP>\S+) - - \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) \S+" (?P<StatusCode>\S+) (?P<Size>\S+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"$`,
-				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
-				EnableMetrics:   true,
+				Parser: ParserConfig{
+					LogFormatRegex:  `^(?P<VHost>\S+) (?P<IP>\S+) - - \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) \S+" (?P<StatusCode>\S+) (?P<Size>\S+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"$`,
+					TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				},
+				Application: ApplicationConfig{
+					EnableMetrics: true,
+				},
 			})
 			harness.processor.LogPath = tt.logFilePath // Point to the pre-compressed file
 
@@ -673,9 +676,13 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			harness := newDryRunTestHarness(t, &AppConfig{
-				LogFormatRegex:  `^(?P<VHost>\S+) (?P<IP>\S+) - - \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) \S+" (?P<StatusCode>\S+) (?P<Size>\S+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"$`,
-				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
-				EnableMetrics:   true,
+				Parser: ParserConfig{
+					LogFormatRegex:  `^(?P<VHost>\S+) (?P<IP>\S+) - - \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) \S+" (?P<StatusCode>\S+) (?P<Size>\S+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"$`,
+					TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				},
+				Application: ApplicationConfig{
+					EnableMetrics: true,
+				},
 			})
 			_ = os.WriteFile(harness.tempLogFile, []byte(logContent), 0644)
 			harness.processor.Chains = []BehavioralChain{chain1, chain2}
@@ -706,8 +713,12 @@ func TestLiveLogTailer(t *testing.T) {
 	// --- Setup ---
 	harness := newTailerTestHarness(t, &AppConfig{
 		// Use very short delays for testing
-		PollingInterval: 10 * time.Millisecond,
-		EOFPollingDelay: 1 * time.Millisecond,
+		Application: ApplicationConfig{
+			Config: ConfigManagement{
+				PollingInterval: 10 * time.Millisecond,
+			},
+			EOFPollingDelay: 1 * time.Millisecond,
+		},
 	})
 
 	// Create the initial log file.
@@ -779,7 +790,11 @@ func TestLiveLogTailer(t *testing.T) {
 
 func TestLiveLogTailer_Shutdown(t *testing.T) {
 	harness := newTailerTestHarness(t, &AppConfig{
-		PollingInterval: 10 * time.Millisecond,
+		Application: ApplicationConfig{
+			Config: ConfigManagement{
+				PollingInterval: 10 * time.Millisecond,
+			},
+		},
 	})
 	// Create a log file for the tailer to open.
 	if err := os.WriteFile(harness.tempLogFile, []byte("line\n"), 0644); err != nil {
@@ -798,7 +813,11 @@ func TestLiveLogTailer_ErrorHandling(t *testing.T) {
 	t.Run("File Not Found on Startup", func(t *testing.T) {
 		// Ensure file does not exist
 		harness := newTailerTestHarness(t, &AppConfig{
-			PollingInterval: 10 * time.Millisecond,
+			Application: ApplicationConfig{
+				Config: ConfigManagement{
+					PollingInterval: 10 * time.Millisecond,
+				},
+			},
 		})
 		_ = os.Remove(harness.tempLogFile)
 
@@ -825,7 +844,11 @@ func TestLiveLogTailer_ErrorHandling(t *testing.T) {
 	// --- Test Case 2: Read Error During Tailing ---
 	t.Run("Read Error During Tailing", func(t *testing.T) {
 		harness := newTailerTestHarness(t, &AppConfig{
-			PollingInterval: 10 * time.Millisecond,
+			Application: ApplicationConfig{
+				Config: ConfigManagement{
+					PollingInterval: 10 * time.Millisecond,
+				},
+			},
 		})
 
 		// Create a file with some content
@@ -860,7 +883,11 @@ func TestLiveLogTailer_ErrorHandling(t *testing.T) {
 func TestLiveLogTailer_InitialOpenErrorAndShutdown(t *testing.T) {
 	// --- Setup ---
 	harness := newTailerTestHarness(t, &AppConfig{
-		PollingInterval: 10 * time.Millisecond,
+		Application: ApplicationConfig{
+			Config: ConfigManagement{
+				PollingInterval: 10 * time.Millisecond,
+			},
+		},
 	})
 
 	// Ensure the file does not exist.
@@ -910,7 +937,11 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 	}
 
 	harness := newTailerTestHarness(t, &AppConfig{
-		PollingInterval: 10 * time.Millisecond,
+		Application: ApplicationConfig{
+			Config: ConfigManagement{
+				PollingInterval: 10 * time.Millisecond,
+			},
+		},
 		// The StatFunc will now also return the same consistent mock FileInfo.
 		StatFunc: func(s string) (os.FileInfo, error) { return mockInfo, nil },
 		FileOpener: func(name string) (fileHandle, error) {
@@ -995,7 +1026,11 @@ func TestLiveLogTailer_ShutdownDuringRetryDelay(t *testing.T) {
 	// --- Setup ---
 	harness := newTailerTestHarness(t, &AppConfig{
 		// Use a long delay to ensure we can send a signal during it.
-		PollingInterval: 100 * time.Millisecond,
+		Application: ApplicationConfig{
+			Config: ConfigManagement{
+				PollingInterval: 100 * time.Millisecond,
+			},
+		},
 	})
 
 	// Ensure the file does not exist to force the retry loop.
@@ -1034,7 +1069,11 @@ func TestLiveLogTailer_ShutdownDuringRetryDelay(t *testing.T) {
 func TestLiveLogTailer_InitialStatError(t *testing.T) {
 	// --- Setup ---
 	harness := newTailerTestHarness(t, &AppConfig{
-		PollingInterval: 10 * time.Millisecond,
+		Application: ApplicationConfig{
+			Config: ConfigManagement{
+				PollingInterval: 10 * time.Millisecond,
+			},
+		},
 		FileOpener: func(name string) (fileHandle, error) {
 			// Open a real file (dev/null is perfect) to get a valid *os.File handle.
 			f, err := os.Open(os.DevNull)
@@ -1093,8 +1132,12 @@ type statErrorFile struct {
 func TestLiveLogTailer_StatError(t *testing.T) {
 	// --- Setup ---
 	harness := newTailerTestHarness(t, &AppConfig{
-		PollingInterval: 10 * time.Millisecond,
-		EOFPollingDelay: 1 * time.Millisecond,
+		Application: ApplicationConfig{
+			Config: ConfigManagement{
+				PollingInterval: 10 * time.Millisecond,
+			},
+			EOFPollingDelay: 1 * time.Millisecond,
+		},
 		// This is the key fix: provide a StatFunc that always fails.
 		// This simulates the file disappearing after being opened.
 		StatFunc: func(s string) (os.FileInfo, error) {
@@ -1154,7 +1197,7 @@ func TestLogMetricsSummary(t *testing.T) {
 		{Name: "ChainA", MetricsCounter: new(atomic.Int64), MetricsResetCounter: new(atomic.Int64), MetricsHitsCounter: new(atomic.Int64)},
 		{Name: "ChainB", MetricsCounter: new(atomic.Int64), MetricsResetCounter: new(atomic.Int64), MetricsHitsCounter: new(atomic.Int64)},
 	}
-	p := newTestProcessor(&AppConfig{EnableMetrics: true}, chains)
+	p := newTestProcessor(&AppConfig{Application: ApplicationConfig{EnableMetrics: true}}, chains)
 
 	// 2. Manually set metric values.
 	p.Metrics.LinesProcessed.Store(1000)
@@ -1264,7 +1307,7 @@ func TestLogMetricsSummary(t *testing.T) {
 func TestLogMetricsSummary_Filter(t *testing.T) {
 	// This test specifically verifies that the filtering logic works.
 	// --- Setup ---
-	p := newTestProcessor(&AppConfig{EnableMetrics: true}, nil)
+	p := newTestProcessor(&AppConfig{Application: ApplicationConfig{EnableMetrics: true}}, nil)
 	p.Metrics.LinesProcessed.Store(100) // dryrun:"true"
 	p.Metrics.BlockerRetries.Store(5)   // dryrun:"false"
 

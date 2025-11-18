@@ -108,34 +108,63 @@ type Processor struct {
 
 // AppConfig holds all the configuration state that can be reloaded from YAML.
 type AppConfig struct {
-	GoodActors               []GoodActorDef                    `config:"compare"`
-	BlockTableNameFallback   string                            `config:"compare"` // This is derived, but comparing is harmless and simple.
-	CleanupInterval          time.Duration                     `config:"compare" summary:"cleanup_interval"`
-	DurationToTableName      map[time.Duration]string          `config:"compare" summary:"duration_tables"`
-	DefaultBlockDuration     time.Duration                     `config:"compare" summary:"default_block_duration"`
-	EOFPollingDelay          time.Duration                     `config:"compare" summary:"eof_polling_delay"`
-	FileDependencies         map[string]*types.FileDependency  // Map of file paths to their dependency status.
-	BlockerAddresses         []string                          `config:"compare" summary:"blocker_addresses"`
-	BlockerDialTimeout       time.Duration                     `config:"compare" summary:"blocker_dial_timeout"`
-	BlockerMaxRetries        int                               `config:"compare" summary:"blocker_max_retries"`
-	BlockerRetryDelay        time.Duration                     `config:"compare" summary:"blocker_retry_delay"`
-	BlockerCommandQueueSize  int                               `config:"compare" summary:"blocker_command_queue_size"`
-	BlockerCommandsPerSecond int                               `config:"compare" summary:"blocker_commands_per_second"`
-	IdleTimeout              time.Duration                     `config:"compare" summary:"idle_timeout"`
-	LineEnding               string                            `config:"compare" summary:"line_ending"`
-	LastModTime              time.Time                         // Not compared
-	MaxTimeSinceLastHit      time.Duration                     `config:"compare" summary:"max_time_since_last_hit"`
-	OutOfOrderTolerance      time.Duration                     `config:"compare" summary:"out_of_order_tolerance"`
-	PollingInterval          time.Duration                     `config:"compare" summary:"polling_interval"`
-	TimestampFormat          string                            `config:"compare"`
-	UnblockOnGoodActor       bool                              `config:"compare"`
-	UnblockCooldown          time.Duration                     `config:"compare"`
-	LogFormatRegex           string                            `config:"compare"`
-	EnableMetrics            bool                              `config:"compare" summary:"enable_metrics"`
-	Persistence              persistence.PersistenceConfig     `config:"compare"`
-	StatFunc                 func(string) (os.FileInfo, error) // Mockable
-	FileOpener               fileOpener                        // Mockable
-	YAMLContent              []byte
+	Application      ApplicationConfig                 `config:"compare"`
+	Parser           ParserConfig                      `config:"compare"`
+	Checker          CheckerConfig                     `config:"compare"`
+	Blockers         BlockersConfig                    `config:"compare"`
+	GoodActors       []GoodActorDef                    `config:"compare"`
+	FileDependencies map[string]*types.FileDependency  // Map of file paths to their dependency status.
+	LastModTime      time.Time                         // Not compared
+	StatFunc         func(string) (os.FileInfo, error) // Mockable
+	FileOpener       fileOpener                        // Mockable
+	YAMLContent      []byte
+}
+
+type ApplicationConfig struct {
+	LogLevel        string                        `config:"compare"`
+	EnableMetrics   bool                          `config:"compare" summary:"enable_metrics"`
+	Config          ConfigManagement              `config:"compare"`
+	Persistence     persistence.PersistenceConfig `config:"compare"`
+	EOFPollingDelay time.Duration                 `config:"compare" summary:"eof_polling_delay"`
+}
+
+type ConfigManagement struct {
+	PollingInterval time.Duration `config:"compare" summary:"polling_interval"`
+}
+
+type ParserConfig struct {
+	LineEnding          string        `config:"compare" summary:"line_ending"`
+	OutOfOrderTolerance time.Duration `config:"compare" summary:"out_of_order_tolerance"`
+	TimestampFormat     string        `config:"compare"`
+	LogFormatRegex      string        `config:"compare"`
+}
+
+type CheckerConfig struct {
+	UnblockOnGoodActor    bool          `config:"compare"`
+	UnblockCooldown       time.Duration `config:"compare"`
+	ActorCleanupInterval  time.Duration `config:"compare" summary:"cleanup_interval"`
+	ActorStateIdleTimeout time.Duration `config:"compare" summary:"idle_timeout"`
+	MaxTimeSinceLastHit   time.Duration `config:"compare" summary:"max_time_since_last_hit"`
+}
+
+type BlockersConfig struct {
+	DefaultDuration   time.Duration `config:"compare" summary:"default_block_duration"`
+	CommandsPerSecond int           `config:"compare" summary:"blocker_commands_per_second"`
+	CommandQueueSize  int           `config:"compare" summary:"blocker_command_queue_size"`
+	DialTimeout       time.Duration `config:"compare" summary:"blocker_dial_timeout"`
+	MaxRetries        int           `config:"compare" summary:"blocker_max_retries"`
+	RetryDelay        time.Duration `config:"compare" summary:"blocker_retry_delay"`
+	Backends          Backends      `config:"compare"`
+}
+
+type Backends struct {
+	HAProxy HAProxyConfig `config:"compare"`
+}
+
+type HAProxyConfig struct {
+	Addresses         []string                 `config:"compare" summary:"blocker_addresses"`
+	DurationTables    map[time.Duration]string `config:"compare" summary:"duration_tables"`
+	TableNameFallback string                   `config:"compare"`
 }
 
 // Clone creates a deep copy of the AppConfig. This is crucial for safely comparing
@@ -164,10 +193,10 @@ func (c *AppConfig) Clone() AppConfig {
 		}
 	}
 
-	if c.DurationToTableName != nil {
-		clone.DurationToTableName = make(map[time.Duration]string, len(c.DurationToTableName))
-		for k, v := range c.DurationToTableName {
-			clone.DurationToTableName[k] = v
+	if c.Blockers.Backends.HAProxy.DurationTables != nil {
+		clone.Blockers.Backends.HAProxy.DurationTables = make(map[time.Duration]string, len(c.Blockers.Backends.HAProxy.DurationTables))
+		for k, v := range c.Blockers.Backends.HAProxy.DurationTables {
+			clone.Blockers.Backends.HAProxy.DurationTables[k] = v
 		}
 	}
 
@@ -184,63 +213,73 @@ func (c *AppConfig) Clone() AppConfig {
 
 // LoadedConfig encapsulates all configuration data loaded from the YAML file.
 type LoadedConfig struct {
-	GoodActors               []GoodActorDef           `config:"compare"`
-	BlockTableNameFallback   string                   `config:"compare"`
-	Chains                   []BehavioralChain        // Not compared here
-	CleanupInterval          time.Duration            `config:"compare"`
-	DefaultBlockDuration     time.Duration            `config:"compare"`
-	DurationToTableName      map[time.Duration]string `config:"compare"`
-	EOFPollingDelay          time.Duration            `config:"compare"`
-	FileDependencies         map[string]*types.FileDependency
-	BlockerAddresses         []string                      `config:"compare"`
-	BlockerDialTimeout       time.Duration                 `config:"compare"`
-	BlockerMaxRetries        int                           `config:"compare"`
-	BlockerRetryDelay        time.Duration                 `config:"compare"`
-	BlockerCommandQueueSize  int                           `config:"compare"`
-	BlockerCommandsPerSecond int                           `config:"compare"`
-	IdleTimeout              time.Duration                 `config:"compare"`
-	LogLevel                 string                        `config:"compare"`
-	LineEnding               string                        `config:"compare"`
-	LogFormatRegex           *regexp.Regexp                // Not compared here
-	MaxTimeSinceLastHit      time.Duration                 `config:"compare"`
-	OutOfOrderTolerance      time.Duration                 `config:"compare"`
-	PollingInterval          time.Duration                 `config:"compare"`
-	TimestampFormat          string                        `config:"compare"`
-	UnblockOnGoodActor       bool                          `config:"compare"`
-	UnblockCooldown          time.Duration                 `config:"compare"`
-	EnableMetrics            bool                          `config:"compare"`
-	Persistence              persistence.PersistenceConfig `config:"compare"`
-	StatFunc                 func(string) (os.FileInfo, error)
-	YAMLContent              []byte
+	Application      ApplicationConfig
+	Parser           ParserConfig
+	Checker          CheckerConfig
+	Blockers         BlockersConfig
+	GoodActors       []GoodActorDef    `config:"compare"`
+	Chains           []BehavioralChain // Not compared here
+	FileDependencies map[string]*types.FileDependency
+	LogFormatRegex   *regexp.Regexp // Not compared here
+	StatFunc         func(string) (os.FileInfo, error)
+	YAMLContent      []byte
 }
 
 // --- YAML DATA STRUCTURES ---
 
 type ChainConfig struct {
-	GoodActors               []map[string]interface{}      `yaml:"good_actors"`
-	Version                  string                        `yaml:"version"`
-	Chains                   []BehavioralChainYAML         `yaml:"chains"`
-	CleanupInterval          string                        `yaml:"cleanup_interval"`
-	DefaultBlockDuration     string                        `yaml:"default_block_duration"`
-	DurationTables           map[string]string             `yaml:"duration_tables"`
-	EOFPollingDelay          string                        `yaml:"eof_polling_delay"`
-	BlockerAddresses         []string                      `yaml:"blocker_addresses"`
-	BlockerDialTimeout       string                        `yaml:"blocker_dial_timeout"`
-	BlockerMaxRetries        int                           `yaml:"blocker_max_retries"`
-	BlockerRetryDelay        string                        `yaml:"blocker_retry_delay"`
-	BlockerCommandQueueSize  int                           `yaml:"blocker_command_queue_size"`
-	BlockerCommandsPerSecond int                           `yaml:"blocker_commands_per_second"`
-	IdleTimeout              string                        `yaml:"idle_timeout"`
-	LineEnding               string                        `yaml:"line_ending"`
-	LogLevel                 string                        `yaml:"log_level"`
-	LogFormatRegex           string                        `yaml:"log_format_regex"`
-	OutOfOrderTolerance      string                        `yaml:"out_of_order_tolerance"`
-	PollingInterval          string                        `yaml:"polling_interval"`
-	TimestampFormat          string                        `yaml:"timestamp_format"`
-	UnblockOnGoodActor       bool                          `yaml:"unblock_on_good_actor"`
-	UnblockCooldown          string                        `yaml:"unblock_cooldown"`
-	EnableMetrics            *bool                         `yaml:"enable_metrics"` // Changed to *bool
-	Persistence              persistence.PersistenceConfig `yaml:"persistence"`
+	Version     string                   `yaml:"version"`
+	Application ApplicationConfigYAML    `yaml:"application"`
+	Parser      ParserConfigYAML         `yaml:"parser"`
+	Checker     CheckerConfigYAML        `yaml:"checker"`
+	Blockers    BlockersConfigYAML       `yaml:"blockers"`
+	GoodActors  []map[string]interface{} `yaml:"good_actors"`
+	Chains      []BehavioralChainYAML    `yaml:"chains"`
+}
+
+type ApplicationConfigYAML struct {
+	LogLevel        string                        `yaml:"log_level"`
+	EnableMetrics   *bool                         `yaml:"enable_metrics"`
+	Config          ConfigManagementYAML          `yaml:"config"`
+	Persistence     persistence.PersistenceConfig `yaml:"persistence"`
+	EOFPollingDelay string                        `yaml:"eof_polling_delay"`
+}
+
+type ConfigManagementYAML struct {
+	PollingInterval string `yaml:"polling_interval"`
+}
+
+type ParserConfigYAML struct {
+	LineEnding          string `yaml:"line_ending"`
+	OutOfOrderTolerance string `yaml:"out_of_order_tolerance"`
+	TimestampFormat     string `yaml:"timestamp_format"`
+	LogFormatRegex      string `yaml:"log_format_regex"`
+}
+
+type CheckerConfigYAML struct {
+	UnblockOnGoodActor    bool   `yaml:"unblock_on_good_actor"`
+	UnblockCooldown       string `yaml:"unblock_cooldown"`
+	ActorCleanupInterval  string `yaml:"actor_cleanup_interval"`
+	ActorStateIdleTimeout string `yaml:"actor_state_idle_timeout"`
+}
+
+type BlockersConfigYAML struct {
+	DefaultDuration   string       `yaml:"default_duration"`
+	CommandsPerSecond int          `yaml:"commands_per_second"`
+	CommandQueueSize  int          `yaml:"command_queue_size"`
+	DialTimeout       string       `yaml:"dial_timeout"`
+	MaxRetries        int          `yaml:"max_retries"`
+	RetryDelay        string       `yaml:"retry_delay"`
+	Backends          BackendsYAML `yaml:"backends"`
+}
+
+type BackendsYAML struct {
+	HAProxy HAProxyConfigYAML `yaml:"haproxy"`
+}
+
+type HAProxyConfigYAML struct {
+	Addresses      []string          `yaml:"addresses"`
+	DurationTables map[string]string `yaml:"duration_tables"`
 }
 
 type StepDefYAML struct {

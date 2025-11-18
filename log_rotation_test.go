@@ -56,10 +56,14 @@ func newRotationTestHarness(t *testing.T) *rotationTestHarness {
 		ConfigMutex:   &sync.RWMutex{},
 		Chains:        []BehavioralChain{},
 		Config: &AppConfig{
-			EOFPollingDelay: 10 * time.Millisecond,
-			LineEnding:      "lf",
-			FileOpener:      func(name string) (fileHandle, error) { return os.Open(name) },
-			StatFunc:        os.Stat,
+			Application: ApplicationConfig{
+				EOFPollingDelay: 10 * time.Millisecond,
+			},
+			Parser: ParserConfig{
+				LineEnding: "lf",
+			},
+			FileOpener: func(name string) (fileHandle, error) { return os.Open(name) },
+			StatFunc:   os.Stat,
 		},
 		DryRun:  false,
 		NowFunc: time.Now,

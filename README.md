@@ -140,30 +140,110 @@ The application uses a unified logging system with five discrete levels. The `--
 This file defines the sequential behavioral chains used by the bot-detector to identify and act upon suspicious traffic patterns.
 The file is structured as a top-level map containing a single key, chains, which holds an array of individual chain definitions.
 
-## **Root Structure**
+## **Configuration Structure**
+
+The configuration is now organized into logical top-level sections.
 
 | Field | Type | Description |
 | :---- | :---- | :---- |
 | **version** | string | The configuration version. Must match a supported version (e.g., "1.0"). |
-| **chains** | list of objects | The list of behavioral chains to be loaded. |
-| **good_actors** | list of objects | Optional. A list of trusted actors to skip from all processing. |
+| **application** | object | General application settings. See table [`application`](#application). |
+| **parser** | object | Settings related to parsing log lines. See table [`parser`](#parser). |
+| **checker** | object | Settings that control the behavior of the chain checker and state management. See table [`checker`](#checker). |
+| **blockers** | object | Configuration for the blocking backend(s). See table [`blockers`](#blockers). |
+| **good_actors** | list of objects | Optional. A list of trusted actors to skip from all processing. See table [`good_actors`](#good_actors). |
+| **chains** | list of objects | The list of behavioral chains to be loaded. See table [`chains`](#chains). |
+
+---
+
+### `application`
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
 | **log_level** | string | Optional. Set minimum log level: `critical`, `error`, `warning`, `info`, `debug`. Default: `warning`. |
-| **polling_interval** | string | Optional. Interval to check this file for changes. Default: `5s`. A minimum of `1s` is enforced. |
-| **cleanup_interval**| string | Optional. Interval to run the routine that cleans up idle IP state. Default: `1m`. |
+| **enable_metrics** | boolean | Optional. If `true`, enables the metrics endpoint. Default: `false`. |
+| **eof_polling_delay** | string | Optional. Duration to wait before re-checking a log file after reaching its end. Default: `200ms`. |
+| **config** | object | Settings related to application configuration management. See table [`application.config`](#applicationconfig). |
+| **persistence** | object | Settings related to state persistence. See table [`application.persistence`](#applicationpersistence). |
+
+#### `application.config`
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
+| **polling_interval** | string | Optional. Interval to check the main config file and its dependencies for changes. Default: `5s`. A minimum of `1s` is enforced. |
+
+#### `application.persistence`
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
+| **enabled** | boolean | Optional. If `true`, enables state persistence. Default: `false`. |
+| **compaction_interval** | string | Optional. Interval at which the state journal is compacted. Default: `1h`. |
+
+---
+
+### `parser`
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
 | **line_ending** | string | Optional. Specifies the expected line ending for log parsing. Can be `lf` (Unix, default), `crlf` (Windows), or `cr` (Classic Mac). |
-| **idle_timeout** | string | Optional. Duration an IP must be inactive before its state is purged. Default: `30m`. |
 | **out_of_order_tolerance** | string | Optional. Maximum duration an out-of-order log entry will be processed. Default: `5s`. |
 | **timestamp_format** | string | Optional. The time format layout string (per Go's `time.Parse` syntax) for parsing timestamps. Default: `02/Jan/2006:15:04:05 -0700`. |
 | **log_format_regex** | string | Optional. A Go-compatible regex to parse log lines. **Required capture groups:** `IP`, `Timestamp`. **Optional groups:** `Method`, `Path`, `StatusCode`, `Size`, `Referrer`, `UserAgent`. If an optional group is omitted, its value will be treated as empty. If not provided, the application defaults to a regex that expects a **virtual-host-prefixed combined log format**. |
-| **default_block_duration** | string | Optional. A global block duration to apply to any `block` action chain that does not define its own `block_duration`. Format: Go duration string (e.g., "5m", "1h"). |
-| **blocker_max_retries** | int | Optional. Number of attempts to send a command to a blocker instance. Default: `3`. |
-| **blocker_addresses** | array of string | A list of all blocker control endpoints (TCP `host:port` or Unix socket paths) across the cluster. |
-| **blocker_retry_delay** | string | Optional. Duration to wait between retry attempts. Default: `200ms`. |
-| **blocker_dial_timeout** | string | Optional. Timeout for establishing a connection to a blocker socket. Default: `5s`. |
-| **blocker_command_queue_size** | int | Optional. The maximum number of commands that can be queued for the blocker. Default: `1000`. |
+
+---
+
+### `checker`
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
+| **actor_cleanup_interval**| string | Optional. Interval to run the routine that cleans up idle IP state. Default: `1m`. |
+| **actor_state_idle_timeout** | string | Optional. Duration an IP must be inactive before its state is purged. Default: `30m`. |
 | **unblock_on_good_actor** | boolean | Optional. If `true`, the application will issue an `unblock` command for an IP that matches a `good_actors` rule. Default: `false`. |
 | **unblock_cooldown** | string | Optional. The minimum time that must pass before another `unblock` command is sent for the same IP. Prevents command spam. Default: `5m`. |
-| **blocker_commands_per_second** | int | Optional. The maximum number of commands per second to send to the blocker. Default: `10`. |
+
+---
+
+### `blockers`
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
+| **default_duration** | string | Optional. A global block duration to apply to any `block` action chain that does not define its own `block_duration`. Format: Go duration string (e.g., "5m", "1h"). |
+| **commands_per_second** | int | Optional. The maximum number of commands per second to send to the blocker. Default: `10`. |
+| **command_queue_size** | int | Optional. The maximum number of commands that can be queued for the blocker. Default: `1000`. |
+| **dial_timeout** | string | Optional. Timeout for establishing a connection to a blocker socket. Default: `5s`. |
+| **max_retries** | int | Optional. Number of attempts to send a command to a blocker instance. Default: `3`. |
+| **retry_delay** | string | Optional. Duration to wait between retry attempts. Default: `200ms`. |
+| **backends** | object | Backend-specific blocker configurations. See table [`blockers.backends.haproxy`](#blockersbackendshaproy). |
+
+#### `blockers.backends.haproxy`
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
+| **addresses** | array of string | A list of all HAProxy control endpoints (TCP `host:port` or Unix socket paths) across the cluster. |
+| **duration_tables** | map | A map of Go duration strings to HAProxy stick table names (e.g., `"30m": "thirty_min_blocks"`). |
+
+---
+
+### `good_actors`
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
+| **name** | string | A unique name for the good actor rule. |
+| **ip** | string or list | An IP address, CIDR block, `file:` path, or `regex:` pattern to match against the log entry's IP address. Can be a single string or a list of strings. |
+| **useragent** | string or list | A string, `file:` path, or `regex:` pattern to match against the log entry's User-Agent. Can be a single string or a list of strings. |
+
+---
+
+### `chains`
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
+| **name** | string | A unique, descriptive name for the chain. |
+| **action** | string | The action to take when the chain is completed (`block` or `log`). |
+| **block_duration** | string | Optional. The duration for which the IP should be blocked if `action` is `block`. |
+| **match_key** | string | The key used to track activity (e.g., `ip`, `ip_ua`). |
+| **on_match** | string | Optional. If set to `"stop"`, no further chains will be processed for the current log entry after this chain completes. |
+| **steps** | list of objects | The sequential list of steps that define the malicious pattern. |
 
 #### A Note on Durations
 

@@ -25,12 +25,15 @@ func TestLoadConfigFromYAML_Success(t *testing.T) {
 	yamlContent := `
 version: "1.0"
 
-blocker_addresses:
-  - "127.0.0.1:9999"
-duration_tables:
-  "5m": "table_5m"
-  "1h": "table_1h"
-default_block_duration: "1h"
+blockers:
+  backends:
+    haproxy:
+      addresses:
+        - "127.0.0.1:9999"
+      duration_tables:
+        "5m": "table_5m"
+        "1h": "table_1h"
+  default_duration: "1h"
 chains:
   - name: "TestChain"
     match_key: "ip"
@@ -128,11 +131,12 @@ func TestLoadConfigFromYAML_BlockerSettings(t *testing.T) {
 			name: "Custom values",
 			yamlContent: `
 version: "1.0"
-blocker_max_retries: 5
-blocker_retry_delay: "300ms"
-blocker_dial_timeout: "10s"
-blocker_command_queue_size: 500
-blocker_commands_per_second: 5
+blockers:
+  max_retries: 5
+  retry_delay: "300ms"
+  dial_timeout: "10s"
+  command_queue_size: 500
+  commands_per_second: 5
 `,
 			expectedMaxRetries:        5,
 			expectedRetryDelay:        300 * time.Millisecond,
@@ -144,6 +148,7 @@ blocker_commands_per_second: 5
 			name: "Default values",
 			yamlContent: `
 version: "1.0"
+blockers: {}
 `,
 			expectedMaxRetries:        DefaultBlockerMaxRetries,
 			expectedRetryDelay:        DefaultBlockerRetryDelay,
@@ -160,13 +165,13 @@ version: "1.0"
 			if err != nil {
 				t.Fatalf("LoadConfigFromYAML() failed: %v", err)
 			}
-			if loadedCfg.BlockerMaxRetries != tt.expectedMaxRetries ||
-				loadedCfg.BlockerRetryDelay != tt.expectedRetryDelay ||
-				loadedCfg.BlockerDialTimeout != tt.expectedDialTimeout ||
-				loadedCfg.BlockerCommandQueueSize != tt.expectedCommandQueueSize ||
-				loadedCfg.BlockerCommandsPerSecond != tt.expectedCommandsPerSecond {
+			if loadedCfg.Blockers.MaxRetries != tt.expectedMaxRetries ||
+				loadedCfg.Blockers.RetryDelay != tt.expectedRetryDelay ||
+				loadedCfg.Blockers.DialTimeout != tt.expectedDialTimeout ||
+				loadedCfg.Blockers.CommandQueueSize != tt.expectedCommandQueueSize ||
+				loadedCfg.Blockers.CommandsPerSecond != tt.expectedCommandsPerSecond {
 				t.Errorf("Blocker settings mismatch. Got retries=%d, delay=%v, timeout=%v, queue_size=%d, commands_per_second=%d. Expected retries=%d, delay=%v, timeout=%v, queue_size=%d, commands_per_second=%d",
-					loadedCfg.BlockerMaxRetries, loadedCfg.BlockerRetryDelay, loadedCfg.BlockerDialTimeout, loadedCfg.BlockerCommandQueueSize, loadedCfg.BlockerCommandsPerSecond,
+					loadedCfg.Blockers.MaxRetries, loadedCfg.Blockers.RetryDelay, loadedCfg.Blockers.DialTimeout, loadedCfg.Blockers.CommandQueueSize, loadedCfg.Blockers.CommandsPerSecond,
 					tt.expectedMaxRetries, tt.expectedRetryDelay, tt.expectedDialTimeout, tt.expectedCommandQueueSize, tt.expectedCommandsPerSecond)
 			}
 		})
@@ -845,8 +850,11 @@ chains:
 			name: "Block Duration Not in Defined Duration Tables",
 			yamlContent: `
 version: "1.0"
-duration_tables:
-  "5m": "table_5m"
+blockers:
+  backends:
+    haproxy:
+      duration_tables:
+        "5m": "table_5m"
 chains:
   - name: "Test"
     action: "block"
@@ -903,35 +911,41 @@ func TestLoadConfigFromYAML_InvalidDurations(t *testing.T) {
 			name: "Invalid polling_interval",
 			yamlContent: `
 version: "1.0"
-polling_interval: "5x"`,
+application:
+  config:
+    polling_interval: "5x"`,
 			expectedError: "invalid polling_interval format",
 		},
 		{
 			name: "Invalid cleanup_interval",
 			yamlContent: `
 version: "1.0"
-cleanup_interval: "1y"`,
+checker:
+  actor_cleanup_interval: "1y"`,
 			expectedError: "invalid cleanup_interval format",
 		},
 		{
 			name: "Invalid idle_timeout",
 			yamlContent: `
 version: "1.0"
-idle_timeout: "30z"`,
+checker:
+  actor_state_idle_timeout: "30z"`,
 			expectedError: "invalid idle_timeout format",
 		},
 		{
 			name: "Invalid out_of_order_tolerance",
 			yamlContent: `
 version: "1.0"
-out_of_order_tolerance: "bad"`,
+parser:
+  out_of_order_tolerance: "bad"`,
 			expectedError: "invalid out_of_order_tolerance format",
 		},
 		{
 			name: "Invalid eof_polling_delay",
 			yamlContent: `
 version: "1.0"
-eof_polling_delay: "200"`,
+application:
+  eof_polling_delay: "200"`,
 			expectedError: "invalid eof_polling_delay format",
 		},
 	}
@@ -956,8 +970,11 @@ chains:
 			name: "Invalid duration in duration_tables",
 			yamlContent: `
 version: "1.0"
-duration_tables:
-  "1x": "table_1x"
+blockers:
+  backends:
+    haproxy:
+      duration_tables:
+        "1x": "table_1x"
 `,
 			expectedError: "invalid duration",
 		},
@@ -998,7 +1015,8 @@ chains:
 			name: "Invalid default_block_duration",
 			yamlContent: `
 version: "1.0"
-default_block_duration: "1x"
+blockers:
+  default_duration: "1x"
 chains: []
 `,
 			expectedError: "invalid block_duration format for default_block_duration",
@@ -1007,14 +1025,16 @@ chains: []
 			name: "Invalid blocker_retry_delay",
 			yamlContent: `
 version: "1.0"
-blocker_retry_delay: "bad"`,
+blockers:
+  retry_delay: "bad"`,
 			expectedError: "invalid blocker_retry_delay",
 		},
 		{
 			name: "Invalid blocker_dial_timeout",
 			yamlContent: `
 version: "1.0"
-blocker_dial_timeout: "1y"`,
+blockers:
+  dial_timeout: "1y"`,
 			expectedError: "invalid blocker_dial_timeout",
 		},
 	}...)
@@ -1033,7 +1053,8 @@ func TestLoadConfigFromYAML_MissingOptionalCaptureGroup(t *testing.T) {
 	// Regex without the 'Referrer' named capture group.
 	yamlContent := `
 version: "1.0"
-log_format_regex: '^(?P<VHost>\S+) (?P<IP>\S+) \S+ \S+ \[(?P<Timestamp>[^\]]+)\] \"(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)\" (?P<StatusCode>\d{1,3}) \d+ \"[^\"]*\" \"(?P<UserAgent>[^\"]*)\"$'
+parser:
+  log_format_regex: '^(?P<VHost>\S+) (?P<IP>\S+) \S+ \S+ \[(?P<Timestamp>[^\]]+)\] \"(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)\" (?P<StatusCode>\d{1,3}) \d+ \"[^\"]*\" \"(?P<UserAgent>[^\"]*)\"$'
 chains: []
 `
 	tmpConfigPath := setupTestYAML(t, yamlContent)
@@ -1047,9 +1068,7 @@ chains: []
 		t.Fatal("Expected LogFormatRegex to be loaded, but it was nil.")
 	}
 
-	// Now, test the parsing with this regex.
-	// Use the test helper to create a properly initialized processor.
-	p := newTestProcessor(&AppConfig{TimestampFormat: loadedCfg.TimestampFormat}, nil)
+	p := newTestProcessor(&AppConfig{Parser: ParserConfig{TimestampFormat: loadedCfg.Parser.TimestampFormat}}, nil)
 	p.LogRegex = loadedCfg.LogFormatRegex
 
 	logLine := `example.com 192.0.2.1 - - [01/Jan/2025:12:00:00 +0000] "GET /path HTTP/1.1" 200 123 "http://a.real.referrer" "TestAgent/1.0"`
@@ -1084,7 +1103,8 @@ func TestLoadConfigFromYAML_MissingRequiredCaptureGroup(t *testing.T) {
 	// a required capture group like 'IP'.
 	yamlContent := `
 version: "1.0"
-log_format_regex: '^(?P<VHost>\S+) \S+ \S+ \S+ \[(?P<Timestamp>[^\]]+)\] ".+"$'
+parser:
+  log_format_regex: '^(?P<VHost>\S+) \S+ \S+ \S+ \[(?P<Timestamp>[^\]]+)\] ".+"$'
 chains: []
 `
 	tmpConfigPath := setupTestYAML(t, yamlContent)
@@ -1102,8 +1122,9 @@ func TestLoadConfigFromYAML_CustomTimestampFormat(t *testing.T) {
 	// This test verifies that a custom timestamp_format is correctly loaded and used.
 	yamlContent := fmt.Sprintf(`
 version: "1.0"
-timestamp_format: "%s" # Use RFC3339 for this test
-log_format_regex: '^(?P<IP>\S+) \[(?P<Timestamp>[^\]]+)\] (?P<Path>\S+)$'
+parser:
+  timestamp_format: "%s" # Use RFC3339 for this test
+  log_format_regex: '^(?P<IP>\S+) \[(?P<Timestamp>[^\]]+)\] (?P<Path>\S+)$'
 chains: []
 `, time.RFC3339)
 
@@ -1114,12 +1135,12 @@ chains: []
 		t.Fatalf("LoadConfigFromYAML() failed unexpectedly: %v", err)
 	}
 
-	if loadedCfg.TimestampFormat != time.RFC3339 {
-		t.Fatalf("Expected TimestampFormat to be loaded as RFC3339, but got: '%s'", loadedCfg.TimestampFormat)
+	if loadedCfg.Parser.TimestampFormat != time.RFC3339 {
+		t.Fatalf("Expected TimestampFormat to be loaded as RFC3339, but got: '%s'", loadedCfg.Parser.TimestampFormat)
 	}
 
 	// Now, test the parsing with this config.
-	p := newTestProcessor(&AppConfig{TimestampFormat: loadedCfg.TimestampFormat}, nil)
+	p := newTestProcessor(&AppConfig{Parser: ParserConfig{TimestampFormat: loadedCfg.Parser.TimestampFormat}}, nil)
 	p.LogRegex = loadedCfg.LogFormatRegex
 
 	logLine := `192.0.2.1 [2025-01-01T12:00:00Z] /test`
@@ -1159,7 +1180,8 @@ func TestConfigWatcher_Reload(t *testing.T) {
 	// 1. Create a temporary YAML file with initial content.
 	initialYAMLContent := `
 version: "1.0"
-log_level: "info"
+application:
+  log_level: "info"
 
 chains:
   - name: "InitialChain"
@@ -1183,8 +1205,11 @@ chains:
 		Metrics:       metrics.NewMetrics(),
 		Chains:        initialLoadedCfg.Chains, // Set initial chains
 		Config: &AppConfig{ // Set initial config state
-			PollingInterval: 10 * time.Millisecond,
-
+			Application: ApplicationConfig{
+				Config: ConfigManagement{
+					PollingInterval: 10 * time.Millisecond,
+				},
+			},
 			FileDependencies: initialLoadedCfg.FileDependencies,
 		},
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
@@ -1210,7 +1235,8 @@ chains:
 	// 5. Modify the YAML file on disk.
 	modifiedYAMLContent := `
 version: "1.0"
-log_level: "debug" # Changed log level
+application:
+  log_level: "debug" # Changed log level
 
 chains:
   - name: "ReloadedChain" # Changed chain name
@@ -1285,7 +1311,11 @@ chains:
 	// 4. Create the processor with the initial config.
 	processor := newTestProcessor(&AppConfig{
 		FileDependencies: initialLoadedCfg.FileDependencies,
-		PollingInterval:  10 * time.Millisecond,
+		Application: ApplicationConfig{
+			Config: ConfigManagement{
+				PollingInterval: 10 * time.Millisecond,
+			},
+		},
 	}, initialLoadedCfg.Chains)
 	processor.ConfigPath = tmpConfigPath
 	processor.TestSignals = &TestSignals{
@@ -1350,7 +1380,8 @@ func TestConfigWatcher_ReloadFailure(t *testing.T) {
 
 	initialYAMLContent := `
 version: "1.0"
-log_level: "info"
+application:
+  log_level: "info"
 chains:
   - name: "InitialChain"
     match_key: "ip"
@@ -1370,14 +1401,14 @@ chains:
 	processor := &Processor{
 		ConfigMutex: &sync.RWMutex{},
 		Chains:      initialLoadedCfg.Chains, // This is fine, as it's a local type
-		Config:      &AppConfig{},
+		Config:      &AppConfig{Application: ApplicationConfig{Config: ConfigManagement{}}},
 		TestSignals: &TestSignals{
 			ForceCheckSignal: make(chan struct{}, 1),
 			ReloadDoneSignal: make(chan struct{}, 1),
 		},
 		ConfigPath: tmpConfigPath,
 	}
-	processor.Config.PollingInterval = 10 * time.Millisecond
+	processor.Config.Application.Config.PollingInterval = 10 * time.Millisecond
 	initialFileInfo, _ := os.Stat(tmpConfigPath)
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
@@ -1465,7 +1496,7 @@ chains:
 	processor := &Processor{
 		ConfigMutex: &sync.RWMutex{},
 		Chains:      []BehavioralChain{{Name: "InitialChain"}}, // Simplified initial state
-		Config:      &AppConfig{},
+		Config:      &AppConfig{Application: ApplicationConfig{Config: ConfigManagement{}}},
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 			logMutex.Lock()
 			capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
@@ -1476,7 +1507,7 @@ chains:
 		},
 		ConfigPath: tmpConfigPath,
 	}
-	processor.Config.PollingInterval = 10 * time.Millisecond
+	processor.Config.Application.Config.PollingInterval = 10 * time.Millisecond
 	initialFileInfo, _ := os.Stat(tmpConfigPath)
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
@@ -1884,7 +1915,9 @@ chains:
 			processor := &Processor{
 				ConfigMutex: &sync.RWMutex{},
 				Config: &AppConfig{
-					UnblockOnGoodActor: tt.unblockOnGoodActor,
+					Checker: CheckerConfig{
+						UnblockOnGoodActor: tt.unblockOnGoodActor,
+					},
 				},
 				DryRun:       false,
 				activeBlocks: make(map[string]persistence.ActiveBlockInfo),
@@ -1965,8 +1998,10 @@ func TestConfigReload_UnblockGoodActors(t *testing.T) {
 	// Setup: Create initial config without good actors
 	initialYAML := `
 version: "1.0"
-log_level: "info"
-unblock_on_good_actor: true
+application:
+  log_level: "info"
+checker:
+  unblock_on_good_actor: true
 
 chains:
   - name: "TestChain"
@@ -1994,10 +2029,16 @@ chains:
 		Metrics:       metrics.NewMetrics(),
 		Chains:        initialLoadedCfg.Chains,
 		Config: &AppConfig{
-			PollingInterval:    10 * time.Millisecond,
-			FileDependencies:   initialLoadedCfg.FileDependencies,
-			GoodActors:         initialLoadedCfg.GoodActors,
-			UnblockOnGoodActor: true,
+			Application: ApplicationConfig{
+				Config: ConfigManagement{
+					PollingInterval: 10 * time.Millisecond,
+				},
+			},
+			FileDependencies: initialLoadedCfg.FileDependencies,
+			GoodActors:       initialLoadedCfg.GoodActors,
+			Checker: CheckerConfig{
+				UnblockOnGoodActor: true,
+			},
 		},
 		DryRun:       false,
 		activeBlocks: make(map[string]persistence.ActiveBlockInfo),
@@ -2044,8 +2085,10 @@ chains:
 	// Act: Modify config to add a good actor for one of the blocked IPs
 	modifiedYAML := `
 version: "1.0"
-log_level: "info"
-unblock_on_good_actor: true
+application:
+  log_level: "info"
+checker:
+  unblock_on_good_actor: true
 
 good_actors:
   - name: "whitelisted_ip"
