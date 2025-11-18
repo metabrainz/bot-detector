@@ -1198,7 +1198,7 @@ func (f *statErrorFile) Stat() (os.FileInfo, error) {
 	return nil, errors.New("simulated stat error")
 }
 
-func TestLogMetricsSummary(t *testing.T) {
+func Testapp.LogMetricsSummary(t *testing.T) {
 	// --- Setup ---
 	// 1. Create a processor with some chains.
 	chains := []config.BehavioralChain{
@@ -1267,7 +1267,7 @@ func TestLogMetricsSummary(t *testing.T) {
 	}
 
 	// --- Act ---
-	LogMetricsSummary(p, 100*time.Millisecond, logFunc, "METRICS", "metric") // Use "metric" tag to display all
+	app.LogMetricsSummary(p, 100*time.Millisecond, logFunc, "METRICS", "metric") // Use "metric" tag to display all
 
 	// --- Assert ---
 	output := strings.Join(capturedLogs, "\n")
@@ -1312,7 +1312,7 @@ func TestLogMetricsSummary(t *testing.T) {
 	assertContains(t, output, "- ChainB: Hits: 100 (20.00%), Completed: 5 (50.00%), Resets: 0 (0.00%)")
 }
 
-func TestLogMetricsSummary_Filter(t *testing.T) {
+func Testapp.LogMetricsSummary_Filter(t *testing.T) {
 	// This test specifically verifies that the filtering logic works.
 	// --- Setup ---
 	p := newTestProcessor(&AppConfig{Application: ApplicationConfig{EnableMetrics: true}}, nil)
@@ -1326,7 +1326,7 @@ func TestLogMetricsSummary_Filter(t *testing.T) {
 
 	// --- Act ---
 	// Call with the "dryrun" filter.
-	LogMetricsSummary(p, 10*time.Millisecond, logFunc, "METRICS", "dryrun")
+	app.LogMetricsSummary(p, 10*time.Millisecond, logFunc, "METRICS", "dryrun")
 
 	// --- Assert ---
 	output := strings.Join(capturedLogs, "\n")

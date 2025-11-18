@@ -13,7 +13,7 @@ import (
 	"bot-detector/internal/server"
 	"bot-detector/internal/store"
 	"bot-detector/internal/testutil"
-	"bot-detector/internal/types"
+	"bot-detector/internal/logparser"
 	"bot-detector/internal/utils"
 	"bufio"
 	"encoding/json"
@@ -22,12 +22,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -313,7 +311,7 @@ func execute(params *commandline.AppParameters) error {
 	}
 
 	p.CheckChainsFunc = func(entry *app.LogEntry) { checker.CheckChains(p, entry) }
-	p.ProcessLogLine = func(line string) { processLogLineInternal(p, line) }
+	p.ProcessLogLine = func(line string) { logparser.ProcessLogLineInternal(p, line) }
 
 	app.LogConfigurationSummary(p)
 	app.LogChainDetails(p, p.Chains, "Loaded chains")
@@ -367,51 +365,6 @@ func dumpBackendsAndExit(p *app.Processor) error {
 	return nil
 }
 
-// GenerateHTMLMetricsReport creates the full metrics report as an HTML-safe string.
-func (p *app.Processor) GenerateHTMLMetricsReport() string {
-	var report strings.Builder
-	webLogFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-		// Sanitize the formatted string before writing it to the HTML report.
-		report.WriteString(utils.ForHTML(fmt.Sprintf(format, args...)) + "\n")
-	}
-	processor.LogMetricsSummary(p, time.Since(p.StartTime), webLogFunc, "METRICS", "metric")
-	return report.String()
-}
-
-// GenerateStepsMetricsReport creates a report of step execution counts as an HTML-safe string.
-func (p *app.Processor) GenerateStepsMetricsReport() string {
-	var report strings.Builder
-	report.WriteString("--- Step Execution Counts ---\n")
-	if p.Metrics.StepExecutionCounts == nil {
-		report.WriteString("Step metrics are not enabled or initialized.\n")
-		return report.String()
-	}
-
-	// Collect and sort step metrics for consistent output
-	type StepMetric struct {
-		Name  string
-		Count int64
-	}
-	var stepMetrics []StepMetric
-	p.Metrics.StepExecutionCounts.Range(func(key, value interface{}) bool {
-		stepName, _ := key.(string)
-		count, _ := value.(*atomic.Int64)
-		stepMetrics = append(stepMetrics, StepMetric{Name: stepName, Count: count.Load()})
-		return true
-	})
-
-	sort.Slice(stepMetrics, func(i, j int) bool {
-		if stepMetrics[i].Count == stepMetrics[j].Count {
-			return stepMetrics[i].Name < stepMetrics[j].Name
-		}
-		return stepMetrics[i].Count >= stepMetrics[j].Count
-	})
-
-	for _, sm := range stepMetrics {
-		report.WriteString(fmt.Sprintf("%12d %s\n", sm.Count, utils.ForHTML(sm.Name)))
-	}
-	return report.String()
-}
 
 func performGracefulShutdown(p *app.Processor) {
 	p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Graceful shutdown initiated.")
@@ -547,16 +500,16 @@ func start(p *app.Processor) {
 			}
 
 			if p.TopN > 0 {
-				go cleanupTopActors(p, stopWatcher)
+				go processor.CleanupTopActors(p, stopWatcher)
 			}
 			go store.CleanUpIdleActors(p, stopWatcher)
-			go entryBufferWorker(p, stopWatcher)
+			go checker.EntryBufferWorker(p, stopWatcher)
 			go server.Start(p)
 		}
 		// Listen for OS signals on the processor's channel
-		signal.Notify(p.signalCh, syscall.SIGINT, syscall.SIGTERM)
+		signal.Notify(p.SignalCh, syscall.SIGINT, syscall.SIGTERM)
 
 		// LiveLogTailer is the blocking main loop
-		processor.LiveLogTailer(p, p.signalCh, nil) // Pass the processor's channel to the tailer
+		processor.LiveLogTailer(p, p.SignalCh, nil) // Pass the processor's channel to the tailer
 	}
 }

@@ -782,7 +782,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 
 // entryBufferWorker is a background goroutine that processes log entries from the buffer
 // in chronological order, respecting the out-of-order tolerance.
-func entryBufferWorker(p *app.Processor, stop <-chan struct{}) {
+func EntryBufferWorker(p *app.Processor, stop <-chan struct{}) {
 	// Use a ticker that is half the tolerance duration for responsiveness,
 	// with a minimum floor to prevent busy-looping.
 	p.ConfigMutex.RLock()

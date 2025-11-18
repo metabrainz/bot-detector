@@ -4,7 +4,11 @@ import (
 	"bot-detector/internal/logging"
 	"bot-detector/internal/store"
 	"bot-detector/internal/types"
+	"bot-detector/internal/utils"
+	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -139,3 +143,49 @@ func (p *Processor) IncrementCmdsPerBlocker(addr string) {
 	}
 }
 
+
+// GenerateHTMLMetricsReport creates the full metrics report as an HTML-safe string.
+func (p *Processor) GenerateHTMLMetricsReport() string {
+	var report strings.Builder
+	webLogFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		// Sanitize the formatted string before writing it to the HTML report.
+		report.WriteString(utils.ForHTML(fmt.Sprintf(format, args...)) + "\n")
+	}
+	LogMetricsSummary(p, time.Since(p.StartTime), webLogFunc, "METRICS", "metric")
+	return report.String()
+}
+
+// GenerateStepsMetricsReport creates a report of step execution counts as an HTML-safe string.
+func (p *Processor) GenerateStepsMetricsReport() string {
+	var report strings.Builder
+	report.WriteString("--- Step Execution Counts ---\n")
+	if p.Metrics.StepExecutionCounts == nil {
+		report.WriteString("Step metrics are not enabled or initialized.\n")
+		return report.String()
+	}
+
+	// Collect and sort step metrics for consistent output
+	type StepMetric struct {
+		Name  string
+		Count int64
+	}
+	var stepMetrics []StepMetric
+	p.Metrics.StepExecutionCounts.Range(func(key, value interface{}) bool {
+		stepName, _ := key.(string)
+		count, _ := value.(*atomic.Int64)
+		stepMetrics = append(stepMetrics, StepMetric{Name: stepName, Count: count.Load()})
+		return true
+	})
+
+	sort.Slice(stepMetrics, func(i, j int) bool {
+		if stepMetrics[i].Count == stepMetrics[j].Count {
+			return stepMetrics[i].Name < stepMetrics[j].Name
+		}
+		return stepMetrics[i].Count >= stepMetrics[j].Count
+	})
+
+	for _, sm := range stepMetrics {
+		report.WriteString(fmt.Sprintf("%12d %s\n", sm.Count, utils.ForHTML(sm.Name)))
+	}
+	return report.String()
+}
