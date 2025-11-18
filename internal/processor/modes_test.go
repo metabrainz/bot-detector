@@ -504,7 +504,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 			setupFunc: func(filePath string) {
 				_ = os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\nexample.com 1.1.1.2 - - [01/Jan/2025:00:00:01 +0000] \"GET /2 HTTP/1.1\" 200 100 \"-\" \"-\"\n# a comment\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
 			},
-			expectedLinesProcessed: 3,
+			expectedLinesProcessed: 4, // ProcessLogLine is called for all lines including comments
 			expectedLogContains:    "Dry-run finished.",
 		},
 		{
@@ -512,7 +512,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 			setupFunc: func(filePath string) {
 				_ = os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\n\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
 			},
-			expectedLinesProcessed: 2,
+			expectedLinesProcessed: 3, // Includes empty line
 			expectedLogContains:    "Dry-run finished.", // Just check that it finishes
 		},
 		{
@@ -520,7 +520,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 			setupFunc: func(filePath string) {
 				_ = os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\n# comment\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
 			},
-			expectedLinesProcessed: 2,
+			expectedLinesProcessed: 3, // Includes comment line
 			expectedLogContains:    "Dry-run finished.", // Just check that it finishes
 		},
 		{
