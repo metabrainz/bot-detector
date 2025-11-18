@@ -22,7 +22,7 @@ type LogFunc func(level logging.LogLevel, tag string, format string, v ...interf
 // ConfigPoller polls the leader node for configuration updates.
 type ConfigPoller struct {
 	leaderAddress     string
-	configPath        string
+	configFilePath    string
 	pollInterval      time.Duration
 	httpClient        *http.Client
 	configReloadCh    chan<- struct{}
@@ -35,7 +35,7 @@ type ConfigPoller struct {
 // ConfigPollerOptions contains configuration for the config poller.
 type ConfigPollerOptions struct {
 	LeaderAddress  string           // Leader HTTP address (e.g., "http://leader:8080")
-	ConfigPath     string           // Local config file path
+	ConfigFilePath string           // Local config file path
 	PollInterval   time.Duration    // How often to poll for updates
 	ConfigReloadCh chan<- struct{}  // Channel to signal config reload
 	ShutdownCh     <-chan os.Signal // Shutdown signal channel
@@ -51,7 +51,7 @@ func NewConfigPoller(opts ConfigPollerOptions) *ConfigPoller {
 
 	return &ConfigPoller{
 		leaderAddress:  opts.LeaderAddress,
-		configPath:     opts.ConfigPath,
+		configFilePath: opts.ConfigFilePath,
 		pollInterval:   opts.PollInterval,
 		configReloadCh: opts.ConfigReloadCh,
 		shutdownCh:     opts.ShutdownCh,
@@ -68,7 +68,7 @@ func (cp *ConfigPoller) Start() {
 	cp.logFunc(logging.LevelInfo, "CLUSTER", "Starting config poller for leader at %s (interval: %s)", cp.leaderAddress, cp.pollInterval)
 
 	// Initialize with current local config modification time
-	if stat, err := os.Stat(cp.configPath); err == nil {
+	if stat, err := os.Stat(cp.configFilePath); err == nil {
 		cp.lastModTime = stat.ModTime()
 		cp.logFunc(logging.LevelDebug, "CLUSTER", "Initial local config mod time: %s", cp.lastModTime.Format(time.RFC1123))
 	}
@@ -153,7 +153,7 @@ func (cp *ConfigPoller) poll() {
 	etag := resp.Header.Get("ETag")
 
 	// Backup current config and dependencies
-	configDir := filepath.Dir(cp.configPath)
+	configDir := filepath.Dir(cp.configFilePath)
 	backupDir := configDir + ".backup"
 	if err := os.RemoveAll(backupDir); err != nil && !os.IsNotExist(err) {
 		cp.logFunc(logging.LevelWarning, "CLUSTER", "Failed to remove old backup: %v", err)
@@ -162,7 +162,7 @@ func (cp *ConfigPoller) poll() {
 		cp.logFunc(logging.LevelWarning, "CLUSTER", "Failed to create backup directory: %v", err)
 	} else {
 		// Copy config directory contents to backup (simple approach - copy only config.yaml)
-		if err := copyFile(cp.configPath, filepath.Join(backupDir, "config.yaml")); err != nil {
+		if err := copyFile(cp.configFilePath, filepath.Join(backupDir, "config.yaml")); err != nil {
 			cp.logFunc(logging.LevelWarning, "CLUSTER", "Failed to create config backup: %v", err)
 		}
 	}
@@ -217,11 +217,11 @@ func copyFile(src, dst string) error {
 
 // BootstrapOptions contains options for bootstrapping a follower node.
 type BootstrapOptions struct {
-	LeaderAddress string        // Leader HTTP address (e.g., "http://leader:8080")
-	ConfigPath    string        // Local config file path to create
-	LogFunc       LogFunc       // Logging function
-	HTTPTimeout   time.Duration // HTTP request timeout
-	ForceUpdate   bool          // Force update even if local config exists
+	LeaderAddress  string        // Leader HTTP address (e.g., "http://leader:8080")
+	ConfigFilePath string        // Local config file path to create
+	LogFunc        LogFunc       // Logging function
+	HTTPTimeout    time.Duration // HTTP request timeout
+	ForceUpdate    bool          // Force update even if local config exists
 }
 
 // Bootstrap fetches the initial configuration from the leader and saves it locally.
@@ -239,7 +239,7 @@ func Bootstrap(opts BootstrapOptions) error {
 
 	// Check if config already exists (unless force update)
 	if !opts.ForceUpdate {
-		if _, err := os.Stat(opts.ConfigPath); err == nil {
+		if _, err := os.Stat(opts.ConfigFilePath); err == nil {
 			opts.LogFunc(logging.LevelInfo, "CLUSTER", "Local config exists, skipping bootstrap")
 			return nil
 		}
@@ -274,7 +274,7 @@ func Bootstrap(opts BootstrapOptions) error {
 	etag := resp.Header.Get("ETag")
 
 	// Ensure config directory exists
-	configDir := filepath.Dir(opts.ConfigPath)
+	configDir := filepath.Dir(opts.ConfigFilePath)
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}

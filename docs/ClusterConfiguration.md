@@ -44,9 +44,9 @@ graph TD
     end
 
     subgraph "Application Cluster"
-        D["bot-detector<br/>(Leader)"]
-        E["bot-detector<br/>(Follower)"]
-        F["bot-detector<br/>(Follower)"]
+        D["bot-detector --config-dir /etc/bot-detector<br/>(Leader)"]
+        E["bot-detector --config-dir /etc/bot-detector<br/>(Follower)"]
+        F["bot-detector --config-dir /etc/bot-detector<br/>(Follower)"]
 
         C -- "3. Hot-Reloads" --> D
         D -- "4. Config Distribution" --> E & F

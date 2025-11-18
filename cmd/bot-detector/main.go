@@ -95,6 +95,10 @@ func main() {
 	}
 }
 
+func GetConfigFilePath(params *commandline.AppParameters) string {
+	return filepath.Join(params.ConfigDir, "config.yaml")
+}
+
 // handleStartupFlags checks for command-line flags that prevent normal startup,
 // such as --version or --check. It returns a special "exit" error to signal
 // a clean exit, an error for failures, or nil to continue execution.
@@ -106,7 +110,7 @@ func handleStartupFlags(params *commandline.AppParameters) error {
 
 	if params.Check {
 		opts := config.LoadConfigOptions{
-			ConfigPath: params.ConfigPath,
+			ConfigFilePath: GetConfigFilePath(params),
 		}
 		var err error
 		if _, err = config.LoadConfigFromYAML(opts); err != nil {
@@ -136,7 +140,7 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		SignalCh:             make(chan os.Signal, 1),
 		LogFunc:              logging.LogOutput,
 		NowFunc:              time.Now, // Use the real time.Now in production.
-		ConfigPath:           params.ConfigPath,
+		ConfigFilePath:       GetConfigFilePath(params),
 		ConfigDir:            params.ConfigDir,
 		LogPath:              params.LogPath,
 		ReloadOn:             params.ReloadOn,
@@ -259,6 +263,8 @@ func execute(params *commandline.AppParameters) error {
 		return err
 	}
 
+	configFilePath := GetConfigFilePath(params)
+
 	// Check if FOLLOW file exists and determine if we need to bootstrap
 	followPath := filepath.Join(params.ConfigDir, "FOLLOW")
 	followData, err := os.ReadFile(followPath)
@@ -270,7 +276,7 @@ func execute(params *commandline.AppParameters) error {
 		}
 
 		// Check if config file exists, if not, bootstrap
-		if _, err := os.Stat(params.ConfigPath); os.IsNotExist(err) {
+		if _, err := os.Stat(configFilePath); os.IsNotExist(err) {
 			// Config doesn't exist, bootstrap from leader
 			// Add http:// prefix if not present
 			if !strings.HasPrefix(leaderAddr, "http://") && !strings.HasPrefix(leaderAddr, "https://") {
@@ -279,11 +285,11 @@ func execute(params *commandline.AppParameters) error {
 
 			logging.LogOutput(logging.LevelInfo, "CLUSTER", "Config file not found, bootstrapping from leader at %s", leaderAddr)
 			if err := cluster.Bootstrap(cluster.BootstrapOptions{
-				LeaderAddress: leaderAddr,
-				ConfigPath:    params.ConfigPath,
-				LogFunc:       logging.LogOutput,
-				HTTPTimeout:   10 * time.Second,
-				ForceUpdate:   false,
+				LeaderAddress:  leaderAddr,
+				ConfigFilePath: configFilePath,
+				LogFunc:        logging.LogOutput,
+				HTTPTimeout:    10 * time.Second,
+				ForceUpdate:    false,
 			}); err != nil {
 				return fmt.Errorf("failed to bootstrap config from leader: %w", err)
 			}
@@ -294,12 +300,12 @@ func execute(params *commandline.AppParameters) error {
 	}
 	// If FOLLOW doesn't exist, this is a leader - no bootstrap needed
 
-	fileInfo, err := os.Stat(params.ConfigPath)
+	fileInfo, err := os.Stat(configFilePath)
 	if err != nil {
-		return fmt.Errorf("could not stat config file: %v", err)
+		return fmt.Errorf("could not stat file: %q  - %v", configFilePath, err)
 	}
 
-	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: params.ConfigPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: configFilePath})
 	if err != nil {
 		return fmt.Errorf("configuration Load Error: %v", err)
 	}
@@ -567,7 +573,7 @@ func start(p *app.Processor) {
 
 				poller := cluster.NewConfigPoller(cluster.ConfigPollerOptions{
 					LeaderAddress:  p.NodeLeaderAddress,
-					ConfigPath:     p.ConfigPath,
+					ConfigFilePath: p.ConfigFilePath,
 					PollInterval:   pollInterval,
 					ConfigReloadCh: configReloadCh,
 					ShutdownCh:     p.SignalCh,

@@ -37,14 +37,16 @@ This is a critical prerequisite. See [HaproxySetup.md](docs/HaproxySetup.md) for
 
 ### **Step 2: Running the Bot-Detector**
 
-The application is configured using a YAML file and a few command-line flags.
+The application is configured using a configuration directory containing a YAML file named `config.yaml` and a few command-line flags.
+
+**Important:** The `--config-dir` flag specifies a **directory path**, not a file path. This directory must contain a file named `config.yaml`, which is the main configuration file. Additional dependency files referenced in the configuration (via `file:` directives) are resolved relative to this directory.
 
 #### **Production Mode (Live Tailing and Blocking)**
 
 ```sh
 ./bot-detector \
   --log-path "/var/log/haproxy/access.log" \
-  --config "/etc/bot-detector/config.yaml"
+  --config-dir "/etc/bot-detector"
 ```
 
 #### **Dry Run Mode (Testing)**
@@ -54,13 +56,13 @@ Use `--dry-run` to test your chains against a static log file. This will process
 If `--log-path` is provided, it will read from that file. If `--log-path` is omitted in dry-run mode, the application will read from standard input (`stdin`), allowing you to pipe log data into it.
 
 ```sh
-# Reading from a file
+# Reading from a file (config directory contains config.yaml)
 ./bot-detector --dry-run \
   --log-path "test_access.log" \
-  --config "config.yaml"
+  --config-dir "./testdata"
 
 # Reading from stdin
-cat test_access.log | ./bot-detector --dry-run --config "config.yaml"
+cat test_access.log | ./bot-detector --dry-run --config-dir "./testdata"
 ```
 
 ## **Resilience and Logging**
@@ -198,13 +200,13 @@ This will produce a single executable named `bot-detector`.
 
 | Flag | Default | Description |
 | :--- | :--- | :--- |
-| **`--config`** | `""` | Path to the YAML configuration file. |
+| **`--config-dir`** | `""` | **Path to the configuration directory** containing `config.yaml`. |
 | **`--log-path`** | `""` | Path to the access log file to tail (or to read in dry-run mode). |
 | **`--dry-run`** | `false` | Runs in test mode, ignoring the blocking backend and live logging. |
 | **`--exit-on-eof`** | `false` | Exits after processing the log file to EOF instead of tailing. |
 | **`--dump-backends`** | `false` | Checks HAProxy backend sync status, lists all IPs, and exits. |
 | **`--version`** | `false` | Print the application version and exit. |
-| **`--check`** | `false` | Validates the configuration file and exits with error code on failure. |
+| **`--check`** | `false` | Validates the configuration and exits with error code on failure. |
 | **`--reload-on`** | `""` | Controls config reloading: `watcher`, `HUP`, `USR1`, or `USR2`. |
 | **`--http-server`** | `""` | Starts a web server on this address to display live metrics. |
 | **`--top-n`** | `0` | In dry-run mode, show top N actors per chain. |
@@ -212,7 +214,7 @@ This will produce a single executable named `bot-detector`.
 
 ---
 
-# **Behavioral Chains Configuration File (config.yaml)**
+# **Behavioral Chains Configuration**
 
 This file defines the sequential behavioral chains used by the bot-detector to identify and act upon suspicious traffic patterns.
 The file is structured as a top-level map containing a single key, chains, which holds an array of individual chain definitions.
@@ -481,7 +483,7 @@ For more complex string matching, use a prefix. Available prefixes: `exact:`, `r
     ip: "cidr:192.168.1.0/24"
     ```
 *   **File-Based Matcher:** Loads a list of values from an external file. This can be used with any field that accepts string values (e.g., `path`, `useragent`, `ip`). Each line in the file is treated as a separate value in a list (OR condition).
-    > **Path Resolution:** File paths are resolved relative to the directory of the main `config.yaml` file. Absolute paths are also supported.
+    > **Path Resolution:** File paths are resolved relative to the configuration directory (the directory specified with `--config-dir` that contains `config.yaml`). Absolute paths are also supported.
 
     For example, given a file named `bad_paths.txt` with the following content:
     ```

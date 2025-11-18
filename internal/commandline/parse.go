@@ -12,8 +12,7 @@ import (
 // from command-line flags, ready for execution.
 type AppParameters struct {
 	Check        bool
-	ConfigPath   string // Full path to config.yaml file
-	ConfigDir    string // Directory containing config.yaml (derived from ConfigPath)
+	ConfigDir    string // Directory containing config.yaml
 	DryRun       bool
 	DumpBackends bool
 	ExitOnEOF    bool
@@ -37,7 +36,6 @@ func (p AppParameters) String() string {
 	sb.WriteString("--- App Parameters ---\n")
 
 	writeField("Check", "%v", p.Check)
-	writeField("ConfigPath", "%q", p.ConfigPath)
 	writeField("ConfigDir", "%q", p.ConfigDir)
 	writeField("DryRun", "%v", p.DryRun)
 	writeField("DumpBackends", "%v", p.DumpBackends)
@@ -76,7 +74,7 @@ func ParseParameters(args []string) (*AppParameters, error) {
 
 	params := &AppParameters{
 		Check:        *cliFlags.Check,
-		ConfigPath:   *cliFlags.ConfigPath,
+		ConfigDir:    *cliFlags.ConfigDir,
 		DryRun:       *cliFlags.DryRun,
 		DumpBackends: *cliFlags.DumpBackends,
 		ExitOnEOF:    *cliFlags.ExitOnEOF,
@@ -88,75 +86,22 @@ func ParseParameters(args []string) (*AppParameters, error) {
 		TopN:         *cliFlags.TopN,
 	}
 
-	hasConfigPath := false
-	hasLogPath := false
-
-	// Resolve absolute paths immediately and derive ConfigDir.
-	if params.ConfigPath != "" {
-		absPath, err := filepath.Abs(params.ConfigPath)
-		if err != nil {
-			return nil, fmt.Errorf("could not determine absolute path for config file: %v", err)
-		}
-
-		// Check if the path is a directory or file
-		info, err := os.Stat(absPath)
-		if err != nil {
-			if os.IsNotExist(err) {
-				// Path doesn't exist - check if it looks like a file path
-				ext := filepath.Ext(absPath)
-				if ext != "" {
-					// Has extension, so it's a file path
-					if filepath.Base(absPath) != "config.yaml" {
-						return nil, fmt.Errorf("config file must be named 'config.yaml', got: %s", filepath.Base(absPath))
-					}
-					params.ConfigPath = absPath
-					params.ConfigDir = filepath.Dir(absPath)
-				} else {
-					// No extension, assume it's a directory path
-					params.ConfigDir = absPath
-					params.ConfigPath = filepath.Join(absPath, "config.yaml")
-				}
-
-				// Validate that the directory exists
-				dirInfo, dirErr := os.Stat(params.ConfigDir)
-				if dirErr != nil {
-					return nil, fmt.Errorf("config directory does not exist: %s", params.ConfigDir)
-				}
-				if !dirInfo.IsDir() {
-					return nil, fmt.Errorf("config directory path is not a directory: %s", params.ConfigDir)
-				}
-			} else {
-				return nil, fmt.Errorf("could not stat config path: %v", err)
-			}
-		} else {
-			// Path exists
-			if info.IsDir() {
-				// It's a directory - build config path
-				params.ConfigDir = absPath
-				params.ConfigPath = filepath.Join(absPath, "config.yaml")
-			} else {
-				// It's a file - validate filename and derive directory
-				if filepath.Base(absPath) != "config.yaml" {
-					return nil, fmt.Errorf("config file must be named 'config.yaml', got: %s", filepath.Base(absPath))
-				}
-				params.ConfigPath = absPath
-				params.ConfigDir = filepath.Dir(absPath)
-			}
-		}
-
-		// Validate directory permissions (readable/writable)
-		testFile := filepath.Join(params.ConfigDir, ".write_test")
-		if err := os.WriteFile(testFile, []byte("test"), 0600); err != nil {
-			return nil, fmt.Errorf("config directory is not writable: %s (%v)", params.ConfigDir, err)
-		}
-		_ = os.Remove(testFile)
-
-		hasConfigPath = true
-	}
-
-	// --version is a special case, returns ASAP (but after paths are resolved)
+	// --version is a special case, returns ASAP
 	if params.ShowVersion {
 		return params, nil
+	}
+
+	hasConfigDir := false
+	hasLogPath := false
+
+	// Resolve absolute paths immediately.
+	if params.ConfigDir != "" {
+		absPath, err := filepath.Abs(params.ConfigDir)
+		if err != nil {
+			return nil, fmt.Errorf("could not determine absolute path for config dir: %v", err)
+		}
+		params.ConfigDir = absPath
+		hasConfigDir = true
 	}
 
 	if params.LogPath != "" {
@@ -178,14 +123,14 @@ func ParseParameters(args []string) (*AppParameters, error) {
 
 	// Dry run don't require a log path
 	requireLogPath := true
-	requireConfigPath := true
+	requireConfigDir := true
 
 	if params.Check || params.DumpBackends || params.DryRun {
 		requireLogPath = false
 	}
 
-	if requireConfigPath && !hasConfigPath {
-		return nil, fmt.Errorf("--config <path> is required")
+	if requireConfigDir && !hasConfigDir {
+		return nil, fmt.Errorf("--config-dir <path> is required")
 	}
 
 	if requireLogPath && !hasLogPath {
@@ -198,7 +143,7 @@ func ParseParameters(args []string) (*AppParameters, error) {
 // CLIFlagValues holds pointers to the variables where command-line flag values will be stored.
 type CLIFlagValues struct {
 	Check        *bool
-	ConfigPath   *string
+	ConfigDir    *string
 	DryRun       *bool
 	DumpBackends *bool
 	ExitOnEOF    *bool
@@ -214,7 +159,7 @@ type CLIFlagValues struct {
 func registerCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 	flags := &CLIFlagValues{
 		Check:        fs.Bool("check", false, "Check the configuration file for validity and exit."),
-		ConfigPath:   fs.String("config", "", "Path to the configuration file."),
+		ConfigDir:    fs.String("config-dir", "", "Path to the configuration file."),
 		DryRun:       fs.Bool("dry-run", false, "Enable dry-run mode. Processes a static log file and exits."),
 		DumpBackends: fs.Bool("dump-backends", false, "List currently blocked IPs and exit."),
 		ExitOnEOF:    fs.Bool("exit-on-eof", false, "Exit after processing the existing log file instead of tailing."),

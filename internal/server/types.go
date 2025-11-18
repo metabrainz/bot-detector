@@ -34,7 +34,7 @@ type Provider interface {
 
 	// GetConfigForArchive retrieves the main configuration and all file dependencies
 	// for creating a configuration archive.
-	GetConfigForArchive() (mainConfig []byte, modTime time.Time, deps map[string]*types.FileDependency, configPath string, err error)
+	GetConfigForArchive() (mainConfig []byte, modTime time.Time, deps map[string]*types.FileDependency, configDir string, err error)
 
 	// GenerateHTMLMetricsReport generates an HTML-formatted metrics report.
 	GenerateHTMLMetricsReport() string
