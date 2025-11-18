@@ -19,15 +19,15 @@ import (
 
 // newTestProcessorWithFileDeps creates a new app.Processor instance for testing,
 // pre-populating it with a mock config.AppConfig that includes a FileDependencies map.
-func newTestProcessorWithFileDeps(t *testing.T, config *config.AppConfig, logFunc func(level logging.LogLevel, tag string, format string, v ...interface{})) *app.Processor {
+func newTestProcessorWithFileDeps(t *testing.T, cfg *config.AppConfig, logFunc func(level logging.LogLevel, tag string, format string, v ...interface{})) *app.Processor {
 	t.Helper()
-	if config == nil {
-		config = &config.AppConfig{}
+	if cfg == nil {
+		cfg = &config.AppConfig{}
 	}
-	if config.FileDependencies == nil {
-		config.FileDependencies = make(map[string]*types.FileDependency)
+	if cfg.FileDependencies == nil {
+		cfg.FileDependencies = make(map[string]*types.FileDependency)
 	}
-	p := testutil.NewTestProcessor(config, nil) // Use the existing testutil.NewTestProcessor
+	p := testutil.NewTestProcessor(cfg, nil) // Use the existing testutil.NewTestProcessor
 	p.LogFunc = logFunc                // Set the log function here
 	return p
 }
@@ -63,7 +63,7 @@ chains:
 	}
 
 	// --- Initial Load ---
-	loadedCfg, err := config.LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
 		t.Fatalf("Initial config.LoadConfigFromYAML failed: %v", err)
 	}
@@ -82,8 +82,8 @@ chains:
 
 	// Create a processor with the loaded config
 	p := newTestProcessorWithFileDeps(t, &config.AppConfig{
-		Application: ApplicationConfig{
-			Config: ConfigManagement{
+		Application: config.ApplicationConfig{
+			Config: config.ConfigManagement{
 				PollingInterval: 10 * time.Millisecond, // Short polling interval for test
 			},
 		},
@@ -95,7 +95,7 @@ chains:
 	// Setup channels for app.ConfigWatcher
 	stopCh := make(chan struct{})
 	reloadDoneCh := make(chan struct{})
-	p.app.TestSignals = &app.TestSignals{ReloadDoneSignal: reloadDoneCh}
+	p.TestSignals = &app.TestSignals{ReloadDoneSignal: reloadDoneCh}
 
 	go app.ConfigWatcher(p, stopCh)
 	defer close(stopCh)
@@ -189,7 +189,7 @@ chains:
 	t.Cleanup(func() { logging.LogOutput = originalLogOutput })
 
 	// --- Act ---
-	loadedCfg, err := config.LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
 		t.Fatalf("config.LoadConfigFromYAML failed: %v", err)
 	}
@@ -220,7 +220,7 @@ chains:
 		t.Errorf("FileDependency Content mismatch. Got %v, want empty", fileDep.Content)
 	}
 
-	// Verify warning was logged by compileStringMatcher
+	// Verify warning was logged by config.CompileStringMatcher
 	logMutex.Lock()
 	foundWarning := false
 	for _, log := range capturedLogs {
@@ -264,7 +264,7 @@ chains:
 	}
 
 	// --- Initial Load (file is missing) ---
-	loadedCfg, err := config.LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
 		t.Fatalf("Initial config.LoadConfigFromYAML failed: %v", err)
 	}
@@ -287,8 +287,8 @@ chains:
 
 	// Create a processor with the loaded config
 	p := newTestProcessorWithFileDeps(t, &config.AppConfig{
-		Application: ApplicationConfig{
-			Config: ConfigManagement{
+		Application: config.ApplicationConfig{
+			Config: config.ConfigManagement{
 				PollingInterval: 10 * time.Millisecond, // Short polling interval for test
 			},
 		},
@@ -300,7 +300,7 @@ chains:
 	// Setup channels for app.ConfigWatcher
 	stopCh := make(chan struct{})
 	reloadDoneCh := make(chan struct{})
-	p.app.TestSignals = &app.TestSignals{ReloadDoneSignal: reloadDoneCh}
+	p.TestSignals = &app.TestSignals{ReloadDoneSignal: reloadDoneCh}
 
 	go app.ConfigWatcher(p, stopCh)
 	defer close(stopCh)
@@ -389,7 +389,7 @@ chains:
 	}
 
 	// --- Initial Load ---
-	loadedCfg, err := config.LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
 		t.Fatalf("Initial config.LoadConfigFromYAML failed: %v", err)
 	}
@@ -412,8 +412,8 @@ chains:
 
 	// Create a processor with the loaded config
 	p := newTestProcessorWithFileDeps(t, &config.AppConfig{
-		Application: ApplicationConfig{
-			Config: ConfigManagement{
+		Application: config.ApplicationConfig{
+			Config: config.ConfigManagement{
 				PollingInterval: 10 * time.Millisecond, // Short polling interval for test
 			},
 		},
@@ -425,7 +425,7 @@ chains:
 	// Setup channels for app.ConfigWatcher
 	stopCh := make(chan struct{})
 	reloadDoneCh := make(chan struct{})
-	p.app.TestSignals = &app.TestSignals{ReloadDoneSignal: reloadDoneCh}
+	p.TestSignals = &app.TestSignals{ReloadDoneSignal: reloadDoneCh}
 
 	go app.ConfigWatcher(p, stopCh)
 	defer close(stopCh)
@@ -516,7 +516,7 @@ chains:
 	}
 
 	// --- Act ---
-	_, err := config.LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
 
 	// --- Assert ---
 	if err == nil {

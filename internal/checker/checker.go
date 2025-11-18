@@ -56,7 +56,7 @@ func GetActor(chain *config.BehavioralChain, entry *app.LogEntry) store.Actor {
 // preCheckActivity performs initial checks on an actor before processing against chains.
 // It returns the relevant ActorActivity and a boolean indicating if further processing should be skipped.
 // The caller is responsible for locking/unlocking the ActivityMutex. It returns the store.SkipInfo if applicable.
-func preCheckActivity(p *app.Processor, entry *app.LogEntry, actor store.Actor) (*store.ActorActivity, bool, store.SkipInfo) {
+func PreCheckActivity(p *app.Processor, entry *app.LogEntry, actor store.Actor) (*store.ActorActivity, bool, store.SkipInfo) {
 	// 2. Get or create actor activity and check for existing blocks.
 	activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 
@@ -489,7 +489,7 @@ func checkInterStepTimeRules(p *app.Processor, chain *config.BehavioralChain, en
 // processChainForEntry evaluates a single log entry against a single behavioral chain.
 // It manages state transitions (advancing, resetting) and triggers completion handling.
 // It returns true if the chain completed and its `on_match` rule was "stop".
-func processChainForEntry(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry, currentActivity *store.ActorActivity, previousRequestTime time.Time) bool {
+func ProcessChainForEntry(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry, currentActivity *store.ActorActivity, previousRequestTime time.Time) bool {
 	// If GetActor returns an empty actor, it's a mismatch for this chain (e.g., wrong IP version).
 	if GetActor(chain, entry).IPInfo.Address == "" {
 		return false
@@ -631,7 +631,7 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 		}
 
 		// Perform pre-checks for existing blocks.
-		currentActivity, skip, _ := preCheckActivity(p, entry, actor) // _ for SkipInfo, as metric is handled in CheckChains
+		currentActivity, skip, _ := PreCheckActivity(p, entry, actor) // _ for SkipInfo, as metric is handled in CheckChains
 		if skip {
 			// The skip reason metric is now handled in CheckChains, so we just continue.
 			continue
@@ -641,7 +641,7 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 		// This is the correct value to use for all time-based checks for this entry.
 		previousRequestTime := currentActivity.LastRequestTime
 
-		stop := processChainForEntry(p, &chain, entry, currentActivity, previousRequestTime)
+		stop := ProcessChainForEntry(p, &chain, entry, currentActivity, previousRequestTime)
 
 		// Mark this activity as processed for this entry.
 		processedActivities[currentActivity] = struct{}{}
@@ -745,7 +745,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 
 	// 2. Now, perform the pre-check for any existing skip reasons (good_actor or blocked).
 	// This is the single point where we increment the per-reason skip metrics for all skips.
-	_, skip, skipInfo := preCheckActivity(p, entry, actor)
+	_, skip, skipInfo := PreCheckActivity(p, entry, actor)
 	if skip {
 		if skipInfo.Type != utils.SkipTypeNone {
 			// Construct the reason string based on SkipInfo.Type for logging and metrics.

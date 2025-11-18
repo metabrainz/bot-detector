@@ -171,7 +171,7 @@ type BehavioralChainYAML struct {
 type StepDef struct {
 	Order    int
 	Matchers []struct {
-		Matcher   fieldMatcher
+		Matcher   FieldMatcher
 		FieldName string
 	} // Changed: Now stores matcher and its associated field name.
 	MaxDelayDuration    time.Duration
@@ -201,9 +201,9 @@ type BehavioralChain struct {
 type GoodActorDef struct {
 	Name string
 
-	IPMatchers []fieldMatcher // A list of matchers for the IP field (OR logic within the list)
+	IPMatchers []FieldMatcher // A list of matchers for the IP field (OR logic within the list)
 
-	UAMatchers []fieldMatcher // A list of matchers for the UserAgent field (OR logic within the list)
+	UAMatchers []FieldMatcher // A list of matchers for the UserAgent field (OR logic within the list)
 
 }
 

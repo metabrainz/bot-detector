@@ -185,8 +185,8 @@ func (t *Tailer) checkForRotation() bool {
 	return false
 }
 
-// lineReader is a function type for reading lines.
-type lineReader func(reader *bufio.Reader, limit int) (string, error)
+// LineReader is a function type for reading lines.
+type LineReader func(reader *bufio.Reader, limit int) (string, error)
 
 // handleLineRead is a common helper to process the result of a bufio.Reader.ReadBytes call.
 func handleLineRead(line []byte, err error, limit int) (string, error) {
@@ -204,8 +204,8 @@ func handleLineRead(line []byte, err error, limit int) (string, error) {
 
 }
 
-// readLineLF reads a line ending with LF ('\n').
-func readLineLF(reader *bufio.Reader, limit int) (string, error) {
+// ReadLineLF reads a line ending with LF ('\n').
+func ReadLineLF(reader *bufio.Reader, limit int) (string, error) {
 	line, err := reader.ReadBytes('\n')
 	lineLen := len(line)
 	if lineLen > 0 && line[lineLen-1] == '\n' {
@@ -214,8 +214,8 @@ func readLineLF(reader *bufio.Reader, limit int) (string, error) {
 	return handleLineRead(line, err, limit)
 }
 
-// readLineCRLF reads a line ending with CRLF ('\r\n').
-func readLineCRLF(reader *bufio.Reader, limit int) (string, error) {
+// ReadLineCRLF reads a line ending with CRLF ('\r\n').
+func ReadLineCRLF(reader *bufio.Reader, limit int) (string, error) {
 	line, err := reader.ReadBytes('\n')
 	lineLen := len(line)
 	if lineLen > 1 && line[lineLen-2] == '\r' && line[lineLen-1] == '\n' {
@@ -226,8 +226,8 @@ func readLineCRLF(reader *bufio.Reader, limit int) (string, error) {
 	return handleLineRead(line, err, limit)
 }
 
-// readLineCR reads a line ending with CR ('\r').
-func readLineCR(reader *bufio.Reader, limit int) (string, error) {
+// ReadLineCR reads a line ending with CR ('\r').
+func ReadLineCR(reader *bufio.Reader, limit int) (string, error) {
 	line, err := reader.ReadBytes('\r')
 	lineLen := len(line)
 	if lineLen > 0 && line[lineLen-1] == '\r' {
@@ -237,14 +237,14 @@ func readLineCR(reader *bufio.Reader, limit int) (string, error) {
 }
 
 // getLineReader returns the appropriate line reading function based on the config.
-func getLineReader(lineEnding string) (lineReader, error) {
+func getLineReader(lineEnding string) (LineReader, error) {
 	switch lineEnding {
 	case "lf", "": // Default to 'lf' if empty
-		return readLineLF, nil
+		return ReadLineLF, nil
 	case "crlf":
-		return readLineCRLF, nil
+		return ReadLineCRLF, nil
 	case "cr":
-		return readLineCR, nil
+		return ReadLineCR, nil
 	default:
 		return nil, fmt.Errorf("unsupported line ending: %s", lineEnding)
 	}

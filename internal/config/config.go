@@ -245,18 +245,18 @@ type MatcherContext struct {
 	FilePath           string
 }
 
-// fieldMatcher is a function type that represents a compiled matching rule.
+// FieldMatcher is a function type that represents a compiled matching rule.
 // It takes a LogEntry and returns true if the entry satisfies the rule.
-type fieldMatcher func(entry *types.LogEntry) bool
+type FieldMatcher func(entry *types.LogEntry) bool
 
 // CompileMatchers parses the raw `field_matches` interface from YAML into a slice of efficient matcher functions.
 // Exported for use in tests.
 func CompileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps map[string]*types.FileDependency, filePath string) ([]struct {
-	Matcher   fieldMatcher
+	Matcher   FieldMatcher
 	FieldName string
 }, error) {
 	var matchers []struct {
-		Matcher   fieldMatcher
+		Matcher   FieldMatcher
 		FieldName string
 	}
 	// Create the initial MatcherContext for this chain and step.
@@ -274,7 +274,7 @@ func CompileMatchers(chainName string, stepIndex int, fieldMatches map[string]in
 			return nil, err // Propagate error up
 		}
 		matchers = append(matchers, struct {
-			Matcher   fieldMatcher
+			Matcher   FieldMatcher
 			FieldName string
 		}{Matcher: matcher, FieldName: fieldName})
 	}
@@ -282,7 +282,7 @@ func CompileMatchers(chainName string, stepIndex int, fieldMatches map[string]in
 }
 
 // compileSingleMatcher is a large switch that handles the different value "shapes" (string, int, list, map).
-func compileSingleMatcher(ctx MatcherContext, field string, value interface{}) (fieldMatcher, string, error) {
+func compileSingleMatcher(ctx MatcherContext, field string, value interface{}) (FieldMatcher, string, error) {
 	// Convert the incoming fieldName to its canonical PascalCase form for internal matching.
 	// This ensures that YAML keys like "ip" map correctly to LogEntry.IPInfo.
 	canonicalFieldName, ok := types.FieldNameCanonicalMap[strings.ToLower(field)]
@@ -295,12 +295,12 @@ func compileSingleMatcher(ctx MatcherContext, field string, value interface{}) (
 	subCtx := ctx
 	subCtx.CanonicalFieldName = canonicalFieldName
 
-	var matcher fieldMatcher
+	var matcher FieldMatcher
 	var err error
 
 	switch v := value.(type) {
 	case string:
-		matcher, err = compileStringMatcher(subCtx, v)
+		matcher, err = CompileStringMatcher(subCtx, v)
 	case int:
 		matcher, err = compileIntMatcher(subCtx, v), nil
 	case []interface{}:
@@ -318,7 +318,7 @@ func compileSingleMatcher(ctx MatcherContext, field string, value interface{}) (
 }
 
 // compileStringMatcher handles string values, which can be exact, regex, glob, or status code patterns.
-func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error) {
+func CompileStringMatcher(ctx MatcherContext, value string) (FieldMatcher, error) {
 	if strings.HasPrefix(value, "exact:") {
 		literalValue := strings.TrimPrefix(value, "exact:")
 		return func(entry *types.LogEntry) bool {
@@ -471,7 +471,7 @@ func compileStringMatcher(ctx MatcherContext, value string) (fieldMatcher, error
 }
 
 // compileIntMatcher handles exact integer matches.
-func compileIntMatcher(ctx MatcherContext, value int) fieldMatcher {
+func compileIntMatcher(ctx MatcherContext, value int) FieldMatcher {
 	return func(entry *types.LogEntry) bool {
 		fieldVal := types.GetMatchValueIfType(ctx.CanonicalFieldName, entry, types.IntField)
 		if fieldVal == nil {
@@ -482,8 +482,8 @@ func compileIntMatcher(ctx MatcherContext, value int) fieldMatcher {
 }
 
 // compileListMatcher handles lists, creating an OR condition over its items.
-func compileListMatcher(ctx MatcherContext, values []interface{}) (fieldMatcher, error) {
-	var subMatchers []fieldMatcher
+func compileListMatcher(ctx MatcherContext, values []interface{}) (FieldMatcher, error) {
+	var subMatchers []FieldMatcher
 	for _, item := range values {
 		// Pass the existing context to the sub-matcher.
 		// The canonicalFieldName is already set in ctx by compileSingleMatcher.
@@ -505,11 +505,11 @@ func compileListMatcher(ctx MatcherContext, values []interface{}) (fieldMatcher,
 }
 
 // compileObjectMatcher handles map values, creating an AND condition for its sub-matchers.
-func compileObjectMatcher(ctx MatcherContext, obj map[string]interface{}) (fieldMatcher, error) {
-	var subMatchers []fieldMatcher
+func compileObjectMatcher(ctx MatcherContext, obj map[string]interface{}) (FieldMatcher, error) {
+	var subMatchers []FieldMatcher
 
 	for key, val := range obj {
-		var matcher fieldMatcher
+		var matcher FieldMatcher
 		var err error
 
 		switch key {
@@ -542,7 +542,7 @@ func compileObjectMatcher(ctx MatcherContext, obj map[string]interface{}) (field
 }
 
 // compileRangeMatcher handles numeric range operators (gt, gte, lt, lte).
-func compileRangeMatcher(ctx MatcherContext, op string, value interface{}) (fieldMatcher, error) {
+func compileRangeMatcher(ctx MatcherContext, op string, value interface{}) (FieldMatcher, error) {
 	num, ok := value.(int)
 	if !ok {
 		return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': value for '%s' must be an integer, got %T", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, op, value)
@@ -579,10 +579,10 @@ func compileRangeMatcher(ctx MatcherContext, op string, value interface{}) (fiel
 }
 
 // compileNotMatcher handles the 'not' operator.
-func compileNotMatcher(ctx MatcherContext, value interface{}) (fieldMatcher, error) {
+func compileNotMatcher(ctx MatcherContext, value interface{}) (FieldMatcher, error) {
 	// The value of 'not' can be a single item or a list of items.
 	// We can reuse the existing list and single matcher compilers.
-	var subMatcher fieldMatcher
+	var subMatcher FieldMatcher
 	var err error
 
 	if values, ok := value.([]interface{}); ok {
@@ -960,7 +960,7 @@ func parseGoodActors(config *ChainConfig, fileDeps map[string]*types.FileDepende
 				if err != nil {
 					return nil, err
 				}
-				def.IPMatchers = []fieldMatcher{matcher}
+				def.IPMatchers = []FieldMatcher{matcher}
 			case "useragent", "user_agent":
 				var uaList []interface{}
 				if list, isList := value.([]interface{}); isList {
@@ -974,7 +974,7 @@ func parseGoodActors(config *ChainConfig, fileDeps map[string]*types.FileDepende
 				if err != nil {
 					return nil, err
 				}
-				def.UAMatchers = []fieldMatcher{matcher}
+				def.UAMatchers = []FieldMatcher{matcher}
 			}
 		}
 

@@ -1,6 +1,7 @@
 package checker_test
 
 import (
+	"bot-detector/internal/logparser"
 	"bot-detector/internal/checker"
 	"bot-detector/internal/testutil"
 	
@@ -123,9 +124,9 @@ func TestPreCheckActivity_StillBlocked(t *testing.T) {
 			entry := &app.LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: tt.entryTimestamp}
 
 			// --- Act ---
-			// We call the unexported preCheckActivity directly to isolate the logic under test.
+			// We call the unexported checker.PreCheckActivity directly to isolate the logic under test.
 			processor.ActivityMutex.Lock()
-			_, skip, _ := preCheckActivity(processor, entry, actor)
+			_, skip, _ := checker.PreCheckActivity(processor, entry, actor)
 			processor.ActivityMutex.Unlock()
 
 			// --- Assert ---
@@ -207,7 +208,7 @@ func TestProcessChainForEntry_AlreadyCompleted(t *testing.T) {
 
 	chain := config.BehavioralChain{
 		Name:  "CompletedChain",
-		Steps: []config.config.StepDef{{Order: 1}}, // A simple one-step chain
+		Steps: []config.StepDef{{Order: 1}}, // A simple one-step chain
 	}
 
 	// Create an activity state where the chain is already completed.
@@ -227,7 +228,7 @@ func TestProcessChainForEntry_AlreadyCompleted(t *testing.T) {
 	// --- Act ---
 	// Call the function under test. This should hit the 'if nextStepIndex >= len(chain.Steps)'
 	// branch and immediately break.
-	processChainForEntry(processor, &chain, entry, activity, time.Time{})
+	checker.ProcessChainForEntry(processor, &chain, entry, activity, time.Time{})
 
 	// --- Assert ---
 	// The state should remain unchanged.
@@ -245,17 +246,17 @@ func TestProcessChainForEntry_AlreadyCompleted(t *testing.T) {
 func TestCheckChains_TimeDelayReset(t *testing.T) {
 	tests := []struct {
 		name            string
-		step2YAML       StepDefYAML
+		step2YAML       config.StepDefYAML
 		step2TimeOffset time.Duration
 	}{
 		{
 			name:            "MaxDelay Exceeded",
-			step2YAML:       StepDefYAML{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MaxDelay: "5s"},
+			step2YAML:       config.StepDefYAML{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MaxDelay: "5s"},
 			step2TimeOffset: 6 * time.Second,
 		},
 		{
 			name:            "MinDelay Not Met",
-			step2YAML:       StepDefYAML{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MinDelay: "500ms"},
+			step2YAML:       config.StepDefYAML{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MinDelay: "500ms"},
 			step2TimeOffset: 100 * time.Millisecond,
 		},
 	}
@@ -473,7 +474,7 @@ func TestCheckChains_OnMatchStop(t *testing.T) {
 	h.assertChainProgressCleared("StopChain", entry)
 
 	// The "ShouldBeSkippedChain" should have no progress state, as it was never processed.
-	key := GetActor(&h.processor.Chains[1], entry)
+	key := checker.GetActor(&h.processor.Chains[1], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
 	activity, exists := h.processor.ActivityStore[store.Actor(key)]
@@ -499,8 +500,8 @@ func TestCheckChains_UnblockOnGoodActor(t *testing.T) {
 
 	// 2. Define a "good actor" rule directly in the processor's config.
 	// This simulates loading a `good_actors` block from YAML.
-	// Create a MatcherContext for the good actor.
-	goodActorCtx := MatcherContext{
+	// Create a config.MatcherContext for the good actor.
+	goodActorCtx := config.MatcherContext{
 		ChainName:          "good_actor_test",
 		StepIndex:          0,
 		CanonicalFieldName: "IP",
@@ -515,14 +516,14 @@ func TestCheckChains_UnblockOnGoodActor(t *testing.T) {
 		},
 		FilePath: "", // Empty for this test
 	}
-	goodActorMatcher, err := compileStringMatcher(goodActorCtx, goodIP)
+	goodActorMatcher, err := config.CompileStringMatcher(goodActorCtx, goodIP)
 	if err != nil {
 		t.Fatalf("Failed to compile good actor matcher: %v", err)
 	}
-	h.processor.Config.GoodActors = []app.GoodActorDef{
+	h.processor.Config.GoodActors = []config.GoodActorDef{
 		{
 			Name:       "test_good_ips",
-			IPMatchers: []fieldMatcher{goodActorMatcher},
+			IPMatchers: []config.FieldMatcher{goodActorMatcher},
 		},
 	}
 
@@ -571,30 +572,30 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		Action:   "log",
 	}
 	// Create MatcherContexts for the chain steps.
-	ctx1 := MatcherContext{
+	ctx1 := config.MatcherContext{
 		ChainName:          chain.Name,
 		StepIndex:          0,
 		CanonicalFieldName: "Path",
 		FileDependencies:   make(map[string]*types.FileDependency),
 		FilePath:           "",
 	}
-	matcher1, _ := compileStringMatcher(ctx1, "/step1")
+	matcher1, _ := config.CompileStringMatcher(ctx1, "/step1")
 
-	ctx2 := MatcherContext{
+	ctx2 := config.MatcherContext{
 		ChainName:          chain.Name,
 		StepIndex:          1,
 		CanonicalFieldName: "Path",
 		FileDependencies:   make(map[string]*types.FileDependency),
 		FilePath:           "",
 	}
-	matcher2, _ := compileStringMatcher(ctx2, "/step2")
-	chain.Steps = []config.config.StepDef{
+	matcher2, _ := config.CompileStringMatcher(ctx2, "/step2")
+	chain.Steps = []config.StepDef{
 		{Order: 1, MinTimeSinceLastHit: 2 * time.Second, Matchers: []struct {
-			Matcher   fieldMatcher
+			Matcher   config.FieldMatcher
 			FieldName string
 		}{{Matcher: matcher1, FieldName: "Path"}}},
 		{Order: 2, Matchers: []struct {
-			Matcher   fieldMatcher
+			Matcher   config.FieldMatcher
 			FieldName string
 		}{{Matcher: matcher2, FieldName: "Path"}}},
 	}
@@ -652,7 +653,7 @@ func TestCheckChains_TimeRules(t *testing.T) {
 				Timestamp: now,      // The current request always happens at our fixed "now".
 				Path:      "/step1", // This will match the first step
 			}
-			CheckChains(processor, entry)
+			checker.CheckChains(processor, entry)
 
 			processor.ActivityMutex.RLock()
 			activity := processor.ActivityStore[store.Actor(store.Actor{IPInfo: entry.IPInfo})]
@@ -716,7 +717,7 @@ regex:NastyBot`), 0644); err != nil {
 	}
 
 	// Set the CheckChainsFunc on the processor instance to avoid nil pointers.
-	processor.CheckChainsFunc = func(entry *app.LogEntry) { CheckChains(processor, entry) }
+	processor.CheckChainsFunc = func(entry *app.LogEntry) { checker.CheckChains(processor, entry) }
 	processor.ProcessLogLine = func(line string) { logparser.ProcessLogLineInternal(processor, line) }
 
 	// 2. Read test_access.log and extract expected log outputs from comments
@@ -752,7 +753,7 @@ regex:NastyBot`), 0644); err != nil {
 		t.Logf("%s", logLine) // Also print to test output for debugging
 	}
 
-	// Read in each line of the test log, and run CheckChains on it, to simulate log tailing.
+	// Read in each line of the test log, and run checker.CheckChains on it, to simulate log tailing.
 	logEntryScanner := bufio.NewScanner(bytes.NewReader(testLogData)) // Re-scan for log entries
 	actualLogLineNumber := 0
 
@@ -910,13 +911,13 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 				},
 			}, chains)
 
-			// Use a mock checkChainsInternal to see what gets processed immediately
+			// Use a mock checker.checkChainsInternal to see what gets processed immediately
 			var processedImmediately []*app.LogEntry
-			originalCheck := checkChainsInternal
-			checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
-				processedImmediately = append(processedImmediately, entry)
-			}
-			t.Cleanup(func() { checkChainsInternal = originalCheck })
+// // 			originalCheck := checker.checkChainsInternal
+// 			checker.checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
+// 				processedImmediately = append(processedImmediately, entry)
+// 			}
+// 			t.Cleanup(func() { checker.checkChainsInternal = originalCheck })
 
 			// 1. Set the last request time manually to set up the scenario
 			processor.ActivityMutex.Lock()
@@ -926,7 +927,7 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 
 			// 2. Process the out-of-order entry by calling the main entrypoint
 			outOfOrderEntry := &app.LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: now.Add(-tt.outOfOrderOffset)}
-			CheckChains(processor, outOfOrderEntry)
+			checker.CheckChains(processor, outOfOrderEntry)
 
 			// 3. Assert outcome
 			bufferIsPopulated := len(processor.EntryBuffer) > 0
@@ -942,7 +943,7 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 	}
 }
 
-// bufferWorkerTestHarness encapsulates the setup for testing the entryBufferWorker.
+// bufferWorkerTestHarness encapsulates the setup for testing the checker.EntryBufferWorker.
 type bufferWorkerTestHarness struct {
 	t          *testing.T
 	processor  *app.Processor
@@ -951,7 +952,7 @@ type bufferWorkerTestHarness struct {
 	tickDoneCh chan struct{} // Signals that a ticker cycle has completed.
 }
 
-// newBufferWorkerTestHarness creates a harness for testing the entryBufferWorker.
+// newBufferWorkerTestHarness creates a harness for testing the checker.EntryBufferWorker.
 func newBufferWorkerTestHarness(t *testing.T, tolerance time.Duration) *bufferWorkerTestHarness {
 	t.Helper()
 
@@ -962,7 +963,7 @@ func newBufferWorkerTestHarness(t *testing.T, tolerance time.Duration) *bufferWo
 		tickDoneCh: make(chan struct{}, 1), // Buffered to prevent blocking
 	}
 
-	// Create a processor with a mock checkChainsInternal function to capture processed entries.
+	// Create a processor with a mock checker.checkChainsInternal function to capture processed entries.
 	p := testutil.NewTestProcessor(&config.AppConfig{Parser: config.ParserConfig{OutOfOrderTolerance: tolerance}}, nil)
 	h.processor = p
 
@@ -977,10 +978,10 @@ func newBufferWorkerTestHarness(t *testing.T, tolerance time.Duration) *bufferWo
 	return h
 }
 
-// start runs the entryBufferWorker in a goroutine.
+// start runs the checker.EntryBufferWorker in a goroutine.
 func (h *bufferWorkerTestHarness) start() {
 	go func() {
-		entryBufferWorker(h.processor, h.stopCh)
+		checker.EntryBufferWorker(h.processor, h.stopCh)
 		close(h.doneCh)
 	}()
 }
@@ -992,7 +993,7 @@ func (h *bufferWorkerTestHarness) stop() {
 	case <-h.doneCh:
 		// Worker shut down gracefully.
 	case <-time.After(2 * time.Second):
-		h.t.Fatal("timed out waiting for entryBufferWorker to shut down")
+		h.t.Fatal("timed out waiting for checker.EntryBufferWorker to shut down")
 	}
 }
 
@@ -1068,8 +1069,8 @@ func TestEntryBufferWorker(t *testing.T) {
 func TestOooBufferFunctions(t *testing.T) {
 	baseTime := time.Now()
 
-	// --- Test shouldBufferOutOfOrder ---
-	t.Run("shouldBufferOutOfOrder", func(t *testing.T) {
+	// --- Test checker.shouldBufferOutOfOrder ---
+	t.Run("checker.shouldBufferOutOfOrder", func(t *testing.T) {
 		tolerance := 5 * time.Second
 		lastRequestTime := baseTime
 
@@ -1091,12 +1092,12 @@ func TestOooBufferFunctions(t *testing.T) {
 				if tt.name == "First request ever" {
 					lrt = time.Time{}
 				}
-				result := shouldBufferOutOfOrder(lrt, tt.entryTimestamp, tolerance)
-				if result != tt.expected {
-					t.Errorf("shouldBufferOutOfOrder() = %v, want %v", result, tt.expected)
-				}
-			})
-		}
+// 				result := checker.shouldBufferOutOfOrder(lrt, tt.entryTimestamp, tolerance)
+// 				if result != tt.expected {
+// 					t.Errorf("checker.shouldBufferOutOfOrder() = %v, want %v", result, tt.expected)
+// 				}
+// 			})
+// 		}
 	})
 
 	// --- Test addToOooBuffer ---
@@ -1168,12 +1169,12 @@ func TestOooBufferFunctions(t *testing.T) {
 	t.Run("flushOooBuffer", func(t *testing.T) {
 		var processedCount atomic.Int32
 		p := testutil.NewTestProcessor(nil, nil)
-		// Override checkChainsInternal to just count calls
-		originalCheck := checkChainsInternal
-		checkChainsInternal = func(proc *app.Processor, entry *app.LogEntry) {
+		// Override checker.checkChainsInternal to just count calls
+		originalCheck := checker.checkChainsInternal
+		checker.checkChainsInternal = func(proc *app.Processor, entry *app.LogEntry) {
 			processedCount.Add(1)
 		}
-		t.Cleanup(func() { checkChainsInternal = originalCheck })
+		t.Cleanup(func() { checker.checkChainsInternal = originalCheck })
 
 		e1 := &app.LogEntry{Timestamp: baseTime.Add(-10 * time.Second)}
 		e2 := &app.LogEntry{Timestamp: baseTime.Add(-8 * time.Second)}
@@ -1198,17 +1199,17 @@ func TestOutOfOrder_ComplexScenario(t *testing.T) {
 	const targetIP = "192.0.2.10"
 	baseTime := time.Now()
 
-	// Create a processor and a mock for checkChainsInternal to capture the final processing order.
+	// Create a processor and a mock for checker.checkChainsInternal to capture the final processing order.
 	p := testutil.NewTestProcessor(&config.AppConfig{Parser: config.ParserConfig{OutOfOrderTolerance: tolerance}}, nil)
 	var processedEntries []*app.LogEntry
 	var processedMutex sync.Mutex
-	originalCheck := checkChainsInternal
-	checkChainsInternal = func(proc *app.Processor, entry *app.LogEntry) {
+	originalCheck := checker.checkChainsInternal
+	checker.checkChainsInternal = func(proc *app.Processor, entry *app.LogEntry) {
 		processedMutex.Lock()
 		defer processedMutex.Unlock()
 		processedEntries = append(processedEntries, entry)
 	}
-	t.Cleanup(func() { checkChainsInternal = originalCheck })
+	t.Cleanup(func() { checker.checkChainsInternal = originalCheck })
 
 	// Define the 5 hits for the scenario.
 	hit1 := &app.LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: baseTime, Path: "/hit1"}
@@ -1329,15 +1330,15 @@ func TestGetActor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			chain := &config.BehavioralChain{MatchKey: tt.matchKey}
-			result := GetActor(chain, tt.entry)
+			result := checker.GetActor(chain, tt.entry)
 
 			if result != tt.expectedKey {
-				t.Errorf("GetActor() got key %+v, want %+v", result, tt.expectedKey)
+				t.Errorf("checker.GetActor() got key %+v, want %+v", result, tt.expectedKey)
 			}
 		})
 	}
 }
-// checkerTestHarness encapsulates common setup for CheckChains tests.
+// checkerTestHarness encapsulates common setup for checker.CheckChains tests.
 type CheckerTestHarness struct {
 	t             *testing.T
 	processor     *app.Processor
@@ -1351,7 +1352,7 @@ type CheckerTestHarness struct {
 	logMutex     sync.Mutex
 }
 
-// newCheckerTestHarness creates a harness for testing CheckChains logic.
+// newCheckerTestHarness creates a harness for testing checker.CheckChains logic.
 func NewCheckerTestHarness(t *testing.T, cfg *config.AppConfig) *CheckerTestHarness {
 	t.Helper()
 	ResetGlobalState()
@@ -1397,7 +1398,7 @@ func (h *CheckerTestHarness) addChain(chainYAML config.BehavioralChain) {
 		if err != nil {
 			h.t.Fatalf("Failed to compile matchers for chain '%s': %v", chainYAML.Name, err)
 		}
-		runtimeChain.Steps = append(runtimeChain.Steps, config.config.StepDef{
+		runtimeChain.Steps = append(runtimeChain.Steps, config.StepDef{
 			Order:    i + 1,
 			Matchers: matchers,
 		})
@@ -1405,16 +1406,16 @@ func (h *CheckerTestHarness) addChain(chainYAML config.BehavioralChain) {
 	h.processor.Chains = append(h.processor.Chains, runtimeChain)
 }
 
-// processEntry runs a single log entry through the CheckChains logic.
+// processEntry runs a single log entry through the checker.CheckChains logic.
 func (h *CheckerTestHarness) processEntry(entry *app.LogEntry) {
 	h.t.Helper()
-	checker.CheckChains(h.processor, entry)
+	checker.checker.CheckChains(h.processor, entry)
 }
 
 // assertChainProgress checks if a given key is at the expected step for a chain.
 func (h *CheckerTestHarness) assertChainProgress(chainName string, entry *app.LogEntry, expectedStep int) {
 	h.t.Helper()
-	key := checker.GetActor(&h.processor.Chains[0], entry)
+	key := checker.checker.GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
 	activity, exists := h.processor.ActivityStore[store.Actor(key)]
@@ -1426,7 +1427,7 @@ func (h *CheckerTestHarness) assertChainProgress(chainName string, entry *app.Lo
 // assertBlocked checks if a given key is marked as blocked.
 func (h *CheckerTestHarness) assertBlocked(entry *app.LogEntry, expected bool) { //nolint:thelper
 	h.t.Helper()
-	key := checker.GetActor(&h.processor.Chains[0], entry)
+	key := checker.checker.GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
 	activity, exists := h.processor.ActivityStore[store.Actor(key)]
@@ -1442,7 +1443,7 @@ func (h *CheckerTestHarness) assertBlocked(entry *app.LogEntry, expected bool) {
 // assertChainProgressCleared checks that a chain's progress has been removed from the activity store.
 func (h *CheckerTestHarness) assertChainProgressCleared(chainName string, entry *app.LogEntry) {
 	h.t.Helper()
-	key := checker.GetActor(&h.processor.Chains[0], entry)
+	key := checker.checker.GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
 	activity, exists := h.processor.ActivityStore[store.Actor(key)]

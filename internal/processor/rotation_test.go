@@ -64,7 +64,7 @@ func newRotationTestHarness(t *testing.T) *rotationTestHarness {
 			Parser: config.ParserConfig{
 				LineEnding: "lf",
 			},
-			FileOpener: func(name string) (fileHandle, error) { return os.Open(name) },
+			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
 		DryRun:  false,
@@ -76,8 +76,7 @@ func newRotationTestHarness(t *testing.T) *rotationTestHarness {
 	h.processor.Blocker = blocker.NewHAProxyBlocker(h.processor, false)
 
 	// Initialize out-of-order buffer infrastructure
-	h.processor.oooBufferFlushSignal = make(chan struct{}, 1)
-	h.processor.signalOooBufferFlush = h.processor.doSignalOooBufferFlush
+	h.processor.OooBufferFlushSignal = make(chan struct{}, 1)
 
 	// Set up logging that captures output for debugging
 	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
