@@ -34,9 +34,6 @@ go.work.sum
 # Compiled binary
 bot-detector
 
-# WIP
-work_in_progress/
-
 # AI
 .gemini/
 .claude/
