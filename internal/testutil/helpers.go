@@ -109,7 +109,7 @@ func (m *MockBlocker) Shutdown() {
 }
 
 // newTestProcessor creates a new Processor instance with sensible defaults for testing.
-func newTestProcessor(config *config.AppConfig, chains []app.BehavioralChain) *app.Processor {
+func newTestProcessor(config *config.AppConfig, chains []config.BehavioralChain) *app.Processor {
 	if config == nil {
 		config = &AppConfig{}
 	}

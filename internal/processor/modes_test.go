@@ -605,7 +605,7 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 		MatchKey: "ip",
 	}
 	// Correctly create matchers without capturing loop variables.
-	chain1.Steps = []app.StepDef{
+	chain1.Steps = []config.StepDef{
 		{Matchers: []struct {
 			Matcher   fieldMatcher
 			FieldName string
@@ -625,7 +625,7 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 		Action:   "log",
 		MatchKey: "ip",
 	}
-	chain2.Steps = []app.StepDef{
+	chain2.Steps = []config.StepDef{
 		{Matchers: []struct {
 			Matcher   fieldMatcher
 			FieldName string
@@ -693,7 +693,7 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 				},
 			})
 			_ = os.WriteFile(harness.tempLogFile, []byte(logContent), 0644)
-			harness.processor.Chains = []app.BehavioralChain{chain1, chain2}
+			harness.processor.Chains = []config.BehavioralChain{chain1, chain2}
 			harness.processor.TopN = tt.topN
 			harness.processor.DryRun = true // Explicitly set DryRun mode for this test.
 
@@ -1201,7 +1201,7 @@ func (f *statErrorFile) Stat() (os.FileInfo, error) {
 func TestLogMetricsSummary(t *testing.T) {
 	// --- Setup ---
 	// 1. Create a processor with some chains.
-	chains := []app.BehavioralChain{
+	chains := []config.BehavioralChain{
 		{Name: "ChainA", MetricsCounter: new(atomic.Int64), MetricsResetCounter: new(atomic.Int64), MetricsHitsCounter: new(atomic.Int64)},
 		{Name: "ChainB", MetricsCounter: new(atomic.Int64), MetricsResetCounter: new(atomic.Int64), MetricsHitsCounter: new(atomic.Int64)},
 	}

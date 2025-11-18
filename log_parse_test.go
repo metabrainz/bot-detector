@@ -3,6 +3,7 @@ package main
 import (
 	"bot-detector/internal/app"
 	"bot-detector/internal/checker"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/parser"
 	"bot-detector/internal/store"
@@ -314,7 +315,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 	matcher, _ := compileStringMatcher(ctx, "/1")
 	chain := BehavioralChain{
 		Name: "dryrun_chain",
-		Steps: []app.StepDef{
+		Steps: []config.StepDef{
 			{Order: 1, Matchers: []struct {
 				Matcher   fieldMatcher
 				FieldName string
@@ -329,7 +330,7 @@ func TestProcessLogLine_DryRun(t *testing.T) {
 		Parser: ParserConfig{
 			TimestampFormat: AccessLogTimeFormat, // Set the required timestamp format
 		},
-	}, []app.BehavioralChain{chain})
+	}, []config.BehavioralChain{chain})
 	p.DryRun = true
 	p.Blocker = mockBlocker
 

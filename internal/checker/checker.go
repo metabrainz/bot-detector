@@ -2,6 +2,7 @@ package checker
 
 import (
 	"bot-detector/internal/app"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
@@ -15,7 +16,7 @@ import (
 // GetActor constructs the correct Actor key for a given log entry based on the chain's match_key.
 // It handles IP version filtering and decides whether to include the User-Agent in the key.
 // If the entry's IP version doesn't match the key (e.g., ipv4 vs ipv6), it returns an empty Actor.
-func GetActor(chain *app.BehavioralChain, entry *app.LogEntry) Actor {
+func GetActor(chain *config.BehavioralChain, entry *app.LogEntry) Actor {
 	ipVersion := entry.IPInfo.Version
 	useUA := false
 
@@ -257,7 +258,7 @@ func handleOutOfOrder(p *app.Processor, entry *app.LogEntry) (buffered bool) {
 // handleChainCompletion takes action when a chain is completed (log, block, etc.).
 // It updates the actor's state and metrics, and performs the configured action.
 // It returns true if `on_match` is "stop", indicating that no further chains should be processed for this entry.
-func handleChainCompletion(p *app.Processor, chain *app.BehavioralChain, entry *app.LogEntry, currentActivity *store.ActorActivity) bool {
+func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry, currentActivity *store.ActorActivity) bool {
 	if p.EnableMetrics {
 		if p.Metrics.ChainsCompleted != nil {
 			if val, ok := p.Metrics.ChainsCompleted.Load(chain.Name); ok {
@@ -334,7 +335,7 @@ func handleChainCompletion(p *app.Processor, chain *app.BehavioralChain, entry *
 }
 
 // executeBlock calls the external blocker unless in DryRun mode.
-func executeBlock(p *app.Processor, entry *app.LogEntry, chain *app.BehavioralChain) {
+func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.BehavioralChain) {
 	if p.persistenceEnabled {
 		p.persistenceWg.Add(1)
 		go func() {
@@ -414,7 +415,7 @@ func FlushGivenEntries(p *app.Processor, entries []*app.LogEntry) {
 // in chronological order, respecting the out-of-order tolerance.
 
 // logDryRunCompletion handles logging for completed chains in dry-run mode.
-func logDryRunCompletion(p *app.Processor, chain *app.BehavioralChain, entry *app.LogEntry) {
+func logDryRunCompletion(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry) {
 	onMatchSuffix := getOnMatchSuffix(chain)
 	switch chain.Action {
 	case "block":
@@ -428,7 +429,7 @@ func logDryRunCompletion(p *app.Processor, chain *app.BehavioralChain, entry *ap
 
 // matchStepFields checks if the fields of a log entry match the compiled matchers of a step.
 // It returns true if all fields match, false otherwise.
-func matchStepFields(p *app.Processor, chain *app.BehavioralChain, step *app.StepDef, entry *app.LogEntry) bool {
+func matchStepFields(p *app.Processor, chain *config.BehavioralChain, step *config.StepDef, entry *app.LogEntry) bool {
 	// Iterate over the pre-compiled matcher functions.
 	for _, matcher := range step.Matchers {
 		if !matcher.Matcher(entry) { // Access the actual matcher function
@@ -465,7 +466,7 @@ func matchStepFields(p *app.Processor, chain *app.BehavioralChain, step *app.Ste
 }
 
 // getOnMatchSuffix is a small helper to generate the logging suffix.
-func getOnMatchSuffix(chain *app.BehavioralChain) string {
+func getOnMatchSuffix(chain *config.BehavioralChain) string {
 	if chain.OnMatch == "stop" {
 		return " (on_match: stop)"
 	}
@@ -474,7 +475,7 @@ func getOnMatchSuffix(chain *app.BehavioralChain) string {
 
 // checkFirstStepTimeRule validates the `min_time_since_last_hit` rule for the first step of a chain.
 // It returns true if the rule passes, and false otherwise.
-func checkFirstStepTimeRule(step *app.StepDef, timeSinceLastHit time.Duration, previousRequestTime time.Time) bool {
+func checkFirstStepTimeRule(step *config.StepDef, timeSinceLastHit time.Duration, previousRequestTime time.Time) bool {
 	if step.MinTimeSinceLastHit > 0 {
 		// The rule is active. It fails if the actor has been seen before (`!IsZero`)
 		// and the time since the last hit is less than or equal to the minimum required.
@@ -487,7 +488,7 @@ func checkFirstStepTimeRule(step *app.StepDef, timeSinceLastHit time.Duration, p
 
 // handleTimeRuleReset logs the reason for a chain reset and updates metrics.
 // This helper is used by checkInterStepTimeRules to reduce code duplication.
-func handleTimeRuleReset(p *app.Processor, chain *app.BehavioralChain, entry *app.LogEntry, reason string, value time.Duration) {
+func handleTimeRuleReset(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry, reason string, value time.Duration) {
 	if p.EnableMetrics {
 		if val, ok := p.Metrics.ChainsReset.Load(chain.Name); ok {
 			if counter, ok := val.(*atomic.Int64); ok {
@@ -511,7 +512,7 @@ func handleTimeRuleReset(p *app.Processor, chain *app.BehavioralChain, entry *ap
 
 // checkInterStepTimeRules validates `max_delay` and `min_delay` rules between steps.
 // It returns true if the chain should be reset due to a time rule violation.
-func checkInterStepTimeRules(p *app.Processor, chain *app.BehavioralChain, entry *app.LogEntry, step *app.StepDef, timeSinceLastStepHit time.Duration) bool {
+func checkInterStepTimeRules(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry, step *config.StepDef, timeSinceLastStepHit time.Duration) bool {
 	if step.MaxDelayDuration > 0 && timeSinceLastStepHit > step.MaxDelayDuration {
 		handleTimeRuleReset(p, chain, entry, "MaxDelay exceeded", step.MaxDelayDuration)
 		return true // Reset the chain.
@@ -526,7 +527,7 @@ func checkInterStepTimeRules(p *app.Processor, chain *app.BehavioralChain, entry
 // processChainForEntry evaluates a single log entry against a single behavioral chain.
 // It manages state transitions (advancing, resetting) and triggers completion handling.
 // It returns true if the chain completed and its `on_match` rule was "stop".
-func processChainForEntry(p *app.Processor, chain *app.BehavioralChain, entry *app.LogEntry, currentActivity *store.ActorActivity, previousRequestTime time.Time) bool {
+func processChainForEntry(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry, currentActivity *store.ActorActivity, previousRequestTime time.Time) bool {
 	// If GetActor returns an empty actor, it's a mismatch for this chain (e.g., wrong IP version).
 	if GetActor(chain, entry).IPInfo.Address == "" {
 		return false

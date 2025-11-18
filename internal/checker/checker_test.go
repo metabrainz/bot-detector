@@ -48,7 +48,7 @@ func TestCheckChains_BlockAction(t *testing.T) {
 				MatchKey:      "ip_ua",
 				Action:        "block",
 				BlockDuration: blockDuration,
-				StepsYAML: []StepDefYAML{
+				StepsYAML: []config.StepDefYAML{
 					{FieldMatches: map[string]interface{}{"Path": "/step/one"}},
 					{FieldMatches: map[string]interface{}{"Path": "/step/two"}},
 				},
@@ -157,7 +157,7 @@ func TestCheckChains_UnknownAction(t *testing.T) {
 				Name:      "UnknownActionChain",
 				MatchKey:  "ip",
 				Action:    "throttle", // An unrecognized action
-				StepsYAML: []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/test"}}},
+				StepsYAML: []config.StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/test"}}},
 			})
 
 			entry := &LogEntry{
@@ -204,7 +204,7 @@ func TestProcessChainForEntry_AlreadyCompleted(t *testing.T) {
 
 	chain := BehavioralChain{
 		Name:  "CompletedChain",
-		Steps: []app.StepDef{{Order: 1}}, // A simple one-step chain
+		Steps: []config.StepDef{{Order: 1}}, // A simple one-step chain
 	}
 
 	// Create an activity state where the chain is already completed.
@@ -267,7 +267,7 @@ func TestCheckChains_TimeDelayReset(t *testing.T) {
 				Name:      "TimeResetChain",
 				MatchKey:  "ip",
 				Action:    "log",
-				StepsYAML: []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/step/one"}}, tt.step2YAML},
+				StepsYAML: []config.StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/step/one"}}, tt.step2YAML},
 			})
 
 			// --- Act ---
@@ -298,7 +298,7 @@ func TestCheckChains_LogAction(t *testing.T) {
 		MatchKey:      "ip",
 		Action:        "log", // ACTION: log
 		BlockDuration: 0,
-		StepsYAML: []StepDefYAML{
+		StepsYAML: []config.StepDefYAML{
 			{FieldMatches: map[string]interface{}{"Path": "/step/one"}, MaxDelay: "5s"},
 			{FieldMatches: map[string]interface{}{"Path": "/step/two"}, MaxDelay: "5s"},
 		},
@@ -334,7 +334,7 @@ func TestCheckChains_BlockExpiration(t *testing.T) {
 		MatchKey:      "ip",
 		Action:        "block",
 		BlockDuration: 1 * time.Minute,
-		StepsYAML:     []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/test"}}},
+		StepsYAML:     []config.StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/test"}}},
 	})
 
 	// Manually create a pre-existing, EXPIRED block state.
@@ -382,7 +382,7 @@ func TestCheckChains_IPVersionMismatch(t *testing.T) {
 				Name:      "VersionMismatchChain",
 				MatchKey:  tt.chainMatchKey,
 				Action:    "log",
-				StepsYAML: []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/test"}}},
+				StepsYAML: []config.StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/test"}}},
 			})
 
 			// --- Act ---
@@ -413,7 +413,7 @@ func TestCheckChains_IPAndUABlockOptimization(t *testing.T) {
 		MatchKey:      "ip_ua",
 		Action:        "block",
 		BlockDuration: 5 * time.Minute,
-		StepsYAML:     []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/trigger"}}},
+		StepsYAML:     []config.StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/trigger"}}},
 	})
 
 	// --- Act ---
@@ -446,7 +446,7 @@ func TestCheckChains_OnMatchStop(t *testing.T) {
 		MatchKey:  "ip",
 		Action:    "log",
 		OnMatch:   "stop",
-		StepsYAML: []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/trigger"}}},
+		StepsYAML: []config.StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/trigger"}}},
 	})
 
 	// Chain 2: This chain also matches the same entry but should be skipped.
@@ -454,7 +454,7 @@ func TestCheckChains_OnMatchStop(t *testing.T) {
 		Name:      "ShouldBeSkippedChain",
 		MatchKey:  "ip",
 		Action:    "log",
-		StepsYAML: []StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/trigger"}}},
+		StepsYAML: []config.StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/trigger"}}},
 	})
 
 	// --- Act ---
@@ -585,7 +585,7 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		FilePath:           "",
 	}
 	matcher2, _ := compileStringMatcher(ctx2, "/step2")
-	chain.Steps = []app.StepDef{
+	chain.Steps = []config.StepDef{
 		{Order: 1, MinTimeSinceLastHit: 2 * time.Second, Matchers: []struct {
 			Matcher   fieldMatcher
 			FieldName string
@@ -596,7 +596,7 @@ func TestCheckChains_TimeRules(t *testing.T) {
 		}{{Matcher: matcher2, FieldName: "Path"}}},
 	}
 
-	chains := []app.BehavioralChain{chain}
+	chains := []config.BehavioralChain{chain}
 
 	baseProcessor := func() *app.Processor {
 		return newTestProcessor(&AppConfig{}, chains)
@@ -896,7 +896,7 @@ func TestCheckChains_OutOfOrder(t *testing.T) {
 				MatchKey: "ip",
 				Action:   "log",
 			}
-			chains := []app.BehavioralChain{chain}
+			chains := []config.BehavioralChain{chain}
 
 			processor := newTestProcessor(&AppConfig{
 				Parser: ParserConfig{

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/metrics"
 	"bot-detector/internal/processor"
@@ -56,7 +56,7 @@ func newRotationTestHarness(t *testing.T) *rotationTestHarness {
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		Metrics:       metrics.NewMetrics(),
 		ConfigMutex:   &sync.RWMutex{},
-		Chains:        []app.BehavioralChain{},
+		Chains:        []config.BehavioralChain{},
 		Config: &AppConfig{
 			Application: ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,

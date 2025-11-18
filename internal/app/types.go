@@ -2,17 +2,15 @@ package app
 
 import (
 	"bot-detector/internal/blocker"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
-	"bot-detector/internal/utils"
-	"fmt"
 	"io"
 	"os"
 	"regexp"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -69,7 +67,7 @@ type Processor struct {
 	Blocker       blocker.Blocker
 	ConfigMutex   *sync.RWMutex
 	Metrics       *metrics.Metrics
-	Chains        []BehavioralChain
+	Chains        []config.BehavioralChain
 	Config        *config.AppConfig
 	DryRun        bool
 	EnableMetrics bool
@@ -108,104 +106,3 @@ type Processor struct {
 // AppConfig holds all the configuration state that can be reloaded from YAML.
 
 // Config types moved to internal/config/types.go
-
-type StepDefYAML struct {
-	Order               int
-	FieldMatches        map[string]interface{} `yaml:"field_matches"`
-	MaxDelay            string                 `yaml:"max_delay"`
-	MinDelay            string                 `yaml:"min_delay"`
-	MinTimeSinceLastHit string                 `yaml:"min_time_since_last_hit"`
-	Repeated            int                    `yaml:"repeated"`
-}
-
-type BehavioralChainYAML struct {
-	Name          string        `yaml:"name"`
-	Action        string        `yaml:"action"`
-	BlockDuration string        `yaml:"block_duration"`
-	MatchKey      string        `yaml:"match_key"`
-	OnMatch       string        `yaml:"on_match"`
-	Steps         []StepDefYAML `yaml:"steps"`
-}
-
-// --- RUNTIME DATA STRUCTURES ---
-
-type LogEntry struct {
-	Timestamp  time.Time // Actual time of the request (parsed from log, not time.Now()).
-	IPInfo     utils.IPInfo
-	Method     string
-	Path       string
-	Protocol   string
-	Referrer   string
-	StatusCode int
-	Size       int
-	UserAgent  string
-	VHost      string
-}
-
-// Actor is a comparable struct used as the key for the ActivityStore map. It represents
-// the unique entity being tracked (e.g., an IP address or an IP+UserAgent combination).
-type Actor struct {
-	IPInfo utils.IPInfo
-	UA     string // UserAgent. Empty string if tracking is IP-only.
-}
-
-// String provides a clean, readable representation of the Actor for logging.
-func (a Actor) String() string {
-	// Use a separator that is unlikely to appear in a User-Agent string.
-	if a.UA != "" {
-		return fmt.Sprintf("%s | %s", a.IPInfo.Address, a.UA)
-	}
-	return a.IPInfo.Address
-}
-
-// SkipInfo holds structured information about why an actor was skipped.
-type SkipInfo struct {
-	Type   utils.SkipType
-	Source string // The name of the good_actor rule or the blocking chain.
-}
-
-// StepState holds the progress of an actor within a single behavioral chain.
-type StepState struct {
-	CurrentStep   int
-	LastMatchTime time.Time
-}
-
-// StepDef holds the compiled definition of a single step in a behavioral chain.
-type StepDef struct {
-	Order    int
-	Matchers []struct {
-		Matcher   fieldMatcher
-		FieldName string
-	} // Changed: Now stores matcher and its associated field name.
-	MaxDelayDuration    time.Duration
-	MinDelayDuration    time.Duration
-	MinTimeSinceLastHit time.Duration
-}
-
-// BehavioralChain holds the compiled definition of a single behavioral chain.
-type BehavioralChain struct {
-	Name                     string
-	Action                   string
-	BlockDuration            time.Duration
-	BlockDurationStr         string        // The original string representation of the duration (e.g., "1w")
-	UsesDefaultBlockDuration bool          // True if the chain is using the global default_block_duration.
-	MatchKey                 string        // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
-	OnMatch                  string        // "stop" to halt processing of other chains on match.
-	StepsYAML                []StepDefYAML // Store original YAML for accurate comparison
-	Steps                    []StepDef
-	MetricsHitsCounter       *atomic.Int64 // Counter for hits on this specific chain.
-	MetricsResetCounter      *atomic.Int64 // Counter for resets of this specific chain.
-	MetricsCounter           *atomic.Int64 // Counter for this specific chain.
-	FieldMatchCounts         *sync.Map     // Counter for field matches within this chain (key: fieldName, value: *atomic.Int64).
-}
-
-// GoodActorDef represents a single compiled definition from the good_actors config.
-
-type GoodActorDef struct {
-	Name string
-
-	IPMatchers []fieldMatcher // A list of matchers for the IP field (OR logic within the list)
-
-	UAMatchers []fieldMatcher // A list of matchers for the UserAgent field (OR logic within the list)
-
-}

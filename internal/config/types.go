@@ -5,6 +5,8 @@ import (
 	"bot-detector/internal/types"
 	"os"
 	"regexp"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -155,5 +157,41 @@ type BehavioralChainYAML struct {
 }
 
 // --- RUNTIME DATA STRUCTURES ---
+type StepDef struct {
+	Order    int
+	Matchers []struct {
+		Matcher   fieldMatcher
+		FieldName string
+	} // Changed: Now stores matcher and its associated field name.
+	MaxDelayDuration    time.Duration
+	MinDelayDuration    time.Duration
+	MinTimeSinceLastHit time.Duration
+}
 
-type LogEntry struct {
+// BehavioralChain holds the compiled definition of a single behavioral chain.
+type BehavioralChain struct {
+	Name                     string
+	Action                   string
+	BlockDuration            time.Duration
+	BlockDurationStr         string               // The original string representation of the duration (e.g., "1w")
+	UsesDefaultBlockDuration bool                 // True if the chain is using the global default_block_duration.
+	MatchKey                 string               // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
+	OnMatch                  string               // "stop" to halt processing of other chains on match.
+	StepsYAML                []config.StepDefYAML // Store original YAML for accurate comparison
+	Steps                    []config.StepDef
+	MetricsHitsCounter       *atomic.Int64 // Counter for hits on this specific chain.
+	MetricsResetCounter      *atomic.Int64 // Counter for resets of this specific chain.
+	MetricsCounter           *atomic.Int64 // Counter for this specific chain.
+	FieldMatchCounts         *sync.Map     // Counter for field matches within this chain (key: fieldName, value: *atomic.Int64).
+}
+
+// GoodActorDef represents a single compiled definition from the good_actors config.
+
+type GoodActorDef struct {
+	Name string
+
+	IPMatchers []fieldMatcher // A list of matchers for the IP field (OR logic within the list)
+
+	UAMatchers []fieldMatcher // A list of matchers for the UserAgent field (OR logic within the list)
+
+}
