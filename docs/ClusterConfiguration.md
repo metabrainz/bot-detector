@@ -1,9 +1,20 @@
-> **Note:** This document outlines a proposed design and is currently a Work in Progress.
-FIXME: We need to pass a config directory on the command line rather than a config file
-
 # Multi-Instance Cluster Architecture
 
 This document describes the Leader/Follower architecture for `bot-detector` clusters. This model enables configuration synchronization and metrics aggregation while maintaining independent threat detection and execution on each node.
+
+## Implementation Status
+
+The cluster implementation is **complete and operational** as of Phases 1-7:
+
+- ✅ **Configuration synchronization**: Leader serves config via `/config/archive`, followers poll and hot-reload
+- ✅ **Bootstrap mode**: New followers can start with only a `FOLLOW` file and fetch initial config
+- ✅ **Metrics collection**: Leader polls followers via `/cluster/metrics` at configurable intervals
+- ✅ **Metrics aggregation**: Cluster-wide metrics available via `/cluster/metrics/aggregate`
+- ✅ **Node health tracking**: Automatic health status determination (healthy/stale/error)
+- ✅ **Dynamic role changes**: Nodes can transition between leader/follower without restart
+- ✅ **FOLLOW file mechanism**: Role designation via presence/absence of FOLLOW file
+
+**Future enhancements** (Phases 8-12) include retry logic with exponential backoff, HTTPS support, comprehensive integration tests, and optional features. See `work_in_progress/cluster2.md` for detailed planning.
 
 ## Guiding Principles
 
@@ -305,32 +316,33 @@ The following HTTP endpoints are used for cluster coordination:
 
 | Endpoint | Method | Purpose | Used By |
 |----------|--------|---------|---------|
-| `/config/archive` | HEAD | Check `Last-Modified` and checksum headers (e.g., `ETag`) for config version | Followers (poll) |
-| `/config/archive` | GET | Serves the current configuration as a `.tar.gz` archive with checksum header | Followers (download) |
-| `/api/v1/metrics/cluster` | GET | Returns aggregated metrics from all followers | Admins (dashboard) |
+| `/config/archive` | HEAD | Check `Last-Modified` header for config version | Followers (poll) |
+| `/config/archive` | GET | Serves the current configuration as a `.tar.gz` archive | Followers (download) |
+| `/cluster/metrics/aggregate` | GET | Returns aggregated metrics from all followers | Admins (dashboard) |
 
 ### Follower Endpoints
 
 | Endpoint | Method | Purpose | Used By |
 |----------|--------|---------|---------|
-| `/api/v1/metrics` | GET | Returns local instance metrics as JSON (includes node `name` for identification) | Leader (collection) |
-| `/api/v1/status` | GET | Returns instance status (role, uptime, version, node name) | Monitoring |
+| `/cluster/metrics` | GET | Returns local instance metrics as JSON (includes node `name` for identification) | Leader (collection) |
 
 ### Shared Endpoints (All Instances)
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/metrics` | GET | Prometheus-compatible metrics (local instance) |
-| `/health` | GET | Health check endpoint |
+| Endpoint | Method | Purpose | Used By |
+|----------|--------|---------|---------|
+| `/cluster/status` | GET | Returns instance status (role, name, address, leader) | Monitoring |
+| `/` or `/stats` | GET | HTML metrics report | Admins (browser) |
+| `/stats/steps` | GET | Plain text step execution counts | Admins (monitoring) |
+| `/config` | GET | Raw YAML configuration content | Admins (inspection) |
 
 ---
 
 ## Metrics Aggregation
 
-The leader periodically **pulls** metrics from all followers to provide cluster-wide visibility. Each node stores its own metrics locally and exposes them via the `/api/v1/metrics` endpoint. The leader queries all followers at regular intervals (configured via `metrics_report_interval`, default: 10s).
+The leader periodically **pulls** metrics from all followers to provide cluster-wide visibility. Each node stores its own metrics locally and exposes them via the `/cluster/metrics` endpoint. The leader queries all followers at regular intervals (configured via `metrics_report_interval`, default: 10s).
 
 **Metrics Collection Model:**
-- **Pull-based**: Leader actively queries followers via `GET /api/v1/metrics`
+- **Pull-based**: Leader actively queries followers via `GET /cluster/metrics`
 - **Local storage**: Each node maintains its own metrics in memory
 - **No push**: Followers do not proactively send metrics to the leader
 - **Periodic refresh**: Leader updates the cluster dashboard on each poll cycle
@@ -345,12 +357,12 @@ The leader periodically **pulls** metrics from all followers to provide cluster-
 - Good actors skipped
 
 **Leader Aggregation:**
-- Queries each follower listed in `cluster.nodes` via `GET /api/v1/metrics`
+- Queries each follower listed in `cluster.nodes` via `GET /cluster/metrics`
 - Each response includes the node's `name` field for identification
 - Sums counters across all instances
-- Merges top-N lists (e.g., most blocked IPs cluster-wide)
-- Provides per-instance breakdown
-- Tracks follower health (last seen, response time, poll failures)
+- Provides per-instance breakdown with health status (healthy/stale/error)
+- Tracks follower health (last collected time, consecutive errors)
+- Available via `GET /cluster/metrics/aggregate` endpoint
 
 **Example Cluster Dashboard View:**
 ```
