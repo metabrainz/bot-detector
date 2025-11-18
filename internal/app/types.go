@@ -2,6 +2,7 @@ package app
 
 import (
 	"bot-detector/internal/blocker"
+	"bot-detector/internal/cluster"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
@@ -92,10 +93,11 @@ type Processor struct {
 	// ExitOnEOF is a flag to indicate if the tailer should exit when it reaches the end of the file.
 	ExitOnEOF bool
 	// Cluster fields
-	NodeRole          string // "leader" or "follower"
-	NodeName          string // Node name from cluster config (empty if not configured)
-	NodeAddress       string // Node address from cluster config (empty if not configured)
-	NodeLeaderAddress string // Leader address (only set for followers)
+	Cluster           *cluster.ClusterConfig // Cluster configuration (nil if clustering not enabled)
+	NodeRole          string                 // "leader" or "follower"
+	NodeName          string                 // Node name from cluster config (empty if not configured)
+	NodeAddress       string                 // Node address from cluster config (empty if not configured)
+	NodeLeaderAddress string                 // Leader address (only set for followers)
 }
 
 // GetTimestampFormat returns the timestamp format from the config.
