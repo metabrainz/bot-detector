@@ -1,11 +1,16 @@
 package cluster
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"bot-detector/internal/logging"
@@ -82,14 +87,14 @@ func (cp *ConfigPoller) Start() {
 	}
 }
 
-// poll fetches the configuration from the leader and updates local config if needed.
+// poll fetches the configuration archive from the leader and updates local config if needed.
 func (cp *ConfigPoller) poll() {
-	configURL := fmt.Sprintf("%s/config", cp.leaderAddress)
+	archiveURL := fmt.Sprintf("%s/config/archive", cp.leaderAddress)
 
 	// Create request
-	req, err := http.NewRequest("GET", configURL, nil)
+	req, err := http.NewRequest("GET", archiveURL, nil)
 	if err != nil {
-		cp.logFunc(logging.LevelError, "CLUSTER", "Failed to create config request: %v", err)
+		cp.logFunc(logging.LevelError, "CLUSTER", "Failed to create archive request: %v", err)
 		return
 	}
 
@@ -101,7 +106,7 @@ func (cp *ConfigPoller) poll() {
 	// Make request
 	resp, err := cp.httpClient.Do(req)
 	if err != nil {
-		cp.logFunc(logging.LevelError, "CLUSTER", "Failed to fetch config from leader: %v", err)
+		cp.logFunc(logging.LevelError, "CLUSTER", "Failed to fetch archive from leader: %v", err)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -120,7 +125,7 @@ func (cp *ConfigPoller) poll() {
 	// Get Last-Modified header
 	lastModifiedStr := resp.Header.Get("Last-Modified")
 	if lastModifiedStr == "" {
-		cp.logFunc(logging.LevelWarning, "CLUSTER", "Leader config response missing Last-Modified header")
+		cp.logFunc(logging.LevelWarning, "CLUSTER", "Leader archive response missing Last-Modified header")
 		return
 	}
 
@@ -130,47 +135,48 @@ func (cp *ConfigPoller) poll() {
 		return
 	}
 
-	// Read config content
-	configContent, err := io.ReadAll(resp.Body)
+	// Read archive content
+	archiveData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		cp.logFunc(logging.LevelError, "CLUSTER", "Failed to read config from leader: %v", err)
+		cp.logFunc(logging.LevelError, "CLUSTER", "Failed to read archive from leader: %v", err)
 		return
 	}
 
 	// Check if content has actually changed (not just mod time)
-	if string(configContent) == string(cp.lastConfigContent) {
-		cp.logFunc(logging.LevelDebug, "CLUSTER", "Config content unchanged despite different mod time")
+	if bytes.Equal(archiveData, cp.lastConfigContent) {
+		cp.logFunc(logging.LevelDebug, "CLUSTER", "Archive content unchanged despite different mod time")
 		cp.lastModTime = lastModified
 		return
 	}
 
-	// Write new config to temporary file first
-	tempPath := cp.configPath + ".tmp"
-	if err := os.WriteFile(tempPath, configContent, 0600); err != nil {
-		cp.logFunc(logging.LevelError, "CLUSTER", "Failed to write temporary config file: %v", err)
-		return
+	// Get ETag for checksum verification
+	etag := resp.Header.Get("ETag")
+
+	// Backup current config and dependencies
+	configDir := filepath.Dir(cp.configPath)
+	backupDir := configDir + ".backup"
+	if err := os.RemoveAll(backupDir); err != nil && !os.IsNotExist(err) {
+		cp.logFunc(logging.LevelWarning, "CLUSTER", "Failed to remove old backup: %v", err)
+	}
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		cp.logFunc(logging.LevelWarning, "CLUSTER", "Failed to create backup directory: %v", err)
+	} else {
+		// Copy config directory contents to backup (simple approach - copy only config.yaml)
+		if err := copyFile(cp.configPath, filepath.Join(backupDir, "config.yaml")); err != nil {
+			cp.logFunc(logging.LevelWarning, "CLUSTER", "Failed to create config backup: %v", err)
+		}
 	}
 
-	// NOTE: We skip validation here to avoid import cycles.
-	// The config will be validated when it's loaded by the main application.
-	// If it's invalid, the reload will fail and the old config will remain in use.
-
-	// Backup current config
-	backupPath := cp.configPath + ".backup"
-	if err := copyFile(cp.configPath, backupPath); err != nil {
-		cp.logFunc(logging.LevelWarning, "CLUSTER", "Failed to create config backup: %v", err)
-	}
-
-	// Replace config file atomically
-	if err := os.Rename(tempPath, cp.configPath); err != nil {
-		cp.logFunc(logging.LevelError, "CLUSTER", "Failed to replace config file: %v", err)
-		_ = os.Remove(tempPath)
+	// Extract archive to config directory
+	// This will overwrite existing files but preserve FOLLOW file
+	if err := extractTarGz(archiveData, configDir, etag, cp.logFunc); err != nil {
+		cp.logFunc(logging.LevelError, "CLUSTER", "Failed to extract config archive: %v", err)
 		return
 	}
 
 	// Update tracking variables
 	cp.lastModTime = lastModified
-	cp.lastConfigContent = configContent
+	cp.lastConfigContent = archiveData
 
 	cp.logFunc(logging.LevelInfo, "CLUSTER", "Updated config from leader (mod time: %s)", lastModified.Format(time.RFC1123))
 
@@ -246,11 +252,11 @@ func Bootstrap(opts BootstrapOptions) error {
 		Timeout: opts.HTTPTimeout,
 	}
 
-	// Fetch config from leader
-	configURL := fmt.Sprintf("%s/config", opts.LeaderAddress)
-	resp, err := client.Get(configURL)
+	// Fetch config archive from leader
+	archiveURL := fmt.Sprintf("%s/config/archive", opts.LeaderAddress)
+	resp, err := client.Get(archiveURL)
 	if err != nil {
-		return fmt.Errorf("failed to fetch config from leader: %w", err)
+		return fmt.Errorf("failed to fetch config archive from leader: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -258,11 +264,14 @@ func Bootstrap(opts BootstrapOptions) error {
 		return fmt.Errorf("leader returned error status %d", resp.StatusCode)
 	}
 
-	// Read config content
-	configContent, err := io.ReadAll(resp.Body)
+	// Read archive content
+	archiveData, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read config from leader: %w", err)
+		return fmt.Errorf("failed to read config archive from leader: %w", err)
 	}
+
+	// Get ETag for checksum verification
+	etag := resp.Header.Get("ETag")
 
 	// Ensure config directory exists
 	configDir := filepath.Dir(opts.ConfigPath)
@@ -270,11 +279,89 @@ func Bootstrap(opts BootstrapOptions) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Write config to file
-	if err := os.WriteFile(opts.ConfigPath, configContent, 0600); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
+	// Extract archive to config directory
+	if err := extractTarGz(archiveData, configDir, etag, opts.LogFunc); err != nil {
+		return fmt.Errorf("failed to extract config archive: %w", err)
 	}
 
-	opts.LogFunc(logging.LevelInfo, "CLUSTER", "Successfully bootstrapped config from leader (%d bytes)", len(configContent))
+	opts.LogFunc(logging.LevelInfo, "CLUSTER", "Successfully bootstrapped config from leader (%d bytes)", len(archiveData))
+	return nil
+}
+
+// extractTarGz extracts a tar.gz archive to the specified directory.
+// It excludes the FOLLOW file for safety (to prevent overwriting role determination).
+// Returns the ETag (checksum) if present in the headers.
+func extractTarGz(archiveData []byte, targetDir string, etag string, logFunc LogFunc) error {
+	// Verify checksum if ETag is provided
+	if etag != "" {
+		// Remove quotes from ETag if present
+		etag = strings.Trim(etag, "\"")
+
+		// Compute SHA256 of archive data
+		hash := sha256.Sum256(archiveData)
+		computedHash := fmt.Sprintf("%x", hash)
+
+		if computedHash != etag {
+			logFunc(logging.LevelWarning, "CLUSTER", "Archive checksum mismatch (expected: %s, got: %s)", etag, computedHash)
+		} else {
+			logFunc(logging.LevelDebug, "CLUSTER", "Archive checksum verified: %s", etag)
+		}
+	}
+
+	// Create gzip reader
+	gzReader, err := gzip.NewReader(bytes.NewReader(archiveData))
+	if err != nil {
+		return fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	defer gzReader.Close()
+
+	// Create tar reader
+	tarReader := tar.NewReader(gzReader)
+
+	// Extract files
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read tar header: %w", err)
+		}
+
+		// Skip FOLLOW file for safety
+		if header.Name == "FOLLOW" || strings.HasSuffix(header.Name, "/FOLLOW") {
+			logFunc(logging.LevelDebug, "CLUSTER", "Skipping FOLLOW file in archive")
+			continue
+		}
+
+		// Only process regular files
+		if header.Typeflag != tar.TypeReg {
+			continue
+		}
+
+		// Build target path
+		targetPath := filepath.Join(targetDir, header.Name)
+
+		// Ensure target directory exists
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			return fmt.Errorf("failed to create directory for %s: %w", targetPath, err)
+		}
+
+		// Create target file
+		outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
+		if err != nil {
+			return fmt.Errorf("failed to create file %s: %w", targetPath, err)
+		}
+
+		// Copy file contents
+		if _, err := io.Copy(outFile, tarReader); err != nil {
+			outFile.Close()
+			return fmt.Errorf("failed to write file %s: %w", targetPath, err)
+		}
+
+		outFile.Close()
+		logFunc(logging.LevelDebug, "CLUSTER", "Extracted: %s", header.Name)
+	}
+
 	return nil
 }
