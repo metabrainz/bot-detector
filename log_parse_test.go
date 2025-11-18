@@ -405,7 +405,7 @@ func TestProcessLogLineInternal_ParseError(t *testing.T) {
 func TestGetMatchValue_UnknownField(t *testing.T) {
 	entry := &LogEntry{}
 
-	_, _, err := checker.GetMatchValue("UnknownField", entry)
+	_, _, err := app.GetMatchValue("UnknownField", entry)
 
 	if err == nil {
 		t.Fatal("Expected an error for unknown field, but got nil")
@@ -444,7 +444,7 @@ func TestGetMatchValue_Success(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.fieldName, func(t *testing.T) {
-			value, fieldType, err := checker.GetMatchValue(tc.fieldName, entry)
+			value, fieldType, err := app.GetMatchValue(tc.fieldName, entry)
 			if err != nil {
 				t.Fatalf("Expected no error, but got: %v", err)
 			}

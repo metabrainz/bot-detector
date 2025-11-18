@@ -7,6 +7,8 @@ import (
 	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
+	"bot-detector/internal/utils"
+	"fmt"
 	"io"
 	"os"
 	"regexp"
@@ -61,6 +63,21 @@ var FieldNameCanonicalMap = map[string]string{
 
 // Processor holds all necessary dependencies and state for log processing,
 // making it easy to mock/stub external calls and manage state in tests.
+
+// LogEntry represents a parsed log entry with all its fields.
+type LogEntry struct {
+	Timestamp  time.Time
+	IPInfo     utils.IPInfo
+	Method     string
+	Path       string
+	Protocol   string
+	Referrer   string
+	StatusCode int
+	Size       int
+	UserAgent  string
+	VHost      string
+}
+
 type Processor struct {
 	ActivityMutex *sync.RWMutex
 	ActivityStore map[store.Actor]*store.ActorActivity
@@ -106,3 +123,44 @@ type Processor struct {
 // AppConfig holds all the configuration state that can be reloaded from YAML.
 
 // Config types moved to internal/config/types.go
+
+// GetMatchValue returns the value and type of a field from a LogEntry.
+func GetMatchValue(fieldName string, entry *LogEntry) (interface{}, FieldType, error) {
+	// If entry is nil, this is a compile-time check for the field's type.
+	if entry == nil {
+		entry = &LogEntry{} // Use a zero-value entry to get the type.
+	}
+
+	switch fieldName {
+	case "IP":
+		return entry.IPInfo.Address, StringField, nil
+	case "Path":
+		return entry.Path, StringField, nil
+	case "Method":
+		return entry.Method, StringField, nil
+	case "Protocol":
+		return entry.Protocol, StringField, nil
+	case "UserAgent":
+		return entry.UserAgent, StringField, nil
+	case "Referrer":
+		return entry.Referrer, StringField, nil
+	case "StatusCode":
+		return entry.StatusCode, IntField, nil
+	case "Size":
+		return entry.Size, IntField, nil
+	case "VHost":
+		return entry.VHost, StringField, nil
+	default:
+		return nil, UnsupportedField, fmt.Errorf("unknown field: '%s'", fieldName)
+	}
+}
+
+// GetMatchValueIfType retrieves a field's value only if it matches the expected type.
+
+func GetMatchValueIfType(fieldName string, entry *LogEntry, expectedType FieldType) interface{} {
+	value, actualType, err := GetMatchValue(fieldName, entry) //nolint:errcheck
+	if err != nil || actualType != expectedType {
+		return nil
+	}
+	return value
+}

@@ -52,45 +52,6 @@ func GetActor(chain *config.BehavioralChain, entry *app.LogEntry) Actor {
 }
 
 // GetMatchValue retrieves the field value from a LogEntry based on the field name.
-func GetMatchValue(fieldName string, entry *app.LogEntry) (interface{}, FieldType, error) {
-	// If entry is nil, this is a compile-time check for the field's type.
-	if entry == nil {
-		entry = &LogEntry{} // Use a zero-value entry to get the type.
-	}
-
-	switch fieldName {
-	case "IP":
-		return entry.IPInfo.Address, StringField, nil
-	case "Path":
-		return entry.Path, StringField, nil
-	case "Method":
-		return entry.Method, StringField, nil
-	case "Protocol":
-		return entry.Protocol, StringField, nil
-	case "UserAgent":
-		return entry.UserAgent, StringField, nil
-	case "Referrer":
-		return entry.Referrer, StringField, nil
-	case "StatusCode":
-		return entry.StatusCode, IntField, nil
-	case "Size":
-		return entry.Size, IntField, nil
-	case "VHost":
-		return entry.VHost, StringField, nil
-	default:
-		return nil, UnsupportedField, fmt.Errorf("unknown field: '%s'", fieldName)
-	}
-}
-
-// GetMatchValueIfType retrieves a field's value only if it matches the expected type.
-// It returns the value, or nil if the type doesn't match or an error occurs.
-func GetMatchValueIfType(fieldName string, entry *app.LogEntry, expectedType FieldType) interface{} {
-	value, actualType, err := GetMatchValue(fieldName, entry) //nolint:errcheck
-	if err != nil || actualType != expectedType {
-		return nil
-	}
-	return value
-}
 
 // preCheckActivity performs initial checks on an actor before processing against chains.
 // It returns the relevant ActorActivity and a boolean indicating if further processing should be skipped.
