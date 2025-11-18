@@ -47,4 +47,7 @@ type Provider interface {
 
 	// GetNodeStatus returns the cluster status of this node (role, name, address, leader).
 	GetNodeStatus() NodeStatus
+
+	// GetMetricsSnapshot returns a JSON-serializable snapshot of current metrics.
+	GetMetricsSnapshot() MetricsSnapshot
 }

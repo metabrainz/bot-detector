@@ -104,6 +104,18 @@ func (m *mockProvider) GetNodeStatus() NodeStatus {
 	}
 }
 
+func (m *mockProvider) GetMetricsSnapshot() MetricsSnapshot {
+	return MetricsSnapshot{
+		Timestamp: time.Now(),
+		ProcessingStats: ProcessingStats{
+			LinesProcessed: 100,
+			ValidHits:      10,
+		},
+		ActorStats: ActorStats{},
+		ChainStats: ChainStats{},
+	}
+}
+
 // TestServer_StartAndShutdown verifies the full lifecycle of the stats server.
 func TestServer_StartAndShutdown(t *testing.T) {
 	// --- Setup ---

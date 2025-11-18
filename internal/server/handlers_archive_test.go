@@ -32,6 +32,14 @@ func (m *MockProvider) GetConfigForArchive() ([]byte, time.Time, map[string]*typ
 func (m *MockProvider) GetNodeStatus() NodeStatus {
 	return NodeStatus{Role: "leader", Name: "", Address: "", LeaderAddress: ""}
 }
+func (m *MockProvider) GetMetricsSnapshot() MetricsSnapshot {
+	return MetricsSnapshot{
+		Timestamp:       time.Now(),
+		ProcessingStats: ProcessingStats{},
+		ActorStats:      ActorStats{},
+		ChainStats:      ChainStats{},
+	}
+}
 
 // MockFileDependency and MockProvider for testing
 type MockFileDependency struct {

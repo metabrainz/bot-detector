@@ -60,6 +60,130 @@ func (p *Processor) GetNodeStatus() server.NodeStatus {
 	}
 }
 
+// GetMetricsSnapshot returns a JSON-serializable snapshot of current metrics.
+func (p *Processor) GetMetricsSnapshot() server.MetricsSnapshot {
+	elapsed := time.Since(p.StartTime).Seconds()
+	linesProcessed := p.Metrics.LinesProcessed.Load()
+
+	var linesPerSecond float64
+	if elapsed > 0 {
+		linesPerSecond = float64(linesProcessed) / elapsed
+	}
+
+	// Calculate per-chain metrics first so we can compute totals
+	perChainMetrics := extractPerChainMetrics(
+		p.Metrics.ChainsHits,
+		p.Metrics.ChainsCompleted,
+		p.Metrics.ChainsReset,
+	)
+
+	// Calculate total hits, completed, and resets from per-chain metrics
+	var totalHits, totalCompleted, totalResets int64
+	for _, metric := range perChainMetrics {
+		totalHits += metric.Hits
+		totalCompleted += metric.Completed
+		totalResets += metric.Resets
+	}
+
+	snapshot := server.MetricsSnapshot{
+		Timestamp: time.Now(),
+		ProcessingStats: server.ProcessingStats{
+			LinesProcessed: linesProcessed,
+			ValidHits:      p.Metrics.ValidHits.Load(),
+			ParseErrors:    p.Metrics.ParseErrors.Load(),
+			ReorderedLines: p.Metrics.ReorderedEntries.Load(),
+			TimeElapsed:    elapsed,
+			LinesPerSecond: linesPerSecond,
+		},
+		ActorStats: server.ActorStats{
+			GoodActorsSkipped: p.Metrics.GoodActorsSkipped.Load(),
+			ActorsCleaned:     p.Metrics.ActorsCleaned.Load(),
+		},
+		ChainStats: server.ChainStats{
+			ActionsBlock: p.Metrics.BlockActions.Load(),
+			ActionsLog:   p.Metrics.LogActions.Load(),
+			TotalHits:    totalHits,
+			Completed:    totalCompleted,
+			Resets:       totalResets,
+		},
+		GoodActorHits:   extractSyncMapInt64(p.Metrics.GoodActorHits),
+		SkipsByReason:   extractSyncMapInt64(p.Metrics.SkipsByReason),
+		MatchKeyHits:    extractSyncMapInt64(p.Metrics.MatchKeyHits),
+		BlockDurations:  extractSyncMapInt64(p.Metrics.BlockDurations),
+		PerChainMetrics: perChainMetrics,
+	}
+
+	return snapshot
+}
+
+// extractSyncMapInt64 extracts a sync.Map of string->*atomic.Int64 into a regular map.
+func extractSyncMapInt64(m *sync.Map) map[string]int64 {
+	result := make(map[string]int64)
+	if m == nil {
+		return result
+	}
+
+	m.Range(func(key, value interface{}) bool {
+		if k, ok := key.(string); ok {
+			if v, ok := value.(*atomic.Int64); ok {
+				result[k] = v.Load()
+			}
+		}
+		return true
+	})
+
+	return result
+}
+
+// extractPerChainMetrics extracts per-chain metrics from sync.Maps.
+func extractPerChainMetrics(hits, completed, resets *sync.Map) map[string]server.ChainMetric {
+	result := make(map[string]server.ChainMetric)
+
+	// Collect all chain names from hits map
+	chainNames := make(map[string]bool)
+	if hits != nil {
+		hits.Range(func(key, _ interface{}) bool {
+			if k, ok := key.(string); ok {
+				chainNames[k] = true
+			}
+			return true
+		})
+	}
+
+	// Build metrics for each chain
+	for chainName := range chainNames {
+		metric := server.ChainMetric{}
+
+		if hits != nil {
+			if v, ok := hits.Load(chainName); ok {
+				if counter, ok := v.(*atomic.Int64); ok {
+					metric.Hits = counter.Load()
+				}
+			}
+		}
+
+		if completed != nil {
+			if v, ok := completed.Load(chainName); ok {
+				if counter, ok := v.(*atomic.Int64); ok {
+					metric.Completed = counter.Load()
+				}
+			}
+		}
+
+		if resets != nil {
+			if v, ok := resets.Load(chainName); ok {
+				if counter, ok := v.(*atomic.Int64); ok {
+					metric.Resets = counter.Load()
+				}
+			}
+		}
+
+		result[chainName] = metric
+	}
+
+	return result
+}
+
 // --- StoreProvider Interface Implementation ---
 
 func (p *Processor) GetCleanupInterval() time.Duration {
