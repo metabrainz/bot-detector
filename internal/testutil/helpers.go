@@ -1,4 +1,4 @@
-package main
+package testutil
 
 import (
 	"bot-detector/internal/blocker"
