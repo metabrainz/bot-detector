@@ -8,22 +8,11 @@ import (
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
 	"bot-detector/internal/types"
-	"io"
 	"os"
 	"regexp"
 	"sync"
 	"time"
 )
-
-// fileOpener defines the function signature for opening a file, returning our interface.
-type fileOpener func(name string) (fileHandle, error)
-
-// fileHandle defines the interface for file operations needed by the tailer.
-type fileHandle interface {
-	io.ReadSeeker
-	io.Closer
-	Stat() (os.FileInfo, error)
-}
 
 // Type aliases for types moved to internal/types package
 type (

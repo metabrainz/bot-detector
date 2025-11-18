@@ -30,13 +30,6 @@ import (
 	"time"
 )
 
-// signalMap maps common signal names to their syscall values.
-var signalMap = map[string]os.Signal{
-	"HUP":  syscall.SIGHUP,
-	"USR1": syscall.SIGUSR1,
-	"USR2": syscall.SIGUSR2,
-}
-
 // Helper function to extract settings from the BuildInfo struct
 func findSetting(info *debug.BuildInfo, key string) string {
 	for _, setting := range info.Settings {
