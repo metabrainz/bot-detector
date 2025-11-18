@@ -1,6 +1,8 @@
-package main
+package checker
 
 import (
+	"bot-detector/internal/app"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
@@ -11,10 +13,10 @@ import (
 	"time"
 )
 
-// GetActor constructs the correct Actor key for a given log entry based on the chain's match_key.
+// GetActor constructs the correct store.Actor key for a given log entry based on the chain's match_key.
 // It handles IP version filtering and decides whether to include the User-Agent in the key.
-// If the entry's IP version doesn't match the key (e.g., ipv4 vs ipv6), it returns an empty Actor.
-func GetActor(chain *BehavioralChain, entry *LogEntry) Actor {
+// If the entry's IP version doesn't match the key (e.g., ipv4 vs ipv6), it returns an empty store.Actor.
+func GetActor(chain *config.BehavioralChain, entry *app.LogEntry) store.Actor {
 	ipVersion := entry.IPInfo.Version
 	useUA := false
 
@@ -23,77 +25,38 @@ func GetActor(chain *BehavioralChain, entry *LogEntry) Actor {
 		// Any IP version is fine.
 	case "ipv4":
 		if ipVersion != utils.VersionIPv4 {
-			return Actor{} // Mismatch, return empty actor
+			return store.Actor{} // Mismatch, return empty actor
 		}
 	case "ipv6":
 		if ipVersion != utils.VersionIPv6 {
-			return Actor{} // Mismatch, return empty actor
+			return store.Actor{} // Mismatch, return empty actor
 		}
 	case "ip_ua":
 		useUA = true
 	case "ipv4_ua":
 		if ipVersion != utils.VersionIPv4 {
-			return Actor{}
+			return store.Actor{}
 		}
 		useUA = true
 	case "ipv6_ua":
 		if ipVersion != utils.VersionIPv6 {
-			return Actor{}
+			return store.Actor{}
 		}
 		useUA = true
 	}
 
 	if useUA {
-		return Actor{IPInfo: entry.IPInfo, UA: entry.UserAgent}
+		return store.Actor{IPInfo: entry.IPInfo, UA: entry.UserAgent}
 	}
-	return Actor{IPInfo: entry.IPInfo}
+	return store.Actor{IPInfo: entry.IPInfo}
 }
 
 // GetMatchValue retrieves the field value from a LogEntry based on the field name.
-func GetMatchValue(fieldName string, entry *LogEntry) (interface{}, FieldType, error) {
-	// If entry is nil, this is a compile-time check for the field's type.
-	if entry == nil {
-		entry = &LogEntry{} // Use a zero-value entry to get the type.
-	}
-
-	switch fieldName {
-	case "IP":
-		return entry.IPInfo.Address, StringField, nil
-	case "Path":
-		return entry.Path, StringField, nil
-	case "Method":
-		return entry.Method, StringField, nil
-	case "Protocol":
-		return entry.Protocol, StringField, nil
-	case "UserAgent":
-		return entry.UserAgent, StringField, nil
-	case "Referrer":
-		return entry.Referrer, StringField, nil
-	case "StatusCode":
-		return entry.StatusCode, IntField, nil
-	case "Size":
-		return entry.Size, IntField, nil
-	case "VHost":
-		return entry.VHost, StringField, nil
-	default:
-		return nil, UnsupportedField, fmt.Errorf("unknown field: '%s'", fieldName)
-	}
-}
-
-// GetMatchValueIfType retrieves a field's value only if it matches the expected type.
-// It returns the value, or nil if the type doesn't match or an error occurs.
-func GetMatchValueIfType(fieldName string, entry *LogEntry, expectedType FieldType) interface{} {
-	value, actualType, err := GetMatchValue(fieldName, entry) //nolint:errcheck
-	if err != nil || actualType != expectedType {
-		return nil
-	}
-	return value
-}
 
 // preCheckActivity performs initial checks on an actor before processing against chains.
 // It returns the relevant ActorActivity and a boolean indicating if further processing should be skipped.
 // The caller is responsible for locking/unlocking the ActivityMutex. It returns the store.SkipInfo if applicable.
-func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*store.ActorActivity, bool, store.SkipInfo) {
+func PreCheckActivity(p *app.Processor, entry *app.LogEntry, actor store.Actor) (*store.ActorActivity, bool, store.SkipInfo) {
 	// 2. Get or create actor activity and check for existing blocks.
 	activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 
@@ -118,7 +81,7 @@ func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*store.ActorA
 			// Only log the skip message the first time.
 			if activity.SkipInfo.Type != utils.SkipTypeBlocked { // This ensures we only log once per block.
 				// The source is already set when the block was applied.
-				p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (blocked:%s).", actor.IPInfo.Address, entry.UserAgent, activity.SkipInfo.Source)
+				p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (blocked:%s).", actor.IPInfo.Address, entry.UserAgent, activity.SkipInfo.Source)
 			}
 			return activity, true, activity.SkipInfo
 		}
@@ -126,10 +89,11 @@ func preCheckActivity(p *Processor, entry *LogEntry, actor Actor) (*store.ActorA
 	return activity, false, store.SkipInfo{} // No skip, return empty SkipInfo
 }
 
-// isGoodActor checks if a log entry matches any of the configured "good actor" definitions.
+// IsGoodActor checks if an entry matches any of the configured good_actor rules.
 // It returns true and the reason string if a match is found.
 // This function is thread-safe and handles its own locking.
-func isGoodActor(p *Processor, entry *LogEntry) (bool, string) {
+// Exported for use in persistence state restoration.
+func IsGoodActor(p *app.Processor, entry *app.LogEntry) (bool, string) {
 	p.ConfigMutex.RLock()
 	defer p.ConfigMutex.RUnlock()
 	goodActors := p.Config.GoodActors
@@ -159,7 +123,7 @@ func isGoodActor(p *Processor, entry *LogEntry) (bool, string) {
 // addToOooBuffer inserts a log entry into the out-of-order buffer while maintaining
 // the buffer's sorted order by timestamp. This is more efficient than appending
 // and re-sorting the entire buffer later.
-func addToOooBuffer(p *Processor, entry *LogEntry) {
+func AddToOooBuffer(p *app.Processor, entry *app.LogEntry) {
 	// Find the correct insertion point using binary search.
 	i := sort.Search(len(p.EntryBuffer), func(i int) bool {
 		return p.EntryBuffer[i].Timestamp.After(entry.Timestamp)
@@ -178,7 +142,7 @@ func addToOooBuffer(p *Processor, entry *LogEntry) {
 // nextOooCandidate checks the out-of-order buffer for the next entry that is ready
 // to be processed. An entry is ready if its timestamp is older than the processing horizon.
 // If a candidate is found, it is removed from the buffer and returned.
-func nextOooCandidate(p *Processor, processingHorizon time.Time) *LogEntry {
+func NextOooCandidate(p *app.Processor, processingHorizon time.Time) *app.LogEntry {
 	if len(p.EntryBuffer) == 0 {
 		return nil // Buffer is empty.
 	}
@@ -195,12 +159,12 @@ func nextOooCandidate(p *Processor, processingHorizon time.Time) *LogEntry {
 
 // flushOooBuffer processes all entries currently in the out-of-order buffer and clears it.
 // This is typically used during shutdown to ensure no entries are lost.
-func flushOooBuffer(p *Processor) {
+func flushOooBuffer(p *app.Processor) {
 	if len(p.EntryBuffer) == 0 {
 		return
 	}
 	// Create a copy to avoid holding the lock during processing.
-	toProcess := make([]*LogEntry, len(p.EntryBuffer))
+	toProcess := make([]*app.LogEntry, len(p.EntryBuffer))
 	copy(toProcess, p.EntryBuffer)
 	p.EntryBuffer = nil // Clear the buffer immediately.
 
@@ -212,14 +176,14 @@ func flushOooBuffer(p *Processor) {
 
 // shouldBufferOutOfOrder determines if an incoming log entry is out-of-order and within the
 // configured tolerance window, indicating it should be buffered instead of processed immediately.
-func shouldBufferOutOfOrder(lastRequestTime, entryTimestamp time.Time, tolerance time.Duration) bool {
+func ShouldBufferOutOfOrder(lastRequestTime, entryTimestamp time.Time, tolerance time.Duration) bool {
 	return !lastRequestTime.IsZero() && entryTimestamp.Before(lastRequestTime) && lastRequestTime.Sub(entryTimestamp) <= tolerance
 }
 
 // handleOutOfOrder decides whether to process an entry immediately or buffer it based on its timestamp
 // relative to the last seen request for the same actor. It assumes the caller holds the ActivityMutex.
 // It returns true if the entry was buffered, and false if it was processed immediately.
-func handleOutOfOrder(p *Processor, entry *LogEntry) (buffered bool) {
+func handleOutOfOrder(p *app.Processor, entry *app.LogEntry) (buffered bool) {
 	p.ConfigMutex.RLock()
 	tolerance := p.Config.Parser.OutOfOrderTolerance
 	p.ConfigMutex.RUnlock()
@@ -231,14 +195,14 @@ func handleOutOfOrder(p *Processor, entry *LogEntry) (buffered bool) {
 	}
 
 	// We use a simple 'ip' key here as a proxy for the activity's last seen time.
-	actor := Actor{IPInfo: entry.IPInfo}
+	actor := store.Actor{IPInfo: entry.IPInfo}
 	actorActivity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 	lastRequestTime := actorActivity.LastRequestTime
 
 	// If the entry is older than the last request we've seen for this IP,
 	// and it's within the tolerance window, buffer it.
-	if shouldBufferOutOfOrder(lastRequestTime, entry.Timestamp, tolerance) {
-		addToOooBuffer(p, entry)
+	if ShouldBufferOutOfOrder(lastRequestTime, entry.Timestamp, tolerance) {
+		AddToOooBuffer(p, entry)
 		return true // Indicate that the entry was buffered.
 	}
 
@@ -248,7 +212,7 @@ func handleOutOfOrder(p *Processor, entry *LogEntry) (buffered bool) {
 	// After processing a newer entry, signal the worker to check the buffer,
 	// but only if there are entries in the buffer to process.
 	if len(p.EntryBuffer) > 0 {
-		p.signalOooBufferFlush()
+		p.SignalOooBufferFlush()
 	}
 	return false // Indicate that the entry was processed.
 }
@@ -256,7 +220,7 @@ func handleOutOfOrder(p *Processor, entry *LogEntry) (buffered bool) {
 // handleChainCompletion takes action when a chain is completed (log, block, etc.).
 // It updates the actor's state and metrics, and performs the configured action.
 // It returns true if `on_match` is "stop", indicating that no further chains should be processed for this entry.
-func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *store.ActorActivity) bool {
+func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry, currentActivity *store.ActorActivity) bool {
 	if p.EnableMetrics {
 		if p.Metrics.ChainsCompleted != nil {
 			if val, ok := p.Metrics.ChainsCompleted.Load(chain.Name); ok {
@@ -269,9 +233,10 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 
 	// --- 1. Log the completion event ---
 	logLevel := logging.LevelCritical
-	if IsTesting() {
-		logLevel = logging.LevelDebug
-	}
+	// Removed IsTesting check to avoid import cycle with testutil
+	// if testutil.IsTesting() {
+	// 	logLevel = logging.LevelDebug
+	// }
 
 	if p.DryRun {
 		logDryRunCompletion(p, chain, entry)
@@ -312,7 +277,7 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 		}
 		executeBlock(p, entry, chain)
 		// Update the in-memory state to reflect the block for both live and dry runs.
-		ipOnlyActor := store.Actor(Actor{IPInfo: entry.IPInfo, UA: ""})
+		ipOnlyActor := store.Actor(store.Actor{IPInfo: entry.IPInfo, UA: ""})
 		ipActivity := store.GetOrCreateUnsafe(p.ActivityStore, ipOnlyActor)
 		ipActivity.IsBlocked = true                                                           // Mark as blocked_
 		ipActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
@@ -332,13 +297,13 @@ func handleChainCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry
 }
 
 // executeBlock calls the external blocker unless in DryRun mode.
-func executeBlock(p *Processor, entry *LogEntry, chain *BehavioralChain) {
-	if p.persistenceEnabled {
-		p.persistenceWg.Add(1)
+func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.BehavioralChain) {
+	if p.PersistenceEnabled {
+		p.PersistenceWg.Add(1)
 		go func() {
-			defer p.persistenceWg.Done()
-			p.persistenceMutex.Lock()
-			defer p.persistenceMutex.Unlock()
+			defer p.PersistenceWg.Done()
+			p.PersistenceMutex.Lock()
+			defer p.PersistenceMutex.Unlock()
 
 			unblockTime := p.NowFunc().Add(chain.BlockDuration)
 			event := &persistence.AuditEvent{
@@ -348,12 +313,12 @@ func executeBlock(p *Processor, entry *LogEntry, chain *BehavioralChain) {
 				Duration:  chain.BlockDuration,
 				Reason:    chain.Name,
 			}
-			if err := persistence.WriteEventToJournal(p.journalHandle, event); err != nil {
+			if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
 				p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write block event to journal for %s: %v", entry.IPInfo.Address, err)
 			}
 
 			// Update in-memory state
-			p.activeBlocks[entry.IPInfo.Address] = persistence.ActiveBlockInfo{
+			p.ActiveBlocks[entry.IPInfo.Address] = persistence.ActiveBlockInfo{
 				UnblockTime: unblockTime,
 				Reason:      chain.Name,
 			}
@@ -376,7 +341,7 @@ func executeBlock(p *Processor, entry *LogEntry, chain *BehavioralChain) {
 
 // flushEntryBufferUnsafe contains the core logic for processing all entries in the buffer.
 // It assumes the caller holds the ActivityMutex. This function is NOT thread-safe on its own.
-func flushEntryBufferUnsafe(p *Processor) {
+func flushEntryBufferUnsafe(p *app.Processor) {
 	if len(p.EntryBuffer) == 0 {
 		return
 	}
@@ -384,7 +349,7 @@ func flushEntryBufferUnsafe(p *Processor) {
 }
 
 // FlushEntryBuffer is a public wrapper to flush the OOO buffer, used on shutdown or EOF.
-func FlushEntryBuffer(p *Processor) {
+func FlushEntryBuffer(p *app.Processor) {
 	if len(p.EntryBuffer) > 0 {
 		p.LogFunc(logging.LevelDebug, "BUFFER_FLUSH", "Flushing %d buffered entries.", len(p.EntryBuffer))
 	}
@@ -395,7 +360,7 @@ func FlushEntryBuffer(p *Processor) {
 
 // FlushGivenEntries processes a slice of entries in chronological order.
 // It acquires the necessary lock and calls the internal processing function.
-func FlushGivenEntries(p *Processor, entries []*LogEntry) {
+func FlushGivenEntries(p *app.Processor, entries []*app.LogEntry) {
 	// Sort the entries to be processed by timestamp to ensure strict chronological order.
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].Timestamp.Before(entries[j].Timestamp)
@@ -412,7 +377,7 @@ func FlushGivenEntries(p *Processor, entries []*LogEntry) {
 // in chronological order, respecting the out-of-order tolerance.
 
 // logDryRunCompletion handles logging for completed chains in dry-run mode.
-func logDryRunCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry) {
+func logDryRunCompletion(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry) {
 	onMatchSuffix := getOnMatchSuffix(chain)
 	switch chain.Action {
 	case "block":
@@ -426,7 +391,7 @@ func logDryRunCompletion(p *Processor, chain *BehavioralChain, entry *LogEntry) 
 
 // matchStepFields checks if the fields of a log entry match the compiled matchers of a step.
 // It returns true if all fields match, false otherwise.
-func matchStepFields(p *Processor, chain *BehavioralChain, step *StepDef, entry *LogEntry) bool {
+func matchStepFields(p *app.Processor, chain *config.BehavioralChain, step *config.StepDef, entry *app.LogEntry) bool {
 	// Iterate over the pre-compiled matcher functions.
 	for _, matcher := range step.Matchers {
 		if !matcher.Matcher(entry) { // Access the actual matcher function
@@ -463,7 +428,7 @@ func matchStepFields(p *Processor, chain *BehavioralChain, step *StepDef, entry 
 }
 
 // getOnMatchSuffix is a small helper to generate the logging suffix.
-func getOnMatchSuffix(chain *BehavioralChain) string {
+func getOnMatchSuffix(chain *config.BehavioralChain) string {
 	if chain.OnMatch == "stop" {
 		return " (on_match: stop)"
 	}
@@ -472,7 +437,7 @@ func getOnMatchSuffix(chain *BehavioralChain) string {
 
 // checkFirstStepTimeRule validates the `min_time_since_last_hit` rule for the first step of a chain.
 // It returns true if the rule passes, and false otherwise.
-func checkFirstStepTimeRule(step *StepDef, timeSinceLastHit time.Duration, previousRequestTime time.Time) bool {
+func checkFirstStepTimeRule(step *config.StepDef, timeSinceLastHit time.Duration, previousRequestTime time.Time) bool {
 	if step.MinTimeSinceLastHit > 0 {
 		// The rule is active. It fails if the actor has been seen before (`!IsZero`)
 		// and the time since the last hit is less than or equal to the minimum required.
@@ -485,7 +450,7 @@ func checkFirstStepTimeRule(step *StepDef, timeSinceLastHit time.Duration, previ
 
 // handleTimeRuleReset logs the reason for a chain reset and updates metrics.
 // This helper is used by checkInterStepTimeRules to reduce code duplication.
-func handleTimeRuleReset(p *Processor, chain *BehavioralChain, entry *LogEntry, reason string, value time.Duration) {
+func handleTimeRuleReset(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry, reason string, value time.Duration) {
 	if p.EnableMetrics {
 		if val, ok := p.Metrics.ChainsReset.Load(chain.Name); ok {
 			if counter, ok := val.(*atomic.Int64); ok {
@@ -509,7 +474,7 @@ func handleTimeRuleReset(p *Processor, chain *BehavioralChain, entry *LogEntry, 
 
 // checkInterStepTimeRules validates `max_delay` and `min_delay` rules between steps.
 // It returns true if the chain should be reset due to a time rule violation.
-func checkInterStepTimeRules(p *Processor, chain *BehavioralChain, entry *LogEntry, step *StepDef, timeSinceLastStepHit time.Duration) bool {
+func checkInterStepTimeRules(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry, step *config.StepDef, timeSinceLastStepHit time.Duration) bool {
 	if step.MaxDelayDuration > 0 && timeSinceLastStepHit > step.MaxDelayDuration {
 		handleTimeRuleReset(p, chain, entry, "MaxDelay exceeded", step.MaxDelayDuration)
 		return true // Reset the chain.
@@ -524,7 +489,7 @@ func checkInterStepTimeRules(p *Processor, chain *BehavioralChain, entry *LogEnt
 // processChainForEntry evaluates a single log entry against a single behavioral chain.
 // It manages state transitions (advancing, resetting) and triggers completion handling.
 // It returns true if the chain completed and its `on_match` rule was "stop".
-func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry, currentActivity *store.ActorActivity, previousRequestTime time.Time) bool {
+func ProcessChainForEntry(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry, currentActivity *store.ActorActivity, previousRequestTime time.Time) bool {
 	// If GetActor returns an empty actor, it's a mismatch for this chain (e.g., wrong IP version).
 	if GetActor(chain, entry).IPInfo.Address == "" {
 		return false
@@ -641,7 +606,7 @@ func processChainForEntry(p *Processor, chain *BehavioralChain, entry *LogEntry,
 }
 
 // checkChainsInternal is the core logic for checking an entry against all chains. It's a variable to allow mocking in tests.
-var checkChainsInternal = func(p *Processor, entry *LogEntry) {
+var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 	// This function is now called by checkChainsWithLock, which acquires the lock.
 	// The original lock acquisition has been moved up to the caller.
 
@@ -666,7 +631,7 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 		}
 
 		// Perform pre-checks for existing blocks.
-		currentActivity, skip, _ := preCheckActivity(p, entry, actor) // _ for SkipInfo, as metric is handled in CheckChains
+		currentActivity, skip, _ := PreCheckActivity(p, entry, actor) // _ for SkipInfo, as metric is handled in CheckChains
 		if skip {
 			// The skip reason metric is now handled in CheckChains, so we just continue.
 			continue
@@ -676,7 +641,7 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 		// This is the correct value to use for all time-based checks for this entry.
 		previousRequestTime := currentActivity.LastRequestTime
 
-		stop := processChainForEntry(p, &chain, entry, currentActivity, previousRequestTime)
+		stop := ProcessChainForEntry(p, &chain, entry, currentActivity, previousRequestTime)
 
 		// Mark this activity as processed for this entry.
 		processedActivities[currentActivity] = struct{}{}
@@ -694,17 +659,18 @@ var checkChainsInternal = func(p *Processor, entry *LogEntry) {
 
 }
 
-// doSignalOooBufferFlush sends a non-blocking signal to the entryBufferWorker to trigger an immediate flush.
-func (p *Processor) doSignalOooBufferFlush() {
+// DoSignalOooBufferFlush sends a non-blocking signal to the entryBufferWorker to trigger an immediate flush.
+// Exported for use in tests.
+func DoSignalOooBufferFlush(p *app.Processor) {
 	select {
-	case p.oooBufferFlushSignal <- struct{}{}: // Send a signal if the channel is not full.
+	case p.OooBufferFlushSignal <- struct{}{}: // Send a signal if the channel is not full.
 	default: // Channel is full, a flush is already pending. Do nothing.
 	}
 }
 
 // CheckChains is the entry point for processing a log entry.
 // If out-of-order tolerance is configured, it buffers the entry. Otherwise, it processes immediately.
-func CheckChains(p *Processor, entry *LogEntry) {
+func CheckChains(p *app.Processor, entry *app.LogEntry) {
 	// This function now acts as a gatekeeper, performing pre-checks before handing
 	// off to the out-of-order handler. The logic for buffering or immediate processing
 	// is now encapsulated in handleOutOfOrder.
@@ -714,16 +680,16 @@ func CheckChains(p *Processor, entry *LogEntry) {
 
 	// Create the base actor for this entry. This is used for good_actor checks,
 	// pre-checks, and out-of-order buffering logic.
-	actor := Actor{IPInfo: entry.IPInfo}
+	actor := store.Actor{IPInfo: entry.IPInfo}
 	activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 
 	// 1. First, check if the entry is a good actor. This will set the SkipInfo on the actor's activity.
-	isGood, goodActorRuleName := isGoodActor(p, entry)
+	isGood, goodActorRuleName := IsGoodActor(p, entry)
 	if isGood {
 		// Only log the skip message and set the state the first time.
 		if activity.SkipInfo.Type == utils.SkipTypeNone {
 			activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeGoodActor, Source: goodActorRuleName}
-			p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (good_actor:%s).", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName)
+			p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (good_actor:%s).", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName)
 		}
 
 		// --- UNBLOCK ON GOOD ACTOR LOGIC ---
@@ -743,10 +709,10 @@ func CheckChains(p *Processor, entry *LogEntry) {
 			if activity.LastUnblockTime.IsZero() || time.Since(activity.LastUnblockTime) > unblockCooldown {
 				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s. Issuing unblock command.", entry.IPInfo.Address)
 
-				if p.persistenceEnabled {
+				if p.PersistenceEnabled {
 					func() {
-						p.persistenceMutex.Lock()
-						defer p.persistenceMutex.Unlock()
+						p.PersistenceMutex.Lock()
+						defer p.PersistenceMutex.Unlock()
 
 						event := &persistence.AuditEvent{
 							Timestamp: p.NowFunc(),
@@ -754,12 +720,12 @@ func CheckChains(p *Processor, entry *LogEntry) {
 							IP:        entry.IPInfo.Address,
 							Reason:    "good-actor-match",
 						}
-						if err := persistence.WriteEventToJournal(p.journalHandle, event); err != nil {
+						if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
 							p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write unblock event to journal for %s: %v", entry.IPInfo.Address, err)
 						}
 
 						// Update in-memory state
-						delete(p.activeBlocks, entry.IPInfo.Address)
+						delete(p.ActiveBlocks, entry.IPInfo.Address)
 					}()
 				}
 
@@ -779,7 +745,7 @@ func CheckChains(p *Processor, entry *LogEntry) {
 
 	// 2. Now, perform the pre-check for any existing skip reasons (good_actor or blocked).
 	// This is the single point where we increment the per-reason skip metrics for all skips.
-	_, skip, skipInfo := preCheckActivity(p, entry, actor)
+	_, skip, skipInfo := PreCheckActivity(p, entry, actor)
 	if skip {
 		if skipInfo.Type != utils.SkipTypeNone {
 			// Construct the reason string based on SkipInfo.Type for logging and metrics.
@@ -811,12 +777,12 @@ func CheckChains(p *Processor, entry *LogEntry) {
 	}
 
 	// Delegate to the out-of-order handler, which will decide to buffer or process.
-	handleOutOfOrder(p, entry) // This now calls p.signalOooBufferFlush() internally.
+	handleOutOfOrder(p, entry) // This now calls p.SignalOooBufferFlush() internally.
 }
 
 // entryBufferWorker is a background goroutine that processes log entries from the buffer
 // in chronological order, respecting the out-of-order tolerance.
-func entryBufferWorker(p *Processor, stop <-chan struct{}) {
+func EntryBufferWorker(p *app.Processor, stop <-chan struct{}) {
 	// Use a ticker that is half the tolerance duration for responsiveness,
 	// with a minimum floor to prevent busy-looping.
 	p.ConfigMutex.RLock()
@@ -846,7 +812,7 @@ func entryBufferWorker(p *Processor, stop <-chan struct{}) {
 			FlushEntryBuffer(p) // Use the public, locking version.
 			return
 
-		case <-p.oooBufferFlushSignal:
+		case <-p.OooBufferFlushSignal:
 			// An immediate flush was requested by a newer log entry.
 			p.LogFunc(logging.LevelDebug, "BUFFER_WORKER", "Immediate flush triggered.")
 			// Fall through to process the buffer.
@@ -868,9 +834,9 @@ func entryBufferWorker(p *Processor, stop <-chan struct{}) {
 			return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
 		})
 		// Process all candidates that are ready by repeatedly calling nextOooCandidate.
-		var processedInTick []*LogEntry
+		var processedInTick []*app.LogEntry
 		for {
-			if entry := nextOooCandidate(p, processingHorizon); entry != nil {
+			if entry := NextOooCandidate(p, processingHorizon); entry != nil {
 				processedInTick = append(processedInTick, entry)
 			} else {
 				break // No more candidates ready.
@@ -885,7 +851,7 @@ func entryBufferWorker(p *Processor, stop <-chan struct{}) {
 		}
 
 		// Signal for tests that a tick has been processed.
-		if IsTesting() {
+		if utils.IsTesting() {
 			// Use a very specific tag that the test harness can listen for.
 			p.LogFunc(logging.LevelDebug, "BUFFER_WORKER_TICK_DONE", "Tick processed.")
 		}

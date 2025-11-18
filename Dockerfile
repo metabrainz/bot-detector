@@ -13,14 +13,14 @@ COPY go.mod go.sum ./
 RUN go mod download
 RUN go mod tidy
 
-# Switch to non-root user after go mod commands
+# Copy the rest of the source code with proper ownership
+COPY --chown=appuser:appgroup . .
+
+# Switch to non-root user for the build
 USER appuser
 
-# Copy the rest of the source code
-COPY . .
-
 # Build the Go application for a static binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bot-detector .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bot-detector ./cmd/bot-detector
 
 # Stage 2: Create the final minimal image
 FROM alpine:latest

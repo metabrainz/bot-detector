@@ -1,7 +1,9 @@
-package main
+package processor
 
 import (
+	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/metrics"
 	"bot-detector/internal/store"
@@ -22,7 +24,7 @@ type rotationTestHarness struct {
 	t              *testing.T
 	tempDir        string
 	logFilePath    string
-	processor      *Processor
+	processor      *app.Processor
 	signalCh       chan os.Signal
 	readySignal    chan struct{}
 	doneCh         chan struct{}
@@ -49,20 +51,20 @@ func newRotationTestHarness(t *testing.T) *rotationTestHarness {
 	}
 
 	// Create processor with realistic configuration
-	h.processor = &Processor{
+	h.processor = &app.Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		Metrics:       metrics.NewMetrics(),
 		ConfigMutex:   &sync.RWMutex{},
-		Chains:        []BehavioralChain{},
-		Config: &AppConfig{
-			Application: ApplicationConfig{
+		Chains:        []config.BehavioralChain{},
+		Config: &config.AppConfig{
+			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
 			},
-			Parser: ParserConfig{
+			Parser: config.ParserConfig{
 				LineEnding: "lf",
 			},
-			FileOpener: func(name string) (fileHandle, error) { return os.Open(name) },
+			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
 		DryRun:  false,
@@ -74,8 +76,7 @@ func newRotationTestHarness(t *testing.T) *rotationTestHarness {
 	h.processor.Blocker = blocker.NewHAProxyBlocker(h.processor, false)
 
 	// Initialize out-of-order buffer infrastructure
-	h.processor.oooBufferFlushSignal = make(chan struct{}, 1)
-	h.processor.signalOooBufferFlush = h.processor.doSignalOooBufferFlush
+	h.processor.OooBufferFlushSignal = make(chan struct{}, 1)
 
 	// Set up logging that captures output for debugging
 	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {

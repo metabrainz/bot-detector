@@ -1,14 +1,8 @@
-package main
+package config
 
 import (
-	"bot-detector/internal/blocker"
-	"bot-detector/internal/logging"
-	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/persistence"
-	"bot-detector/internal/store"
 	"bot-detector/internal/types"
-	"bot-detector/internal/utils"
-	"fmt"
 	"io"
 	"os"
 	"regexp"
@@ -17,96 +11,17 @@ import (
 	"time"
 )
 
-// fileOpener defines the function signature for opening a file, returning our interface.
-type fileOpener func(name string) (fileHandle, error)
+// FileOpener defines the function signature for opening a file.
+type FileOpener func(name string) (FileHandle, error)
 
-// fileHandle defines the interface for file operations needed by the tailer.
-type fileHandle interface {
+// FileHandle defines the interface for file operations needed by the tailer.
+type FileHandle interface {
 	io.ReadSeeker
 	io.Closer
 	Stat() (os.FileInfo, error)
 }
 
-// FieldType indicates the native type of a field from a LogEntry.
-type FieldType int
-
-const (
-	StringField FieldType = iota
-	IntField
-	UnsupportedField
-)
-
-// TestSignals holds channels used exclusively for test synchronization.
-// This struct is nil in production.
-type TestSignals struct {
-	CleanupDoneSignal chan struct{}
-	EOFCheckSignal    chan struct{}
-	ReloadDoneSignal  chan struct{}
-	ForceCheckSignal  chan struct{}
-}
-
-// FieldNameCanonicalMap maps lowercase YAML field names to their canonical PascalCase
-// equivalents in the LogEntry struct. This allows for case-insensitive configuration.
-var FieldNameCanonicalMap = map[string]string{
-	"ip":         "IP",
-	"path":       "Path",
-	"method":     "Method",
-	"protocol":   "Protocol",
-	"useragent":  "UserAgent",
-	"user_agent": "UserAgent",
-	"referrer":   "Referrer",
-	"statuscode": "StatusCode",
-	"size":       "Size",
-	"vhost":      "VHost",
-}
-
-// --- DEPENDENCY CONTAINER ---
-
-// Processor holds all necessary dependencies and state for log processing,
-// making it easy to mock/stub external calls and manage state in tests.
-type Processor struct {
-	ActivityMutex *sync.RWMutex
-	ActivityStore map[store.Actor]*store.ActorActivity
-	Blocker       blocker.Blocker
-	ConfigMutex   *sync.RWMutex
-	Metrics       *metrics.Metrics
-	Chains        []BehavioralChain
-	Config        *AppConfig
-	DryRun        bool
-	EnableMetrics bool
-
-	EntryBuffer          []*LogEntry    // Buffer for holding out-of-order entries.
-	oooBufferFlushSignal chan struct{}  // Signal to the entryBufferWorker to flush the OOO buffer immediately.
-	LogRegex             *regexp.Regexp // The currently active log parsing regex.
-	CheckChainsFunc      func(entry *LogEntry)
-	signalCh             chan os.Signal
-	LogFunc              func(level logging.LogLevel, tag string, format string, v ...interface{})
-	ProcessLogLine       func(line string)
-	NowFunc              func() time.Time // Mockable time function.
-	signalOooBufferFlush func()
-	TestSignals          *TestSignals // Test-only signals for synchronization.
-	ConfigPath           string
-	LogPath              string `test:"-"`
-	ReloadOn             string
-	TopActorsPerChain    map[string]map[string]*store.ActorStats // Dry-run only: tracks top actors per chain.
-	HTTPServer           string
-	TopN                 int // For dry-run stats: show top N actors.
-	startTime            time.Time
-	// Persistence fields
-	persistenceEnabled bool
-	stateDir           string
-	compactionInterval time.Duration
-	persistenceMutex   sync.Mutex
-	persistenceWg      sync.WaitGroup
-	journalHandle      *os.File
-	activeBlocks       map[string]persistence.ActiveBlockInfo
-	// configReloaded is a flag to indicate if the configuration has been reloaded at least once.
-	configReloaded bool
-	// ExitOnEOF is a flag to indicate if the tailer should exit when it reaches the end of the file.
-	ExitOnEOF bool
-}
-
-// AppConfig holds all the configuration state that can be reloaded from YAML.
+// Config type definitions extracted from internal/app/types.go
 type AppConfig struct {
 	Application      ApplicationConfig                 `config:"compare"`
 	Parser           ParserConfig                      `config:"compare"`
@@ -116,7 +31,7 @@ type AppConfig struct {
 	FileDependencies map[string]*types.FileDependency  // Map of file paths to their dependency status.
 	LastModTime      time.Time                         // Not compared
 	StatFunc         func(string) (os.FileInfo, error) // Mockable
-	FileOpener       fileOpener                        // Mockable
+	FileOpener       FileOpener                        // Mockable
 	YAMLContent      []byte
 }
 
@@ -167,51 +82,6 @@ type HAProxyConfig struct {
 	TableNameFallback string                   `config:"compare"`
 }
 
-// Clone creates a deep copy of the AppConfig. This is crucial for safely comparing
-// configurations during a reload without causing race conditions.
-func (c *AppConfig) Clone() AppConfig {
-	if c == nil {
-		return AppConfig{}
-	}
-
-	// Create a new config and copy value types.
-	clone := *c
-
-	// Deep copy slices and maps.
-	if c.GoodActors != nil {
-		clone.GoodActors = make([]GoodActorDef, len(c.GoodActors)) // GoodActorDef contains slices, so we need to copy them too.
-		copy(clone.GoodActors, c.GoodActors)
-		for i, def := range c.GoodActors {
-			if def.IPMatchers != nil {
-				clone.GoodActors[i].IPMatchers = make([]fieldMatcher, len(def.IPMatchers))
-				copy(clone.GoodActors[i].IPMatchers, def.IPMatchers)
-			}
-			if def.UAMatchers != nil {
-				clone.GoodActors[i].UAMatchers = make([]fieldMatcher, len(def.UAMatchers))
-				copy(clone.GoodActors[i].UAMatchers, def.UAMatchers)
-			}
-		}
-	}
-
-	if c.Blockers.Backends.HAProxy.DurationTables != nil {
-		clone.Blockers.Backends.HAProxy.DurationTables = make(map[time.Duration]string, len(c.Blockers.Backends.HAProxy.DurationTables))
-		for k, v := range c.Blockers.Backends.HAProxy.DurationTables {
-			clone.Blockers.Backends.HAProxy.DurationTables[k] = v
-		}
-	}
-
-	if c.FileDependencies != nil {
-		newFileDependencies := make(map[string]*types.FileDependency, len(c.FileDependencies))
-		for k, v := range c.FileDependencies {
-			newFileDependencies[k] = v.Clone() // Deep copy the FileDependency object
-		}
-		clone.FileDependencies = newFileDependencies
-	}
-	// Other slice types are just strings, which are immutable, so a shallow copy is fine.
-	return clone
-}
-
-// LoadedConfig encapsulates all configuration data loaded from the YAML file.
 type LoadedConfig struct {
 	Application      ApplicationConfig
 	Parser           ParserConfig
@@ -224,8 +94,6 @@ type LoadedConfig struct {
 	StatFunc         func(string) (os.FileInfo, error)
 	YAMLContent      []byte
 }
-
-// --- YAML DATA STRUCTURES ---
 
 type ChainConfig struct {
 	Version     string                   `yaml:"version"`
@@ -281,7 +149,6 @@ type HAProxyConfigYAML struct {
 	Addresses      []string          `yaml:"addresses"`
 	DurationTables map[string]string `yaml:"duration_tables"`
 }
-
 type StepDefYAML struct {
 	Order               int
 	FieldMatches        map[string]interface{} `yaml:"field_matches"`
@@ -301,53 +168,10 @@ type BehavioralChainYAML struct {
 }
 
 // --- RUNTIME DATA STRUCTURES ---
-
-type LogEntry struct {
-	Timestamp  time.Time // Actual time of the request (parsed from log, not time.Now()).
-	IPInfo     utils.IPInfo
-	Method     string
-	Path       string
-	Protocol   string
-	Referrer   string
-	StatusCode int
-	Size       int
-	UserAgent  string
-	VHost      string
-}
-
-// Actor is a comparable struct used as the key for the ActivityStore map. It represents
-// the unique entity being tracked (e.g., an IP address or an IP+UserAgent combination).
-type Actor struct {
-	IPInfo utils.IPInfo
-	UA     string // UserAgent. Empty string if tracking is IP-only.
-}
-
-// String provides a clean, readable representation of the Actor for logging.
-func (a Actor) String() string {
-	// Use a separator that is unlikely to appear in a User-Agent string.
-	if a.UA != "" {
-		return fmt.Sprintf("%s | %s", a.IPInfo.Address, a.UA)
-	}
-	return a.IPInfo.Address
-}
-
-// SkipInfo holds structured information about why an actor was skipped.
-type SkipInfo struct {
-	Type   utils.SkipType
-	Source string // The name of the good_actor rule or the blocking chain.
-}
-
-// StepState holds the progress of an actor within a single behavioral chain.
-type StepState struct {
-	CurrentStep   int
-	LastMatchTime time.Time
-}
-
-// StepDef holds the compiled definition of a single step in a behavioral chain.
 type StepDef struct {
 	Order    int
 	Matchers []struct {
-		Matcher   fieldMatcher
+		Matcher   FieldMatcher
 		FieldName string
 	} // Changed: Now stores matcher and its associated field name.
 	MaxDelayDuration    time.Duration
@@ -377,8 +201,42 @@ type BehavioralChain struct {
 type GoodActorDef struct {
 	Name string
 
-	IPMatchers []fieldMatcher // A list of matchers for the IP field (OR logic within the list)
+	IPMatchers []FieldMatcher // A list of matchers for the IP field (OR logic within the list)
 
-	UAMatchers []fieldMatcher // A list of matchers for the UserAgent field (OR logic within the list)
+	UAMatchers []FieldMatcher // A list of matchers for the UserAgent field (OR logic within the list)
 
+}
+
+// Clone creates a deep copy of the AppConfig object.
+func (ac *AppConfig) Clone() AppConfig {
+	if ac == nil {
+		return AppConfig{}
+	}
+
+	// Clone FileDependencies map
+	fileDeps := make(map[string]*types.FileDependency, len(ac.FileDependencies))
+	for path, dep := range ac.FileDependencies {
+		fileDeps[path] = dep.Clone()
+	}
+
+	// Clone GoodActors slice
+	goodActors := make([]GoodActorDef, len(ac.GoodActors))
+	copy(goodActors, ac.GoodActors)
+
+	// Clone YAMLContent
+	yamlCopy := make([]byte, len(ac.YAMLContent))
+	copy(yamlCopy, ac.YAMLContent)
+
+	return AppConfig{
+		Application:      ac.Application,
+		Parser:           ac.Parser,
+		Checker:          ac.Checker,
+		Blockers:         ac.Blockers,
+		GoodActors:       goodActors,
+		FileDependencies: fileDeps,
+		LastModTime:      ac.LastModTime,
+		StatFunc:         ac.StatFunc,
+		FileOpener:       ac.FileOpener,
+		YAMLContent:      yamlCopy,
+	}
 }

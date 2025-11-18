@@ -1,12 +1,15 @@
-package main
+package config_test
 
 import (
-	"bot-detector/internal/blocker"
+	"bot-detector/internal/app"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/parser"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
+	"bot-detector/internal/testutil"
+	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
 	"fmt"
 
@@ -53,14 +56,14 @@ chains:
       - field_matches: { path: "/default" }
 `
 	tmpConfigPath := setupTestYAML(t, yamlContent)
-	t.Cleanup(resetGlobalState)
+	t.Cleanup(testutil.ResetGlobalState)
 
 	// --- Act ---
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 
 	// --- Assert ---
 	if err != nil {
-		t.Fatalf("LoadConfigFromYAML() returned an unexpected error: %v", err)
+		t.Fatalf("config.LoadConfigFromYAML() returned an unexpected error: %v", err)
 	}
 
 	if len(loadedCfg.Chains) != 2 {
@@ -150,20 +153,20 @@ blockers:
 version: "1.0"
 blockers: {}
 `,
-			expectedMaxRetries:        DefaultBlockerMaxRetries,
-			expectedRetryDelay:        DefaultBlockerRetryDelay,
-			expectedDialTimeout:       DefaultBlockerDialTimeout,
-			expectedCommandQueueSize:  DefaultBlockerCommandQueueSize,
-			expectedCommandsPerSecond: DefaultBlockerCommandsPerSecond,
+			expectedMaxRetries:        config.DefaultBlockerMaxRetries,
+			expectedRetryDelay:        config.DefaultBlockerRetryDelay,
+			expectedDialTimeout:       config.DefaultBlockerDialTimeout,
+			expectedCommandQueueSize:  config.DefaultBlockerCommandQueueSize,
+			expectedCommandsPerSecond: config.DefaultBlockerCommandsPerSecond,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tmpConfigPath := setupTestYAML(t, tt.yamlContent)
-			loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+			loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 			if err != nil {
-				t.Fatalf("LoadConfigFromYAML() failed: %v", err)
+				t.Fatalf("config.LoadConfigFromYAML() failed: %v", err)
 			}
 			if loadedCfg.Blockers.MaxRetries != tt.expectedMaxRetries ||
 				loadedCfg.Blockers.RetryDelay != tt.expectedRetryDelay ||
@@ -193,17 +196,17 @@ chains:
             lte: 404
 `
 	tmpConfigPath := setupTestYAML(t, yamlContent)
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
-		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
+		t.Fatalf("config.LoadConfigFromYAML() failed: %v", err)
 	}
 	matcher := loadedCfg.Chains[0].Steps[0].Matchers[0]
 
 	// Test cases
-	if !matcher.Matcher(&LogEntry{StatusCode: 404}) { // 404 <= 404 -> true
+	if !matcher.Matcher(&types.LogEntry{StatusCode: 404}) { // 404 <= 404 -> true
 		t.Error("Matcher failed for lte boundary")
 	}
-	if matcher.Matcher(&LogEntry{StatusCode: 400}) { // 400 > 400 -> false
+	if matcher.Matcher(&types.LogEntry{StatusCode: 400}) { // 400 > 400 -> false
 		t.Error("Matcher failed for gt boundary")
 	}
 }
@@ -222,13 +225,13 @@ chains:
             lt: 500
 `
 	testCases := map[string]struct {
-		entry    *LogEntry
+		entry    *types.LogEntry
 		expected bool
 	}{
-		"In Range (404)":              {entry: &LogEntry{StatusCode: 404}, expected: true},
-		"Boundary In Range (400)":     {entry: &LogEntry{StatusCode: 400}, expected: true},
-		"Boundary Out of Range (500)": {entry: &LogEntry{StatusCode: 500}, expected: false},
-		"Out of Range (200)":          {entry: &LogEntry{StatusCode: 200}, expected: false},
+		"In Range (404)":              {entry: &types.LogEntry{StatusCode: 404}, expected: true},
+		"Boundary In Range (400)":     {entry: &types.LogEntry{StatusCode: 400}, expected: true},
+		"Boundary Out of Range (500)": {entry: &types.LogEntry{StatusCode: 500}, expected: false},
+		"Out of Range (200)":          {entry: &types.LogEntry{StatusCode: 200}, expected: false},
 	}
 
 	runMatcherTest(t, yamlContent, testCases, "")
@@ -248,13 +251,13 @@ chains:
             lt: 2000
 `
 	testCases := map[string]struct {
-		entry    *LogEntry
+		entry    *types.LogEntry
 		expected bool
 	}{
-		"In Range (1500)":              {entry: &LogEntry{Size: 1500}, expected: true},
-		"Boundary In Range (1000)":     {entry: &LogEntry{Size: 1000}, expected: true},
-		"Boundary Out of Range (2000)": {entry: &LogEntry{Size: 2000}, expected: false},
-		"Out of Range (500)":           {entry: &LogEntry{Size: 500}, expected: false},
+		"In Range (1500)":              {entry: &types.LogEntry{Size: 1500}, expected: true},
+		"Boundary In Range (1000)":     {entry: &types.LogEntry{Size: 1000}, expected: true},
+		"Boundary Out of Range (2000)": {entry: &types.LogEntry{Size: 2000}, expected: false},
+		"Out of Range (500)":           {entry: &types.LogEntry{Size: 500}, expected: false},
 	}
 
 	runMatcherTest(t, yamlContent, testCases, "")
@@ -265,7 +268,7 @@ func TestLoadConfigFromYAML_ObjectMatcher_WithNot(t *testing.T) {
 		name        string
 		yamlContent string
 		testCases   map[string]struct {
-			entry    *LogEntry
+			entry    *types.LogEntry
 			expected bool
 		}
 		expectError string
@@ -285,12 +288,12 @@ chains:
             lt: 500
             not: 404`,
 			testCases: map[string]struct {
-				entry    *LogEntry
+				entry    *types.LogEntry
 				expected bool
 			}{
-				"In Range, Not Excluded (403)": {entry: &LogEntry{StatusCode: 403}, expected: true},
-				"Excluded (404)":               {entry: &LogEntry{StatusCode: 404}, expected: false},
-				"Out of Range (500)":           {entry: &LogEntry{StatusCode: 500}, expected: false},
+				"In Range, Not Excluded (403)": {entry: &types.LogEntry{StatusCode: 403}, expected: true},
+				"Excluded (404)":               {entry: &types.LogEntry{StatusCode: 404}, expected: false},
+				"Out of Range (500)":           {entry: &types.LogEntry{StatusCode: 500}, expected: false},
 			},
 		},
 		{
@@ -306,12 +309,12 @@ chains:
           statuscode:
             not: [403, 404]`,
 			testCases: map[string]struct {
-				entry    *LogEntry
+				entry    *types.LogEntry
 				expected bool
 			}{
-				"Not in list (200)": {entry: &LogEntry{StatusCode: 200}, expected: true},
-				"In list (403)":     {entry: &LogEntry{StatusCode: 403}, expected: false},
-				"In list (404)":     {entry: &LogEntry{StatusCode: 404}, expected: false},
+				"Not in list (200)": {entry: &types.LogEntry{StatusCode: 200}, expected: true},
+				"In list (403)":     {entry: &types.LogEntry{StatusCode: 403}, expected: false},
+				"In list (404)":     {entry: &types.LogEntry{StatusCode: 404}, expected: false},
 			},
 		},
 	}
@@ -328,7 +331,7 @@ func TestLoadConfigFromYAML_ObjectMatcher_Not_WithPath(t *testing.T) {
 		name        string
 		yamlContent string
 		testCases   map[string]struct {
-			entry    *LogEntry
+			entry    *types.LogEntry
 			expected bool
 		}
 	}{
@@ -345,12 +348,12 @@ chains:
           path:
             not: "regex:^/admin"`,
 			testCases: map[string]struct {
-				entry    *LogEntry
+				entry    *types.LogEntry
 				expected bool
 			}{
-				"Matches other path":           {entry: &LogEntry{Path: "/dashboard"}, expected: true},
-				"Does not match excluded path": {entry: &LogEntry{Path: "/admin"}, expected: false},
-				"Does not match sub-path":      {entry: &LogEntry{Path: "/admin/users"}, expected: false},
+				"Matches other path":           {entry: &types.LogEntry{Path: "/dashboard"}, expected: true},
+				"Does not match excluded path": {entry: &types.LogEntry{Path: "/admin"}, expected: false},
+				"Does not match sub-path":      {entry: &types.LogEntry{Path: "/admin/users"}, expected: false},
 			},
 		},
 		{
@@ -368,12 +371,12 @@ chains:
               - "/admin"
               - "regex:^/api/v1/public/"`,
 			testCases: map[string]struct {
-				entry    *LogEntry
+				entry    *types.LogEntry
 				expected bool
 			}{
-				"Matches other path":                 {entry: &LogEntry{Path: "/dashboard"}, expected: true},
-				"Does not match exact excluded path": {entry: &LogEntry{Path: "/admin"}, expected: false},
-				"Does not match regex excluded path": {entry: &LogEntry{Path: "/api/v1/public/users"}, expected: false},
+				"Matches other path":                 {entry: &types.LogEntry{Path: "/dashboard"}, expected: true},
+				"Does not match exact excluded path": {entry: &types.LogEntry{Path: "/admin"}, expected: false},
+				"Does not match regex excluded path": {entry: &types.LogEntry{Path: "/api/v1/public/users"}, expected: false},
 			},
 		},
 	}
@@ -390,7 +393,7 @@ func TestLoadConfigFromYAML_StringMatcher_Prefixes(t *testing.T) {
 		name        string
 		yamlContent string
 		testCases   map[string]struct {
-			entry    *LogEntry
+			entry    *types.LogEntry
 			expected bool
 		}
 	}{
@@ -406,11 +409,11 @@ chains:
       - field_matches:
           path: "exact:regex:"`,
 			testCases: map[string]struct {
-				entry    *LogEntry
+				entry    *types.LogEntry
 				expected bool
 			}{
-				"Matches literal 'regex:'": {entry: &LogEntry{Path: "regex:"}, expected: true},
-				"Does not match other":     {entry: &LogEntry{Path: "/path"}, expected: false},
+				"Matches literal 'regex:'": {entry: &types.LogEntry{Path: "regex:"}, expected: true},
+				"Does not match other":     {entry: &types.LogEntry{Path: "/path"}, expected: false},
 			},
 		},
 		{
@@ -425,11 +428,11 @@ chains:
       - field_matches:
           path: "regex:"`,
 			testCases: map[string]struct {
-				entry    *LogEntry
+				entry    *types.LogEntry
 				expected bool
 			}{
-				"Matches literal 'regex:'": {entry: &LogEntry{Path: "regex:"}, expected: true},
-				"Does not match other":     {entry: &LogEntry{Path: "/path"}, expected: false},
+				"Matches literal 'regex:'": {entry: &types.LogEntry{Path: "regex:"}, expected: true},
+				"Does not match other":     {entry: &types.LogEntry{Path: "/path"}, expected: false},
 			},
 		},
 		{
@@ -444,11 +447,11 @@ chains:
       - field_matches:
           path: "file:"`,
 			testCases: map[string]struct {
-				entry    *LogEntry
+				entry    *types.LogEntry
 				expected bool
 			}{
-				"Matches literal 'file:'": {entry: &LogEntry{Path: "file:"}, expected: true},
-				"Does not match other":    {entry: &LogEntry{Path: "/path"}, expected: false},
+				"Matches literal 'file:'": {entry: &types.LogEntry{Path: "file:"}, expected: true},
+				"Does not match other":    {entry: &types.LogEntry{Path: "/path"}, expected: false},
 			},
 		},
 		{
@@ -463,12 +466,12 @@ chains:
       - field_matches:
           path: "regex:^/test"`,
 			testCases: map[string]struct {
-				entry    *LogEntry
+				entry    *types.LogEntry
 				expected bool
 			}{
-				"Matches regex":          {entry: &LogEntry{Path: "/test/path"}, expected: true},
-				"Does not match":         {entry: &LogEntry{Path: "/other"}, expected: false},
-				"Does not match literal": {entry: &LogEntry{Path: "regex:^/test"}, expected: false},
+				"Matches regex":          {entry: &types.LogEntry{Path: "/test/path"}, expected: true},
+				"Does not match":         {entry: &types.LogEntry{Path: "/other"}, expected: false},
+				"Does not match literal": {entry: &types.LogEntry{Path: "regex:^/test"}, expected: false},
 			},
 		},
 		{
@@ -483,14 +486,14 @@ chains:
       - field_matches:
           statuscode: "4XX"`,
 			testCases: map[string]struct {
-				entry    *LogEntry
+				entry    *types.LogEntry
 				expected bool
 			}{
-				"Matches 404":        {entry: &LogEntry{StatusCode: 404}, expected: true},
-				"Matches 400":        {entry: &LogEntry{StatusCode: 400}, expected: true},
-				"Matches 499":        {entry: &LogEntry{StatusCode: 499}, expected: true},
-				"Does not match 500": {entry: &LogEntry{StatusCode: 500}, expected: false},
-				"Does not match 399": {entry: &LogEntry{StatusCode: 399}, expected: false},
+				"Matches 404":        {entry: &types.LogEntry{StatusCode: 404}, expected: true},
+				"Matches 400":        {entry: &types.LogEntry{StatusCode: 400}, expected: true},
+				"Matches 499":        {entry: &types.LogEntry{StatusCode: 499}, expected: true},
+				"Does not match 500": {entry: &types.LogEntry{StatusCode: 500}, expected: false},
+				"Does not match 399": {entry: &types.LogEntry{StatusCode: 399}, expected: false},
 			},
 		},
 		{
@@ -505,14 +508,14 @@ chains:
       - field_matches:
           statuscode: "30X"`,
 			testCases: map[string]struct {
-				entry    *LogEntry
+				entry    *types.LogEntry
 				expected bool
 			}{
-				"Matches 301":        {entry: &LogEntry{StatusCode: 301}, expected: true},
-				"Matches 302":        {entry: &LogEntry{StatusCode: 302}, expected: true},
-				"Matches 309":        {entry: &LogEntry{StatusCode: 309}, expected: true},
-				"Does not match 310": {entry: &LogEntry{StatusCode: 310}, expected: false},
-				"Does not match 299": {entry: &LogEntry{StatusCode: 299}, expected: false},
+				"Matches 301":        {entry: &types.LogEntry{StatusCode: 301}, expected: true},
+				"Matches 302":        {entry: &types.LogEntry{StatusCode: 302}, expected: true},
+				"Matches 309":        {entry: &types.LogEntry{StatusCode: 309}, expected: true},
+				"Does not match 310": {entry: &types.LogEntry{StatusCode: 310}, expected: false},
+				"Does not match 299": {entry: &types.LogEntry{StatusCode: 299}, expected: false},
 			},
 		},
 	}
@@ -529,7 +532,7 @@ func TestLoadConfigFromYAML_CIDRMatcher(t *testing.T) {
 		name        string
 		yamlContent string
 		testCases   map[string]struct {
-			entry    *LogEntry
+			entry    *types.LogEntry
 			expected bool
 		}
 		expectError string
@@ -546,14 +549,14 @@ chains:
       - field_matches:
           ip: "cidr:192.168.1.0/24"`,
 			testCases: map[string]struct {
-				entry    *LogEntry
+				entry    *types.LogEntry
 				expected bool
 			}{
-				"IP in range":      {entry: &LogEntry{IPInfo: utils.NewIPInfo("192.168.1.100")}, expected: true},
-				"IP not in range":  {entry: &LogEntry{IPInfo: utils.NewIPInfo("192.168.2.1")}, expected: false},
-				"IP is network":    {entry: &LogEntry{IPInfo: utils.NewIPInfo("192.168.1.0")}, expected: true},
-				"IP is broadcast":  {entry: &LogEntry{IPInfo: utils.NewIPInfo("192.168.1.255")}, expected: true},
-				"Invalid entry IP": {entry: &LogEntry{IPInfo: utils.NewIPInfo("not-an-ip")}, expected: false},
+				"IP in range":      {entry: &types.LogEntry{IPInfo: utils.NewIPInfo("192.168.1.100")}, expected: true},
+				"IP not in range":  {entry: &types.LogEntry{IPInfo: utils.NewIPInfo("192.168.2.1")}, expected: false},
+				"IP is network":    {entry: &types.LogEntry{IPInfo: utils.NewIPInfo("192.168.1.0")}, expected: true},
+				"IP is broadcast":  {entry: &types.LogEntry{IPInfo: utils.NewIPInfo("192.168.1.255")}, expected: true},
+				"Invalid entry IP": {entry: &types.LogEntry{IPInfo: utils.NewIPInfo("not-an-ip")}, expected: false},
 			},
 		},
 		{
@@ -568,14 +571,14 @@ chains:
       - field_matches:
           ip: "cidr:2001:db8:abcd:0012::/64"`,
 			testCases: map[string]struct {
-				entry    *LogEntry
+				entry    *types.LogEntry
 				expected bool
 			}{
-				"IPv6 in range":       {entry: &LogEntry{IPInfo: utils.NewIPInfo("2001:db8:abcd:0012:dead:beef:cafe:babe")}, expected: true},
-				"IPv6 not in range":   {entry: &LogEntry{IPInfo: utils.NewIPInfo("2001:db8:abcd:0013::1")}, expected: false},
-				"IPv6 is network":     {entry: &LogEntry{IPInfo: utils.NewIPInfo("2001:db8:abcd:0012::")}, expected: true},
-				"IPv4 does not match": {entry: &LogEntry{IPInfo: utils.NewIPInfo("192.168.1.1")}, expected: false},
-				"Invalid entry IP":    {entry: &LogEntry{IPInfo: utils.NewIPInfo("not-an-ip")}, expected: false},
+				"IPv6 in range":       {entry: &types.LogEntry{IPInfo: utils.NewIPInfo("2001:db8:abcd:0012:dead:beef:cafe:babe")}, expected: true},
+				"IPv6 not in range":   {entry: &types.LogEntry{IPInfo: utils.NewIPInfo("2001:db8:abcd:0013::1")}, expected: false},
+				"IPv6 is network":     {entry: &types.LogEntry{IPInfo: utils.NewIPInfo("2001:db8:abcd:0012::")}, expected: true},
+				"IPv4 does not match": {entry: &types.LogEntry{IPInfo: utils.NewIPInfo("192.168.1.1")}, expected: false},
+				"Invalid entry IP":    {entry: &types.LogEntry{IPInfo: utils.NewIPInfo("not-an-ip")}, expected: false},
 			},
 		},
 		{
@@ -618,9 +621,9 @@ chains:
 	tmpConfigPath := setupTestYAML(t, yamlContent)
 
 	// --- Act ---
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
-		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
+		t.Fatalf("config.LoadConfigFromYAML() failed: %v", err)
 	}
 
 	// --- Assert ---
@@ -631,7 +634,7 @@ chains:
 	matcher := loadedCfg.Chains[0].Steps[0].Matchers[0]
 
 	// This entry should NOT match because "GET" != "123"
-	if matcher.Matcher(&LogEntry{Method: "GET"}) {
+	if matcher.Matcher(&types.LogEntry{Method: "GET"}) {
 		t.Error("Matcher incorrectly matched 'GET' with integer 123.")
 	}
 }
@@ -654,7 +657,7 @@ func runErrorTest(t *testing.T, name, yamlContent, expectedError string) {
 			t.Cleanup(func() { logging.LogOutput = originalLogFunc })
 		}
 
-		_, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+		_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 
 		if expectedError == "" {
 			if err != nil {
@@ -887,9 +890,9 @@ func runWarningTest(t *testing.T, yamlContent, expectedWarning string) {
 	t.Cleanup(func() { logging.LogOutput = originalLogFunc })
 
 	// Act
-	_, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
-		t.Fatalf("LoadConfigFromYAML() returned an unexpected fatal error: %v", err)
+		t.Fatalf("config.LoadConfigFromYAML() returned an unexpected fatal error: %v", err)
 	}
 
 	// Assert
@@ -1059,16 +1062,16 @@ chains: []
 `
 	tmpConfigPath := setupTestYAML(t, yamlContent)
 
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
-		t.Fatalf("LoadConfigFromYAML() failed unexpectedly: %v", err)
+		t.Fatalf("config.LoadConfigFromYAML() failed unexpectedly: %v", err)
 	}
 
 	if loadedCfg.LogFormatRegex == nil {
 		t.Fatal("Expected LogFormatRegex to be loaded, but it was nil.")
 	}
 
-	p := newTestProcessor(&AppConfig{Parser: ParserConfig{TimestampFormat: loadedCfg.Parser.TimestampFormat}}, nil)
+	p := testutil.NewTestProcessor(&config.AppConfig{Parser: config.ParserConfig{TimestampFormat: loadedCfg.Parser.TimestampFormat}}, nil)
 	p.LogRegex = loadedCfg.LogFormatRegex
 
 	logLine := `example.com 192.0.2.1 - - [01/Jan/2025:12:00:00 +0000] "GET /path HTTP/1.1" 200 123 "http://a.real.referrer" "TestAgent/1.0"`
@@ -1077,7 +1080,7 @@ chains: []
 	if err != nil {
 		t.Fatalf("parser.ParseLogLine failed: %v", err)
 	}
-	entry := &LogEntry{
+	entry := &types.LogEntry{
 		Timestamp: parsedEntry.Timestamp,
 		IPInfo:    utils.NewIPInfo(parsedEntry.IPInfo.Address),
 		Method:    parsedEntry.Method,
@@ -1109,7 +1112,7 @@ chains: []
 `
 	tmpConfigPath := setupTestYAML(t, yamlContent)
 
-	_, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err == nil {
 		t.Fatal("Expected an error when loading regex with missing required capture group, but got nil.")
 	}
@@ -1130,9 +1133,9 @@ chains: []
 
 	tmpConfigPath := setupTestYAML(t, yamlContent)
 
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
-		t.Fatalf("LoadConfigFromYAML() failed unexpectedly: %v", err)
+		t.Fatalf("config.LoadConfigFromYAML() failed unexpectedly: %v", err)
 	}
 
 	if loadedCfg.Parser.TimestampFormat != time.RFC3339 {
@@ -1140,7 +1143,7 @@ chains: []
 	}
 
 	// Now, test the parsing with this config.
-	p := newTestProcessor(&AppConfig{Parser: ParserConfig{TimestampFormat: loadedCfg.Parser.TimestampFormat}}, nil)
+	p := testutil.NewTestProcessor(&config.AppConfig{Parser: config.ParserConfig{TimestampFormat: loadedCfg.Parser.TimestampFormat}}, nil)
 	p.LogRegex = loadedCfg.LogFormatRegex
 
 	logLine := `192.0.2.1 [2025-01-01T12:00:00Z] /test`
@@ -1149,7 +1152,7 @@ chains: []
 	if err != nil {
 		t.Fatalf("parser.ParseLogLine failed: %v", err)
 	}
-	entry := &LogEntry{
+	entry := &types.LogEntry{
 		Timestamp: parsedEntry.Timestamp,
 		IPInfo:    utils.NewIPInfo(parsedEntry.IPInfo.Address),
 		Method:    parsedEntry.Method,
@@ -1192,28 +1195,28 @@ chains:
 	tmpConfigPath := setupTestYAML(t, initialYAMLContent)
 
 	// 2. Load the initial configuration.
-	initialLoadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+	initialLoadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
-		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
+		t.Fatalf("Initial config.LoadConfigFromYAML() failed: %v", err)
 	}
 
 	// 3. Create the processor with the initial config.
-	processor := &Processor{
+	processor := &app.Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        initialLoadedCfg.Chains, // Set initial chains
-		Config: &AppConfig{ // Set initial config state
-			Application: ApplicationConfig{
-				Config: ConfigManagement{
+		Config: &config.AppConfig{ // Set initial config state
+			Application: config.ApplicationConfig{
+				Config: config.ConfigManagement{
 					PollingInterval: 10 * time.Millisecond,
 				},
 			},
 			FileDependencies: initialLoadedCfg.FileDependencies,
 		},
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
-		TestSignals: &TestSignals{
+		TestSignals: &app.TestSignals{
 			ForceCheckSignal: make(chan struct{}, 1),
 			ReloadDoneSignal: make(chan struct{}, 1),
 		},
@@ -1226,10 +1229,10 @@ chains:
 	}
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
-	// 4. Start the ConfigWatcher with the test signal channel.
+	// 4. Start the app.ConfigWatcher with the test signal channel.
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go ConfigWatcher(processor, stopWatcher)
+	go app.ConfigWatcher(processor, stopWatcher)
 
 	// --- Act ---
 	// 5. Modify the YAML file on disk.
@@ -1303,32 +1306,32 @@ chains:
 
 	tmpConfigPath := setupTestYAML(t, initialYAMLContent)
 	// 3. Load the initial configuration.
-	initialLoadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+	initialLoadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
-		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
+		t.Fatalf("Initial config.LoadConfigFromYAML() failed: %v", err)
 	}
 
 	// 4. Create the processor with the initial config.
-	processor := newTestProcessor(&AppConfig{
+	processor := testutil.NewTestProcessor(&config.AppConfig{
 		FileDependencies: initialLoadedCfg.FileDependencies,
-		Application: ApplicationConfig{
-			Config: ConfigManagement{
+		Application: config.ApplicationConfig{
+			Config: config.ConfigManagement{
 				PollingInterval: 10 * time.Millisecond,
 			},
 		},
 	}, initialLoadedCfg.Chains)
 	processor.ConfigPath = tmpConfigPath
-	processor.TestSignals = &TestSignals{
+	processor.TestSignals = &app.TestSignals{
 		ForceCheckSignal: make(chan struct{}, 1),
 		ReloadDoneSignal: make(chan struct{}, 1),
 	}
 	initialFileInfo, _ := os.Stat(tmpConfigPath)
 	processor.Config.LastModTime = initialFileInfo.ModTime() // Set initial mod time
 
-	// 5. Start the ConfigWatcher with the test signal channel.
+	// 5. Start the app.ConfigWatcher with the test signal channel.
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go ConfigWatcher(processor, stopWatcher)
+	go app.ConfigWatcher(processor, stopWatcher)
 	// --- Act ---
 	// 6. Modify ONLY the dependency file.
 	if err := os.WriteFile(agentFilePath, []byte("ReloadedBadAgent/2.0"), 0644); err != nil {
@@ -1357,12 +1360,12 @@ chains:
 	defer processor.ConfigMutex.RUnlock()
 
 	if len(processor.Chains) != 1 || len(processor.Chains[0].Steps) != 1 {
-		t.Fatal("Processor chains were not reloaded correctly.")
+		t.Fatal("app.Processor chains were not reloaded correctly.")
 	}
 
 	// Create log entries to test the old and new rules.
-	entryWithOldAgent := &LogEntry{UserAgent: "InitialBadAgent/1.0"}
-	entryWithNewAgent := &LogEntry{UserAgent: "ReloadedBadAgent/2.0"}
+	entryWithOldAgent := &types.LogEntry{UserAgent: "InitialBadAgent/1.0"}
+	entryWithNewAgent := &types.LogEntry{UserAgent: "ReloadedBadAgent/2.0"}
 
 	// The single matcher function should now only match the new agent.
 	matcherFunc := processor.Chains[0].Steps[0].Matchers[0]
@@ -1390,19 +1393,19 @@ chains:
 `
 	tmpConfigPath := setupTestYAML(t, initialYAMLContent)
 	// 2. Load the initial configuration.
-	initialLoadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+	initialLoadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
-		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
+		t.Fatalf("Initial config.LoadConfigFromYAML() failed: %v", err)
 	}
 
 	// 3. Create the processor with the initial config and a log capturer.
 	var capturedLogs []string
 	var logMutex sync.Mutex
-	processor := &Processor{
+	processor := &app.Processor{
 		ConfigMutex: &sync.RWMutex{},
 		Chains:      initialLoadedCfg.Chains, // This is fine, as it's a local type
-		Config:      &AppConfig{Application: ApplicationConfig{Config: ConfigManagement{}}},
-		TestSignals: &TestSignals{
+		Config:      &config.AppConfig{Application: config.ApplicationConfig{Config: config.ConfigManagement{}}},
+		TestSignals: &app.TestSignals{
 			ForceCheckSignal: make(chan struct{}, 1),
 			ReloadDoneSignal: make(chan struct{}, 1),
 		},
@@ -1423,10 +1426,10 @@ chains:
 		}
 	}
 
-	// 5. Start the ConfigWatcher.
+	// 5. Start the app.ConfigWatcher.
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go ConfigWatcher(processor, stopWatcher)
+	go app.ConfigWatcher(processor, stopWatcher)
 
 	// --- Act ---
 	// 6. Modify the YAML file with INVALID content.
@@ -1493,16 +1496,16 @@ chains:
 	// 2. Create the processor with a log capturer.
 	var capturedLogs []string
 	var logMutex sync.Mutex
-	processor := &Processor{
+	processor := &app.Processor{
 		ConfigMutex: &sync.RWMutex{},
-		Chains:      []BehavioralChain{{Name: "InitialChain"}}, // Simplified initial state
-		Config:      &AppConfig{Application: ApplicationConfig{Config: ConfigManagement{}}},
+		Chains:      []config.BehavioralChain{{Name: "InitialChain"}}, // Simplified initial state
+		Config:      &config.AppConfig{Application: config.ApplicationConfig{Config: config.ConfigManagement{}}},
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 			logMutex.Lock()
 			capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
 			logMutex.Unlock()
 		},
-		TestSignals: &TestSignals{
+		TestSignals: &app.TestSignals{
 			ForceCheckSignal: make(chan struct{}, 1),
 		},
 		ConfigPath: tmpConfigPath,
@@ -1523,7 +1526,7 @@ chains:
 	}
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go ConfigWatcher(processor, stopWatcher)
+	go app.ConfigWatcher(processor, stopWatcher)
 
 	// --- Act ---
 	// 4. Delete the YAML file to trigger a stat error on the next poll.
@@ -1568,13 +1571,13 @@ func TestStart_WatcherSelection(t *testing.T) {
 			dontExpectReloaderLog: false,
 		},
 		{
-			name:                  "HUP starts SignalReloader only",
+			name:                  "HUP starts app.SignalReloader only",
 			reloadOnFlag:          "HUP",
 			expectWatcherLog:      "Signal-based config reloading enabled. Send HUP signal to reload.",
 			dontExpectReloaderLog: false,
 		},
 		{
-			name:                  "watcher starts ConfigWatcher only",
+			name:                  "watcher starts app.ConfigWatcher only",
 			reloadOnFlag:          "watcher",
 			expectWatcherLog:      "Starting ConfigWatcher, polling every", // Partial match due to dynamic polling interval
 			dontExpectReloaderLog: true,
@@ -1592,7 +1595,7 @@ func TestStart_WatcherSelection(t *testing.T) {
 				capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
 			}
 
-			p := newTestProcessor(&AppConfig{}, nil)
+			p := testutil.NewTestProcessor(&config.AppConfig{}, nil)
 			p.ReloadOn = tt.reloadOnFlag
 			p.LogFunc = logFunc
 
@@ -1602,9 +1605,9 @@ func TestStart_WatcherSelection(t *testing.T) {
 			// --- Act ---
 			// This is a simplified, test-safe version of the logic in main.start()
 			if strings.ToLower(p.ReloadOn) != "watcher" {
-				go SignalReloader(p, stopCh, make(chan os.Signal, 1))
+				go app.SignalReloader(p, stopCh, make(chan os.Signal, 1))
 			} else {
-				go ConfigWatcher(p, stopCh)
+				go app.ConfigWatcher(p, stopCh)
 			}
 
 			time.Sleep(20 * time.Millisecond) // Give the goroutine a moment to start and log.
@@ -1619,7 +1622,7 @@ func TestStart_WatcherSelection(t *testing.T) {
 			}
 
 			if tt.dontExpectReloaderLog && strings.Contains(logOutput, "Signal-based config reloading") {
-				t.Errorf("Expected SignalReloader not to start, but its log was found. Logs:\n%s", logOutput)
+				t.Errorf("Expected app.SignalReloader not to start, but its log was found. Logs:\n%s", logOutput)
 			}
 		})
 	}
@@ -1627,12 +1630,12 @@ func TestStart_WatcherSelection(t *testing.T) {
 
 // runMatcherTest is a helper to reduce boilerplate in matcher tests.
 func runMatcherTest(t *testing.T, yamlContent string, testCases map[string]struct {
-	entry    *LogEntry
+	entry    *types.LogEntry
 	expected bool
 }, expectError string) {
 	t.Helper()
 	tmpConfigPath := setupTestYAML(t, yamlContent)
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if expectError != "" {
 		if err == nil || !strings.Contains(err.Error(), expectError) {
 			t.Fatalf("Expected error containing '%s', but got: %v", expectError, err)
@@ -1640,7 +1643,7 @@ func runMatcherTest(t *testing.T, yamlContent string, testCases map[string]struc
 		return // Error was expected and occurred.
 	}
 	if err != nil {
-		t.Fatalf("LoadConfigFromYAML() failed: %v", err)
+		t.Fatalf("config.LoadConfigFromYAML() failed: %v", err)
 	}
 	matcher := loadedCfg.Chains[0].Steps[0].Matchers[0]
 
@@ -1691,12 +1694,12 @@ good_actors:
 `, ipListPath)
 
 	tmpConfigPath := setupTestYAML(t, yamlContent)
-	t.Cleanup(resetGlobalState)
+	t.Cleanup(testutil.ResetGlobalState)
 
 	// --- Act ---
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
-		t.Fatalf("LoadConfigFromYAML() returned an unexpected error: %v", err)
+		t.Fatalf("config.LoadConfigFromYAML() returned an unexpected error: %v", err)
 	}
 
 	// --- Assert ---
@@ -1705,7 +1708,7 @@ good_actors:
 	}
 
 	// Find the 'googlebot' definition for detailed testing
-	var googlebotDef GoodActorDef
+	var googlebotDef config.GoodActorDef
 	for _, def := range loadedCfg.GoodActors {
 		if def.Name == "googlebot" {
 			googlebotDef = def
@@ -1718,7 +1721,7 @@ good_actors:
 	}
 
 	// Test the compiled matchers
-	googleIPEntry := &LogEntry{IPInfo: utils.NewIPInfo("8.8.8.8"), UserAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"}
+	googleIPEntry := &types.LogEntry{IPInfo: utils.NewIPInfo("8.8.8.8"), UserAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"}
 
 	// The IP matcher should match
 	if len(googlebotDef.IPMatchers) == 0 || !googlebotDef.IPMatchers[0](googleIPEntry) {
@@ -1731,269 +1734,9 @@ good_actors:
 }
 
 // TestFindNewlyAddedGoodActors verifies that the helper correctly identifies newly added good actors.
-func TestFindNewlyAddedGoodActors(t *testing.T) {
-	actor1 := GoodActorDef{Name: "actor1"}
-	actor2 := GoodActorDef{Name: "actor2"}
-	actor3 := GoodActorDef{Name: "actor3"}
-
-	tests := []struct {
-		name     string
-		old      []GoodActorDef
-		new      []GoodActorDef
-		expected []string // expected names
-	}{
-		{
-			name:     "No changes",
-			old:      []GoodActorDef{actor1, actor2},
-			new:      []GoodActorDef{actor1, actor2},
-			expected: []string{},
-		},
-		{
-			name:     "One new actor added",
-			old:      []GoodActorDef{actor1},
-			new:      []GoodActorDef{actor1, actor2},
-			expected: []string{"actor2"},
-		},
-		{
-			name:     "Multiple new actors added",
-			old:      []GoodActorDef{actor1},
-			new:      []GoodActorDef{actor1, actor2, actor3},
-			expected: []string{"actor2", "actor3"},
-		},
-		{
-			name:     "Actor removed (not in result)",
-			old:      []GoodActorDef{actor1, actor2},
-			new:      []GoodActorDef{actor1},
-			expected: []string{},
-		},
-		{
-			name:     "All new actors",
-			old:      []GoodActorDef{},
-			new:      []GoodActorDef{actor1, actor2},
-			expected: []string{"actor1", "actor2"},
-		},
-		{
-			name:     "Empty old and new",
-			old:      []GoodActorDef{},
-			new:      []GoodActorDef{},
-			expected: []string{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := findNewlyAddedGoodActors(tt.old, tt.new)
-
-			if len(result) != len(tt.expected) {
-				t.Errorf("Expected %d new actors, got %d", len(tt.expected), len(result))
-			}
-
-			// Check that all expected names are present
-			resultNames := make(map[string]bool)
-			for _, actor := range result {
-				resultNames[actor.Name] = true
-			}
-
-			for _, expectedName := range tt.expected {
-				if !resultNames[expectedName] {
-					t.Errorf("Expected to find actor '%s' in result, but it was missing", expectedName)
-				}
-			}
-		})
-	}
-}
-
-// TestUnblockNewlyWhitelistedIPs verifies that newly whitelisted IPs are correctly unblocked.
-func TestUnblockNewlyWhitelistedIPs(t *testing.T) {
-	resetGlobalState()
-	t.Cleanup(resetGlobalState)
-
-	tests := []struct {
-		name               string
-		blockedIPs         map[string]persistence.ActiveBlockInfo
-		newGoodActorYAML   string
-		expectUnblocked    []string
-		expectRemaining    []string
-		unblockOnGoodActor bool
-	}{
-		{
-			name: "Exact IP match",
-			blockedIPs: map[string]persistence.ActiveBlockInfo{
-				"1.2.3.4": {Reason: "chain1", UnblockTime: time.Now().Add(1 * time.Hour)},
-				"5.6.7.8": {Reason: "chain2", UnblockTime: time.Now().Add(1 * time.Hour)},
-			},
-			newGoodActorYAML: `
-good_actors:
-  - name: "whitelist1"
-    ip: "1.2.3.4"
-`,
-			expectUnblocked:    []string{"1.2.3.4"},
-			expectRemaining:    []string{"5.6.7.8"},
-			unblockOnGoodActor: true,
-		},
-		{
-			name: "CIDR match",
-			blockedIPs: map[string]persistence.ActiveBlockInfo{
-				"192.168.1.10": {Reason: "chain1", UnblockTime: time.Now().Add(1 * time.Hour)},
-				"192.168.1.20": {Reason: "chain2", UnblockTime: time.Now().Add(1 * time.Hour)},
-				"10.0.0.1":     {Reason: "chain3", UnblockTime: time.Now().Add(1 * time.Hour)},
-			},
-			newGoodActorYAML: `
-good_actors:
-  - name: "local_network"
-    ip: "cidr:192.168.1.0/24"
-`,
-			expectUnblocked:    []string{"192.168.1.10", "192.168.1.20"},
-			expectRemaining:    []string{"10.0.0.1"},
-			unblockOnGoodActor: true,
-		},
-		{
-			name: "Regex match",
-			blockedIPs: map[string]persistence.ActiveBlockInfo{
-				"1.2.3.4": {Reason: "chain1", UnblockTime: time.Now().Add(1 * time.Hour)},
-				"1.2.3.5": {Reason: "chain2", UnblockTime: time.Now().Add(1 * time.Hour)},
-				"9.9.9.9": {Reason: "chain3", UnblockTime: time.Now().Add(1 * time.Hour)},
-			},
-			newGoodActorYAML: `
-good_actors:
-  - name: "pattern_match"
-    ip: "regex:^1\\.2\\."
-`,
-			expectUnblocked:    []string{"1.2.3.4", "1.2.3.5"},
-			expectRemaining:    []string{"9.9.9.9"},
-			unblockOnGoodActor: true,
-		},
-		{
-			name: "No match - IP not in activeBlocks",
-			blockedIPs: map[string]persistence.ActiveBlockInfo{
-				"1.2.3.4": {Reason: "chain1", UnblockTime: time.Now().Add(1 * time.Hour)},
-			},
-			newGoodActorYAML: `
-good_actors:
-  - name: "different_ip"
-    ip: "5.6.7.8"
-`,
-			expectUnblocked:    []string{},
-			expectRemaining:    []string{"1.2.3.4"},
-			unblockOnGoodActor: true,
-		},
-		{
-			name:       "Empty activeBlocks",
-			blockedIPs: map[string]persistence.ActiveBlockInfo{},
-			newGoodActorYAML: `
-good_actors:
-  - name: "any_ip"
-    ip: "1.2.3.4"
-`,
-			expectUnblocked:    []string{},
-			expectRemaining:    []string{},
-			unblockOnGoodActor: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Setup: Create a temporary config file
-			fullYAML := `version: "1.0"
-chains:
-  - name: "TestChain"
-    match_key: "ip"
-    action: "log"
-    steps: [{field_matches: {path: "/"}}]
-` + tt.newGoodActorYAML
-
-			tmpConfigPath := setupTestYAML(t, fullYAML)
-
-			// Load the config to get the good actors
-			loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
-			if err != nil {
-				t.Fatalf("LoadConfigFromYAML() failed: %v", err)
-			}
-
-			// Create processor with activeBlocks
-			unblockCalled := make(map[string]bool)
-			processor := &Processor{
-				ConfigMutex: &sync.RWMutex{},
-				Config: &AppConfig{
-					Checker: CheckerConfig{
-						UnblockOnGoodActor: tt.unblockOnGoodActor,
-					},
-				},
-				DryRun:       false,
-				activeBlocks: make(map[string]persistence.ActiveBlockInfo),
-				Blocker: &mockUnblocker{
-					unblockFunc: func(ipInfo utils.IPInfo, reason string) error {
-						unblockCalled[ipInfo.Address] = true
-						return nil
-					},
-				},
-				LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-					// Silent
-				},
-			}
-
-			// Populate activeBlocks
-			for ip, info := range tt.blockedIPs {
-				processor.activeBlocks[ip] = info
-			}
-
-			// Act: Call the function
-			unblockNewlyWhitelistedIPs(processor, loadedCfg.GoodActors)
-
-			// Assert: Check which IPs were unblocked
-			for _, ip := range tt.expectUnblocked {
-				if !unblockCalled[ip] {
-					t.Errorf("Expected IP %s to be unblocked, but it wasn't", ip)
-				}
-				if _, stillBlocked := processor.activeBlocks[ip]; stillBlocked {
-					t.Errorf("Expected IP %s to be removed from activeBlocks, but it's still there", ip)
-				}
-			}
-
-			// Assert: Check which IPs remain blocked
-			for _, ip := range tt.expectRemaining {
-				if unblockCalled[ip] {
-					t.Errorf("Expected IP %s to remain blocked, but it was unblocked", ip)
-				}
-				if _, stillBlocked := processor.activeBlocks[ip]; !stillBlocked {
-					t.Errorf("Expected IP %s to remain in activeBlocks, but it was removed", ip)
-				}
-			}
-		})
-	}
-}
-
-// mockUnblocker is a test helper that implements the Blocker interface.
-type mockUnblocker struct {
-	unblockFunc func(ipInfo utils.IPInfo, reason string) error
-}
-
-func (m *mockUnblocker) Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
-	return nil
-}
-
-func (m *mockUnblocker) Unblock(ipInfo utils.IPInfo, reason string) error {
-	if m.unblockFunc != nil {
-		return m.unblockFunc(ipInfo, reason)
-	}
-	return nil
-}
-
-func (m *mockUnblocker) DumpBackends() ([]string, error) {
-	return nil, nil
-}
-
-func (m *mockUnblocker) CompareHAProxyBackends(expTolerance time.Duration) ([]blocker.SyncDiscrepancy, error) {
-	return nil, nil
-}
-
-func (m *mockUnblocker) Shutdown() {}
-
-// TestConfigReload_UnblockGoodActors is an integration test that verifies
-// newly added good actors cause blocked IPs to be unblocked during config reload.
 func TestConfigReload_UnblockGoodActors(t *testing.T) {
-	resetGlobalState()
-	t.Cleanup(resetGlobalState)
+	testutil.ResetGlobalState()
+	t.Cleanup(testutil.ResetGlobalState)
 
 	// Setup: Create initial config without good actors
 	initialYAML := `
@@ -2012,9 +1755,9 @@ chains:
 	tmpConfigPath := setupTestYAML(t, initialYAML)
 
 	// Load initial config
-	initialLoadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: tmpConfigPath})
+	initialLoadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err != nil {
-		t.Fatalf("Initial LoadConfigFromYAML() failed: %v", err)
+		t.Fatalf("Initial config.LoadConfigFromYAML() failed: %v", err)
 	}
 
 	// Track unblock calls
@@ -2022,28 +1765,28 @@ chains:
 	unblockMutex := &sync.Mutex{}
 
 	// Create processor with some blocked IPs
-	processor := &Processor{
+	processor := &app.Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        initialLoadedCfg.Chains,
-		Config: &AppConfig{
-			Application: ApplicationConfig{
-				Config: ConfigManagement{
+		Config: &config.AppConfig{
+			Application: config.ApplicationConfig{
+				Config: config.ConfigManagement{
 					PollingInterval: 10 * time.Millisecond,
 				},
 			},
 			FileDependencies: initialLoadedCfg.FileDependencies,
 			GoodActors:       initialLoadedCfg.GoodActors,
-			Checker: CheckerConfig{
+			Checker: config.CheckerConfig{
 				UnblockOnGoodActor: true,
 			},
 		},
 		DryRun:       false,
-		activeBlocks: make(map[string]persistence.ActiveBlockInfo),
-		Blocker: &mockUnblocker{
-			unblockFunc: func(ipInfo utils.IPInfo, reason string) error {
+		ActiveBlocks: make(map[string]persistence.ActiveBlockInfo),
+		Blocker: &testutil.MockBlocker{
+			UnblockFunc: func(ipInfo utils.IPInfo, reason string) error {
 				unblockMutex.Lock()
 				unblockCalled[ipInfo.Address] = true
 				unblockMutex.Unlock()
@@ -2053,7 +1796,7 @@ chains:
 		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 			// Silent for test
 		},
-		TestSignals: &TestSignals{
+		TestSignals: &app.TestSignals{
 			ForceCheckSignal: make(chan struct{}, 1),
 			ReloadDoneSignal: make(chan struct{}, 1),
 		},
@@ -2068,19 +1811,19 @@ chains:
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
 	// Add some blocked IPs
-	processor.activeBlocks["1.2.3.4"] = persistence.ActiveBlockInfo{
+	processor.ActiveBlocks["1.2.3.4"] = persistence.ActiveBlockInfo{
 		Reason:      "test-chain",
 		UnblockTime: time.Now().Add(1 * time.Hour),
 	}
-	processor.activeBlocks["5.6.7.8"] = persistence.ActiveBlockInfo{
+	processor.ActiveBlocks["5.6.7.8"] = persistence.ActiveBlockInfo{
 		Reason:      "test-chain",
 		UnblockTime: time.Now().Add(1 * time.Hour),
 	}
 
-	// Start ConfigWatcher
+	// Start app.ConfigWatcher
 	stopWatcher := make(chan struct{})
 	t.Cleanup(func() { close(stopWatcher) })
-	go ConfigWatcher(processor, stopWatcher)
+	go app.ConfigWatcher(processor, stopWatcher)
 
 	// Act: Modify config to add a good actor for one of the blocked IPs
 	modifiedYAML := `
@@ -2132,12 +1875,12 @@ chains:
 	unblockMutex.Unlock()
 
 	// Check activeBlocks
-	processor.persistenceMutex.Lock()
-	if _, exists := processor.activeBlocks["1.2.3.4"]; exists {
+	processor.PersistenceMutex.Lock()
+	if _, exists := processor.ActiveBlocks["1.2.3.4"]; exists {
 		t.Error("Expected 1.2.3.4 to be removed from activeBlocks")
 	}
-	if _, exists := processor.activeBlocks["5.6.7.8"]; !exists {
+	if _, exists := processor.ActiveBlocks["5.6.7.8"]; !exists {
 		t.Error("Expected 5.6.7.8 to remain in activeBlocks")
 	}
-	processor.persistenceMutex.Unlock()
+	processor.PersistenceMutex.Unlock()
 }

@@ -1,14 +1,19 @@
 package main
 
 import (
+	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
+	"bot-detector/internal/checker"
 	"bot-detector/internal/commandline"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/logparser"
 	"bot-detector/internal/metrics"
 	"bot-detector/internal/persistence"
+	"bot-detector/internal/processor"
 	"bot-detector/internal/server"
 	"bot-detector/internal/store"
-	"bot-detector/internal/types"
+	"bot-detector/internal/testutil"
 	"bot-detector/internal/utils"
 	"bufio"
 	"encoding/json"
@@ -17,27 +22,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 )
-
-// signalMap maps common signal names to their syscall values.
-var signalMap = map[string]os.Signal{
-	"HUP":  syscall.SIGHUP,
-	"USR1": syscall.SIGUSR1,
-	"USR2": syscall.SIGUSR2,
-}
-
-// GetMarshalledConfig reads the raw configuration file from disk.
-func (p *Processor) GetMarshalledConfig() ([]byte, time.Time, error) {
-	return p.Config.YAMLContent, p.Config.LastModTime, nil
-}
 
 // Helper function to extract settings from the BuildInfo struct
 func findSetting(info *debug.BuildInfo, key string) string {
@@ -108,16 +99,16 @@ func main() {
 // a clean exit, an error for failures, or nil to continue execution.
 func handleStartupFlags(params *commandline.AppParameters) error {
 	if params.ShowVersion {
-		fmt.Printf("bot-detector version %s\n", AppVersion)
+		fmt.Printf("bot-detector version %s\n", config.AppVersion)
 		return fmt.Errorf("exit") // Signal clean exit
 	}
 
 	if params.Check {
-		opts := LoadConfigOptions{
+		opts := config.LoadConfigOptions{
 			ConfigPath: params.ConfigPath,
 		}
 		var err error
-		if _, err = LoadConfigFromYAML(opts); err != nil {
+		if _, err = config.LoadConfigFromYAML(opts); err != nil {
 			return fmt.Errorf("configuration check failed: %v", err)
 		}
 		log.Println("[SUCCESS] Configuration is valid.")
@@ -127,8 +118,8 @@ func handleStartupFlags(params *commandline.AppParameters) error {
 	return nil // Continue execution
 }
 
-func initializeProcessor(params *commandline.AppParameters, appConfig *AppConfig, loadedCfg *LoadedConfig) *Processor {
-	return &Processor{
+func initializeProcessor(params *commandline.AppParameters, appConfig *config.AppConfig, loadedCfg *config.LoadedConfig) *app.Processor {
+	return &app.Processor{
 		ActivityMutex:        &sync.RWMutex{},
 		TopActorsPerChain:    make(map[string]map[string]*store.ActorStats),
 		ActivityStore:        make(map[store.Actor]*store.ActorActivity),
@@ -140,8 +131,8 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *AppConfig
 		DryRun:               params.DryRun,
 		ExitOnEOF:            params.ExitOnEOF,
 		EnableMetrics:        loadedCfg.Application.EnableMetrics,
-		oooBufferFlushSignal: make(chan struct{}, 1), // Buffered channel of size 1
-		signalCh:             make(chan os.Signal, 1),
+		OooBufferFlushSignal: make(chan struct{}, 1), // Buffered channel of size 1
+		SignalCh:             make(chan os.Signal, 1),
 		LogFunc:              logging.LogOutput,
 		NowFunc:              time.Now, // Use the real time.Now in production.
 		ConfigPath:           params.ConfigPath,
@@ -149,32 +140,32 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *AppConfig
 		ReloadOn:             params.ReloadOn,
 		TopN:                 params.TopN,
 		HTTPServer:           params.HTTPServer,
-		configReloaded:       false,
+		ConfigReloaded:       false,
 
 		// Initialize persistence fields
-		persistenceEnabled: loadedCfg.Application.Persistence.Enabled,
-		compactionInterval: loadedCfg.Application.Persistence.CompactionInterval,
-		activeBlocks:       make(map[string]persistence.ActiveBlockInfo),
+		PersistenceEnabled: loadedCfg.Application.Persistence.Enabled,
+		CompactionInterval: loadedCfg.Application.Persistence.CompactionInterval,
+		ActiveBlocks:       make(map[string]persistence.ActiveBlockInfo),
 	}
 }
 
-func restorePersistenceState(p *Processor) error {
+func restorePersistenceState(p *app.Processor) error {
 	// -- STATE RESTORATION --
-	if err := os.MkdirAll(p.stateDir, 0750); err != nil {
-		return fmt.Errorf("failed to create state directory '%s': %v", p.stateDir, err)
+	if err := os.MkdirAll(p.StateDir, 0750); err != nil {
+		return fmt.Errorf("failed to create state directory '%s': %v", p.StateDir, err)
 	}
-	p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.stateDir)
+	p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.StateDir)
 
 	// 1. Load snapshot
-	snapshot, err := persistence.LoadSnapshot(filepath.Join(p.stateDir, "state.snapshot"))
+	snapshot, err := persistence.LoadSnapshot(filepath.Join(p.StateDir, "state.snapshot"))
 	if err != nil {
 		p.LogFunc(logging.LevelError, "STATE_LOAD_FAIL", "Failed to load snapshot: %v", err)
 		return err
 	}
-	p.activeBlocks = snapshot.ActiveBlocks
+	p.ActiveBlocks = snapshot.ActiveBlocks
 
 	// 2. Replay Journal
-	journalPath := filepath.Join(p.stateDir, "events.log")
+	journalPath := filepath.Join(p.StateDir, "events.log")
 	journalFile, err := os.Open(journalPath)
 	if err == nil {
 		scanner := bufio.NewScanner(journalFile)
@@ -187,12 +178,12 @@ func restorePersistenceState(p *Processor) error {
 			if event.Timestamp.After(snapshot.Timestamp) {
 				switch event.Event {
 				case persistence.EventTypeBlock:
-					p.activeBlocks[event.IP] = persistence.ActiveBlockInfo{
+					p.ActiveBlocks[event.IP] = persistence.ActiveBlockInfo{
 						UnblockTime: event.Timestamp.Add(event.Duration),
 						Reason:      event.Reason,
 					}
 				case persistence.EventTypeUnblock:
-					delete(p.activeBlocks, event.IP)
+					delete(p.ActiveBlocks, event.IP)
 				}
 			}
 		}
@@ -204,7 +195,7 @@ func restorePersistenceState(p *Processor) error {
 	}
 
 	// 3. State Push
-	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Restoring %d active blocks to backend...", len(p.activeBlocks))
+	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Restoring %d active blocks to backend...", len(p.ActiveBlocks))
 	// Create a sorted list of table durations for best-fit matching
 	type tableInfo struct {
 		duration time.Duration
@@ -218,10 +209,10 @@ func restorePersistenceState(p *Processor) error {
 		return sortedTables[i].duration < sortedTables[j].duration
 	})
 
-	for ip, info := range p.activeBlocks {
+	for ip, info := range p.ActiveBlocks {
 		// Before restoring, check if the IP is now a good actor.
-		tempEntry := &LogEntry{IPInfo: utils.NewIPInfo(ip)}
-		if isGood, reason := isGoodActor(p, tempEntry); isGood {
+		tempEntry := &app.LogEntry{IPInfo: utils.NewIPInfo(ip)}
+		if isGood, reason := checker.IsGoodActor(p, tempEntry); isGood {
 			p.LogFunc(logging.LevelInfo, "STATE_RESTORE_SKIP", "Skipping restore for %s (good_actor: %s)", ip, reason)
 			continue // Don't restore blocks for good actors.
 		}
@@ -242,7 +233,7 @@ func restorePersistenceState(p *Processor) error {
 	}
 
 	// 4. Open journal for appending
-	p.journalHandle, err = persistence.OpenJournalForAppend(journalPath)
+	p.JournalHandle, err = persistence.OpenJournalForAppend(journalPath)
 	if err != nil {
 		p.LogFunc(logging.LevelError, "JOURNAL_OPEN_FAIL", "Failed to open journal for writing: %v", err)
 		return err
@@ -264,14 +255,14 @@ func execute(params *commandline.AppParameters) error {
 		return fmt.Errorf("could not stat config file: %v", err)
 	}
 
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: params.ConfigPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: params.ConfigPath})
 	if err != nil {
 		return fmt.Errorf("configuration Load Error: %v", err)
 	}
 
 	logging.SetLogLevel(loadedCfg.Application.LogLevel)
 
-	appConfig := &AppConfig{
+	appConfig := &config.AppConfig{
 		Application:      loadedCfg.Application,
 		Parser:           loadedCfg.Parser,
 		Checker:          loadedCfg.Checker,
@@ -279,30 +270,30 @@ func execute(params *commandline.AppParameters) error {
 		GoodActors:       loadedCfg.GoodActors,
 		FileDependencies: loadedCfg.FileDependencies,
 		LastModTime:      fileInfo.ModTime(),
-		StatFunc:         defaultStatFunc,
-		FileOpener:       func(name string) (fileHandle, error) { return os.Open(name) },
+		StatFunc:         processor.DefaultStatFunc,
+		FileOpener:       func(name string) (config.FileHandle, error) { return os.Open(name) },
 		YAMLContent:      loadedCfg.YAMLContent,
 	}
 
 	p := initializeProcessor(params, appConfig, loadedCfg)
 
 	if params.StateDir != "" {
-		p.stateDir = params.StateDir
+		p.StateDir = params.StateDir
 	}
 
-	if p.persistenceEnabled && p.stateDir == "" {
+	if p.PersistenceEnabled && p.StateDir == "" {
 		return fmt.Errorf("persistence is enabled in config, but no --state-dir was provided")
 	}
 
-	p.startTime = p.NowFunc()
-	p.signalOooBufferFlush = p.doSignalOooBufferFlush
-	initializeMetrics(p, loadedCfg)
+	p.StartTime = p.NowFunc()
+	p.SignalOooBufferFlush = func() { checker.DoSignalOooBufferFlush(p) }
+	app.InitializeMetrics(p, loadedCfg)
 
 	haproxyBlocker := blocker.NewHAProxyBlocker(p, p.DryRun)
 	rateLimitedBlocker := blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.Blockers.CommandQueueSize, p.Config.Blockers.CommandsPerSecond)
 	p.Blocker = rateLimitedBlocker
 
-	if p.persistenceEnabled {
+	if p.PersistenceEnabled {
 		if err := restorePersistenceState(p); err != nil {
 			return err
 		}
@@ -312,11 +303,11 @@ func execute(params *commandline.AppParameters) error {
 		return dumpBackendsAndExit(p)
 	}
 
-	p.CheckChainsFunc = func(entry *LogEntry) { CheckChains(p, entry) }
-	p.ProcessLogLine = func(line string) { processLogLineInternal(p, line) }
+	p.CheckChainsFunc = func(entry *app.LogEntry) { checker.CheckChains(p, entry) }
+	p.ProcessLogLine = func(line string) { logparser.ProcessLogLineInternal(p, line) }
 
-	logConfigurationSummary(p)
-	logChainDetails(p, p.Chains, "Loaded chains")
+	app.LogConfigurationSummary(p)
+	app.LogChainDetails(p, p.Chains, "Loaded chains")
 
 	start(p)
 
@@ -325,7 +316,7 @@ func execute(params *commandline.AppParameters) error {
 	return nil
 }
 
-func dumpBackendsAndExit(p *Processor) error {
+func dumpBackendsAndExit(p *app.Processor) error {
 	// Only run the sync check if there are multiple backends to compare.
 	if len(p.GetBlockerAddresses()) > 1 {
 		logging.LogOutput(logging.LevelInfo, "SYNC_CHECK", "Checking HAProxy backend synchronization...")
@@ -367,25 +358,25 @@ func dumpBackendsAndExit(p *Processor) error {
 	return nil
 }
 
-func performGracefulShutdown(p *Processor) {
+func performGracefulShutdown(p *app.Processor) {
 	p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Graceful shutdown initiated.")
 
 	if p.Blocker != nil {
 		p.Blocker.Shutdown()
 	}
 
-	if p.persistenceEnabled {
+	if p.PersistenceEnabled {
 		p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Waiting for persistence operations to complete...")
-		p.persistenceWg.Wait()
+		p.PersistenceWg.Wait()
 
-		if p.compactionInterval > 0 {
+		if p.CompactionInterval > 0 {
 			p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Performing final state compaction...")
 			runCompaction(p)
 		}
 
 		p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Closing journal file.")
-		if p.journalHandle != nil {
-			if err := p.journalHandle.Close(); err != nil {
+		if p.JournalHandle != nil {
+			if err := p.JournalHandle.Close(); err != nil {
 				p.LogFunc(logging.LevelError, "PERSISTENCE", "Error closing journal file: %v", err)
 			}
 		}
@@ -393,221 +384,33 @@ func performGracefulShutdown(p *Processor) {
 	fmt.Fprintln(os.Stderr, "[SHUTDOWN] Shutdown complete.")
 }
 
-// --- MetricsProvider Interface Implementation ---
-
-// GetConfigForArchive safely retrieves the main config content and its dependencies for archiving.
-func (p *Processor) GetConfigForArchive() ([]byte, time.Time, map[string]*types.FileDependency, string, error) {
-	p.ConfigMutex.RLock()
-	defer p.ConfigMutex.RUnlock()
-
-	// Create a deep copy of the dependencies to avoid race conditions if the config is reloaded
-	// while the archive is being generated in a goroutine.
-	depsCopy := make(map[string]*types.FileDependency)
-	for path, dep := range p.Config.FileDependencies {
-		// We only include files that are currently loaded and exist.
-		if dep.CurrentStatus != nil && dep.CurrentStatus.Status == types.FileStatusLoaded {
-			depsCopy[path] = dep.Clone()
-		}
-	}
-
-	return p.Config.YAMLContent, p.Config.LastModTime, depsCopy, p.ConfigPath, nil
-}
-
-// GetListenAddr returns the HTTP listen address from the config.
-func (p *Processor) GetListenAddr() string {
-	return p.HTTPServer
-}
-
-// GetShutdownChannel returns the channel used for shutdown signals.
-func (p *Processor) GetShutdownChannel() chan os.Signal {
-	return p.signalCh
-}
-
-// Log is a wrapper around the processor's LogFunc to satisfy the interface.
-func (p *Processor) Log(level logging.LogLevel, tag string, format string, v ...interface{}) {
-	p.LogFunc(level, tag, format, v...)
-}
-
-// GenerateHTMLMetricsReport creates the full metrics report as an HTML-safe string.
-func (p *Processor) GenerateHTMLMetricsReport() string {
-	var report strings.Builder
-	webLogFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
-		// Sanitize the formatted string before writing it to the HTML report.
-		report.WriteString(utils.ForHTML(fmt.Sprintf(format, args...)) + "\n")
-	}
-	logMetricsSummary(p, time.Since(p.startTime), webLogFunc, "METRICS", "metric")
-	return report.String()
-}
-
-// GenerateStepsMetricsReport creates a report of step execution counts as an HTML-safe string.
-func (p *Processor) GenerateStepsMetricsReport() string {
-	var report strings.Builder
-	report.WriteString("--- Step Execution Counts ---\n")
-	if p.Metrics.StepExecutionCounts == nil {
-		report.WriteString("Step metrics are not enabled or initialized.\n")
-		return report.String()
-	}
-
-	// Collect and sort step metrics for consistent output
-	type StepMetric struct {
-		Name  string
-		Count int64
-	}
-	var stepMetrics []StepMetric
-	p.Metrics.StepExecutionCounts.Range(func(key, value interface{}) bool {
-		stepName, _ := key.(string)
-		count, _ := value.(*atomic.Int64)
-		stepMetrics = append(stepMetrics, StepMetric{Name: stepName, Count: count.Load()})
-		return true
-	})
-
-	sort.Slice(stepMetrics, func(i, j int) bool {
-		if stepMetrics[i].Count == stepMetrics[j].Count {
-			return stepMetrics[i].Name < stepMetrics[j].Name
-		}
-		return stepMetrics[i].Count >= stepMetrics[j].Count
-	})
-
-	for _, sm := range stepMetrics {
-		report.WriteString(fmt.Sprintf("%12d %s\n", sm.Count, utils.ForHTML(sm.Name)))
-	}
-	return report.String()
-}
-
-// --- ParserProvider Interface Implementation ---
-
-func (p *Processor) GetTimestampFormat() string {
-	return p.Config.Parser.TimestampFormat
-}
-
-func (p *Processor) GetLogRegex() *regexp.Regexp {
-	p.ConfigMutex.RLock()
-	defer p.ConfigMutex.RUnlock()
-	return p.LogRegex
-}
-
-// --- StoreProvider Interface Implementation ---
-
-func (p *Processor) GetCleanupInterval() time.Duration {
-	return p.Config.Checker.ActorCleanupInterval
-}
-
-func (p *Processor) GetIdleTimeout() time.Duration {
-	return p.Config.Checker.ActorStateIdleTimeout
-}
-
-func (p *Processor) GetMaxTimeSinceLastHit() time.Duration {
-	return p.Config.Checker.MaxTimeSinceLastHit
-}
-
-func (p *Processor) GetTopN() int {
-	return p.TopN
-}
-
-func (p *Processor) GetTopActorsPerChain() map[string]map[string]*store.ActorStats {
-	return p.TopActorsPerChain
-}
-
-func (p *Processor) GetActivityStore() map[store.Actor]*store.ActorActivity {
-	return p.ActivityStore
-}
-
-func (p *Processor) GetActivityMutex() *sync.RWMutex {
-	return p.ActivityMutex
-}
-
-func (p *Processor) GetTestSignals() *store.TestSignals {
-	if p.TestSignals == nil {
-		return nil
-	}
-	// Convert main.TestSignals to store.TestSignals
-	return &store.TestSignals{
-		CleanupDoneSignal: p.TestSignals.CleanupDoneSignal,
-	}
-}
-
-func (p *Processor) IncrementActorsCleaned() {
-	p.Metrics.ActorsCleaned.Add(1)
-}
-
-// --- MetricsProvider Interface Implementation ---
-
-func (p *Processor) IncrementBlockerCmdsQueued() {
-	p.Metrics.BlockerCmdsQueued.Add(1)
-}
-
-func (p *Processor) IncrementBlockerCmdsDropped() {
-	p.Metrics.BlockerCmdsDropped.Add(1)
-}
-
-func (p *Processor) IncrementBlockerCmdsExecuted() {
-	p.Metrics.BlockerCmdsExecuted.Add(1)
-}
-
-// --- HAProxyProvider Interface Implementation ---
-
-func (p *Processor) GetBlockerAddresses() []string {
-	return p.Config.Blockers.Backends.HAProxy.Addresses
-}
-
-func (p *Processor) GetDurationTables() map[time.Duration]string {
-	return p.Config.Blockers.Backends.HAProxy.DurationTables
-}
-
-func (p *Processor) GetBlockTableNameFallback() string {
-	return p.Config.Blockers.Backends.HAProxy.TableNameFallback
-}
-
-func (p *Processor) GetBlockerMaxRetries() int {
-	return p.Config.Blockers.MaxRetries
-}
-
-func (p *Processor) GetBlockerRetryDelay() time.Duration {
-	return p.Config.Blockers.RetryDelay
-}
-
-func (p *Processor) GetBlockerDialTimeout() time.Duration {
-	return p.Config.Blockers.DialTimeout
-}
-
-func (p *Processor) IncrementBlockerRetries() {
-	p.Metrics.BlockerRetries.Add(1)
-}
-
-func (p *Processor) IncrementCmdsPerBlocker(addr string) {
-	if val, ok := p.Metrics.CmdsPerBlocker.Load(addr); ok {
-		val.(*atomic.Int64).Add(1)
-	}
-}
-
-// runCompaction creates a new snapshot and truncates the journal.
-func runCompaction(p *Processor) {
-	p.persistenceMutex.Lock()
-	defer p.persistenceMutex.Unlock()
+func runCompaction(p *app.Processor) {
+	p.PersistenceMutex.Lock()
+	defer p.PersistenceMutex.Unlock()
 
 	// Filter out expired blocks before snapshotting
 	now := p.NowFunc()
 	activeBlocks := make(map[string]persistence.ActiveBlockInfo)
-	for ip, info := range p.activeBlocks {
+	for ip, info := range p.ActiveBlocks {
 		if now.Before(info.UnblockTime) {
 			activeBlocks[ip] = info
 		}
 	}
-	p.activeBlocks = activeBlocks // Update in-memory map
+	p.ActiveBlocks = activeBlocks // Update in-memory map
 
 	snapshot := &persistence.Snapshot{
 		Timestamp:    now,
-		ActiveBlocks: p.activeBlocks,
+		ActiveBlocks: p.ActiveBlocks,
 	}
 
-	if err := persistence.WriteSnapshot(filepath.Join(p.stateDir, "state.snapshot"), snapshot); err != nil {
+	if err := persistence.WriteSnapshot(filepath.Join(p.StateDir, "state.snapshot"), snapshot); err != nil {
 		p.LogFunc(logging.LevelError, "COMPACTION_FAIL", "Failed to write snapshot: %v", err)
 		return
 	}
 
 	// Truncate and re-open journal
-	journalPath := filepath.Join(p.stateDir, "events.log")
-	if err := p.journalHandle.Close(); err != nil {
+	journalPath := filepath.Join(p.StateDir, "events.log")
+	if err := p.JournalHandle.Close(); err != nil {
 		p.LogFunc(logging.LevelError, "COMPACTION_FAIL", "Failed to close journal for truncation: %v", err)
 	}
 
@@ -618,18 +421,18 @@ func runCompaction(p *Processor) {
 		// Attempt to re-open in append mode as a fallback
 		handle, _ = persistence.OpenJournalForAppend(journalPath)
 	}
-	p.journalHandle = handle
+	p.JournalHandle = handle
 	p.LogFunc(logging.LevelInfo, "COMPACTION", "State snapshot and journal compaction completed successfully.")
 }
 
 // start is the unexported function that contains the main application logic,
 // which is called by the tests and the main function.
-func start(p *Processor) {
+func start(p *app.Processor) {
 	if p.DryRun {
 		// DryRun mode: Process a static log file and exit when done.
 		done := make(chan struct{})
 		// Pass the Processor instance P
-		go DryRunLogProcessor(p, done)
+		go processor.DryRunLogProcessor(p, done)
 
 		// Wait for the processor to finish in dry-run mode
 		<-done
@@ -641,7 +444,7 @@ func start(p *Processor) {
 		// Only start these background tasks if not in a test that bypasses them.
 		// This allows tests to focus on specific components like the tailer without
 		// interference from other goroutines like the config watcher.
-		if !IsTesting() {
+		if !testutil.IsTesting() {
 			// The ConfigWatcher is not started in test mode to prevent race conditions where
 			// the test's config is overwritten by a reload from the default config file.
 			reloadSignalCh := make(chan os.Signal, 1)
@@ -654,28 +457,28 @@ func start(p *Processor) {
 			case "hup", "usr1", "usr2":
 				// Flag is set to a specific signal. Watcher is disabled.
 				p.LogFunc(logging.LevelInfo, "SETUP", "File watcher disabled. Reloading only on %s signal.", strings.ToUpper(reloadFlag))
-				go SignalReloader(p, stopWatcher, reloadSignalCh)
+				go app.SignalReloader(p, stopWatcher, reloadSignalCh)
 
 			case "watcher":
 				// Flag is 'watcher'. Signal reloading is disabled.
 				p.LogFunc(logging.LevelInfo, "SETUP", "Signal-based reloading disabled. Watching config file for changes.")
-				go ConfigWatcher(p, stopWatcher)
+				go app.ConfigWatcher(p, stopWatcher)
 
 			case "":
 				// Flag is absent. Both watcher and SIGHUP reloader are active.
 				p.LogFunc(logging.LevelInfo, "SETUP", "File watcher enabled. Also listening on SIGHUP for forced reload.")
-				go ConfigWatcher(p, stopWatcher)
-				go SignalReloader(p, stopWatcher, reloadSignalCh) // This will default to HUP when p.ReloadOn is ""
+				go app.ConfigWatcher(p, stopWatcher)
+				go app.SignalReloader(p, stopWatcher, reloadSignalCh) // This will default to HUP when p.ReloadOn is ""
 			default:
 				// An invalid value was provided. Log a fatal error and exit.
 				log.Fatalf("[FATAL] Invalid value for --reload-on: '%s'. Must be one of 'watcher', 'hup', 'usr1', or 'usr2'.", p.ReloadOn)
 			}
 
-			if p.persistenceEnabled && p.compactionInterval > 0 {
+			if p.PersistenceEnabled && p.CompactionInterval > 0 {
 				go func() {
-					ticker := time.NewTicker(p.compactionInterval)
+					ticker := time.NewTicker(p.CompactionInterval)
 					defer ticker.Stop()
-					p.LogFunc(logging.LevelInfo, "SETUP", "State compaction enabled, running every %v.", p.compactionInterval)
+					p.LogFunc(logging.LevelInfo, "SETUP", "State compaction enabled, running every %v.", p.CompactionInterval)
 					for {
 						select {
 						case <-ticker.C:
@@ -689,16 +492,16 @@ func start(p *Processor) {
 			}
 
 			if p.TopN > 0 {
-				go cleanupTopActors(p, stopWatcher)
+				go processor.CleanupTopActors(p, stopWatcher)
 			}
 			go store.CleanUpIdleActors(p, stopWatcher)
-			go entryBufferWorker(p, stopWatcher)
+			go checker.EntryBufferWorker(p, stopWatcher)
 			go server.Start(p)
 		}
 		// Listen for OS signals on the processor's channel
-		signal.Notify(p.signalCh, syscall.SIGINT, syscall.SIGTERM)
+		signal.Notify(p.SignalCh, syscall.SIGINT, syscall.SIGTERM)
 
 		// LiveLogTailer is the blocking main loop
-		LiveLogTailer(p, p.signalCh, nil) // Pass the processor's channel to the tailer
+		processor.LiveLogTailer(p, p.SignalCh, nil) // Pass the processor's channel to the tailer
 	}
 }

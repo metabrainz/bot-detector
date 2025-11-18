@@ -1,7 +1,10 @@
-package main
+package app_test
 
 import (
+	"bot-detector/internal/app"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/testutil"
 	"bot-detector/internal/types"
 	"crypto/sha256"
 	"fmt"
@@ -14,25 +17,25 @@ import (
 	"time"
 )
 
-// newTestProcessorWithFileDeps creates a new Processor instance for testing,
-// pre-populating it with a mock AppConfig that includes a FileDependencies map.
-func newTestProcessorWithFileDeps(t *testing.T, config *AppConfig, logFunc func(level logging.LogLevel, tag string, format string, v ...interface{})) *Processor {
+// newTestProcessorWithFileDeps creates a new app.Processor instance for testing,
+// pre-populating it with a mock config.AppConfig that includes a FileDependencies map.
+func newTestProcessorWithFileDeps(t *testing.T, cfg *config.AppConfig, logFunc func(level logging.LogLevel, tag string, format string, v ...interface{})) *app.Processor {
 	t.Helper()
-	if config == nil {
-		config = &AppConfig{}
+	if cfg == nil {
+		cfg = &config.AppConfig{}
 	}
-	if config.FileDependencies == nil {
-		config.FileDependencies = make(map[string]*types.FileDependency)
+	if cfg.FileDependencies == nil {
+		cfg.FileDependencies = make(map[string]*types.FileDependency)
 	}
-	p := newTestProcessor(config, nil) // Use the existing newTestProcessor
-	p.LogFunc = logFunc                // Set the log function here
+	p := testutil.NewTestProcessor(cfg, nil) // Use the existing testutil.NewTestProcessor
+	p.LogFunc = logFunc                      // Set the log function here
 	return p
 }
 
-// TestFileDependency_ContentChange verifies that ConfigWatcher detects a file content change
-// and triggers a reload, and LoadConfigFromYAML re-reads the new content.
+// TestFileDependency_ContentChange verifies that app.ConfigWatcher detects a file content change
+// and triggers a reload, and config.LoadConfigFromYAML re-reads the new content.
 func TestFileDependency_ContentChange(t *testing.T) {
-	resetGlobalState()
+	testutil.ResetGlobalState()
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "change_file.txt")
@@ -60,9 +63,9 @@ chains:
 	}
 
 	// --- Initial Load ---
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
-		t.Fatalf("Initial LoadConfigFromYAML failed: %v", err)
+		t.Fatalf("Initial config.LoadConfigFromYAML failed: %v", err)
 	}
 	var capturedLogs []string
 	var logMutex sync.Mutex
@@ -78,9 +81,9 @@ chains:
 	t.Cleanup(func() { logging.LogOutput = originalLogOutput })
 
 	// Create a processor with the loaded config
-	p := newTestProcessorWithFileDeps(t, &AppConfig{
-		Application: ApplicationConfig{
-			Config: ConfigManagement{
+	p := newTestProcessorWithFileDeps(t, &config.AppConfig{
+		Application: config.ApplicationConfig{
+			Config: config.ConfigManagement{
 				PollingInterval: 10 * time.Millisecond, // Short polling interval for test
 			},
 		},
@@ -89,12 +92,12 @@ chains:
 	}, logCaptureFunc)
 	p.ConfigPath = configPath
 
-	// Setup channels for ConfigWatcher
+	// Setup channels for app.ConfigWatcher
 	stopCh := make(chan struct{})
 	reloadDoneCh := make(chan struct{})
-	p.TestSignals = &TestSignals{ReloadDoneSignal: reloadDoneCh}
+	p.TestSignals = &app.TestSignals{ReloadDoneSignal: reloadDoneCh}
 
-	go ConfigWatcher(p, stopCh)
+	go app.ConfigWatcher(p, stopCh)
 	defer close(stopCh)
 
 	// --- Act 1: Modify the file content ---
@@ -153,7 +156,7 @@ chains:
 
 // TestFileDependency_MissingFile verifies that a missing file dependency is correctly handled.
 func TestFileDependency_MissingFile(t *testing.T) {
-	resetGlobalState()
+	testutil.ResetGlobalState()
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "non_existent_file.txt") // This file will not be created
@@ -186,9 +189,9 @@ chains:
 	t.Cleanup(func() { logging.LogOutput = originalLogOutput })
 
 	// --- Act ---
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
-		t.Fatalf("LoadConfigFromYAML failed: %v", err)
+		t.Fatalf("config.LoadConfigFromYAML failed: %v", err)
 	}
 
 	// --- Assert ---
@@ -217,7 +220,7 @@ chains:
 		t.Errorf("FileDependency Content mismatch. Got %v, want empty", fileDep.Content)
 	}
 
-	// Verify warning was logged by compileStringMatcher
+	// Verify warning was logged by config.CompileStringMatcher
 	logMutex.Lock()
 	foundWarning := false
 	for _, log := range capturedLogs {
@@ -237,9 +240,9 @@ chains:
 }
 
 // TestFileDependency_FileReappears verifies that if a missing file reappears,
-// ConfigWatcher detects it and triggers a reload, and LoadConfigFromYAML successfully loads it.
+// app.ConfigWatcher detects it and triggers a reload, and config.LoadConfigFromYAML successfully loads it.
 func TestFileDependency_FileReappears(t *testing.T) {
-	resetGlobalState()
+	testutil.ResetGlobalState()
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "reappear_file.txt")
@@ -261,9 +264,9 @@ chains:
 	}
 
 	// --- Initial Load (file is missing) ---
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
-		t.Fatalf("Initial LoadConfigFromYAML failed: %v", err)
+		t.Fatalf("Initial config.LoadConfigFromYAML failed: %v", err)
 	}
 	if loadedCfg == nil {
 		t.Fatal("Loaded config is nil")
@@ -283,9 +286,9 @@ chains:
 	}
 
 	// Create a processor with the loaded config
-	p := newTestProcessorWithFileDeps(t, &AppConfig{
-		Application: ApplicationConfig{
-			Config: ConfigManagement{
+	p := newTestProcessorWithFileDeps(t, &config.AppConfig{
+		Application: config.ApplicationConfig{
+			Config: config.ConfigManagement{
 				PollingInterval: 10 * time.Millisecond, // Short polling interval for test
 			},
 		},
@@ -294,12 +297,12 @@ chains:
 	}, logCaptureFunc)
 	p.ConfigPath = configPath
 
-	// Setup channels for ConfigWatcher
+	// Setup channels for app.ConfigWatcher
 	stopCh := make(chan struct{})
 	reloadDoneCh := make(chan struct{})
-	p.TestSignals = &TestSignals{ReloadDoneSignal: reloadDoneCh}
+	p.TestSignals = &app.TestSignals{ReloadDoneSignal: reloadDoneCh}
 
-	go ConfigWatcher(p, stopCh)
+	go app.ConfigWatcher(p, stopCh)
 	defer close(stopCh)
 
 	// --- Act 1: Create the missing file ---
@@ -356,9 +359,9 @@ chains:
 }
 
 // TestFileDependency_FileDisappears verifies that if a loaded file disappears,
-// ConfigWatcher detects it and triggers a reload, and LoadConfigFromYAML marks it as FileStatusMissing.
+// app.ConfigWatcher detects it and triggers a reload, and config.LoadConfigFromYAML marks it as FileStatusMissing.
 func TestFileDependency_FileDisappears(t *testing.T) {
-	resetGlobalState()
+	testutil.ResetGlobalState()
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "disappear_file.txt")
@@ -386,9 +389,9 @@ chains:
 	}
 
 	// --- Initial Load ---
-	loadedCfg, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
 	if err != nil {
-		t.Fatalf("Initial LoadConfigFromYAML failed: %v", err)
+		t.Fatalf("Initial config.LoadConfigFromYAML failed: %v", err)
 	}
 	if loadedCfg == nil {
 		t.Fatal("Loaded config is nil")
@@ -408,9 +411,9 @@ chains:
 	}
 
 	// Create a processor with the loaded config
-	p := newTestProcessorWithFileDeps(t, &AppConfig{
-		Application: ApplicationConfig{
-			Config: ConfigManagement{
+	p := newTestProcessorWithFileDeps(t, &config.AppConfig{
+		Application: config.ApplicationConfig{
+			Config: config.ConfigManagement{
 				PollingInterval: 10 * time.Millisecond, // Short polling interval for test
 			},
 		},
@@ -419,12 +422,12 @@ chains:
 	}, logCaptureFunc)
 	p.ConfigPath = configPath
 
-	// Setup channels for ConfigWatcher
+	// Setup channels for app.ConfigWatcher
 	stopCh := make(chan struct{})
 	reloadDoneCh := make(chan struct{})
-	p.TestSignals = &TestSignals{ReloadDoneSignal: reloadDoneCh}
+	p.TestSignals = &app.TestSignals{ReloadDoneSignal: reloadDoneCh}
 
-	go ConfigWatcher(p, stopCh)
+	go app.ConfigWatcher(p, stopCh)
 	defer close(stopCh)
 
 	// --- Act 1: Delete the file ---
@@ -478,10 +481,10 @@ chains:
 	}
 }
 
-// TestFileDependency_CyclicDependency verifies that LoadConfigFromYAML correctly
+// TestFileDependency_CyclicDependency verifies that config.LoadConfigFromYAML correctly
 // detects and reports a cyclic dependency between files.
 func TestFileDependency_CyclicDependency(t *testing.T) {
-	resetGlobalState()
+	testutil.ResetGlobalState()
 
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "config.yaml")
@@ -513,7 +516,7 @@ chains:
 	}
 
 	// --- Act ---
-	_, err := LoadConfigFromYAML(LoadConfigOptions{ConfigPath: configPath})
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: configPath})
 
 	// --- Assert ---
 	if err == nil {
@@ -529,7 +532,7 @@ chains:
 // TestFileDependency_UpdateStatusScenarios verifies the correct behavior of FileDependency.updateStatus()
 // under various file state changes (initial load, no change, content change, disappearance, reappearance).
 func TestFileDependency_UpdateStatusScenarios(t *testing.T) {
-	resetGlobalState()
+	testutil.ResetGlobalState()
 
 	tempDir := t.TempDir()
 	testFilePath := filepath.Join(tempDir, "test_file.txt")
