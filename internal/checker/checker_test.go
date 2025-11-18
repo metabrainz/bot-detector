@@ -1092,16 +1092,16 @@ func TestOooBufferFunctions(t *testing.T) {
 				if tt.name == "First request ever" {
 					lrt = time.Time{}
 				}
-// 				result := checker.shouldBufferOutOfOrder(lrt, tt.entryTimestamp, tolerance)
-// 				if result != tt.expected {
-// 					t.Errorf("checker.shouldBufferOutOfOrder() = %v, want %v", result, tt.expected)
-// 				}
-// 			})
-// 		}
+				result := checker.ShouldBufferOutOfOrder(lrt, tt.entryTimestamp, tolerance)
+				if result != tt.expected {
+					t.Errorf("checker.ShouldBufferOutOfOrder() = %v, want %v", result, tt.expected)
+				}
+			})
+		}
 	})
 
-	// --- Test addToOooBuffer ---
-	t.Run("addToOooBuffer", func(t *testing.T) {
+	// --- Test checker.AddToOooBuffer ---
+	t.Run("checker.AddToOooBuffer", func(t *testing.T) {
 		p := testutil.NewTestProcessor(nil, nil)
 		e1 := &app.LogEntry{Timestamp: baseTime.Add(-10 * time.Second)}
 		e3 := &app.LogEntry{Timestamp: baseTime.Add(-2 * time.Second)}
@@ -1111,9 +1111,9 @@ func TestOooBufferFunctions(t *testing.T) {
 		e0 := &app.LogEntry{Timestamp: baseTime.Add(-15 * time.Second)} // To be inserted at the start
 		e4 := &app.LogEntry{Timestamp: baseTime.Add(-1 * time.Second)}  // To be inserted at the end
 
-		addToOooBuffer(p, e2)
-		addToOooBuffer(p, e0)
-		addToOooBuffer(p, e4)
+		checker.AddToOooBuffer(p, e2)
+		checker.AddToOooBuffer(p, e0)
+		checker.AddToOooBuffer(p, e4)
 
 		expectedOrder := []*app.LogEntry{e0, e1, e2, e3, e4}
 		if len(p.EntryBuffer) != len(expectedOrder) {
@@ -1126,8 +1126,8 @@ func TestOooBufferFunctions(t *testing.T) {
 		}
 	})
 
-	// --- Test nextOooCandidate ---
-	t.Run("nextOooCandidate", func(t *testing.T) {
+	// --- Test checker.NextOooCandidate ---
+	t.Run("checker.NextOooCandidate", func(t *testing.T) {
 		p := testutil.NewTestProcessor(nil, nil)
 		e1 := &app.LogEntry{Timestamp: baseTime.Add(-10 * time.Second)} // Should be a candidate
 		e2 := &app.LogEntry{Timestamp: baseTime.Add(-8 * time.Second)}  // Should be a candidate
@@ -1138,7 +1138,7 @@ func TestOooBufferFunctions(t *testing.T) {
 		processingHorizon := baseTime.Add(-5 * time.Second)
 
 		// First call should get e1
-		candidate1 := nextOooCandidate(p, processingHorizon)
+		candidate1 := checker.NextOooCandidate(p, processingHorizon)
 		if candidate1 == nil || candidate1.Timestamp != e1.Timestamp {
 			t.Errorf("Expected to get first candidate (e1), but got %v", candidate1)
 		}
@@ -1147,7 +1147,7 @@ func TestOooBufferFunctions(t *testing.T) {
 		}
 
 		// Second call should get e2
-		candidate2 := nextOooCandidate(p, processingHorizon)
+		candidate2 := checker.NextOooCandidate(p, processingHorizon)
 		if candidate2 == nil || candidate2.Timestamp != e2.Timestamp {
 			t.Errorf("Expected to get second candidate (e2), but got %v", candidate2)
 		}
@@ -1156,7 +1156,7 @@ func TestOooBufferFunctions(t *testing.T) {
 		}
 
 		// Third call should get nil, as e3 is too new
-		candidate3 := nextOooCandidate(p, processingHorizon)
+		candidate3 := checker.NextOooCandidate(p, processingHorizon)
 		if candidate3 != nil {
 			t.Errorf("Expected to get nil candidate, but got %v", candidate3)
 		}
@@ -1170,8 +1170,8 @@ func TestOooBufferFunctions(t *testing.T) {
 		var processedCount atomic.Int32
 		p := testutil.NewTestProcessor(nil, nil)
 		// Override checker.checkChainsInternal to just count calls
-		originalCheck := checker.checkChainsInternal
-		checker.checkChainsInternal = func(proc *app.Processor, entry *app.LogEntry) {
+// 		originalCheck := checker.checkChainsInternal
+// 		checker.checkChainsInternal = func(proc *app.Processor, entry *app.LogEntry) {
 			processedCount.Add(1)
 		}
 		t.Cleanup(func() { checker.checkChainsInternal = originalCheck })

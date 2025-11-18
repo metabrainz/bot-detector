@@ -258,7 +258,7 @@ func DefaultStatFunc(path string) (os.FileInfo, error) {
 
 // delayOrShutdown waits for a specified duration but will return early if a shutdown
 // signal is received on the provided channel. It returns true if a shutdown was triggered.
-func delayOrShutdown(p *app.Processor, delay time.Duration, signalCh <-chan os.Signal) bool {
+func DelayOrShutdown(p *app.Processor, delay time.Duration, signalCh <-chan os.Signal) bool {
 	select {
 	case <-time.After(delay):
 		return false // Delay completed
@@ -487,7 +487,7 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 		// Local function to restart the outer loop after a delay.
 		// It's defined here to capture 'shutdown' in its closure.
 		restartTailing := func(delay time.Duration) {
-			if delay > 0 && delayOrShutdown(p, delay, signalCh) {
+			if delay > 0 && DelayOrShutdown(p, delay, signalCh) {
 				shutdown = true
 			}
 		}

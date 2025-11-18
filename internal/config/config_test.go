@@ -1807,7 +1807,7 @@ func TestFindNewlyAddedGoodActors(t *testing.T) {
 // 	}
 // }
 // 
-// // // TestUnblockNewlyWhitelistedIPs verifies that newly whitelisted IPs are correctly unblocked.
+// // TestUnblockNewlyWhitelistedIPs verifies that newly whitelisted IPs are correctly unblocked.
 // func TestUnblockNewlyWhitelistedIPs(t *testing.T) {
 	testutil.ResetGlobalState()
 	t.Cleanup(testutil.ResetGlobalState)
@@ -1972,12 +1972,12 @@ type mockUnblocker struct {
 	unblockFunc func(ipInfo utils.IPInfo, reason string) error
 }
 
-// func (m *mockUnblocker) Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
+func (m *mockUnblocker) Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
 	return nil
-// }
+}
 // 
-// func (m *mockUnblocker) Unblock(ipInfo utils.IPInfo, reason string) error {
-// 	if m.unblockFunc != nil {
+func (m *mockUnblocker) Unblock(ipInfo utils.IPInfo, reason string) error {
+	if m.unblockFunc != nil {
 		return m.unblockFunc(ipInfo, reason)
 	}
 	return nil

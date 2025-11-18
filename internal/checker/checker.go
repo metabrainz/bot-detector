@@ -123,7 +123,7 @@ func IsGoodActor(p *app.Processor, entry *app.LogEntry) (bool, string) {
 // addToOooBuffer inserts a log entry into the out-of-order buffer while maintaining
 // the buffer's sorted order by timestamp. This is more efficient than appending
 // and re-sorting the entire buffer later.
-func addToOooBuffer(p *app.Processor, entry *app.LogEntry) {
+func AddToOooBuffer(p *app.Processor, entry *app.LogEntry) {
 	// Find the correct insertion point using binary search.
 	i := sort.Search(len(p.EntryBuffer), func(i int) bool {
 		return p.EntryBuffer[i].Timestamp.After(entry.Timestamp)
@@ -142,7 +142,7 @@ func addToOooBuffer(p *app.Processor, entry *app.LogEntry) {
 // nextOooCandidate checks the out-of-order buffer for the next entry that is ready
 // to be processed. An entry is ready if its timestamp is older than the processing horizon.
 // If a candidate is found, it is removed from the buffer and returned.
-func nextOooCandidate(p *app.Processor, processingHorizon time.Time) *app.LogEntry {
+func NextOooCandidate(p *app.Processor, processingHorizon time.Time) *app.LogEntry {
 	if len(p.EntryBuffer) == 0 {
 		return nil // Buffer is empty.
 	}
@@ -176,7 +176,7 @@ func flushOooBuffer(p *app.Processor) {
 
 // shouldBufferOutOfOrder determines if an incoming log entry is out-of-order and within the
 // configured tolerance window, indicating it should be buffered instead of processed immediately.
-func shouldBufferOutOfOrder(lastRequestTime, entryTimestamp time.Time, tolerance time.Duration) bool {
+func ShouldBufferOutOfOrder(lastRequestTime, entryTimestamp time.Time, tolerance time.Duration) bool {
 	return !lastRequestTime.IsZero() && entryTimestamp.Before(lastRequestTime) && lastRequestTime.Sub(entryTimestamp) <= tolerance
 }
 
@@ -201,8 +201,8 @@ func handleOutOfOrder(p *app.Processor, entry *app.LogEntry) (buffered bool) {
 
 	// If the entry is older than the last request we've seen for this IP,
 	// and it's within the tolerance window, buffer it.
-	if shouldBufferOutOfOrder(lastRequestTime, entry.Timestamp, tolerance) {
-		addToOooBuffer(p, entry)
+	if ShouldBufferOutOfOrder(lastRequestTime, entry.Timestamp, tolerance) {
+		AddToOooBuffer(p, entry)
 		return true // Indicate that the entry was buffered.
 	}
 
@@ -836,7 +836,7 @@ func EntryBufferWorker(p *app.Processor, stop <-chan struct{}) {
 		// Process all candidates that are ready by repeatedly calling nextOooCandidate.
 		var processedInTick []*app.LogEntry
 		for {
-			if entry := nextOooCandidate(p, processingHorizon); entry != nil {
+			if entry := NextOooCandidate(p, processingHorizon); entry != nil {
 				processedInTick = append(processedInTick, entry)
 			} else {
 				break // No more candidates ready.
