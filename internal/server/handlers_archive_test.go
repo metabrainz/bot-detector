@@ -40,7 +40,7 @@ type MockFileDependency struct {
 type MockProviderWithArchive struct {
 	*MockProvider // Embed the existing mock provider
 	Deps          map[string]*MockFileDependency
-	ConfigPath    string
+	ConfigDir     string
 	MainModTime   time.Time
 	MainContent   []byte
 }
@@ -63,14 +63,14 @@ func (m *MockProviderWithArchive) GetConfigForArchive() ([]byte, time.Time, map[
 			Content: mockDep.Content,
 		}
 	}
-	return m.MainContent, m.MainModTime, deps, m.ConfigPath, nil
+	return m.MainContent, m.MainModTime, deps, m.ConfigDir, nil
 }
 
 func TestArchiveHandler(t *testing.T) {
 	// -- Setup --
 	mainContent := "version: '1.0'\n"
 	dep1Content := "1.2.3.4\n5.6.7.8\n"
-	configPath := "/etc/bot-detector/config.yaml"
+	configDir := "/etc/bot-detector"
 
 	now := time.Now()
 	mainModTime := now.Add(-10 * time.Minute)
@@ -80,7 +80,7 @@ func TestArchiveHandler(t *testing.T) {
 		MockProvider: &MockProvider{}, // Initialize the embedded mock
 		MainContent:  []byte(mainContent),
 		MainModTime:  mainModTime,
-		ConfigPath:   configPath,
+		ConfigDir:    configDir,
 		Deps: map[string]*MockFileDependency{
 			"/etc/bot-detector/dependency1.txt": {
 				Path:    "/etc/bot-detector/dependency1.txt",
@@ -157,7 +157,7 @@ func TestArchiveHandler(t *testing.T) {
 	}
 
 	// Verify dependency
-	relPath, _ := filepath.Rel(filepath.Dir(configPath), "/etc/bot-detector/dependency1.txt")
+	relPath, _ := filepath.Rel(configDir, "/etc/bot-detector/dependency1.txt")
 	if content, ok := filesInArchive[relPath]; !ok {
 		t.Errorf("archive does not contain dependency file: %s", relPath)
 	} else if content != dep1Content {

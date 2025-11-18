@@ -15,7 +15,7 @@ import (
 // main configuration file and all its file dependencies.
 func archiveHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		mainConfig, modTime, deps, configPath, err := p.GetConfigForArchive()
+		mainConfig, modTime, deps, configDir, err := p.GetConfigForArchive()
 		if err != nil {
 			http.Error(w, "Failed to get configuration for archive", http.StatusInternalServerError)
 			p.Log(0, "ARCHIVE_ERROR", "Failed to get config for archive: %v", err)
@@ -59,7 +59,6 @@ func archiveHandler(p Provider) http.HandlerFunc {
 		}
 
 		// Add all file dependencies to the archive.
-		configDir := filepath.Dir(configPath)
 		for path, dep := range deps {
 			// Only add files that are currently loaded to the archive.
 			if dep.CurrentStatus != nil && dep.CurrentStatus.Status == types.FileStatusLoaded {
