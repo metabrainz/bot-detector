@@ -24,7 +24,7 @@ fi
 
 # Run go build
 echo "Running go build..."
-go build
+go build -o bot-detector ./cmd/bot-detector
 
 # Run gofmt
 echo "Running gofmt..."
