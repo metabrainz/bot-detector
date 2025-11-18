@@ -1,0 +1,32 @@
+application:
+  config:
+    polling_interval: 5s
+  tail:
+    log_path: /tmp/bot-detector-test.log
+  server:
+    port: 8080
+  persistence:
+    enabled: false
+
+cluster:
+  nodes:
+    - name: leader
+      address: "127.0.0.1:8080"
+    - name: follower
+      address: "127.0.0.1:9090"
+  config_poll_interval: 5s
+  metrics_report_interval: 10s
+  protocol: http
+
+profiles:
+  - name: test_profile
+    time_window: 60s
+    requests_threshold: 10
+    unique_ips_threshold: 5
+    detection_criteria:
+      - type: high_frequency
+        threshold: 100
+    actions:
+      - type: log
+        parameters:
+          message: "Test detection"
