@@ -1267,7 +1267,7 @@ func TestLogMetricsSummary(t *testing.T) {
 	}
 
 	// --- Act ---
-	logMetricsSummary(p, 100*time.Millisecond, logFunc, "METRICS", "metric") // Use "metric" tag to display all
+	LogMetricsSummary(p, 100*time.Millisecond, logFunc, "METRICS", "metric") // Use "metric" tag to display all
 
 	// --- Assert ---
 	output := strings.Join(capturedLogs, "\n")
@@ -1326,7 +1326,7 @@ func TestLogMetricsSummary_Filter(t *testing.T) {
 
 	// --- Act ---
 	// Call with the "dryrun" filter.
-	logMetricsSummary(p, 10*time.Millisecond, logFunc, "METRICS", "dryrun")
+	LogMetricsSummary(p, 10*time.Millisecond, logFunc, "METRICS", "dryrun")
 
 	// --- Assert ---
 	output := strings.Join(capturedLogs, "\n")

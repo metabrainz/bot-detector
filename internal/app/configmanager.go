@@ -83,8 +83,9 @@ func LogConfigurationSummary(p *Processor) {
 	}
 }
 
-// logChainDetails logs details for a given list of chains, one per line.
-func logChainDetails(p *Processor, chains []config.BehavioralChain, header string) {
+// LogChainDetails logs details for a given list of chains, one per line.
+// Exported for use in main.
+func LogChainDetails(p *Processor, chains []config.BehavioralChain, header string) {
 	p.LogFunc(logging.LevelDebug, "CONFIG", "%s (%d total)", header, len(chains))
 	for _, chain := range chains {
 		details := fmt.Sprintf("Name: '%s', Action: %s, Steps: %d, MatchKey: %s", chain.Name, chain.Action, len(chain.Steps), chain.MatchKey)
@@ -320,13 +321,13 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	}
 
 	if len(added) > 0 {
-		logChainDetails(p, added, "Added chains:")
+		LogChainDetails(p, added, "Added chains:")
 	}
 	if len(modified) > 0 {
-		logChainDetails(p, modified, "Modified chains:")
+		LogChainDetails(p, modified, "Modified chains:")
 	}
 	if len(removed) > 0 {
-		logChainDetails(p, removed, "Removed chains:")
+		LogChainDetails(p, removed, "Removed chains:")
 	}
 
 	// --- Unblock IPs that match newly added good actors ---

@@ -316,7 +316,7 @@ func execute(params *commandline.AppParameters) error {
 	p.ProcessLogLine = func(line string) { processLogLineInternal(p, line) }
 
 	app.LogConfigurationSummary(p)
-	logChainDetails(p, p.Chains, "Loaded chains")
+	app.LogChainDetails(p, p.Chains, "Loaded chains")
 
 	start(p)
 
@@ -367,67 +367,6 @@ func dumpBackendsAndExit(p *app.Processor) error {
 	return nil
 }
 
-func performGracefulShutdown(p *app.Processor) {
-	p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Graceful shutdown initiated.")
-
-	if p.Blocker != nil {
-		p.Blocker.Shutdown()
-	}
-
-	if p.PersistenceEnabled {
-		p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Waiting for persistence operations to complete...")
-		p.PersistenceWg.Wait()
-
-		if p.CompactionInterval > 0 {
-			p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Performing final state compaction...")
-			runCompaction(p)
-		}
-
-		p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Closing journal file.")
-		if p.JournalHandle != nil {
-			if err := p.JournalHandle.Close(); err != nil {
-				p.LogFunc(logging.LevelError, "PERSISTENCE", "Error closing journal file: %v", err)
-			}
-		}
-	}
-	fmt.Fprintln(os.Stderr, "[SHUTDOWN] Shutdown complete.")
-}
-
-// --- MetricsProvider Interface Implementation ---
-
-// GetConfigForArchive safely retrieves the main config content and its dependencies for archiving.
-func (p *app.Processor) GetConfigForArchive() ([]byte, time.Time, map[string]*types.FileDependency, string, error) {
-	p.ConfigMutex.RLock()
-	defer p.ConfigMutex.RUnlock()
-
-	// Create a deep copy of the dependencies to avoid race conditions if the config is reloaded
-	// while the archive is being generated in a goroutine.
-	depsCopy := make(map[string]*types.FileDependency)
-	for path, dep := range p.Config.FileDependencies {
-		// We only include files that are currently loaded and exist.
-		if dep.CurrentStatus != nil && dep.CurrentStatus.Status == types.FileStatusLoaded {
-			depsCopy[path] = dep.Clone()
-		}
-	}
-
-	return p.Config.YAMLContent, p.Config.LastModTime, depsCopy, p.ConfigPath, nil
-}
-
-// GetListenAddr returns the HTTP listen address from the config.
-func (p *app.Processor) GetListenAddr() string {
-	return p.HTTPServer
-}
-
-// GetShutdownChannel returns the channel used for shutdown signals.
-func (p *app.Processor) GetShutdownChannel() chan os.Signal {
-	return p.signalCh
-}
-
-// Log is a wrapper around the processor's LogFunc to satisfy the interface.
-func (p *app.Processor) Log(level logging.LogLevel, tag string, format string, v ...interface{}) {
-	p.LogFunc(level, tag, format, v...)
-}
-
 // GenerateHTMLMetricsReport creates the full metrics report as an HTML-safe string.
 func (p *app.Processor) GenerateHTMLMetricsReport() string {
 	var report strings.Builder
@@ -435,7 +374,7 @@ func (p *app.Processor) GenerateHTMLMetricsReport() string {
 		// Sanitize the formatted string before writing it to the HTML report.
 		report.WriteString(utils.ForHTML(fmt.Sprintf(format, args...)) + "\n")
 	}
-	logMetricsSummary(p, time.Since(p.StartTime), webLogFunc, "METRICS", "metric")
+	processor.LogMetricsSummary(p, time.Since(p.StartTime), webLogFunc, "METRICS", "metric")
 	return report.String()
 }
 
@@ -474,113 +413,32 @@ func (p *app.Processor) GenerateStepsMetricsReport() string {
 	return report.String()
 }
 
-// --- ParserProvider Interface Implementation ---
+func performGracefulShutdown(p *app.Processor) {
+	p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Graceful shutdown initiated.")
 
-func (p *app.Processor) GetTimestampFormat() string {
-	return p.Config.Parser.TimestampFormat
-}
-
-func (p *app.Processor) GetLogRegex() *regexp.Regexp {
-	p.ConfigMutex.RLock()
-	defer p.ConfigMutex.RUnlock()
-	return p.LogRegex
-}
-
-// --- StoreProvider Interface Implementation ---
-
-func (p *app.Processor) GetCleanupInterval() time.Duration {
-	return p.Config.Checker.ActorCleanupInterval
-}
-
-func (p *app.Processor) GetIdleTimeout() time.Duration {
-	return p.Config.Checker.ActorStateIdleTimeout
-}
-
-func (p *app.Processor) GetMaxTimeSinceLastHit() time.Duration {
-	return p.Config.Checker.MaxTimeSinceLastHit
-}
-
-func (p *app.Processor) GetTopN() int {
-	return p.TopN
-}
-
-func (p *app.Processor) GetTopActorsPerChain() map[string]map[string]*store.ActorStats {
-	return p.TopActorsPerChain
-}
-
-func (p *app.Processor) GetActivityStore() map[store.Actor]*store.ActorActivity {
-	return p.ActivityStore
-}
-
-func (p *app.Processor) GetActivityMutex() *sync.RWMutex {
-	return p.ActivityMutex
-}
-
-func (p *app.Processor) GetTestSignals() *store.TestSignals {
-	if p.TestSignals == nil {
-		return nil
+	if p.Blocker != nil {
+		p.Blocker.Shutdown()
 	}
-	// Convert main.TestSignals to store.TestSignals
-	return &store.TestSignals{
-		CleanupDoneSignal: p.TestSignals.CleanupDoneSignal,
+
+	if p.PersistenceEnabled {
+		p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Waiting for persistence operations to complete...")
+		p.PersistenceWg.Wait()
+
+		if p.CompactionInterval > 0 {
+			p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Performing final state compaction...")
+			runCompaction(p)
+		}
+
+		p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Closing journal file.")
+		if p.JournalHandle != nil {
+			if err := p.JournalHandle.Close(); err != nil {
+				p.LogFunc(logging.LevelError, "PERSISTENCE", "Error closing journal file: %v", err)
+			}
+		}
 	}
+	fmt.Fprintln(os.Stderr, "[SHUTDOWN] Shutdown complete.")
 }
 
-func (p *app.Processor) IncrementActorsCleaned() {
-	p.Metrics.ActorsCleaned.Add(1)
-}
-
-// --- MetricsProvider Interface Implementation ---
-
-func (p *app.Processor) IncrementBlockerCmdsQueued() {
-	p.Metrics.BlockerCmdsQueued.Add(1)
-}
-
-func (p *app.Processor) IncrementBlockerCmdsDropped() {
-	p.Metrics.BlockerCmdsDropped.Add(1)
-}
-
-func (p *app.Processor) IncrementBlockerCmdsExecuted() {
-	p.Metrics.BlockerCmdsExecuted.Add(1)
-}
-
-// --- HAProxyProvider Interface Implementation ---
-
-func (p *app.Processor) GetBlockerAddresses() []string {
-	return p.Config.Blockers.Backends.HAProxy.Addresses
-}
-
-func (p *app.Processor) GetDurationTables() map[time.Duration]string {
-	return p.Config.Blockers.Backends.HAProxy.DurationTables
-}
-
-func (p *app.Processor) GetBlockTableNameFallback() string {
-	return p.Config.Blockers.Backends.HAProxy.TableNameFallback
-}
-
-func (p *app.Processor) GetBlockerMaxRetries() int {
-	return p.Config.Blockers.MaxRetries
-}
-
-func (p *app.Processor) GetBlockerRetryDelay() time.Duration {
-	return p.Config.Blockers.RetryDelay
-}
-
-func (p *app.Processor) GetBlockerDialTimeout() time.Duration {
-	return p.Config.Blockers.DialTimeout
-}
-
-func (p *app.Processor) IncrementBlockerRetries() {
-	p.Metrics.BlockerRetries.Add(1)
-}
-
-func (p *app.Processor) IncrementCmdsPerBlocker(addr string) {
-	if val, ok := p.Metrics.CmdsPerBlocker.Load(addr); ok {
-		val.(*atomic.Int64).Add(1)
-	}
-}
-
-// runCompaction creates a new snapshot and truncates the journal.
 func runCompaction(p *app.Processor) {
 	p.PersistenceMutex.Lock()
 	defer p.PersistenceMutex.Unlock()

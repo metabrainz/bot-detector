@@ -383,7 +383,7 @@ func DryRunLogProcessor(p *app.Processor, done chan<- struct{}) {
 	elapsedTime := time.Since(startTime)
 
 	p.LogFunc(logging.LevelInfo, "DRY_RUN", "Dry-run finished.")
-	logMetricsSummary(p, elapsedTime, p.LogFunc, "METRICS", "dryrun")
+	LogMetricsSummary(p, elapsedTime, p.LogFunc, "METRICS", "dryrun")
 }
 
 // formatLastSeen formats a time.Time into a human-readable string like "Nd", "Nh", "Nm", "Ns".
@@ -721,7 +721,7 @@ func logPerChainMetrics(p *app.Processor, logFunc func(logging.LogLevel, string,
 	}
 }
 
-// logMetricsSummary calculates and logs a summary of all application metrics.
+// LogMetricsSummary calculates and logs a summary of all application metrics.
 // It is a generic function that can be used in different contexts (e.g., dry-run, periodic live summary).
 //
 // Parameters:
@@ -730,7 +730,8 @@ func logPerChainMetrics(p *app.Processor, logFunc func(logging.LogLevel, string,
 //   - logFunc: The logging function to use for output.
 //   - logTag: The tag to use for each log line (e.g., "METRICS").
 //   - filterTag: The struct tag to filter which general metrics to display (e.g., "dryrun").
-func logMetricsSummary(p *app.Processor, elapsedTime time.Duration, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag, filterTag string) {
+// Exported for use in app package.
+func LogMetricsSummary(p *app.Processor, elapsedTime time.Duration, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag, filterTag string) {
 	if !p.EnableMetrics {
 		logFunc(logging.LevelInfo, logTag, "Metrics are disabled.")
 		return
