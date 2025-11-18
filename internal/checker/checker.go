@@ -5,7 +5,6 @@ import (
 	"bot-detector/internal/logging"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
-	"bot-detector/internal/testutil"
 	"bot-detector/internal/utils"
 	"fmt"
 	"sort"
@@ -271,9 +270,10 @@ func handleChainCompletion(p *app.Processor, chain *app.BehavioralChain, entry *
 
 	// --- 1. Log the completion event ---
 	logLevel := logging.LevelCritical
-	if testutil.IsTesting() {
-		logLevel = logging.LevelDebug
-	}
+	// Removed IsTesting check to avoid import cycle with testutil
+	// if testutil.IsTesting() {
+	// 	logLevel = logging.LevelDebug
+	// }
 
 	if p.DryRun {
 		logDryRunCompletion(p, chain, entry)
@@ -887,9 +887,10 @@ func entryBufferWorker(p *app.Processor, stop <-chan struct{}) {
 		}
 
 		// Signal for tests that a tick has been processed.
-		if testutil.IsTesting() {
-			// Use a very specific tag that the test harness can listen for.
-			p.LogFunc(logging.LevelDebug, "BUFFER_WORKER_TICK_DONE", "Tick processed.")
-		}
+		// Removed IsTesting check to avoid import cycle with testutil
+		// if testutil.IsTesting() {
+		// 	// Use a very specific tag that the test harness can listen for.
+		// 	p.LogFunc(logging.LevelDebug, "BUFFER_WORKER_TICK_DONE", "Tick processed.")
+		// }
 	}
 }
