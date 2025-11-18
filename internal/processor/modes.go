@@ -3,6 +3,7 @@ package processor
 import (
 	"bot-detector/internal/app"
 	"bot-detector/internal/checker"
+	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
@@ -34,14 +35,14 @@ var (
 // Tailer is a struct that encapsulates the state and logic for tailing a single file.
 type Tailer struct {
 	path        string
-	file        fileHandle
+	file        config.FileHandle
 	reader      *bufio.Reader
 	initialStat os.FileInfo
 	logger      func(logging.LogLevel, string, string, ...interface{})
 	config      struct {
 		EOFPollingDelay time.Duration
 		LineEnding      string
-		FileOpener      func(string) (fileHandle, error)
+		FileOpener      func(string) (config.FileHandle, error)
 		StatFunc        func(string) (os.FileInfo, error)
 	}
 }
@@ -89,14 +90,14 @@ func (t *Tailer) ReadLine() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("configuration error with line_ending: %w", err)
 	}
-	lineLimit := MaxLogLineSize
+	lineLimit := config.MaxLogLineSize
 
 	line, readErr := readLine(t.reader, lineLimit)
 
 	if readErr != nil {
-		if errors.Is(readErr, ErrLineSkipped) {
+		if errors.Is(readErr, config.ErrLineSkipped) {
 			t.logger(logging.LevelWarning, "TAIL_SKIP", "Skipped line (length exceeded %d bytes): %.100s...", lineLimit, line)
-			return "", ErrLineSkipped // Return the sentinel error
+			return "", config.ErrLineSkipped // Return the sentinel error
 		}
 		if readErr == io.EOF {
 			// If we read a line along with EOF (file without trailing newline),
@@ -193,7 +194,7 @@ type lineReader func(reader *bufio.Reader, limit int) (string, error)
 // handleLineRead is a common helper to process the result of a bufio.Reader.ReadBytes call.
 func handleLineRead(line []byte, err error, limit int) (string, error) {
 	if len(line) > limit {
-		return string(line[:limit]), ErrLineSkipped
+		return string(line[:limit]), config.ErrLineSkipped
 	}
 
 	if err != nil {
@@ -266,8 +267,8 @@ func delayOrShutdown(p *app.Processor, delay time.Duration, signalCh <-chan os.S
 		p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
 		// Re-broadcast the signal so other listeners (like in main()) can also receive it.
 		// This is crucial for a coordinated shutdown.
-		if p.signalCh != nil {
-			p.signalCh <- s
+		if p.SignalCh != nil {
+			p.SignalCh <- s
 		}
 		return true // Shutdown signal received
 	}
@@ -282,14 +283,14 @@ func processFileLines(p *app.Processor, file io.Reader, lineProcessor func(line 
 		return fmt.Errorf("configuration error with line_ending: %w", err)
 	}
 
-	lineLimit := MaxLogLineSize
+	lineLimit := config.MaxLogLineSize
 
 	reader := bufio.NewReader(file)
 	for {
 		line, readErr := readLine(reader, lineLimit)
 
 		if readErr != nil {
-			if errors.Is(readErr, ErrLineSkipped) {
+			if errors.Is(readErr, config.ErrLineSkipped) {
 				p.LogFunc(logging.LevelWarning, "TAIL_SKIP", "Skipped line (length exceeded %d bytes): %.100s...", lineLimit, line)
 				continue
 			}
@@ -456,7 +457,7 @@ func logTopActorsSummary(p *app.Processor, logFunc func(logging.LogLevel, string
 		})
 
 		logFunc(logging.LevelInfo, "STATS", "  Chain: %s", chainName)
-		logFunc(logging.LevelInfo, "STATS", TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor")
+		logFunc(logging.LevelInfo, "STATS", config.TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor")
 
 		limit := p.TopN
 		for i := 0; i < limit && i < len(stats); i++ {
@@ -475,7 +476,7 @@ func logTopActorsSummary(p *app.Processor, logFunc func(logging.LogLevel, string
 				}
 			}
 
-			logFunc(logging.LevelInfo, "STATS", TopNRowFormat,
+			logFunc(logging.LevelInfo, "STATS", config.TopNRowFormat,
 				stat.Stats.Hits, stat.Stats.Completions, stat.Stats.Resets, lastSeen, stat.Actor)
 		}
 	}
@@ -861,8 +862,8 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 		tailer, err := NewTailer(p, seekToEnd)
 		if err != nil {
 			// File not found or error on initial open, wait and retry.
-			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", p.LogPath, err, ErrorRetryDelay)
-			restartTailing(ErrorRetryDelay)
+			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", p.LogPath, err, config.ErrorRetryDelay)
+			restartTailing(config.ErrorRetryDelay)
 			continue
 		}
 
@@ -888,7 +889,7 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 			line, readErr := tailer.ReadLine()
 
 			if readErr != nil {
-				if errors.Is(readErr, ErrLineSkipped) {
+				if errors.Is(readErr, config.ErrLineSkipped) {
 					// Already logged by tailer, just continue
 					continue
 				}
@@ -908,13 +909,13 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 				if errors.Is(readErr, ErrFileRotated) {
 					// File has been rotated, close current tailer and reopen
 					_ = tailer.Close()
-					restartTailing(FileOpenRetryDelay)
+					restartTailing(config.FileOpenRetryDelay)
 					break // Break inner loop to reopen.
 				}
 				// Other unexpected errors
 				p.LogFunc(logging.LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening file.", readErr)
 				_ = tailer.Close()
-				restartTailing(ErrorRetryDelay)
+				restartTailing(config.ErrorRetryDelay)
 				break // Break the inner loop to force a file reopen via the outer loop.
 			}
 

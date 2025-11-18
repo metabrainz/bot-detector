@@ -1,7 +1,7 @@
 package parser
 
 import (
-	"bot-detector/internal/app"
+	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
 	"fmt"
 	"regexp"
@@ -13,21 +13,6 @@ import (
 type Provider interface {
 	GetTimestampFormat() string
 	GetLogRegex() *regexp.Regexp
-}
-
-// LogEntry is a local copy of the LogEntry struct to avoid circular dependencies.
-// The main application will convert this to its own LogEntry type.
-type LogEntry struct {
-	Timestamp  time.Time
-	IPInfo     utils.IPInfo
-	Method     string
-	Path       string
-	Protocol   string
-	Referrer   string
-	StatusCode int
-	Size       int
-	UserAgent  string
-	VHost      string
 }
 
 var defaultLogRegex = regexp.MustCompile(
@@ -44,7 +29,7 @@ func getMatch(name string, matches []string, regex *regexp.Regexp) string {
 }
 
 // ParseLogLine parses a single log line string into a structured LogEntry.
-func ParseLogLine(p Provider, line string) (*app.LogEntry, error) {
+func ParseLogLine(p Provider, line string) (*types.LogEntry, error) {
 	if len(line) == 0 || line[0] == '#' {
 		return nil, nil
 	}
@@ -82,7 +67,7 @@ func ParseLogLine(p Provider, line string) (*app.LogEntry, error) {
 		size, _ = strconv.Atoi(sizeStr)
 	}
 
-	return &LogEntry{
+	return &types.LogEntry{
 		Timestamp:  timestamp,
 		IPInfo:     ipInfo,
 		Method:     utils.ForLog(getMatch("Method", matches, regexToUse)),

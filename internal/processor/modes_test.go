@@ -425,7 +425,7 @@ func newTailerTestHarness(t *testing.T, config *config.AppConfig) *tailerTestHar
 // start runs the LiveLogTailer in a goroutine and waits for it to be ready.
 func (h *tailerTestHarness) start() {
 	go func() {
-		LiveLogTailer(h.processor, h.signalCh, h.readyCh)
+		LiveLogTailer(h.processor, h.SignalCh, h.readyCh)
 		close(h.doneCh)
 	}()
 
@@ -441,7 +441,7 @@ func (h *tailerTestHarness) start() {
 // stop sends a shutdown signal and waits for the tailer to exit.
 func (h *tailerTestHarness) stop() {
 	h.t.Logf("[HARNESS] stop(): Sending shutdown signal.")
-	h.signalCh <- syscall.SIGTERM
+	h.SignalCh <- syscall.SIGTERM
 	select {
 	case <-h.doneCh:
 		// Graceful shutdown complete.
@@ -831,7 +831,7 @@ func TestLiveLogTailer_ErrorHandling(t *testing.T) {
 
 		// Run tailer in a goroutine
 		go func() {
-			LiveLogTailer(harness.processor, harness.signalCh, nil)
+			LiveLogTailer(harness.processor, harness.SignalCh, nil)
 			close(harness.doneCh)
 		}()
 		defer harness.stop()
@@ -904,7 +904,7 @@ func TestLiveLogTailer_InitialOpenErrorAndShutdown(t *testing.T) {
 	// --- Act ---
 	// We don't use harness.start() because it waits for a ready signal that will never come.
 	go func() {
-		LiveLogTailer(harness.processor, harness.signalCh, nil) // Pass nil for readySignal
+		LiveLogTailer(harness.processor, harness.SignalCh, nil) // Pass nil for readySignal
 		close(harness.doneCh)
 	}()
 
@@ -1057,7 +1057,7 @@ func TestLiveLogTailer_ShutdownDuringRetryDelay(t *testing.T) {
 
 	// --- Act ---
 	go func() {
-		LiveLogTailer(harness.processor, harness.signalCh, nil)
+		LiveLogTailer(harness.processor, harness.SignalCh, nil)
 		close(harness.doneCh)
 	}()
 
@@ -1109,7 +1109,7 @@ func TestLiveLogTailer_InitialStatError(t *testing.T) {
 
 	// --- Act ---
 	go func() {
-		LiveLogTailer(harness.processor, harness.signalCh, nil)
+		LiveLogTailer(harness.processor, harness.SignalCh, nil)
 		close(harness.doneCh) // Ensure doneCh is closed when the goroutine exits.
 	}()
 
@@ -1122,7 +1122,7 @@ func TestLiveLogTailer_InitialStatError(t *testing.T) {
 
 	// Now, send the shutdown signal and wait for the goroutine to exit.
 	// We don't use harness.stop() because its timeout might race with the internal ErrorRetryDelay.
-	harness.signalCh <- syscall.SIGTERM
+	harness.SignalCh <- syscall.SIGTERM
 	select {
 	case <-harness.doneCh:
 	case <-time.After(2 * time.Second): // A more generous timeout.

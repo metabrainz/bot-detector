@@ -301,7 +301,7 @@ func execute(params *commandline.AppParameters) error {
 
 	p.startTime = p.NowFunc()
 	p.signalOooBufferFlush = p.doSignalOooBufferFlush
-	initializeMetrics(p, loadedCfg)
+	app.InitializeMetrics(p, loadedCfg)
 
 	haproxyBlocker := blocker.NewHAProxyBlocker(p, p.DryRun)
 	rateLimitedBlocker := blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.Blockers.CommandQueueSize, p.Config.Blockers.CommandsPerSecond)
@@ -320,7 +320,7 @@ func execute(params *commandline.AppParameters) error {
 	p.CheckChainsFunc = func(entry *app.LogEntry) { checker.CheckChains(p, entry) }
 	p.ProcessLogLine = func(line string) { processLogLineInternal(p, line) }
 
-	logConfigurationSummary(p)
+	app.LogConfigurationSummary(p)
 	logChainDetails(p, p.Chains, "Loaded chains")
 
 	start(p)
@@ -659,18 +659,18 @@ func start(p *app.Processor) {
 			case "hup", "usr1", "usr2":
 				// Flag is set to a specific signal. Watcher is disabled.
 				p.LogFunc(logging.LevelInfo, "SETUP", "File watcher disabled. Reloading only on %s signal.", strings.ToUpper(reloadFlag))
-				go SignalReloader(p, stopWatcher, reloadSignalCh)
+				go app.SignalReloader(p, stopWatcher, reloadSignalCh)
 
 			case "watcher":
 				// Flag is 'watcher'. Signal reloading is disabled.
 				p.LogFunc(logging.LevelInfo, "SETUP", "Signal-based reloading disabled. Watching config file for changes.")
-				go ConfigWatcher(p, stopWatcher)
+				go app.ConfigWatcher(p, stopWatcher)
 
 			case "":
 				// Flag is absent. Both watcher and SIGHUP reloader are active.
 				p.LogFunc(logging.LevelInfo, "SETUP", "File watcher enabled. Also listening on SIGHUP for forced reload.")
-				go ConfigWatcher(p, stopWatcher)
-				go SignalReloader(p, stopWatcher, reloadSignalCh) // This will default to HUP when p.ReloadOn is ""
+				go app.ConfigWatcher(p, stopWatcher)
+				go app.SignalReloader(p, stopWatcher, reloadSignalCh) // This will default to HUP when p.ReloadOn is ""
 			default:
 				// An invalid value was provided. Log a fatal error and exit.
 				log.Fatalf("[FATAL] Invalid value for --reload-on: '%s'. Must be one of 'watcher', 'hup', 'usr1', or 'usr2'.", p.ReloadOn)

@@ -1935,7 +1935,7 @@ chains:
 
 			// Populate activeBlocks
 			for ip, info := range tt.blockedIPs {
-				processor.activeBlocks[ip] = info
+				processor.ActiveBlocks[ip] = info
 			}
 
 			// Act: Call the function
@@ -1946,7 +1946,7 @@ chains:
 				if !unblockCalled[ip] {
 					t.Errorf("Expected IP %s to be unblocked, but it wasn't", ip)
 				}
-				if _, stillBlocked := processor.activeBlocks[ip]; stillBlocked {
+				if _, stillBlocked := processor.ActiveBlocks[ip]; stillBlocked {
 					t.Errorf("Expected IP %s to be removed from activeBlocks, but it's still there", ip)
 				}
 			}
@@ -1956,7 +1956,7 @@ chains:
 				if unblockCalled[ip] {
 					t.Errorf("Expected IP %s to remain blocked, but it was unblocked", ip)
 				}
-				if _, stillBlocked := processor.activeBlocks[ip]; !stillBlocked {
+				if _, stillBlocked := processor.ActiveBlocks[ip]; !stillBlocked {
 					t.Errorf("Expected IP %s to remain in activeBlocks, but it was removed", ip)
 				}
 			}
@@ -2069,11 +2069,11 @@ chains:
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
 	// Add some blocked IPs
-	processor.activeBlocks["1.2.3.4"] = persistence.ActiveBlockInfo{
+	processor.ActiveBlocks["1.2.3.4"] = persistence.ActiveBlockInfo{
 		Reason:      "test-chain",
 		UnblockTime: time.Now().Add(1 * time.Hour),
 	}
-	processor.activeBlocks["5.6.7.8"] = persistence.ActiveBlockInfo{
+	processor.ActiveBlocks["5.6.7.8"] = persistence.ActiveBlockInfo{
 		Reason:      "test-chain",
 		UnblockTime: time.Now().Add(1 * time.Hour),
 	}
@@ -2133,12 +2133,12 @@ chains:
 	unblockMutex.Unlock()
 
 	// Check activeBlocks
-	processor.persistenceMutex.Lock()
-	if _, exists := processor.activeBlocks["1.2.3.4"]; exists {
+	processor.PersistenceMutex.Lock()
+	if _, exists := processor.ActiveBlocks["1.2.3.4"]; exists {
 		t.Error("Expected 1.2.3.4 to be removed from activeBlocks")
 	}
-	if _, exists := processor.activeBlocks["5.6.7.8"]; !exists {
+	if _, exists := processor.ActiveBlocks["5.6.7.8"]; !exists {
 		t.Error("Expected 5.6.7.8 to remain in activeBlocks")
 	}
-	processor.persistenceMutex.Unlock()
+	processor.PersistenceMutex.Unlock()
 }

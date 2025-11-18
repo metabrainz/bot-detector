@@ -26,6 +26,9 @@ const (
 // AppLogTimestampFormat defines the standard timestamp format for this application's own log output.
 const AppLogTimestampFormat = time.RFC3339 // e.g., "2006-01-02T15:04:05Z07:00"
 
+// AccessLogTimeFormat defines the timestamp format used in standard access logs.
+const AccessLogTimeFormat = "02/Jan/2006:15:04:05 -0700"
+
 // Default configuration values used if not specified in the YAML file.
 const (
 	DefaultLogLevel            = "warning"

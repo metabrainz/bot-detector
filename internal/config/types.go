@@ -3,12 +3,23 @@ package config
 import (
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/types"
+	"io"
 	"os"
 	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// FileOpener defines the function signature for opening a file.
+type FileOpener func(name string) (FileHandle, error)
+
+// FileHandle defines the interface for file operations needed by the tailer.
+type FileHandle interface {
+	io.ReadSeeker
+	io.Closer
+	Stat() (os.FileInfo, error)
+}
 
 // Config type definitions extracted from internal/app/types.go
 type AppConfig struct {
@@ -20,7 +31,7 @@ type AppConfig struct {
 	FileDependencies map[string]*types.FileDependency  // Map of file paths to their dependency status.
 	LastModTime      time.Time                         // Not compared
 	StatFunc         func(string) (os.FileInfo, error) // Mockable
-	FileOpener       fileOpener                        // Mockable
+	FileOpener       FileOpener                        // Mockable
 	YAMLContent      []byte
 }
 
@@ -177,8 +188,8 @@ type BehavioralChain struct {
 	UsesDefaultBlockDuration bool                 // True if the chain is using the global default_block_duration.
 	MatchKey                 string               // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
 	OnMatch                  string               // "stop" to halt processing of other chains on match.
-	StepsYAML                []config.StepDefYAML // Store original YAML for accurate comparison
-	Steps                    []config.StepDef
+	StepsYAML                []StepDefYAML // Store original YAML for accurate comparison
+	Steps                    []StepDef
 	MetricsHitsCounter       *atomic.Int64 // Counter for hits on this specific chain.
 	MetricsResetCounter      *atomic.Int64 // Counter for resets of this specific chain.
 	MetricsCounter           *atomic.Int64 // Counter for this specific chain.
@@ -194,4 +205,38 @@ type GoodActorDef struct {
 
 	UAMatchers []fieldMatcher // A list of matchers for the UserAgent field (OR logic within the list)
 
+}
+
+// Clone creates a deep copy of the AppConfig object.
+func (ac *AppConfig) Clone() AppConfig {
+	if ac == nil {
+		return AppConfig{}
+	}
+
+	// Clone FileDependencies map
+	fileDeps := make(map[string]*types.FileDependency, len(ac.FileDependencies))
+	for path, dep := range ac.FileDependencies {
+		fileDeps[path] = dep.Clone()
+	}
+
+	// Clone GoodActors slice
+	goodActors := make([]GoodActorDef, len(ac.GoodActors))
+	copy(goodActors, ac.GoodActors)
+
+	// Clone YAMLContent
+	yamlCopy := make([]byte, len(ac.YAMLContent))
+	copy(yamlCopy, ac.YAMLContent)
+
+	return AppConfig{
+		Application:      ac.Application,
+		Parser:           ac.Parser,
+		Checker:          ac.Checker,
+		Blockers:         ac.Blockers,
+		GoodActors:       goodActors,
+		FileDependencies: fileDeps,
+		LastModTime:      ac.LastModTime,
+		StatFunc:         ac.StatFunc,
+		FileOpener:       ac.FileOpener,
+		YAMLContent:      yamlCopy,
+	}
 }

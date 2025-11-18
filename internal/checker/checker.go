@@ -13,10 +13,10 @@ import (
 	"time"
 )
 
-// GetActor constructs the correct Actor key for a given log entry based on the chain's match_key.
+// GetActor constructs the correct store.Actor key for a given log entry based on the chain's match_key.
 // It handles IP version filtering and decides whether to include the User-Agent in the key.
-// If the entry's IP version doesn't match the key (e.g., ipv4 vs ipv6), it returns an empty Actor.
-func GetActor(chain *config.BehavioralChain, entry *app.LogEntry) Actor {
+// If the entry's IP version doesn't match the key (e.g., ipv4 vs ipv6), it returns an empty store.Actor.
+func GetActor(chain *config.BehavioralChain, entry *app.LogEntry) store.Actor {
 	ipVersion := entry.IPInfo.Version
 	useUA := false
 
@@ -25,30 +25,30 @@ func GetActor(chain *config.BehavioralChain, entry *app.LogEntry) Actor {
 		// Any IP version is fine.
 	case "ipv4":
 		if ipVersion != utils.VersionIPv4 {
-			return Actor{} // Mismatch, return empty actor
+			return store.Actor{} // Mismatch, return empty actor
 		}
 	case "ipv6":
 		if ipVersion != utils.VersionIPv6 {
-			return Actor{} // Mismatch, return empty actor
+			return store.Actor{} // Mismatch, return empty actor
 		}
 	case "ip_ua":
 		useUA = true
 	case "ipv4_ua":
 		if ipVersion != utils.VersionIPv4 {
-			return Actor{}
+			return store.Actor{}
 		}
 		useUA = true
 	case "ipv6_ua":
 		if ipVersion != utils.VersionIPv6 {
-			return Actor{}
+			return store.Actor{}
 		}
 		useUA = true
 	}
 
 	if useUA {
-		return Actor{IPInfo: entry.IPInfo, UA: entry.UserAgent}
+		return store.Actor{IPInfo: entry.IPInfo, UA: entry.UserAgent}
 	}
-	return Actor{IPInfo: entry.IPInfo}
+	return store.Actor{IPInfo: entry.IPInfo}
 }
 
 // GetMatchValue retrieves the field value from a LogEntry based on the field name.
@@ -56,7 +56,7 @@ func GetActor(chain *config.BehavioralChain, entry *app.LogEntry) Actor {
 // preCheckActivity performs initial checks on an actor before processing against chains.
 // It returns the relevant ActorActivity and a boolean indicating if further processing should be skipped.
 // The caller is responsible for locking/unlocking the ActivityMutex. It returns the store.SkipInfo if applicable.
-func preCheckActivity(p *app.Processor, entry *app.LogEntry, actor Actor) (*store.ActorActivity, bool, store.SkipInfo) {
+func preCheckActivity(p *app.Processor, entry *app.LogEntry, actor store.Actor) (*store.ActorActivity, bool, store.SkipInfo) {
 	// 2. Get or create actor activity and check for existing blocks.
 	activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 
@@ -81,7 +81,7 @@ func preCheckActivity(p *app.Processor, entry *app.LogEntry, actor Actor) (*stor
 			// Only log the skip message the first time.
 			if activity.SkipInfo.Type != utils.SkipTypeBlocked { // This ensures we only log once per block.
 				// The source is already set when the block was applied.
-				p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (blocked:%s).", actor.IPInfo.Address, entry.UserAgent, activity.SkipInfo.Source)
+				p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (blocked:%s).", actor.IPInfo.Address, entry.UserAgent, activity.SkipInfo.Source)
 			}
 			return activity, true, activity.SkipInfo
 		}
@@ -194,7 +194,7 @@ func handleOutOfOrder(p *app.Processor, entry *app.LogEntry) (buffered bool) {
 	}
 
 	// We use a simple 'ip' key here as a proxy for the activity's last seen time.
-	actor := Actor{IPInfo: entry.IPInfo}
+	actor := store.Actor{IPInfo: entry.IPInfo}
 	actorActivity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 	lastRequestTime := actorActivity.LastRequestTime
 
@@ -211,7 +211,7 @@ func handleOutOfOrder(p *app.Processor, entry *app.LogEntry) (buffered bool) {
 	// After processing a newer entry, signal the worker to check the buffer,
 	// but only if there are entries in the buffer to process.
 	if len(p.EntryBuffer) > 0 {
-		p.signalOooBufferFlush()
+		p.SignalOooBufferFlush()
 	}
 	return false // Indicate that the entry was processed.
 }
@@ -276,7 +276,7 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 		}
 		executeBlock(p, entry, chain)
 		// Update the in-memory state to reflect the block for both live and dry runs.
-		ipOnlyActor := store.Actor(Actor{IPInfo: entry.IPInfo, UA: ""})
+		ipOnlyActor := store.Actor(store.Actor{IPInfo: entry.IPInfo, UA: ""})
 		ipActivity := store.GetOrCreateUnsafe(p.ActivityStore, ipOnlyActor)
 		ipActivity.IsBlocked = true                                                           // Mark as blocked_
 		ipActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
@@ -297,12 +297,12 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 
 // executeBlock calls the external blocker unless in DryRun mode.
 func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.BehavioralChain) {
-	if p.persistenceEnabled {
-		p.persistenceWg.Add(1)
+	if p.PersistenceEnabled {
+		p.PersistenceWg.Add(1)
 		go func() {
-			defer p.persistenceWg.Done()
-			p.persistenceMutex.Lock()
-			defer p.persistenceMutex.Unlock()
+			defer p.PersistenceWg.Done()
+			p.PersistenceMutex.Lock()
+			defer p.PersistenceMutex.Unlock()
 
 			unblockTime := p.NowFunc().Add(chain.BlockDuration)
 			event := &persistence.AuditEvent{
@@ -312,12 +312,12 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 				Duration:  chain.BlockDuration,
 				Reason:    chain.Name,
 			}
-			if err := persistence.WriteEventToJournal(p.journalHandle, event); err != nil {
+			if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
 				p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write block event to journal for %s: %v", entry.IPInfo.Address, err)
 			}
 
 			// Update in-memory state
-			p.activeBlocks[entry.IPInfo.Address] = persistence.ActiveBlockInfo{
+			p.ActiveBlocks[entry.IPInfo.Address] = persistence.ActiveBlockInfo{
 				UnblockTime: unblockTime,
 				Reason:      chain.Name,
 			}
@@ -659,9 +659,9 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 }
 
 // doSignalOooBufferFlush sends a non-blocking signal to the entryBufferWorker to trigger an immediate flush.
-func (p *app.Processor) doSignalOooBufferFlush() {
+func doSignalOooBufferFlush(p *app.Processor) {
 	select {
-	case p.oooBufferFlushSignal <- struct{}{}: // Send a signal if the channel is not full.
+	case p.OooBufferFlushSignal <- struct{}{}: // Send a signal if the channel is not full.
 	default: // Channel is full, a flush is already pending. Do nothing.
 	}
 }
@@ -678,7 +678,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 
 	// Create the base actor for this entry. This is used for good_actor checks,
 	// pre-checks, and out-of-order buffering logic.
-	actor := Actor{IPInfo: entry.IPInfo}
+	actor := store.Actor{IPInfo: entry.IPInfo}
 	activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 
 	// 1. First, check if the entry is a good actor. This will set the SkipInfo on the actor's activity.
@@ -687,7 +687,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 		// Only log the skip message and set the state the first time.
 		if activity.SkipInfo.Type == utils.SkipTypeNone {
 			activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeGoodActor, Source: goodActorRuleName}
-			p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (good_actor:%s).", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName)
+			p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (good_actor:%s).", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName)
 		}
 
 		// --- UNBLOCK ON GOOD ACTOR LOGIC ---
@@ -707,10 +707,10 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 			if activity.LastUnblockTime.IsZero() || time.Since(activity.LastUnblockTime) > unblockCooldown {
 				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s. Issuing unblock command.", entry.IPInfo.Address)
 
-				if p.persistenceEnabled {
+				if p.PersistenceEnabled {
 					func() {
-						p.persistenceMutex.Lock()
-						defer p.persistenceMutex.Unlock()
+						p.PersistenceMutex.Lock()
+						defer p.PersistenceMutex.Unlock()
 
 						event := &persistence.AuditEvent{
 							Timestamp: p.NowFunc(),
@@ -718,12 +718,12 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 							IP:        entry.IPInfo.Address,
 							Reason:    "good-actor-match",
 						}
-						if err := persistence.WriteEventToJournal(p.journalHandle, event); err != nil {
+						if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
 							p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write unblock event to journal for %s: %v", entry.IPInfo.Address, err)
 						}
 
 						// Update in-memory state
-						delete(p.activeBlocks, entry.IPInfo.Address)
+						delete(p.ActiveBlocks, entry.IPInfo.Address)
 					}()
 				}
 
@@ -775,7 +775,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 	}
 
 	// Delegate to the out-of-order handler, which will decide to buffer or process.
-	handleOutOfOrder(p, entry) // This now calls p.signalOooBufferFlush() internally.
+	handleOutOfOrder(p, entry) // This now calls p.SignalOooBufferFlush() internally.
 }
 
 // entryBufferWorker is a background goroutine that processes log entries from the buffer
@@ -810,7 +810,7 @@ func entryBufferWorker(p *app.Processor, stop <-chan struct{}) {
 			FlushEntryBuffer(p) // Use the public, locking version.
 			return
 
-		case <-p.oooBufferFlushSignal:
+		case <-p.OooBufferFlushSignal:
 			// An immediate flush was requested by a newer log entry.
 			p.LogFunc(logging.LevelDebug, "BUFFER_WORKER", "Immediate flush triggered.")
 			// Fall through to process the buffer.
@@ -832,7 +832,7 @@ func entryBufferWorker(p *app.Processor, stop <-chan struct{}) {
 			return p.EntryBuffer[i].Timestamp.Before(p.EntryBuffer[j].Timestamp)
 		})
 		// Process all candidates that are ready by repeatedly calling nextOooCandidate.
-		var processedInTick []*LogEntry
+		var processedInTick []*app.LogEntry
 		for {
 			if entry := nextOooCandidate(p, processingHorizon); entry != nil {
 				processedInTick = append(processedInTick, entry)
