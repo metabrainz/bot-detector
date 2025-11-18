@@ -72,6 +72,7 @@ type Processor struct {
 	SignalOooBufferFlush func()
 	TestSignals          *TestSignals // Test-only signals for synchronization.
 	ConfigPath           string
+	ConfigDir            string // Directory containing config.yaml (derived from ConfigPath)
 	LogPath              string `test:"-"`
 	ReloadOn             string
 	TopActorsPerChain    map[string]map[string]*store.ActorStats // Dry-run only: tracks top actors per chain.

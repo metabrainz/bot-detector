@@ -137,6 +137,7 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		LogFunc:              logging.LogOutput,
 		NowFunc:              time.Now, // Use the real time.Now in production.
 		ConfigPath:           params.ConfigPath,
+		ConfigDir:            params.ConfigDir,
 		LogPath:              params.LogPath,
 		ReloadOn:             params.ReloadOn,
 		TopN:                 params.TopN,
