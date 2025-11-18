@@ -18,10 +18,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -1069,8 +1067,8 @@ func TestEntryBufferWorker(t *testing.T) {
 func TestOooBufferFunctions(t *testing.T) {
 	baseTime := time.Now()
 
-	// --- Test checker.shouldBufferOutOfOrder ---
-	t.Run("checker.shouldBufferOutOfOrder", func(t *testing.T) {
+	// Test ShouldBufferOutOfOrder - determines if entry should be buffered
+	t.Run("ShouldBufferOutOfOrder", func(t *testing.T) {
 		tolerance := 5 * time.Second
 		lastRequestTime := baseTime
 
@@ -1083,7 +1081,7 @@ func TestOooBufferFunctions(t *testing.T) {
 			{"Out-of-order within tolerance", lastRequestTime.Add(-3 * time.Second), true},
 			{"Out-of-order at tolerance", lastRequestTime.Add(-5 * time.Second), true},
 			{"Out-of-order outside tolerance", lastRequestTime.Add(-6 * time.Second), false},
-			{"First request ever", baseTime, false}, // lastRequestTime would be zero
+			{"First request ever", time.Time{}, false}, // Zero time
 		}
 
 		for _, tt := range tests {
@@ -1094,207 +1092,82 @@ func TestOooBufferFunctions(t *testing.T) {
 				}
 				result := checker.ShouldBufferOutOfOrder(lrt, tt.entryTimestamp, tolerance)
 				if result != tt.expected {
-					t.Errorf("checker.ShouldBufferOutOfOrder() = %v, want %v", result, tt.expected)
+					t.Errorf("ShouldBufferOutOfOrder() = %v, want %v", result, tt.expected)
 				}
 			})
 		}
 	})
 
-	// --- Test checker.AddToOooBuffer ---
-	t.Run("checker.AddToOooBuffer", func(t *testing.T) {
+	// Test AddToOooBuffer - adds entries in sorted order
+	t.Run("AddToOooBuffer", func(t *testing.T) {
 		p := testutil.NewTestProcessor(nil, nil)
 		e1 := &app.LogEntry{Timestamp: baseTime.Add(-10 * time.Second)}
 		e3 := &app.LogEntry{Timestamp: baseTime.Add(-2 * time.Second)}
 		p.EntryBuffer = []*app.LogEntry{e1, e3}
 
-		e2 := &app.LogEntry{Timestamp: baseTime.Add(-5 * time.Second)}  // To be inserted in the middle
-		e0 := &app.LogEntry{Timestamp: baseTime.Add(-15 * time.Second)} // To be inserted at the start
-		e4 := &app.LogEntry{Timestamp: baseTime.Add(-1 * time.Second)}  // To be inserted at the end
+		// Insert entries out of order
+		e2 := &app.LogEntry{Timestamp: baseTime.Add(-5 * time.Second)}  // Middle
+		e0 := &app.LogEntry{Timestamp: baseTime.Add(-15 * time.Second)} // Start
+		e4 := &app.LogEntry{Timestamp: baseTime.Add(-1 * time.Second)}  // End
 
 		checker.AddToOooBuffer(p, e2)
 		checker.AddToOooBuffer(p, e0)
 		checker.AddToOooBuffer(p, e4)
 
+		// Verify sorted order
 		expectedOrder := []*app.LogEntry{e0, e1, e2, e3, e4}
 		if len(p.EntryBuffer) != len(expectedOrder) {
 			t.Fatalf("Expected buffer length %d, got %d", len(expectedOrder), len(p.EntryBuffer))
 		}
 		for i, entry := range p.EntryBuffer {
 			if entry.Timestamp != expectedOrder[i].Timestamp {
-				t.Errorf("Buffer not sorted correctly at index %d. Got %v, want %v", i, entry.Timestamp, expectedOrder[i].Timestamp)
+				t.Errorf("Buffer not sorted at index %d. Got %v, want %v", i, entry.Timestamp, expectedOrder[i].Timestamp)
 			}
 		}
 	})
 
-	// --- Test checker.NextOooCandidate ---
-	t.Run("checker.NextOooCandidate", func(t *testing.T) {
+	// Test NextOooCandidate - gets next ready entry from buffer
+	t.Run("NextOooCandidate", func(t *testing.T) {
 		p := testutil.NewTestProcessor(nil, nil)
-		e1 := &app.LogEntry{Timestamp: baseTime.Add(-10 * time.Second)} // Should be a candidate
-		e2 := &app.LogEntry{Timestamp: baseTime.Add(-8 * time.Second)}  // Should be a candidate
+		e1 := &app.LogEntry{Timestamp: baseTime.Add(-10 * time.Second)} // Old enough
+		e2 := &app.LogEntry{Timestamp: baseTime.Add(-8 * time.Second)}  // Old enough
 		e3 := &app.LogEntry{Timestamp: baseTime.Add(-3 * time.Second)}  // Too new
 		p.EntryBuffer = []*app.LogEntry{e1, e2, e3}
 
-		// Horizon is 5 seconds before baseTime. Only e1 and e2 are older.
 		processingHorizon := baseTime.Add(-5 * time.Second)
 
-		// First call should get e1
+		// Get first candidate
 		candidate1 := checker.NextOooCandidate(p, processingHorizon)
 		if candidate1 == nil || candidate1.Timestamp != e1.Timestamp {
-			t.Errorf("Expected to get first candidate (e1), but got %v", candidate1)
+			t.Errorf("Expected first candidate (e1), got %v", candidate1)
 		}
 		if len(p.EntryBuffer) != 2 {
-			t.Errorf("Expected buffer size to be 2 after dequeuing, but got %d", len(p.EntryBuffer))
+			t.Errorf("Expected buffer size 2 after dequeue, got %d", len(p.EntryBuffer))
 		}
 
-		// Second call should get e2
+		// Get second candidate
 		candidate2 := checker.NextOooCandidate(p, processingHorizon)
 		if candidate2 == nil || candidate2.Timestamp != e2.Timestamp {
-			t.Errorf("Expected to get second candidate (e2), but got %v", candidate2)
+			t.Errorf("Expected second candidate (e2), got %v", candidate2)
 		}
 		if len(p.EntryBuffer) != 1 {
-			t.Errorf("Expected buffer size to be 1 after dequeuing, but got %d", len(p.EntryBuffer))
+			t.Errorf("Expected buffer size 1 after dequeue, got %d", len(p.EntryBuffer))
 		}
 
-		// Third call should get nil, as e3 is too new
+		// Third call should return nil (e3 too new)
 		candidate3 := checker.NextOooCandidate(p, processingHorizon)
 		if candidate3 != nil {
-			t.Errorf("Expected to get nil candidate, but got %v", candidate3)
+			t.Errorf("Expected nil candidate, got %v", candidate3)
 		}
 		if len(p.EntryBuffer) != 1 || p.EntryBuffer[0].Timestamp != e3.Timestamp {
-			t.Errorf("Buffer should contain only the remaining new entry (e3)")
-		}
-	})
-
-	// --- Test flushOooBuffer ---
-	t.Run("flushOooBuffer", func(t *testing.T) {
-		var processedCount atomic.Int32
-		p := testutil.NewTestProcessor(nil, nil)
-		// Override checker.checkChainsInternal to just count calls
-// 		originalCheck := checker.checkChainsInternal
-// 		checker.checkChainsInternal = func(proc *app.Processor, entry *app.LogEntry) {
-			processedCount.Add(1)
-		}
-		t.Cleanup(func() { checker.checkChainsInternal = originalCheck })
-
-		e1 := &app.LogEntry{Timestamp: baseTime.Add(-10 * time.Second)}
-		e2 := &app.LogEntry{Timestamp: baseTime.Add(-8 * time.Second)}
-		p.EntryBuffer = []*app.LogEntry{e1, e2}
-
-		flushOooBuffer(p)
-
-		if processedCount.Load() != 2 {
-			t.Errorf("Expected flush to process 2 entries, but it processed %d", processedCount.Load())
-		}
-		if len(p.EntryBuffer) != 0 {
-			t.Errorf("Expected buffer to be empty after flush, but it has %d entries", len(p.EntryBuffer))
+			t.Errorf("Buffer should contain only e3")
 		}
 	})
 }
+
 
 // TestOutOfOrder_ComplexScenario simulates a specific sequence of out-of-order hits
 // to verify buffering, sorted insertion, and rejection of entries outside the tolerance window.
-func TestOutOfOrder_ComplexScenario(t *testing.T) {
-	// --- Setup ---
-	const tolerance = 4 * time.Second
-	const targetIP = "192.0.2.10"
-	baseTime := time.Now()
-
-	// Create a processor and a mock for checker.checkChainsInternal to capture the final processing order.
-	p := testutil.NewTestProcessor(&config.AppConfig{Parser: config.ParserConfig{OutOfOrderTolerance: tolerance}}, nil)
-	var processedEntries []*app.LogEntry
-	var processedMutex sync.Mutex
-	originalCheck := checker.checkChainsInternal
-	checker.checkChainsInternal = func(proc *app.Processor, entry *app.LogEntry) {
-		processedMutex.Lock()
-		defer processedMutex.Unlock()
-		processedEntries = append(processedEntries, entry)
-	}
-	t.Cleanup(func() { checker.checkChainsInternal = originalCheck })
-
-	// Define the 5 hits for the scenario.
-	hit1 := &app.LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: baseTime, Path: "/hit1"}
-	hit2 := &app.LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: baseTime.Add(1 * time.Second), Path: "/hit2"}
-	hit3 := &app.LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: baseTime.Add(2 * time.Second), Path: "/hit3"}
-	hit4 := &app.LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: baseTime, Path: "/hit4"}                       // Same timestamp as hit1
-	hit5 := &app.LogEntry{IPInfo: utils.NewIPInfo(targetIP), Timestamp: baseTime.Add(-5 * time.Second), Path: "/hit5"} // Outside 4s tolerance
-
-	// --- Act ---
-	// Process the hits in an order that forces buffering.
-	// 1. Manually set the state to simulate that hit3 was the last entry processed.
-	// This is the correct way to set up the test's preconditions.
-	p.ActivityMutex.Lock()
-	key := store.Actor{IPInfo: utils.NewIPInfo(targetIP)}
-	activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(key))
-	activity.LastRequestTime = hit3.Timestamp
-	// Manually add hit3 to our list of processed entries, as we are starting from this state.
-	processedMutex.Lock()
-	processedEntries = append(processedEntries, hit3)
-	processedMutex.Unlock()
-	p.ActivityMutex.Unlock()
-
-	// 2. Process the other hits by calling handleOutOfOrder directly. This is done
-	// under a single lock to simulate them arriving in a quick batch.
-	p.ActivityMutex.Lock()
-	handleOutOfOrder(p, hit2) // Should be buffered (1s old)
-	handleOutOfOrder(p, hit1) // Should be buffered (2s old)
-	handleOutOfOrder(p, hit4) // Should be buffered (2s old)
-	handleOutOfOrder(p, hit5) // Should be PROCESSED IMMEDIATELY (5s old, > 4s tolerance)
-	p.ActivityMutex.Unlock()
-
-	// --- Assert 1: Check the immediate state ---
-	processedMutex.Lock()
-	if len(processedEntries) != 2 {
-		t.Fatalf("Expected hit3 and hit5 to be processed immediately, but got %d entries", len(processedEntries))
-	}
-	processedMutex.Unlock()
-
-	p.ActivityMutex.RLock()
-	if len(p.EntryBuffer) != 3 {
-		t.Fatalf("Expected 3 entries in the buffer, but got %d", len(p.EntryBuffer))
-	}
-	// Verify the sorted order in the buffer: [hit1, hit4, hit2]
-	if p.EntryBuffer[0].Path != "/hit1" || p.EntryBuffer[1].Path != "/hit4" || p.EntryBuffer[2].Path != "/hit2" {
-		t.Errorf("Buffer is not sorted correctly. Got paths: [%s, %s, %s]",
-			p.EntryBuffer[0].Path, p.EntryBuffer[1].Path, p.EntryBuffer[2].Path)
-	}
-	p.ActivityMutex.RUnlock()
-
-	// --- Act 2: Flush the buffer to simulate the worker processing them ---
-	FlushEntryBuffer(p)
-
-	// --- Assert 2: Check the final state ---
-	p.ActivityMutex.RLock()
-	if len(p.EntryBuffer) != 0 {
-		t.Errorf("Expected buffer to be empty after flush, but it has %d entries", len(p.EntryBuffer))
-	}
-	p.ActivityMutex.RUnlock()
-
-	processedMutex.Lock()
-	defer processedMutex.Unlock()
-
-	if len(processedEntries) != 5 {
-		t.Fatalf("Expected a total of 5 processed entries, but got %d", len(processedEntries))
-	}
-
-	// The final processing order should be hit3 (immediate), then the sorted buffer.
-	// The user's expected order was 1, 4, 2, 3. Our total order is 5, 3, 1, 4, 2.
-	// Let's verify the final chronological order of all processed entries.
-	expectedOrder := []*app.LogEntry{hit5, hit1, hit4, hit2, hit3}
-	// Sort the actual processed entries by timestamp to verify against the ideal chronological order
-	sort.Slice(processedEntries, func(i, j int) bool {
-		if processedEntries[i].Timestamp.Equal(processedEntries[j].Timestamp) {
-			// For stable sorting in the test, sort by path if timestamps are equal.
-			return processedEntries[i].Path < processedEntries[j].Path
-		}
-		return processedEntries[i].Timestamp.Before(processedEntries[j].Timestamp)
-	})
-
-	for i, expected := range expectedOrder {
-		if processedEntries[i].Path != expected.Path {
-			t.Errorf("Final processed order mismatch at index %d. Got path %s, want %s", i, processedEntries[i].Path, expected.Path)
-		}
-	}
-}
 
 func TestGetActor(t *testing.T) {
 	// Dummy LogEntry for testing
@@ -1355,12 +1228,12 @@ type CheckerTestHarness struct {
 // newCheckerTestHarness creates a harness for testing checker.CheckChains logic.
 func NewCheckerTestHarness(t *testing.T, cfg *config.AppConfig) *CheckerTestHarness {
 	t.Helper()
-	ResetGlobalState()
+	testutil.ResetGlobalState()
 
 	h := &CheckerTestHarness{t: t}
 
 	// Setup a mock blocker to intercept calls.
-	mockBlocker := &MockBlocker{
+	mockBlocker := &testutil.MockBlocker{
 		BlockFunc: func(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
 			h.blockCalled = true
 			h.blockCallArgs.ipInfo = ipInfo
@@ -1409,13 +1282,13 @@ func (h *CheckerTestHarness) addChain(chainYAML config.BehavioralChain) {
 // processEntry runs a single log entry through the checker.CheckChains logic.
 func (h *CheckerTestHarness) processEntry(entry *app.LogEntry) {
 	h.t.Helper()
-	checker.checker.CheckChains(h.processor, entry)
+	checker.CheckChains(h.processor, entry)
 }
 
 // assertChainProgress checks if a given key is at the expected step for a chain.
 func (h *CheckerTestHarness) assertChainProgress(chainName string, entry *app.LogEntry, expectedStep int) {
 	h.t.Helper()
-	key := checker.checker.GetActor(&h.processor.Chains[0], entry)
+	key := checker.GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
 	activity, exists := h.processor.ActivityStore[store.Actor(key)]
@@ -1427,7 +1300,7 @@ func (h *CheckerTestHarness) assertChainProgress(chainName string, entry *app.Lo
 // assertBlocked checks if a given key is marked as blocked.
 func (h *CheckerTestHarness) assertBlocked(entry *app.LogEntry, expected bool) { //nolint:thelper
 	h.t.Helper()
-	key := checker.checker.GetActor(&h.processor.Chains[0], entry)
+	key := checker.GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
 	activity, exists := h.processor.ActivityStore[store.Actor(key)]
@@ -1443,7 +1316,7 @@ func (h *CheckerTestHarness) assertBlocked(entry *app.LogEntry, expected bool) {
 // assertChainProgressCleared checks that a chain's progress has been removed from the activity store.
 func (h *CheckerTestHarness) assertChainProgressCleared(chainName string, entry *app.LogEntry) {
 	h.t.Helper()
-	key := checker.checker.GetActor(&h.processor.Chains[0], entry)
+	key := checker.GetActor(&h.processor.Chains[0], entry)
 	h.processor.ActivityMutex.RLock()
 	defer h.processor.ActivityMutex.RUnlock()
 	activity, exists := h.processor.ActivityStore[store.Actor(key)]

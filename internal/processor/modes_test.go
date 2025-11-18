@@ -312,20 +312,19 @@ func TestNewTailer(t *testing.T) {
 // 		}
 // 	})
 // }
-// 
-// // mockFileInfo implements os.FileInfo for testing purposes.
-// type mockFileInfo struct {
-// 	size int64
-// 	sys  interface{}
-// }
-// 
-// func (m *mockFileInfo) Name() string       { return "mock.log" }
-// func (m *mockFileInfo) Size() int64        { return m.size }
-// func (m *mockFileInfo) Mode() os.FileMode  { return 0644 }
-// func (m *mockFileInfo) ModTime() time.Time { return time.Now() }
-// func (m *mockFileInfo) IsDir() bool        { return false }
-// func (m *mockFileInfo) Sys() interface{}   { return m.sys }
-// 
+// mockFileInfo implements os.FileInfo for testing purposes.
+type mockFileInfo struct {
+	size int64
+	sys  interface{}
+}
+
+func (m *mockFileInfo) Name() string       { return "mock.log" }
+func (m *mockFileInfo) Size() int64        { return m.size }
+func (m *mockFileInfo) Mode() os.FileMode  { return 0644 }
+func (m *mockFileInfo) ModTime() time.Time { return time.Now() }
+func (m *mockFileInfo) IsDir() bool        { return false }
+func (m *mockFileInfo) Sys() interface{}   { return m.sys }
+
 func TestDelayOrShutdown(t *testing.T) {
 	// --- Setup ---
 	p := &app.Processor{
@@ -374,6 +373,46 @@ func TestDelayOrShutdown(t *testing.T) {
 	}
 }
 
+// dryRunTestHarness encapsulates the common setup for dry-run processor tests.
+type dryRunTestHarness struct {
+	t              *testing.T
+	app            struct {
+		Processor *app.Processor
+	}
+	tempLogFile    string
+	processedLines []string
+	capturedLogs   []string
+	logMutex       sync.Mutex
+}
+
+// newDryRunTestHarness creates and initializes a test harness for processor.DryRunLogProcessor.
+func newDryRunTestHarness(t *testing.T, cfg *config.AppConfig) *dryRunTestHarness {
+	t.Helper()
+
+	h := &dryRunTestHarness{t: t}
+
+	// Create temp file
+	tempDir := t.TempDir()
+	h.tempLogFile = filepath.Join(tempDir, "test.log")
+
+	// Create processor with mock functions
+	h.app.Processor = testutil.NewTestProcessor(cfg, nil)
+	h.app.Processor.LogPath = h.tempLogFile
+	h.app.Processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+		h.logMutex.Lock()
+		defer h.logMutex.Unlock()
+		logLine := fmt.Sprintf(tag+": "+format, args...)
+		h.capturedLogs = append(h.capturedLogs, logLine)
+	}
+	h.app.Processor.ProcessLogLine = func(line string) {
+		h.logMutex.Lock()
+		defer h.logMutex.Unlock()
+		h.processedLines = append(h.processedLines, line)
+	}
+
+	return h
+}
+
 // tailerTestHarness encapsulates the common setup and teardown for processor.LiveLogTailer tests.
 type tailerTestHarness struct {
 	t              *testing.T
@@ -405,21 +444,21 @@ func newTailerTestHarness(t *testing.T, config *config.AppConfig) *tailerTestHar
 	h.tempLogFile = filepath.Join(tempDir, "test.log")
 
 	// Create app.Processor with mock/capture functions
-	h.processor.Processor = testutil.NewTestProcessor(config, nil) // Use testutil.NewTestProcessor to ensure all fields are initialized.
+	h.processor = testutil.NewTestProcessor(config, nil) // Use testutil.NewTestProcessor to ensure all fields are initialized.
 	// Override the functions needed for this specific harness.
-	h.processor.Processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		h.logMutex.Lock()
 		defer h.logMutex.Unlock() //nolint:gocritic
 		logLine := fmt.Sprintf(tag+": "+format, args...)
 		h.capturedLogs = append(h.capturedLogs, logLine)
 	}
-	h.processor.Processor.ProcessLogLine = func(line string) {
+	h.processor.ProcessLogLine = func(line string) {
 		h.logMutex.Lock()
 		defer h.logMutex.Unlock() //nolint:gocritic
 		h.processedLines = append(h.processedLines, line)
 		h.lineProcessed <- line
 	}
-	h.processor.Processor.LogPath = h.tempLogFile
+	h.processor.LogPath = h.tempLogFile
 
 	return h
 }
@@ -427,7 +466,7 @@ func newTailerTestHarness(t *testing.T, config *config.AppConfig) *tailerTestHar
 // start runs the processor.LiveLogTailer in a goroutine and waits for it to be ready.
 func (h *tailerTestHarness) start() {
 	go func() {
-		processor.LiveLogTailer(h.processor.Processor, h.SignalCh, h.readyCh)
+		processor.LiveLogTailer(h.processor, h.signalCh, h.readyCh)
 		close(h.doneCh)
 	}()
 
@@ -443,7 +482,7 @@ func (h *tailerTestHarness) start() {
 // stop sends a shutdown signal and waits for the tailer to exit.
 func (h *tailerTestHarness) stop() {
 	h.t.Logf("[HARNESS] stop(): Sending shutdown signal.")
-	h.SignalCh <- syscall.SIGTERM
+	h.signalCh <- syscall.SIGTERM
 	select {
 	case <-h.doneCh:
 		// Graceful shutdown complete.
@@ -501,7 +540,7 @@ func TestDryRunLogProcessor(t *testing.T) {
 		{
 			name: "Line Exceeds Limit",
 			setupFunc: func(filePath string) {
-				_ = os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\n"+strings.Repeat("a", MaxLogLineSize+1)+"\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
+				_ = os.WriteFile(filePath, []byte("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\n"+strings.Repeat("a", config.MaxLogLineSize+1)+"\nexample.com 1.1.1.3 - - [01/Jan/2025:00:00:02 +0000] \"GET /3 HTTP/1.1\" 200 100 \"-\" \"-\""), 0644)
 			},
 			expectedLinesProcessed: 2, // The long line is skipped, but the other two are processed.
 			expectedLogContains:    "Skipped line (length exceeded",
@@ -601,7 +640,7 @@ test.com 1.1.1.1 - - [01/Jan/2025:00:00:08 +0000] "GET /step2 HTTP/1.1" 200 100 
 test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 "-" "B"
 `
 
-	chain1 := BehavioralChain{
+	chain1 := config.BehavioralChain{
 		Name:     "TopNTestChain",
 		Action:   "log",
 		MatchKey: "ip",
@@ -609,27 +648,27 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 	// Correctly create matchers without capturing loop variables.
 	chain1.Steps = []config.StepDef{
 		{Matchers: []struct {
-			Matcher   fieldMatcher
+			Matcher   config.FieldMatcher
 			FieldName string
 		}{{Matcher: func(path string) func(e *app.LogEntry) bool {
 			return func(e *app.LogEntry) bool { return e.Path == path }
 		}("/step1"), FieldName: "Path"}}},
 		{MaxDelayDuration: 3 * time.Second, Matchers: []struct {
-			Matcher   fieldMatcher
+			Matcher   config.FieldMatcher
 			FieldName string
 		}{{Matcher: func(path string) func(e *app.LogEntry) bool {
 			return func(e *app.LogEntry) bool { return e.Path == path }
 		}("/step2"), FieldName: "Path"}}},
 	}
 
-	chain2 := BehavioralChain{
+	chain2 := config.BehavioralChain{
 		Name:     "SecondChain",
 		Action:   "log",
 		MatchKey: "ip",
 	}
 	chain2.Steps = []config.StepDef{
 		{Matchers: []struct {
-			Matcher   fieldMatcher
+			Matcher   config.FieldMatcher
 			FieldName string
 		}{{Matcher: func(path string) func(e *app.LogEntry) bool {
 			return func(e *app.LogEntry) bool { return e.Path == path }
@@ -656,14 +695,14 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 			expectInOutput: []string{
 				"Top 1 Actors per Chain",
 				"Chain: SecondChain",
-				fmt.Sprintf(TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor"),
-				fmt.Sprintf(TopNRowFormat, 1, 1, 0, "5s", "3.3.3.3"),
+				fmt.Sprintf(config.TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor"),
+				fmt.Sprintf(config.TopNRowFormat, 1, 1, 0, "5s", "3.3.3.3"),
 				"Chain: TopNTestChain",
-				fmt.Sprintf(TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor"),
-				fmt.Sprintf(TopNRowFormat, 4, 2, 0, "9s", "2.2.2.2"),
+				fmt.Sprintf(config.TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor"),
+				fmt.Sprintf(config.TopNRowFormat, 4, 2, 0, "9s", "2.2.2.2"),
 			},
 			expectNotInOutput: []string{
-				fmt.Sprintf(TopNRowFormat, 3, 1, 1, "8s", "1.1.1.1"),
+				fmt.Sprintf(config.TopNRowFormat, 3, 1, 1, "8s", "1.1.1.1"),
 			},
 		},
 		{
@@ -673,12 +712,12 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 			expectInOutput: []string{
 				"Top 5 Actors per Chain",
 				"Chain: SecondChain",
-				fmt.Sprintf(TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor"),
-				fmt.Sprintf(TopNRowFormat, 1, 1, 0, "5s", "3.3.3.3"),
+				fmt.Sprintf(config.TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor"),
+				fmt.Sprintf(config.TopNRowFormat, 1, 1, 0, "5s", "3.3.3.3"),
 				"Chain: TopNTestChain",
-				fmt.Sprintf(TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor"),
-				fmt.Sprintf(TopNRowFormat, 4, 2, 0, "9s", "2.2.2.2"),
-				fmt.Sprintf(TopNRowFormat, 3, 1, 1, "8s", "1.1.1.1"),
+				fmt.Sprintf(config.TopNHeaderFormat, "Hits", "Compl.", "Resets", "Seen", "Actor"),
+				fmt.Sprintf(config.TopNRowFormat, 4, 2, 0, "9s", "2.2.2.2"),
+				fmt.Sprintf(config.TopNRowFormat, 3, 1, 1, "8s", "1.1.1.1"),
 			},
 		},
 	}
@@ -833,7 +872,7 @@ func TestLiveLogTailer_ErrorHandling(t *testing.T) {
 
 		// Run tailer in a goroutine
 		go func() {
-			processor.LiveLogTailer(harness.app.Processor, harness.SignalCh, nil)
+			processor.LiveLogTailer(harness.processor, harness.signalCh, nil)
 			close(harness.doneCh)
 		}()
 		defer harness.stop()
@@ -876,7 +915,7 @@ func TestLiveLogTailer_ErrorHandling(t *testing.T) {
 		// For now, we'll just assert that the code path exists and is what we expect.
 		// A more advanced test would use a mock reader.
 		// Let's assume a hypothetical error was injected.
-		harness.app.Processor.LogFunc(logging.LevelError, "TAIL_ERROR", "Read error while tailing log file: injected error. Reopening in %v.", ErrorRetryDelay)
+		harness.processor.LogFunc(logging.LevelError, "TAIL_ERROR", "Read error while tailing log file: injected error. Reopening in %v.", config.ErrorRetryDelay)
 
 		harness.logMutex.Lock()
 		logOutput := strings.Join(harness.capturedLogs, "\n")
@@ -906,7 +945,7 @@ func TestLiveLogTailer_InitialOpenErrorAndShutdown(t *testing.T) {
 	// --- Act ---
 	// We don't use harness.start() because it waits for a ready signal that will never come.
 	go func() {
-		processor.LiveLogTailer(harness.app.Processor, harness.SignalCh, nil) // Pass nil for readySignal
+		processor.LiveLogTailer(harness.processor, harness.signalCh, nil) // Pass nil for readySignal
 		close(harness.doneCh)
 	}()
 
@@ -961,8 +1000,8 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 
 	// Override LogFunc to signal when the read error is logged.
 	readErrorLogged := make(chan struct{}, 1)
-	originalLogFunc := harness.app.Processor.LogFunc
-	harness.app.Processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+	originalLogFunc := harness.processor.LogFunc
+	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		originalLogFunc(level, tag, format, args...)
 		if tag == "TAIL_ERROR" && strings.Contains(fmt.Sprintf(format, args...), "Read error while tailing") {
 			select {
@@ -1048,7 +1087,7 @@ func TestLiveLogTailer_ShutdownDuringRetryDelay(t *testing.T) {
 
 	// Override the LogFunc to count how many times "Failed to open" is logged.
 	openFailCount := 0
-	harness.app.Processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		harness.logMutex.Lock()
 		defer harness.logMutex.Unlock()
 		if tag == "TAIL_ERROR" && strings.Contains(format, "Failed to open log file") {
@@ -1059,7 +1098,7 @@ func TestLiveLogTailer_ShutdownDuringRetryDelay(t *testing.T) {
 
 	// --- Act ---
 	go func() {
-		processor.LiveLogTailer(harness.app.Processor, harness.SignalCh, nil)
+		processor.LiveLogTailer(harness.processor, harness.signalCh, nil)
 		close(harness.doneCh)
 	}()
 
@@ -1098,7 +1137,7 @@ func TestLiveLogTailer_InitialStatError(t *testing.T) {
 	// With the processor.Tailer refactoring, stat failures during processor.NewTailer now return an error
 	// (fail fast) rather than logging a warning and continuing with impaired rotation detection.
 	statErrorLogged := make(chan struct{}, 1)
-	harness.app.Processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMsg := fmt.Sprintf(format, args...)
 		harness.logMutex.Lock()
 		defer harness.logMutex.Unlock()
@@ -1111,7 +1150,7 @@ func TestLiveLogTailer_InitialStatError(t *testing.T) {
 
 	// --- Act ---
 	go func() {
-		processor.LiveLogTailer(harness.app.Processor, harness.SignalCh, nil)
+		processor.LiveLogTailer(harness.processor, harness.signalCh, nil)
 		close(harness.doneCh) // Ensure doneCh is closed when the goroutine exits.
 	}()
 
@@ -1124,7 +1163,7 @@ func TestLiveLogTailer_InitialStatError(t *testing.T) {
 
 	// Now, send the shutdown signal and wait for the goroutine to exit.
 	// We don't use harness.stop() because its timeout might race with the internal ErrorRetryDelay.
-	harness.SignalCh <- syscall.SIGTERM
+	harness.signalCh <- syscall.SIGTERM
 	select {
 	case <-harness.doneCh:
 	case <-time.After(2 * time.Second): // A more generous timeout.
@@ -1160,7 +1199,7 @@ func TestLiveLogTailer_StatError(t *testing.T) {
 	var logMutex sync.Mutex
 	statErrorLogged := make(chan struct{}, 1)
 
-	harness.app.Processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMutex.Lock()
 		defer logMutex.Unlock()
 		logLine := fmt.Sprintf(tag+": "+format, args...)
@@ -1366,184 +1405,6 @@ func assertStringSlicesEqual(t *testing.T, expected, actual []string) {
 		if expected[i] != actual[i] {
 			t.Errorf("Slice content mismatch at index %d.\nExpected: %s\nActual:   %s", i, expected[i], actual[i])
 			return
-		}
-	}
-}
-func TestDryRunVsLiveModeComparison(t *testing.T) {
-	// 1. Use the existing test log file.
-	logFilePath := "testdata/test_access.log"
-	logData, err := os.ReadFile(logFilePath)
-	if err != nil {
-		t.Fatalf("Failed to read test log file %s: %v", logFilePath, err)
-	}
-
-	// 2. Extract expected log output from comments in the test log file.
-	expectedLogs := make(map[int]string)
-	scanner := bufio.NewScanner(bytes.NewReader(logData))
-	lineNumber := 0
-	for scanner.Scan() {
-		lineNumber++
-		line := scanner.Text()
-		if strings.Contains(line, "=== EXPECTED LOG:") {
-			parts := strings.SplitN(line, "=== EXPECTED LOG:", 2)
-			if len(parts) == 2 {
-				expected := strings.TrimSpace(parts[1])
-				// The actual log line that triggers the output is usually 2 lines after the comment.
-				// We store the expected output against the line number where the comment appears.
-				// The check logic will handle formatting placeholders like %d.
-				expectedLogs[lineNumber] = expected
-			}
-		}
-	}
-	if len(expectedLogs) == 0 {
-		t.Fatal("No '=== EXPECTED LOG:' comments found in test_access.log")
-	}
-
-	// 3. Create a "clean" version of the log data, stripping comments and empty lines.
-	// This ensures both modes process the exact same set of meaningful log lines.
-	var cleanLogData strings.Builder
-	logScanner := bufio.NewScanner(bytes.NewReader(logData))
-	for logScanner.Scan() {
-		line := logScanner.Text()
-		trimmedLine := strings.TrimSpace(line)
-		if trimmedLine != "" && !strings.HasPrefix(trimmedLine, "#") {
-			cleanLogData.WriteString(line + "\n")
-		}
-	}
-
-	// --- Create temporary files for both modes with the clean data ---
-	createTempLogFile := func(namePrefix string) string {
-		file, err := os.CreateTemp(t.TempDir(), namePrefix)
-		if err != nil {
-			t.Fatalf("Failed to create temp log file: %v", err)
-		}
-		defer func() {
-			_ = file.Close()
-		}()
-		if _, err := file.WriteString(cleanLogData.String()); err != nil {
-			t.Fatalf("Failed to write to temp log file: %v", err)
-		}
-		absPath, _ := filepath.Abs(file.Name())
-		return absPath
-	}
-
-	dryRunLogFilePath := createTempLogFile("dry_run_test_*.log")
-
-	// --- Run in Dry-Run Mode ---
-	dryRunProcessor, dryRunLogs, _ := setupTestProcessor(t, true, dryRunLogFilePath) // No need for lineProcessedCh in dry-run
-	dryRunDone := make(chan struct{})
-	go app.Processor.processor.DryRunLogProcessor(dryRunProcessor, dryRunDone)
-	<-dryRunDone
-
-	// --- Run in Live Mode ---
-	// For live mode, we must simulate new lines being written.
-	// 1. Create an EMPTY temp file first.
-	liveFile, err := os.CreateTemp(t.TempDir(), "live_tail_test_*.log")
-	if err != nil {
-		t.Fatalf("Failed to create empty temp file for live mode: %v", err)
-	}
-	_ = liveFile.Close() // Close it immediately, the tailer will open it.
-	liveLogPath, _ := filepath.Abs(liveFile.Name())
-
-	// 2. Setup the app.Processor to watch the empty file.
-	liveProcessor, liveLogs, liveLineProcessedCh := setupTestProcessor(t, false, liveLogPath)
-	liveSignalCh := make(chan os.Signal, 1)
-	liveReadySignal := make(chan struct{}, 1)
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	// 3. Start the tailer in a goroutine.
-	go func() {
-		defer wg.Done()
-		app.Processor.processor.LiveLogTailer(liveProcessor, liveSignalCh, liveReadySignal)
-	}()
-
-	// 4. Wait for the tailer to be ready (i.e., watching the file).
-	<-liveReadySignal
-
-	// 5. NOW write the data to the file, simulating new log lines appearing.
-	// We must use os.O_APPEND to correctly simulate new lines being added to a log file.
-	// os.WriteFile truncates the file, which the tailer will not detect as new content.
-	f, err := os.OpenFile(liveLogPath, os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		t.Fatalf("Failed to open live tailer log file for appending: %v", err)
-	}
-	_, _ = f.WriteString(cleanLogData.String())
-	_ = f.Close()
-
-	// Wait for all lines to be processed by the live tailer.
-	// Count the actual number of lines that should be processed (non-empty, non-comment).
-	// This count is based on the cleanLogData, which already strips comments and empty lines.
-	numLinesToProcess := strings.Count(cleanLogData.String(), "\n")
-	for i := 0; i < numLinesToProcess; i++ {
-		select {
-		case <-liveLineProcessedCh:
-			// Line processed.
-		case <-time.After(5 * time.Second): // Generous timeout for processing all lines
-			t.Fatalf("Timed out waiting for line %d to be processed by live tailer. Processed so far: %d", i+1, i)
-		}
-	}
-
-	// Send shutdown signal to the live tailer.
-	liveSignalCh <- os.Interrupt
-	// Wait for the tailer goroutine to finish completely.
-	wg.Wait()
-
-	// 5. Compare the results
-	dryRunOutput := dryRunLogs.String()
-	liveOutput := liveLogs.String()
-
-	// Filter out OutOfOrderChain lines from both outputs for comparison.
-	// Out-of-order handling requires the entryBufferWorker, which adds complexity to this test.
-	filterOutOfOrderLines := func(output string) string {
-		var filtered []string
-		for _, line := range strings.Split(output, "\n") {
-			if !strings.Contains(line, "OutOfOrderChain") {
-				filtered = append(filtered, line)
-			}
-		}
-		return strings.Join(filtered, "\n")
-	}
-	dryRunFiltered := filterOutOfOrderLines(dryRunOutput)
-	liveFiltered := filterOutOfOrderLines(liveOutput)
-
-	// First, ensure both modes produce identical output (excluding out-of-order chain).
-	if dryRunFiltered != liveFiltered {
-		t.Errorf("Dry-run and live mode outputs differ (OutOfOrderChain excluded).\n\nDry-run output:\n%s\nLive mode output:\n%s", dryRunFiltered, liveFiltered)
-	}
-
-	// Second, verify that the output matches the expectations from the log file comments.
-	// We only need to check one of the outputs since we've already confirmed they are identical.
-	for commentLine, expectedLog := range expectedLogs {
-		// Skip OutOfOrderChain expectations in this test.
-		// Out-of-order handling requires the entryBufferWorker to be running, which
-		// complicates this comparison test. Out-of-order functionality is tested
-		// separately in dedicated buffer worker tests.
-		if strings.Contains(expectedLog, "OutOfOrderChain") {
-			continue
-		}
-
-		found := false
-		// Handle placeholders like "Line %d:"
-		// The placeholder is no longer used, but we keep the variable for clarity.
-		// The check now relies on content, not line number.
-		formattedExpectedLog := expectedLog
-		formattedExpectedLog = strings.Replace(formattedExpectedLog, "Line %d: ", "", 1)
-
-		// Normalize the expected log for comparison, just like we did in the logFunc.
-		normalizedExpected := formattedExpectedLog
-		normalizedExpected = strings.Replace(normalizedExpected, "DRY_RUN: ", "ACTION: ", 1)
-		normalizedExpected = strings.Replace(normalizedExpected, "ALERT: ", "ACTION: ", 1)
-		normalizedExpected = strings.Replace(normalizedExpected, " (DryRun)", "", 1)
-
-		// Now check if the normalized output contains the normalized expected log.
-		if strings.Contains(liveOutput, normalizedExpected) {
-			found = true
-		}
-
-		if !found {
-			t.Errorf("Expected log message was not found in live/dry-run output.\n\nEXPECTED (from line %d, normalized):\n'%s'\n\nACTUAL OUTPUT:\n%s",
-				commentLine, normalizedExpected, liveOutput)
 		}
 	}
 }
