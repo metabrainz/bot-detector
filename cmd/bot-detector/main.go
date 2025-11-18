@@ -257,6 +257,30 @@ func execute(params *commandline.AppParameters) error {
 		return err
 	}
 
+	// Bootstrap configuration from leader if running in follower mode
+	if params.Leader != "" {
+		// Running in follower mode, check if we need to bootstrap
+		if _, err := os.Stat(params.ConfigPath); os.IsNotExist(err) {
+			// Config doesn't exist, bootstrap from leader
+			leaderAddr := params.Leader
+			// Add http:// prefix if not present
+			if !strings.HasPrefix(leaderAddr, "http://") && !strings.HasPrefix(leaderAddr, "https://") {
+				leaderAddr = "http://" + leaderAddr
+			}
+
+			logging.LogOutput(logging.LevelInfo, "CLUSTER", "Config file not found, bootstrapping from leader at %s", leaderAddr)
+			if err := cluster.Bootstrap(cluster.BootstrapOptions{
+				LeaderAddress: leaderAddr,
+				ConfigPath:    params.ConfigPath,
+				LogFunc:       logging.LogOutput,
+				HTTPTimeout:   10 * time.Second,
+				ForceUpdate:   false,
+			}); err != nil {
+				return fmt.Errorf("failed to bootstrap config from leader: %w", err)
+			}
+		}
+	}
+
 	fileInfo, err := os.Stat(params.ConfigPath)
 	if err != nil {
 		return fmt.Errorf("could not stat config file: %v", err)

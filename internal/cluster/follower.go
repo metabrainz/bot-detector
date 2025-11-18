@@ -208,3 +208,73 @@ func copyFile(src, dst string) error {
 
 	return destFile.Sync()
 }
+
+// BootstrapOptions contains options for bootstrapping a follower node.
+type BootstrapOptions struct {
+	LeaderAddress string        // Leader HTTP address (e.g., "http://leader:8080")
+	ConfigPath    string        // Local config file path to create
+	LogFunc       LogFunc       // Logging function
+	HTTPTimeout   time.Duration // HTTP request timeout
+	ForceUpdate   bool          // Force update even if local config exists
+}
+
+// Bootstrap fetches the initial configuration from the leader and saves it locally.
+// This should be called before starting the application to ensure the follower has
+// a valid configuration file.
+//
+// If the config file already exists and ForceUpdate is false, this function will
+// skip the bootstrap and return nil (allowing the existing config to be used).
+//
+// Returns an error if the bootstrap fails.
+func Bootstrap(opts BootstrapOptions) error {
+	if opts.HTTPTimeout == 0 {
+		opts.HTTPTimeout = 10 * time.Second
+	}
+
+	// Check if config already exists (unless force update)
+	if !opts.ForceUpdate {
+		if _, err := os.Stat(opts.ConfigPath); err == nil {
+			opts.LogFunc(logging.LevelInfo, "CLUSTER", "Local config exists, skipping bootstrap")
+			return nil
+		}
+	}
+
+	opts.LogFunc(logging.LevelInfo, "CLUSTER", "Bootstrapping config from leader at %s", opts.LeaderAddress)
+
+	// Create HTTP client
+	client := &http.Client{
+		Timeout: opts.HTTPTimeout,
+	}
+
+	// Fetch config from leader
+	configURL := fmt.Sprintf("%s/config", opts.LeaderAddress)
+	resp, err := client.Get(configURL)
+	if err != nil {
+		return fmt.Errorf("failed to fetch config from leader: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("leader returned error status %d", resp.StatusCode)
+	}
+
+	// Read config content
+	configContent, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read config from leader: %w", err)
+	}
+
+	// Ensure config directory exists
+	configDir := filepath.Dir(opts.ConfigPath)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	// Write config to file
+	if err := os.WriteFile(opts.ConfigPath, configContent, 0600); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	opts.LogFunc(logging.LevelInfo, "CLUSTER", "Successfully bootstrapped config from leader (%d bytes)", len(configContent))
+	return nil
+}
