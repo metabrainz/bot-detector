@@ -687,7 +687,7 @@ regex:NastyBot`), 0644); err != nil {
 	t.Cleanup(func() { _ = os.Remove("bad_user_agents.txt") })
 	// 1. Load configuration (chains, whitelist, etc.)
 	logging.SetLogLevel("debug")
-	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: "testdata/config.yaml"})
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: "../../testdata/config.yaml"})
 	if err != nil {
 		t.Fatalf("config.LoadConfigFromYAML() failed: %v", err)
 	}
@@ -719,7 +719,7 @@ regex:NastyBot`), 0644); err != nil {
 	processor.ProcessLogLine = func(line string) { logparser.ProcessLogLineInternal(processor, line) }
 
 	// 2. Read test_access.log and extract expected log outputs from comments
-	testLogFilePath := "testdata/test_access.log"
+	testLogFilePath := "../../testdata/test_access.log"
 	testLogData, err := os.ReadFile(testLogFilePath)
 	if err != nil {
 		t.Fatalf("Failed to read %s: %v", testLogFilePath, err)

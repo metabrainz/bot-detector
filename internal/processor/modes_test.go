@@ -581,18 +581,18 @@ func TestDryRunLogProcessor_Decompression(t *testing.T) {
 	}{
 		{
 			name:                "Plain Text File",
-			logFilePath:         "testdata/plain.log",
+			logFilePath:         "../../testdata/plain.log",
 			expectedLogContains: "Starting dry-run mode",
 		},
 		{
 			name:                "Gzip Compressed File",
 			expectedLogContains: "Detected gzip format.",
-			logFilePath:         "testdata/compressed.log.gz",
+			logFilePath:         "../../testdata/compressed.log.gz",
 		},
 		{
 			name:                "Bzip2 Compressed File",
 			expectedLogContains: "Detected bzip2 format.",
-			logFilePath:         "testdata/compressed.log.bz2",
+			logFilePath:         "../../testdata/compressed.log.bz2",
 		},
 	}
 
