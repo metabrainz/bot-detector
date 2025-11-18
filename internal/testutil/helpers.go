@@ -1,9 +1,9 @@
 package testutil
 
 import (
-	"bot-detector/internal/checker"
 	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
+	"bot-detector/internal/checker"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/metrics"
@@ -135,4 +135,3 @@ func NewTestProcessor(cfg *config.AppConfig, chains []config.BehavioralChain) *a
 }
 
 // dryRunTestHarness encapsulates the common setup for DryRunLogProcessor tests.
-

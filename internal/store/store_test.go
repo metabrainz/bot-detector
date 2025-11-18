@@ -32,7 +32,7 @@ func (m *mockStoreProvider) GetTopActorsPerChain() map[string]map[string]*ActorS
 	return m.topActorsPerChain
 }
 func (m *mockStoreProvider) GetTestSignals() *TestSignals { return m.testSignals }
-func (m *mockStoreProvider) IncrementActorsCleaned()          { m.actorsCleaned.Add(1) }
+func (m *mockStoreProvider) IncrementActorsCleaned()      { m.actorsCleaned.Add(1) }
 func (m *mockStoreProvider) Log(level logging.LogLevel, tag string, format string, v ...interface{}) {
 }
 

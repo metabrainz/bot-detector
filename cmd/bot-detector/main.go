@@ -7,13 +7,13 @@ import (
 	"bot-detector/internal/commandline"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/logparser"
 	"bot-detector/internal/metrics"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/processor"
 	"bot-detector/internal/server"
 	"bot-detector/internal/store"
 	"bot-detector/internal/testutil"
-	"bot-detector/internal/logparser"
 	"bot-detector/internal/utils"
 	"bufio"
 	"encoding/json"
@@ -357,7 +357,6 @@ func dumpBackendsAndExit(p *app.Processor) error {
 	}
 	return nil
 }
-
 
 func performGracefulShutdown(p *app.Processor) {
 	p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Graceful shutdown initiated.")

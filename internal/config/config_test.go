@@ -3,13 +3,13 @@ package config_test
 import (
 	"bot-detector/internal/app"
 	"bot-detector/internal/config"
-	"bot-detector/internal/testutil"
 	"bot-detector/internal/logging"
-	"bot-detector/internal/types"
 	metrics "bot-detector/internal/metrics"
 	"bot-detector/internal/parser"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
+	"bot-detector/internal/testutil"
+	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
 	"fmt"
 
@@ -1579,7 +1579,7 @@ func TestStart_WatcherSelection(t *testing.T) {
 		{
 			name:                  "watcher starts app.ConfigWatcher only",
 			reloadOnFlag:          "watcher",
-			expectWatcherLog:      "Starting app.ConfigWatcher, polling every", // Partial match due to dynamic polling interval
+			expectWatcherLog:      "Starting ConfigWatcher, polling every", // Partial match due to dynamic polling interval
 			dontExpectReloaderLog: true,
 		},
 	}

@@ -28,7 +28,7 @@ func newTestProcessorWithFileDeps(t *testing.T, cfg *config.AppConfig, logFunc f
 		cfg.FileDependencies = make(map[string]*types.FileDependency)
 	}
 	p := testutil.NewTestProcessor(cfg, nil) // Use the existing testutil.NewTestProcessor
-	p.LogFunc = logFunc                // Set the log function here
+	p.LogFunc = logFunc                      // Set the log function here
 	return p
 }
 

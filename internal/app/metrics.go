@@ -4,12 +4,12 @@ import (
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/store"
+	"bot-detector/internal/utils"
 	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
-	"bot-detector/internal/utils"
 )
 
 func logTopActorsSummary(p *Processor, logFunc func(logging.LogLevel, string, string, ...interface{})) {
@@ -327,6 +327,7 @@ func logPerChainMetrics(p *Processor, logFunc func(logging.LogLevel, string, str
 //   - logFunc: The logging function to use for output.
 //   - logTag: The tag to use for each log line (e.g., "METRICS").
 //   - filterTag: The struct tag to filter which general metrics to display (e.g., "dryrun").
+//
 // Exported for use in app package.
 func LogMetricsSummary(p *Processor, elapsedTime time.Duration, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag, filterTag string) {
 	if !p.EnableMetrics {
@@ -396,4 +397,3 @@ func formatLastSeen(t time.Time, now time.Time) string {
 		return fmt.Sprintf("%ds", seconds)
 	}
 }
-

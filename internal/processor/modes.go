@@ -383,7 +383,6 @@ func DryRunLogProcessor(p *app.Processor, done chan<- struct{}) {
 	app.LogMetricsSummary(p, elapsedTime, p.LogFunc, "METRICS", "dryrun")
 }
 
-
 // logTopActorsSummary displays the top N actors per chain if the feature is enabled.
 func CleanupTopActors(p *app.Processor, stop <-chan struct{}) {
 	if p.TopN <= 0 {

@@ -2,11 +2,11 @@ package app_test
 
 import (
 	"bot-detector/internal/app"
+	"bot-detector/internal/config"
+	"bot-detector/internal/logging"
 	"bot-detector/internal/metrics"
 	"bot-detector/internal/store"
 	"bot-detector/internal/testutil"
-	"bot-detector/internal/config"
-	"bot-detector/internal/logging"
 	"os"
 	"path/filepath"
 	"sync"
@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 )
+
 func TestSignalReloader_Reload(t *testing.T) {
 	// --- Setup ---
 	testutil.ResetGlobalState()

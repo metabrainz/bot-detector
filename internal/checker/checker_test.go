@@ -1,10 +1,10 @@
 package checker_test
 
 import (
-	"bot-detector/internal/logparser"
 	"bot-detector/internal/checker"
+	"bot-detector/internal/logparser"
 	"bot-detector/internal/testutil"
-	
+
 	"bot-detector/internal/app"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
@@ -1146,7 +1146,6 @@ func TestOooBufferFunctions(t *testing.T) {
 	})
 }
 
-
 // TestOutOfOrder_ComplexScenario simulates a specific sequence of out-of-order hits
 // to verify buffering, sorted insertion, and rejection of entries outside the tolerance window.
 
@@ -1192,6 +1191,7 @@ func TestGetActor(t *testing.T) {
 		})
 	}
 }
+
 // checkerTestHarness encapsulates common setup for checker.CheckChains tests.
 type CheckerTestHarness struct {
 	t             *testing.T

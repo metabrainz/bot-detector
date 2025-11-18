@@ -143,7 +143,6 @@ func (p *Processor) IncrementCmdsPerBlocker(addr string) {
 	}
 }
 
-
 // GenerateHTMLMetricsReport creates the full metrics report as an HTML-safe string.
 func (p *Processor) GenerateHTMLMetricsReport() string {
 	var report strings.Builder
