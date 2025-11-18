@@ -1,4 +1,4 @@
-package main
+package logparser
 
 import (
 	"bot-detector/internal/logging"
