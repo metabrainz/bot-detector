@@ -61,8 +61,8 @@ type ClusterConfig struct {
 	// MetricsReportInterval is how often the leader polls followers for metrics.
 	MetricsReportInterval time.Duration
 
-	// HTTPProtocol specifies the protocol to use for cluster communication ("http" or "https").
-	HTTPProtocol string
+	// Protocol specifies the protocol to use for cluster communication ("http" or "https").
+	Protocol string
 }
 
 // Validate checks if the ClusterConfig is properly configured.
@@ -99,8 +99,8 @@ func (c *ClusterConfig) Validate() error {
 		return fmt.Errorf("metrics_report_interval must be greater than zero")
 	}
 
-	if c.HTTPProtocol != "http" && c.HTTPProtocol != "https" {
-		return fmt.Errorf("http_protocol must be 'http' or 'https', got %q", c.HTTPProtocol)
+	if c.Protocol != "http" && c.Protocol != "https" {
+		return fmt.Errorf("protocol must be 'http' or 'https', got %q", c.Protocol)
 	}
 
 	return nil

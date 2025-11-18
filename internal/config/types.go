@@ -159,7 +159,7 @@ type ClusterConfigYAML struct {
 	Nodes                 []NodeConfigYAML `yaml:"nodes"`
 	ConfigPollInterval    string           `yaml:"config_poll_interval"`
 	MetricsReportInterval string           `yaml:"metrics_report_interval"`
-	HTTPProtocol          string           `yaml:"http_protocol"`
+	Protocol              string           `yaml:"protocol"`
 }
 
 // NodeConfigYAML represents a single node in the cluster in YAML format.

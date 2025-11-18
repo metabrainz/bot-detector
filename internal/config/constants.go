@@ -52,7 +52,7 @@ const (
 	// Default Cluster settings
 	DefaultConfigPollInterval    = "30s"  // How often followers check for config updates
 	DefaultMetricsReportInterval = "10s"  // How often leader polls followers for metrics
-	DefaultClusterHTTPProtocol   = "http" // Protocol for cluster communication
+	DefaultClusterProtocol       = "http" // Protocol for cluster communication
 )
 
 // Define constants for Top N table formatting

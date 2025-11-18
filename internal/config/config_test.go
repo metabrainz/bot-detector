@@ -1899,7 +1899,7 @@ cluster:
       address: "localhost:9090"
   config_poll_interval: "30s"
   metrics_report_interval: "10s"
-  http_protocol: "http"
+  protocol: "http"
 
 chains:
   - name: "TestChain"
@@ -1951,8 +1951,8 @@ chains:
 	}
 
 	// Verify protocol
-	if loadedCfg.Cluster.HTTPProtocol != "http" {
-		t.Errorf("Expected http_protocol 'http', got %q", loadedCfg.Cluster.HTTPProtocol)
+	if loadedCfg.Cluster.Protocol != "http" {
+		t.Errorf("Expected protocol 'http', got %q", loadedCfg.Cluster.Protocol)
 	}
 }
 
@@ -1992,7 +1992,7 @@ cluster:
   nodes:
     - name: "node-1"
       address: "localhost:8080"
-  # config_poll_interval, metrics_report_interval, http_protocol will use defaults
+  # config_poll_interval, metrics_report_interval, protocol will use defaults
 
 chains:
   - name: "TestChain"
@@ -2023,8 +2023,8 @@ chains:
 		t.Errorf("Expected default metrics_report_interval 10s, got %v", loadedCfg.Cluster.MetricsReportInterval)
 	}
 
-	if loadedCfg.Cluster.HTTPProtocol != "http" {
-		t.Errorf("Expected default http_protocol 'http', got %q", loadedCfg.Cluster.HTTPProtocol)
+	if loadedCfg.Cluster.Protocol != "http" {
+		t.Errorf("Expected default protocol 'http', got %q", loadedCfg.Cluster.Protocol)
 	}
 }
 
@@ -2036,7 +2036,7 @@ cluster:
   nodes:
     - name: "node-1"
       address: "secure.example.com:8443"
-  http_protocol: "https"
+  protocol: "https"
 
 chains:
   - name: "TestChain"
@@ -2058,8 +2058,8 @@ chains:
 		t.Fatal("Expected cluster config to be loaded, got nil")
 	}
 
-	if loadedCfg.Cluster.HTTPProtocol != "https" {
-		t.Errorf("Expected http_protocol 'https', got %q", loadedCfg.Cluster.HTTPProtocol)
+	if loadedCfg.Cluster.Protocol != "https" {
+		t.Errorf("Expected protocol 'https', got %q", loadedCfg.Cluster.Protocol)
 	}
 }
 
@@ -2161,7 +2161,7 @@ cluster:
   nodes:
     - name: "node-1"
       address: "localhost:8080"
-  http_protocol: "ftp"  # Invalid protocol
+  protocol: "ftp"  # Invalid protocol
 
 chains:
   - name: "TestChain"
@@ -2175,10 +2175,10 @@ chains:
 
 	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigPath: tmpConfigPath})
 	if err == nil {
-		t.Fatal("Expected error for invalid http_protocol, got nil")
+		t.Fatal("Expected error for invalid protocol, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "http_protocol must be") {
+	if !strings.Contains(err.Error(), "protocol must be") {
 		t.Errorf("Expected error about invalid protocol, got: %v", err)
 	}
 }

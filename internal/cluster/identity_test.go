@@ -53,7 +53,7 @@ func TestDetermineIdentity_WithClusterConfig_ExactMatch(t *testing.T) {
 		},
 		ConfigPollInterval:    30 * time.Second,
 		MetricsReportInterval: 10 * time.Second,
-		HTTPProtocol:          "http",
+		Protocol:              "http",
 	}
 
 	identity, err := DetermineIdentity("", "localhost:8080", clusterCfg)
@@ -82,7 +82,7 @@ func TestDetermineIdentity_WithClusterConfig_PortMatch(t *testing.T) {
 		},
 		ConfigPollInterval:    30 * time.Second,
 		MetricsReportInterval: 10 * time.Second,
-		HTTPProtocol:          "http",
+		Protocol:              "http",
 	}
 
 	// Listen on :8080 should match node-1 by port
@@ -111,7 +111,7 @@ func TestDetermineIdentity_WithClusterConfig_0000PortMatch(t *testing.T) {
 		},
 		ConfigPollInterval:    30 * time.Second,
 		MetricsReportInterval: 10 * time.Second,
-		HTTPProtocol:          "http",
+		Protocol:              "http",
 	}
 
 	// Listen on 0.0.0.0:8080 should match node-1 by port
@@ -137,7 +137,7 @@ func TestDetermineIdentity_WithClusterConfig_NoMatch(t *testing.T) {
 		},
 		ConfigPollInterval:    30 * time.Second,
 		MetricsReportInterval: 10 * time.Second,
-		HTTPProtocol:          "http",
+		Protocol:              "http",
 	}
 
 	// Listen on :7070 doesn't match any node

@@ -792,10 +792,10 @@ func parseClusterConfig(config *ChainConfig) (*cluster.ClusterConfig, error) {
 		return nil, fmt.Errorf("invalid cluster.metrics_report_interval format: %w", err)
 	}
 
-	// Parse http_protocol
-	httpProtocol := DefaultClusterHTTPProtocol
-	if config.Cluster.HTTPProtocol != "" {
-		httpProtocol = config.Cluster.HTTPProtocol
+	// Parse protocol
+	protocol := DefaultClusterProtocol
+	if config.Cluster.Protocol != "" {
+		protocol = config.Cluster.Protocol
 	}
 
 	// Convert nodes from YAML format to cluster format
@@ -811,7 +811,7 @@ func parseClusterConfig(config *ChainConfig) (*cluster.ClusterConfig, error) {
 		Nodes:                 nodes,
 		ConfigPollInterval:    configPollInterval,
 		MetricsReportInterval: metricsReportInterval,
-		HTTPProtocol:          httpProtocol,
+		Protocol:              protocol,
 	}
 
 	// Validate the cluster configuration
