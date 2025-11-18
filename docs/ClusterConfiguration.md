@@ -44,9 +44,9 @@ graph TD
     end
 
     subgraph "Application Cluster"
-        D["bot-detector --config config.yaml<br/>(Leader - no --leader flag)"]
-        E["bot-detector --leader node-1:8080<br/>(Follower)"]
-        F["bot-detector --leader node-1:8080<br/>(Follower)"]
+        D["bot-detector<br/>(Leader)"]
+        E["bot-detector<br/>(Follower)"]
+        F["bot-detector<br/>(Follower)"]
 
         C -- "3. Hot-Reloads" --> D
         D -- "4. Config Distribution" --> E & F
@@ -65,7 +65,7 @@ graph TD
 
 2. **Acceptable Duplicates:** Multiple instances may detect and block the same IP. HAProxy naturally handles this by updating existing stick-table entries, so duplicate commands cause no functional issues.
 
-3. **Configuration Sync:** The leader (node running without `--leader` flag) serves the authoritative configuration. Followers poll periodically for updates and hot-reload when changes are detected.
+3. **Configuration Sync:** The leader serves the authoritative configuration. Followers poll periodically for updates and hot-reload when changes are detected.
 
 4. **Metrics Aggregation:** The leader collects metrics from all followers (blocks per chain, top IPs, error rates, etc.) and provides a unified cluster-wide dashboard.
 
