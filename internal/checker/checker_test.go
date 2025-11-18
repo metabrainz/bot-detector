@@ -714,7 +714,7 @@ regex:NastyBot`), 0644); err != nil {
 
 	// Set the CheckChainsFunc on the processor instance to avoid nil pointers.
 	processor.CheckChainsFunc = func(entry *app.LogEntry) { CheckChains(processor, entry) }
-	processor.ProcessLogLine = func(line string) { processLogLineInternal(processor, line) }
+	processor.ProcessLogLine = func(line string) { logparser.ProcessLogLineInternal(processor, line) }
 
 	// 2. Read test_access.log and extract expected log outputs from comments
 	testLogFilePath := "testdata/test_access.log"

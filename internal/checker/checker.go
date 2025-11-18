@@ -89,10 +89,11 @@ func preCheckActivity(p *app.Processor, entry *app.LogEntry, actor store.Actor) 
 	return activity, false, store.SkipInfo{} // No skip, return empty SkipInfo
 }
 
-// isGoodActor checks if a log entry matches any of the configured "good actor" definitions.
+// IsGoodActor checks if an entry matches any of the configured good_actor rules.
 // It returns true and the reason string if a match is found.
 // This function is thread-safe and handles its own locking.
-func isGoodActor(p *app.Processor, entry *app.LogEntry) (bool, string) {
+// Exported for use in persistence state restoration.
+func IsGoodActor(p *app.Processor, entry *app.LogEntry) (bool, string) {
 	p.ConfigMutex.RLock()
 	defer p.ConfigMutex.RUnlock()
 	goodActors := p.Config.GoodActors
@@ -658,8 +659,9 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 
 }
 
-// doSignalOooBufferFlush sends a non-blocking signal to the entryBufferWorker to trigger an immediate flush.
-func doSignalOooBufferFlush(p *app.Processor) {
+// DoSignalOooBufferFlush sends a non-blocking signal to the entryBufferWorker to trigger an immediate flush.
+// Exported for use in tests.
+func DoSignalOooBufferFlush(p *app.Processor) {
 	select {
 	case p.OooBufferFlushSignal <- struct{}{}: // Send a signal if the channel is not full.
 	default: // Channel is full, a flush is already pending. Do nothing.
@@ -682,7 +684,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 	activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 
 	// 1. First, check if the entry is a good actor. This will set the SkipInfo on the actor's activity.
-	isGood, goodActorRuleName := isGoodActor(p, entry)
+	isGood, goodActorRuleName := IsGoodActor(p, entry)
 	if isGood {
 		// Only log the skip message and set the state the first time.
 		if activity.SkipInfo.Type == utils.SkipTypeNone {

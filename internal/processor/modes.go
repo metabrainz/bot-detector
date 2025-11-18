@@ -253,7 +253,9 @@ func getLineReader(lineEnding string) (lineReader, error) {
 	}
 }
 
-func defaultStatFunc(path string) (os.FileInfo, error) {
+// DefaultStatFunc is the default file stat function using os.Stat.
+// Exported for use in tests.
+func DefaultStatFunc(path string) (os.FileInfo, error) {
 	return os.Stat(path)
 }
 

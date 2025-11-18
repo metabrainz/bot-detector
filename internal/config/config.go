@@ -249,8 +249,9 @@ type MatcherContext struct {
 // It takes a LogEntry and returns true if the entry satisfies the rule.
 type fieldMatcher func(entry *types.LogEntry) bool
 
-// compileMatchers parses the raw `field_matches` interface from YAML into a slice of efficient matcher functions.
-func compileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps map[string]*types.FileDependency, filePath string) ([]struct {
+// CompileMatchers parses the raw `field_matches` interface from YAML into a slice of efficient matcher functions.
+// Exported for use in tests.
+func CompileMatchers(chainName string, stepIndex int, fieldMatches map[string]interface{}, fileDeps map[string]*types.FileDependency, filePath string) ([]struct {
 	Matcher   fieldMatcher
 	FieldName string
 }, error) {
@@ -912,7 +913,7 @@ func parseChains(config *ChainConfig, fileDeps map[string]*types.FileDependency,
 					}
 				}
 
-				runtimeStep.Matchers, err = compileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, fileDeps, configPath)
+				runtimeStep.Matchers, err = CompileMatchers(yamlChain.Name, i, yamlStep.FieldMatches, fileDeps, configPath)
 				if err != nil {
 					return nil, err
 				}

@@ -103,6 +103,29 @@ type Processor struct {
 	ExitOnEOF bool
 }
 
+// GetTimestampFormat returns the timestamp format from the config.
+// This method allows Processor to satisfy the parser.Provider interface.
+func (p *Processor) GetTimestampFormat() string {
+	p.ConfigMutex.RLock()
+	defer p.ConfigMutex.RUnlock()
+	return p.Config.Parser.TimestampFormat
+}
+
+// GetLogRegex returns the currently active log parsing regex.
+// This method allows Processor to satisfy the parser.Provider interface.
+func (p *Processor) GetLogRegex() *regexp.Regexp {
+	p.ConfigMutex.RLock()
+	defer p.ConfigMutex.RUnlock()
+	return p.LogRegex
+}
+
+// GetMarshalledConfig reads the raw configuration file from disk.
+func (p *Processor) GetMarshalledConfig() ([]byte, time.Time, error) {
+	p.ConfigMutex.RLock()
+	defer p.ConfigMutex.RUnlock()
+	return p.Config.YAMLContent, p.Config.LastModTime, nil
+}
+
 // AppConfig holds all the configuration state that can be reloaded from YAML.
 
 // Config types moved to internal/config/types.go

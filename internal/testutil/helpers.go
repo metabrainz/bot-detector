@@ -6,7 +6,9 @@ import (
 	"bot-detector/internal/checker"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/logparser"
 	"bot-detector/internal/metrics"
+	"bot-detector/internal/processor"
 	"bot-detector/internal/store"
 	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
@@ -24,18 +26,8 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// IsTesting returns true if the code is running as part of a "go test" command.
-// It works by checking for the presence of the "-test.v" or "-test.run" arguments,
-// which are automatically added by the Go testing framework. This is more robust
-// than `flag.Lookup` when the global flag set is manipulated during tests.
-func IsTesting() bool {
-	for _, arg := range os.Args {
-		if strings.HasPrefix(arg, "-test.") {
-			return true
-		}
-	}
-	return false
-}
+// IsTesting is re-exported from utils for backward compatibility.
+var IsTesting = utils.IsTesting
 
 // muteGlobalLogger redirects the output of the standard logger to discard,
 // effectively silencing any direct calls to log.Printf during tests.
@@ -109,32 +101,32 @@ func (m *MockBlocker) Shutdown() {
 }
 
 // newTestProcessor creates a new Processor instance with sensible defaults for testing.
-func newTestProcessor(config *config.AppConfig, chains []config.BehavioralChain) *app.Processor {
-	if config == nil {
-		config = &AppConfig{}
+func newTestProcessor(cfg *config.AppConfig, chains []config.BehavioralChain) *app.Processor {
+	if cfg == nil {
+		cfg = &config.AppConfig{}
 	}
-	p := &Processor{
+	p := &app.Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		// Blocker will be set below
 		ConfigMutex:       &sync.RWMutex{},
 		Metrics:           metrics.NewMetrics(),
 		Chains:            chains,
-		Config:            config,
+		Config:            cfg,
 		LogFunc:           func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 		EntryBuffer:       make([]*app.LogEntry, 0),
 		TopActorsPerChain: make(map[string]map[string]*store.ActorStats),
-		EnableMetrics:     config.Application.EnableMetrics,
+		EnableMetrics:     cfg.Application.EnableMetrics,
 
 		NowFunc: time.Now, // Default to real time for tests unless overridden.
 	}
 	// Ensure StatFunc and FileOpener are never nil to prevent panics.
 	if p.Config != nil {
 		if p.Config.StatFunc == nil {
-			p.Config.StatFunc = defaultStatFunc
+			p.Config.StatFunc = processor.DefaultStatFunc
 		}
 		if p.Config.FileOpener == nil {
-			p.Config.FileOpener = func(name string) (fileHandle, error) {
+			p.Config.FileOpener = func(name string) (config.FileHandle, error) {
 				return os.Open(name)
 			}
 		}
@@ -142,8 +134,8 @@ func newTestProcessor(config *config.AppConfig, chains []config.BehavioralChain)
 	// Use a no-op mock blocker by default for most tests.
 	p.Blocker = &MockBlocker{}
 	// Initialize signalFlush to prevent nil pointer dereference in tests.
-	p.oooBufferFlushSignal = make(chan struct{}, 1)
-	p.signalOooBufferFlush = p.doSignalOooBufferFlush
+	p.OooBufferFlushSignal = make(chan struct{}, 1)
+	p.SignalOooBufferFlush = func() { checker.DoSignalOooBufferFlush(p) }
 	p.CheckChainsFunc = func(entry *app.LogEntry) { checker.CheckChains(p, entry) }
 	return p
 }
@@ -151,7 +143,7 @@ func newTestProcessor(config *config.AppConfig, chains []config.BehavioralChain)
 // dryRunTestHarness encapsulates the common setup for DryRunLogProcessor tests.
 type dryRunTestHarness struct {
 	t              *testing.T
-	processor      *Processor
+	processor      *app.Processor
 	tempLogFile    string
 	capturedLogs   []string
 	processedLines []string
@@ -159,13 +151,13 @@ type dryRunTestHarness struct {
 }
 
 // newDryRunTestHarness creates and initializes a test harness for DryRunLogProcessor.
-func newDryRunTestHarness(t *testing.T, config *config.AppConfig) *dryRunTestHarness {
+func newDryRunTestHarness(t *testing.T, cfg *config.AppConfig) *dryRunTestHarness {
 	t.Helper()
 
 	h := &dryRunTestHarness{t: t}
 
-	if config == nil {
-		config = &AppConfig{}
+	if cfg == nil {
+		cfg = &config.AppConfig{}
 	}
 
 	// Create temp file and set global path
@@ -173,7 +165,7 @@ func newDryRunTestHarness(t *testing.T, config *config.AppConfig) *dryRunTestHar
 	h.tempLogFile = filepath.Join(tempDir, "test_dryrun.log")
 
 	// Create processor with mock/capture functions
-	h.processor = newTestProcessor(config, nil)
+	h.processor = newTestProcessor(cfg, nil)
 	h.processor.NowFunc = func() time.Time { return time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC) } // Mock time.Now()
 
 	// Use a custom LogFunc to capture logs and identify skipped lines.
@@ -190,7 +182,7 @@ func newDryRunTestHarness(t *testing.T, config *config.AppConfig) *dryRunTestHar
 	// Override ProcessLogLine to use the real processing logic and capture processed lines.
 	h.processor.ProcessLogLine = func(line string) {
 		// Call the actual log line processing function.
-		processLogLineInternal(h.processor, line)
+		logparser.ProcessLogLineInternal(h.processor, line)
 
 		// Check if the line was *not* skipped by processLogLineInternal.
 		// We do this by checking if a "Skipped (Comment/Empty)" log was *not* generated
@@ -213,7 +205,7 @@ func newDryRunTestHarness(t *testing.T, config *config.AppConfig) *dryRunTestHar
 // checkerTestHarness encapsulates common setup for CheckChains tests.
 type checkerTestHarness struct {
 	t             *testing.T
-	processor     *Processor
+	processor     *app.Processor
 	blockCalled   bool
 	unblockCalled bool
 	blockCallArgs struct {
@@ -225,7 +217,7 @@ type checkerTestHarness struct {
 }
 
 // newCheckerTestHarness creates a harness for testing CheckChains logic.
-func newCheckerTestHarness(t *testing.T, config *config.AppConfig) *checkerTestHarness {
+func newCheckerTestHarness(t *testing.T, cfg *config.AppConfig) *checkerTestHarness {
 	t.Helper()
 	resetGlobalState()
 
@@ -246,7 +238,7 @@ func newCheckerTestHarness(t *testing.T, config *config.AppConfig) *checkerTestH
 	}
 
 	// Create the processor with mock functions.
-	h.processor = newTestProcessor(config, nil) // Start with no chains.
+	h.processor = newTestProcessor(cfg, nil) // Start with no chains.
 	h.processor.Blocker = mockBlocker
 	h.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		h.logMutex.Lock()
@@ -258,7 +250,7 @@ func newCheckerTestHarness(t *testing.T, config *config.AppConfig) *checkerTestH
 }
 
 // addChain compiles a chain from its YAML definition and adds it to the processor.
-func (h *checkerTestHarness) addChain(chainYAML BehavioralChain) {
+func (h *checkerTestHarness) addChain(chainYAML config.BehavioralChain) {
 	h.t.Helper()
 	// This simulates the compilation part of config.LoadConfigFromYAML for a single chain.
 	runtimeChain := chainYAML
@@ -266,11 +258,11 @@ func (h *checkerTestHarness) addChain(chainYAML BehavioralChain) {
 	testFileDependencies := make(map[string]*types.FileDependency)
 
 	for i, stepYAML := range chainYAML.StepsYAML {
-		matchers, err := compileMatchers(chainYAML.Name, i, stepYAML.FieldMatches, testFileDependencies, "")
+		matchers, err := config.CompileMatchers(chainYAML.Name, i, stepYAML.FieldMatches, testFileDependencies, "")
 		if err != nil {
 			h.t.Fatalf("Failed to compile matchers for chain '%s': %v", chainYAML.Name, err)
 		}
-		runtimeChain.Steps = append(runtimeChain.Steps, StepDef{
+		runtimeChain.Steps = append(runtimeChain.Steps, config.StepDef{
 			Order:    i + 1,
 			Matchers: matchers,
 		})
