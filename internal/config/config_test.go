@@ -652,9 +652,9 @@ func runErrorTest(t *testing.T, name, yamlContent, expectedError string) {
 		// For tests that expect non-fatal errors, we can suppress the log output
 		// to keep the test runner output clean.
 		if name == "File Matcher Not Found (Non-Fatal)" {
-			originalLogFunc := logging.LogOutput
-			logging.LogOutput = func(level logging.LogLevel, tag string, format string, args ...interface{}) {}
-			t.Cleanup(func() { logging.LogOutput = originalLogFunc })
+			originalLogFunc := logging.GetLogOutput()
+			logging.SetLogOutput(func(level logging.LogLevel, tag string, format string, args ...interface{}) {})
+			t.Cleanup(func() { logging.SetLogOutput(originalLogFunc) })
 		}
 
 		_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: tmpConfigFilePath})
@@ -881,13 +881,13 @@ func runWarningTest(t *testing.T, yamlContent, expectedWarning string) {
 	tmpConfigFilePath := setupTestYAML(t, yamlContent)
 	var capturedLogs []string
 	var logMutex sync.Mutex
-	originalLogFunc := logging.LogOutput
-	logging.LogOutput = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+	originalLogFunc := logging.GetLogOutput()
+	logging.SetLogOutput(func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMutex.Lock()
 		defer logMutex.Unlock()
 		capturedLogs = append(capturedLogs, fmt.Sprintf(format, args...))
-	}
-	t.Cleanup(func() { logging.LogOutput = originalLogFunc })
+	})
+	t.Cleanup(func() { logging.SetLogOutput(originalLogFunc) })
 
 	// Act
 	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: tmpConfigFilePath})

@@ -48,12 +48,36 @@ func (l LogLevel) String() string {
 	}
 }
 
-// LogOutput is a variable holding the current logging function.
+var (
+	logOutputMutex sync.RWMutex
+	logOutputFunc  func(level LogLevel, prefix string, format string, v ...interface{})
+)
+
+// SetLogOutput safely updates the log output function (primarily for testing)
+func SetLogOutput(fn func(level LogLevel, prefix string, format string, v ...interface{})) {
+	logOutputMutex.Lock()
+	defer logOutputMutex.Unlock()
+	logOutputFunc = fn
+}
+
+// GetLogOutput safely returns the current log output function (primarily for testing)
+func GetLogOutput() func(level LogLevel, prefix string, format string, v ...interface{}) {
+	logOutputMutex.RLock()
+	defer logOutputMutex.RUnlock()
+	return logOutputFunc
+}
+
+// LogOutput is a thread-safe wrapper for the current log output function.
 // This allows it to be replaced with a mock during testing.
-var LogOutput func(level LogLevel, prefix string, format string, v ...interface{})
+var LogOutput = func(level LogLevel, prefix string, format string, v ...interface{}) {
+	logOutputMutex.RLock()
+	fn := logOutputFunc
+	logOutputMutex.RUnlock()
+	fn(level, prefix, format, v...)
+}
 
 func init() {
-	LogOutput = logOutputInternal // Assign the real implementation at startup.
+	SetLogOutput(logOutputInternal)
 }
 
 func logOutputInternal(level LogLevel, prefix string, format string, v ...interface{}) {
