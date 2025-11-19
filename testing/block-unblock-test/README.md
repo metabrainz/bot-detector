@@ -15,7 +15,7 @@ This simulation tests the core blocking/unblocking functionality without requiri
 ```
 ┌─────────────────────┐
 │   Leader Node       │
-│   Port: 8080        │
+│   Port: 8080*       │
 │   Config: testdata/ │
 └──────────┬──────────┘
            │ /config/archive
@@ -23,7 +23,7 @@ This simulation tests the core blocking/unblocking functionality without requiri
            ▼
 ┌─────────────────────┐
 │  Follower Node      │
-│  Port: 9090         │
+│  Port: 9090*        │
 │  Config: follower/  │
 └──────────┬──────────┘
            │
@@ -33,6 +33,8 @@ This simulation tests the core blocking/unblocking functionality without requiri
     Block/Unblock Commands
     (logged, not executed)
 ```
+
+**Port Auto-Detection:** The test automatically finds available ports starting from 8080 (leader) and 9090 (follower). If these ports are in use, the test will search up to 100 ports higher (8080-8179, 9090-9189) to find free ports.
 
 ## Test Flow
 
