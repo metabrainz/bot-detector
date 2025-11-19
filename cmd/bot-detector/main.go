@@ -336,7 +336,7 @@ func execute(params *commandline.AppParameters) error {
 	}
 
 	// Determine node identity based on FOLLOW file and cluster configuration
-	identity, err := cluster.DetermineIdentity(params.ConfigDir, params.HTTPServer, loadedCfg.Cluster)
+	identity, err := cluster.DetermineIdentity(params.ConfigDir, params.HTTPServer, params.ClusterNodeName, loadedCfg.Cluster)
 	if err != nil {
 		return fmt.Errorf("failed to determine node identity: %w", err)
 	}

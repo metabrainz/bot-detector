@@ -100,6 +100,16 @@ func TestParseParameters(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "cluster node name flag",
+			args: []string{"bot-detector", "--config-dir", configDir, "--log-path", logPath, "--cluster-node-name", "node-1"},
+			want: &AppParameters{
+				ConfigDir:       configDir,
+				LogPath:         logPath,
+				ClusterNodeName: "node-1",
+			},
+			wantErr: false,
+		},
+		{
 			name:        "no flags returns help error",
 			args:        []string{"bot-detector"},
 			wantErr:     true,
