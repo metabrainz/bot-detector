@@ -3,6 +3,7 @@ package types
 import (
 	"bot-detector/internal/utils"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -42,6 +43,12 @@ type LogEntry struct {
 	Size       int
 	UserAgent  string
 	VHost      string
+
+	// fieldCache stores extracted field values to avoid redundant GetMatchValue calls.
+	// Key: canonical field name (e.g., "Path", "UserAgent")
+	// Value: the extracted field value (string or int)
+	// This cache is populated lazily during matcher execution.
+	fieldCache map[string]interface{}
 }
 
 // GetMatchValue returns the value and type of a field from a LogEntry.
@@ -76,10 +83,34 @@ func GetMatchValue(fieldName string, entry *LogEntry) (interface{}, FieldType, e
 }
 
 // GetMatchValueIfType retrieves a field's value only if it matches the expected type.
+// It uses a per-entry cache to avoid redundant field extractions.
 func GetMatchValueIfType(fieldName string, entry *LogEntry, expectedType FieldType) interface{} {
+	// Early return for nil entry - avoids unnecessary processing
+	if entry == nil {
+		return nil
+	}
+
+	// Build cache key once (includes both field name and expected type)
+	cacheKey := fieldName + ":" + strconv.Itoa(int(expectedType))
+
+	// Check cache first
+	if entry.fieldCache != nil {
+		if cachedVal, ok := entry.fieldCache[cacheKey]; ok {
+			return cachedVal // Cache hit - return immediately
+		}
+	}
+
+	// Cache miss - extract value normally
 	value, actualType, err := GetMatchValue(fieldName, entry) //nolint:errcheck
 	if err != nil || actualType != expectedType {
 		return nil
 	}
+
+	// Populate cache for future lookups
+	if entry.fieldCache == nil {
+		entry.fieldCache = make(map[string]interface{})
+	}
+	entry.fieldCache[cacheKey] = value
+
 	return value
 }
