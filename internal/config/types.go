@@ -98,7 +98,7 @@ type LoadedConfig struct {
 	YAMLContent      []byte
 }
 
-type ChainConfig struct {
+type TopLevelConfig struct {
 	Version     string                   `yaml:"version"`
 	Application ApplicationConfigYAML    `yaml:"application"`
 	Parser      ParserConfigYAML         `yaml:"parser"`
