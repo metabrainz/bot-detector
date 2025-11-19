@@ -53,19 +53,65 @@ echo -e "${GREEN}✓ Using ports: Leader=$LEADER_PORT, Follower=$FOLLOWER_PORT${
 TMPDIR=$(mktemp -d -t bot-detector-test-XXXXXX)
 echo "Using temporary directory: $TMPDIR"
 
+# Graceful kill
+graceful_kill() {
+  # Check if a PID was provided
+  if [ -z "$1" ]; then
+    echo "Usage: graceful_kill <PID> [delay_seconds]"
+    return 1
+  fi
+
+  local PID="$1"
+  # Set the delay, default to 3 seconds
+  local DELAY=${2:-3}
+
+  echo "Attempting graceful termination (SIGTERM) for PID $PID..."
+  
+  # 1. Send SIGTERM (normal kill)
+  kill "$PID" 2>/dev/null
+
+  # Check if the process exists immediately after sending the signal
+  if ! kill -0 "$PID" 2>/dev/null; then
+    echo "Process $PID not found or terminated immediately."
+    return 0
+  fi
+
+  echo "Waiting for $DELAY seconds for process $PID to exit..."
+  
+  # 2. Wait for the specified delay
+  sleep "$DELAY"
+
+  # 3. Check if the process is still running
+  if kill -0 "$PID" 2>/dev/null; then
+    echo "Process $PID is still running. Forcing termination (SIGKILL -9)..."
+    # 4. If still running, send SIGKILL (kill -9)
+    kill -9 "$PID" 2>/dev/null
+    
+    # Final check for successful SIGKILL
+    if kill -0 "$PID" 2>/dev/null; then
+      echo "ERROR: Process $PID could not be killed."
+      return 1
+    else
+      echo "Process $PID successfully terminated with SIGKILL."
+      return 0
+    fi
+  else
+    echo "Process $PID gracefully terminated."
+    return 0
+  fi
+}
+
 # Clean up function
 cleanup() {
     echo -e "\n${YELLOW}Cleaning up...${NC}"
-    if [ -n "$LEADER_PID" ] && kill -0 $LEADER_PID 2>/dev/null; then
-        kill -9 $LEADER_PID 2>/dev/null || true
+    if [ -n "$LEADER_PID" ] && graceful_kill $LEADER_PID 2>/dev/null; then
         echo "Stopped leader (PID: $LEADER_PID)"
     fi
-    if [ -n "$FOLLOWER_PID" ] && kill -0 $FOLLOWER_PID 2>/dev/null; then
-        kill -9 $FOLLOWER_PID 2>/dev/null || true
+    if [ -n "$FOLLOWER_PID" ] && graceful_kill $FOLLOWER_PID 2>/dev/null; then
         echo "Stopped follower (PID: $FOLLOWER_PID)"
     fi
-    if [ -n "$PROCESSOR_PID" ] && kill -0 $PROCESSOR_PID 2>/dev/null; then
-        kill -9 $PROCESSOR_PID 2>/dev/null || true
+    if [ -n "$PROCESSOR_PID" ] && gracefull_kill $PROCESSOR_PID 2>/dev/null; then
+        echo "Killed $PROCESSOR_PID"
     fi
     if [ -d "$TMPDIR" ]; then
         rm -rf "$TMPDIR"
@@ -104,10 +150,10 @@ cluster:
       address: "localhost:$FOLLOWER_PORT"
   config_poll_interval: "30s"
   metrics_report_interval: "10s"
+  protocol: "http"
 EOF
 
 # Create FOLLOW file for follower
-# NOTE: Currently requires full URL (http://host:port) to match nodes configuration
 echo "localhost:$LEADER_PORT" > "$TMPDIR/follower/FOLLOW"
 
 # Copy test log file
@@ -208,21 +254,11 @@ echo ""
 
 # Now stop follower to run log processing test
 echo -e "${YELLOW}Step 9: Stopping follower for log processing test...${NC}"
-if [ -n "$FOLLOWER_PID" ] && kill -0 $FOLLOWER_PID 2>/dev/null; then
-    kill $FOLLOWER_PID 2>/dev/null || true
-    # Wait up to 3 seconds for clean shutdown
-    for i in {1..3}; do
-        if ! kill -0 $FOLLOWER_PID 2>/dev/null; then
-            break
-        fi
-        sleep 1
-    done
-    # Force kill if still running
-    kill -9 $FOLLOWER_PID 2>/dev/null || true
+if [ -n "$FOLLOWER_PID" ] && graceful_kill $FOLLOWER_PID 5 2>/dev/null; then
+	echo -e "${GREEN}✓ Follower stopped${NC}\n"
 fi
 FOLLOWER_PID=""
 sleep 1
-echo -e "${GREEN}✓ Follower stopped${NC}\n"
 
 # Process test logs with follower config
 echo -e "${YELLOW}Step 10: Processing test logs on follower...${NC}"
@@ -251,10 +287,8 @@ echo "Waiting 10 seconds for log processing and buffer flushing..."
 sleep 10
 
 # Stop the processor forcefully
-if kill -0 $PROCESSOR_PID 2>/dev/null; then
-    kill -9 $PROCESSOR_PID 2>/dev/null || true
-    sleep 1
-fi
+graceful_kill $PROCESSOR_PID
+sleep 1
 
 echo -e "${GREEN}✓ Log processing complete${NC}\n"
 
@@ -378,12 +412,8 @@ else
     echo -e "${YELLOW}Temporary directory preserved for debugging: $TMPDIR${NC}"
 
     # Still cleanup processes
-    if [ -n "$LEADER_PID" ] && kill -0 $LEADER_PID 2>/dev/null; then
-        kill -9 $LEADER_PID 2>/dev/null || true
-    fi
-    if [ -n "$PROCESSOR_PID" ] && kill -0 $PROCESSOR_PID 2>/dev/null; then
-        kill -9 $PROCESSOR_PID 2>/dev/null || true
-    fi
+    [ -n "$LEADER_PID" ] && graceful_kill $LEADER_PID 2>/dev/null
+    [ -n "$PROCESSOR_PID" ] && graceful_kill $PROCESSOR_PID 2>/dev/null
 
     exit 1
 fi
