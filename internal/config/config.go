@@ -674,7 +674,7 @@ func buildDependencyGraph(configFilePath string) (*depGraph, error) {
 	return depGraph, nil
 }
 
-func parseAndNormalizeYAML(configFilePath string) (*ChainConfig, []byte, error) {
+func parseAndNormalizeYAML(configFilePath string) (*TopLevelConfig, []byte, error) {
 	data, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to read YAML file %s: %w", configFilePath, err)
@@ -697,7 +697,7 @@ func parseAndNormalizeYAML(configFilePath string) (*ChainConfig, []byte, error) 
 		return nil, nil, fmt.Errorf("failed to re-marshal normalized YAML: %w", err)
 	}
 
-	var config ChainConfig
+	var config TopLevelConfig
 	decoder := yaml.NewDecoder(&normalizedYAML)
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&config); err != nil {
@@ -715,7 +715,7 @@ func parseAndNormalizeYAML(configFilePath string) (*ChainConfig, []byte, error) 
 	return &config, data, nil
 }
 
-func parseDurations(config *ChainConfig) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, error) {
+func parseDurations(config *TopLevelConfig) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, error) {
 	pollingIntervalStr := DefaultPollingInterval
 	if config.Application.Config.PollingInterval != "" {
 		pollingIntervalStr = config.Application.Config.PollingInterval
@@ -766,7 +766,7 @@ func parseDurations(config *ChainConfig) (time.Duration, time.Duration, time.Dur
 
 // parseClusterConfig parses the cluster configuration from YAML and converts it to cluster.ClusterConfig.
 // Returns nil if no cluster configuration is provided (single-node mode).
-func parseClusterConfig(config *ChainConfig) (*cluster.ClusterConfig, error) {
+func parseClusterConfig(config *TopLevelConfig) (*cluster.ClusterConfig, error) {
 	// Cluster configuration is optional
 	if config.Cluster == nil {
 		return nil, nil
@@ -822,7 +822,7 @@ func parseClusterConfig(config *ChainConfig) (*cluster.ClusterConfig, error) {
 	return clusterConfig, nil
 }
 
-func parseStringAndBoolSettings(config *ChainConfig) (string, string, bool, string, error) {
+func parseStringAndBoolSettings(config *TopLevelConfig) (string, string, bool, string, error) {
 	logLevelStr := DefaultLogLevel
 	if config.Application.LogLevel != "" {
 		logLevelStr = config.Application.LogLevel
@@ -851,7 +851,7 @@ func parseStringAndBoolSettings(config *ChainConfig) (string, string, bool, stri
 	return logLevelStr, lineEndingStr, enableMetrics, unblockCooldownStr, nil
 }
 
-func parseCustomLogRegex(config *ChainConfig) (*regexp.Regexp, error) {
+func parseCustomLogRegex(config *TopLevelConfig) (*regexp.Regexp, error) {
 	if config.Parser.LogFormatRegex == "" {
 		return nil, nil
 	}
@@ -878,7 +878,7 @@ func parseCustomLogRegex(config *ChainConfig) (*regexp.Regexp, error) {
 	return re, nil
 }
 
-func parseChains(config *ChainConfig, fileDeps map[string]*types.FileDependency, configFilePath string, durationTables map[time.Duration]string) ([]BehavioralChain, error) {
+func parseChains(config *TopLevelConfig, fileDeps map[string]*types.FileDependency, configFilePath string, durationTables map[time.Duration]string) ([]BehavioralChain, error) {
 	var newChains []BehavioralChain
 	var defaultBlockDuration time.Duration
 	if config.Blockers.DefaultDuration != "" {
@@ -984,7 +984,7 @@ func parseChains(config *ChainConfig, fileDeps map[string]*types.FileDependency,
 	return newChains, nil
 }
 
-func parseGoodActors(config *ChainConfig, fileDeps map[string]*types.FileDependency, configFilePath string) ([]GoodActorDef, error) {
+func parseGoodActors(config *TopLevelConfig, fileDeps map[string]*types.FileDependency, configFilePath string) ([]GoodActorDef, error) {
 	var newGoodActors []GoodActorDef
 	for _, goodActorMap := range config.GoodActors {
 		nameVal, ok := goodActorMap["name"]
@@ -1044,7 +1044,7 @@ func parseGoodActors(config *ChainConfig, fileDeps map[string]*types.FileDepende
 	return newGoodActors, nil
 }
 
-func parseDurationTables(config *ChainConfig) (map[time.Duration]string, string, error) {
+func parseDurationTables(config *TopLevelConfig) (map[time.Duration]string, string, error) {
 	newDurationTables := make(map[time.Duration]string, len(config.Blockers.Backends.HAProxy.DurationTables))
 	longestDuration := 0 * time.Second
 	newFallbackName := ""
@@ -1064,7 +1064,7 @@ func parseDurationTables(config *ChainConfig) (map[time.Duration]string, string,
 	return newDurationTables, newFallbackName, nil
 }
 
-func parseBlockerSettings(config *ChainConfig) (int, time.Duration, time.Duration, int, int, error) {
+func parseBlockerSettings(config *TopLevelConfig) (int, time.Duration, time.Duration, int, int, error) {
 	var blockerMaxRetries int
 	var blockerRetryDelay, blockerDialTimeout time.Duration
 	var blockerCommandQueueSize, blockerCommandsPerSecond int
