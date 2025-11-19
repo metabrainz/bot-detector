@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+
+	"bot-detector/internal/logging"
 )
 
 // NodeIdentity represents the determined identity and role of this node.
@@ -30,11 +33,12 @@ type NodeIdentity struct {
 //
 // Parameters:
 //   - configDir: Directory containing config.yaml (and potentially FOLLOW file)
-//   - listenAddr: The HTTP server listen address (e.g., ":8080" or "192.168.1.10:8080")
+//   - listenAddr: The HTTP server listen address (e.g., ":8080")
+//   - clusterNodeName: Explicit node name from command line (e.g., "node-1")
 //   - clusterCfg: The cluster configuration from the YAML file (can be nil)
 //
 // Returns the NodeIdentity or an error if configuration is invalid.
-func DetermineIdentity(configDir, listenAddr string, clusterCfg *ClusterConfig) (*NodeIdentity, error) {
+func DetermineIdentity(configDir, listenAddr, clusterNodeName string, clusterCfg *ClusterConfig) (*NodeIdentity, error) {
 	identity := &NodeIdentity{}
 
 	// Determine role based on FOLLOW file existence
@@ -42,12 +46,39 @@ func DetermineIdentity(configDir, listenAddr string, clusterCfg *ClusterConfig) 
 	followData, err := os.ReadFile(followPath)
 	if err == nil {
 		// FOLLOW file exists - this is a follower
-		leaderAddr := strings.TrimSpace(string(followData))
-		if leaderAddr == "" {
+		followContent := strings.TrimSpace(string(followData))
+		if followContent == "" {
 			return nil, fmt.Errorf("FOLLOW file exists but is empty")
 		}
 		identity.Role = RoleFollower
-		identity.LeaderAddress = leaderAddr
+
+		// Detect if FOLLOW content is a URL/host:port or a node name
+		if isURLOrHostPort(followContent) {
+			// Use directly as leader address (backward compatible)
+			identity.LeaderAddress = followContent
+		} else {
+			// Treat as node name - resolve from cluster config
+			if clusterCfg == nil || len(clusterCfg.Nodes) == 0 {
+				return nil, fmt.Errorf(
+					"FOLLOW file contains node name '%s', but no cluster configuration available",
+					followContent,
+				)
+			}
+
+			// Search for node by name
+			leaderNode, found := clusterCfg.FindNodeByName(followContent)
+			if !found {
+				return nil, fmt.Errorf(
+					"FOLLOW file contains node name '%s', but no such node found in cluster configuration",
+					followContent,
+				)
+			}
+
+			identity.LeaderAddress = leaderNode.Address
+			logging.LogOutput(logging.LevelInfo, "CLUSTER",
+				"Resolved leader name '%s' to address '%s'",
+				followContent, leaderNode.Address)
+		}
 	} else if os.IsNotExist(err) {
 		// FOLLOW file doesn't exist - this is a leader
 		identity.Role = RoleLeader
@@ -61,8 +92,21 @@ func DetermineIdentity(configDir, listenAddr string, clusterCfg *ClusterConfig) 
 		return identity, nil
 	}
 
+	var found bool
+	var node NodeConfig
+
 	// Try to find this node in the cluster configuration
-	node, found := matchNodeByListenAddress(listenAddr, clusterCfg)
+	if clusterNodeName != "" {
+		// Primary method: explicit name from --cluster-node-name
+		node, found = clusterCfg.FindNodeByName(clusterNodeName)
+		if !found {
+			return nil, fmt.Errorf("node '%s' provided via --cluster-node-name not found in cluster configuration", clusterNodeName)
+		}
+	} else {
+		// Fallback method: for backward compatibility, match by listen address
+		node, found = matchNodeByListenAddress(listenAddr, clusterCfg)
+	}
+
 	if found {
 		identity.Name = node.Name
 		identity.Address = node.Address
@@ -142,4 +186,33 @@ func (i *NodeIdentity) String() string {
 	}
 
 	return strings.Join(parts, ", ")
+}
+
+// isURLOrHostPort detects if a string is a URL or host:port format.
+// Returns true if the string appears to be a URL (contains "://") or
+// a host:port address (contains ":" followed by a numeric port).
+// Returns false if it appears to be a simple node name.
+func isURLOrHostPort(s string) bool {
+	// URL with scheme (e.g., http://localhost:8080)
+	if strings.Contains(s, "://") {
+		return true
+	}
+
+	// IPv6 addresses have multiple colons - treat as address if it starts with [
+	if strings.HasPrefix(s, "[") {
+		return true
+	}
+
+	// Check for simple host:port pattern
+	// Split on colon and check if we have exactly 2 parts where the second is numeric
+	parts := strings.Split(s, ":")
+	if len(parts) == 2 {
+		// Check if second part looks like a port number
+		if _, err := strconv.Atoi(parts[1]); err == nil {
+			return true
+		}
+	}
+
+	// Otherwise, assume it's a node name
+	return false
 }

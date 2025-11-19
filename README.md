@@ -86,91 +86,7 @@ The queue itself has a configurable size (`blockers.command_queue_size`, default
 ## **Cluster Configuration**
 
 Bot-detector supports running multiple nodes in a leader-follower architecture for high availability and configuration management.
-
-### **How It Works**
-
-- **Leader Node**: Serves the main configuration and all its file dependencies via an HTTP endpoint
-- **Follower Nodes**: Automatically bootstrap and synchronize configuration from the leader
-- **Role Determination**: Controlled by a `FOLLOW` file in the config directory
-  - No FOLLOW file = Leader role
-  - FOLLOW file present (containing leader address) = Follower role
-
-### **Configuration Distribution**
-
-The leader serves configuration as a tar.gz archive with SHA256 checksum verification:
-
-- **Archive Endpoint**: `/config/archive` - Returns config.yaml and all file dependencies
-- **Integrity Verification**: ETag header contains SHA256 checksum of the archive
-- **Dependency Tracking**: All file-based matchers (e.g., `file:./bad_paths.txt`) are automatically included
-- **Change Detection**: Followers poll the leader at a configurable interval (default: 5s)
-
-### **Setting Up a Cluster**
-
-#### Leader Node
-
-1. Create your main configuration file (`config.yaml`) with cluster settings:
-
-```yaml
-cluster:
-  nodes:
-    - name: leader
-      address: "node-1.example.com:8080"
-    - name: follower-1
-      address: "node-2.example.com:8080"
-  config_poll_interval: 5s
-  metrics_report_interval: 10s
-  protocol: http
-```
-
-2. Start the leader (no FOLLOW file in config directory):
-
-```sh
-./bot-detector --config /etc/bot-detector/config.yaml --http-server :8080
-```
-
-#### Follower Node
-
-1. Create a `FOLLOW` file in the config directory pointing to the leader:
-
-```sh
-echo "http://node-1.example.com:8080" > /etc/bot-detector/FOLLOW
-```
-
-2. Start the follower (it will auto-bootstrap configuration from leader):
-
-```sh
-./bot-detector --config /etc/bot-detector/config.yaml --http-server :8080
-```
-
-The follower will:
-- Automatically download the configuration archive from the leader on first start
-- Poll the leader for configuration updates at the configured interval
-- Verify archive integrity using SHA256 checksums
-- Reload configuration automatically when changes are detected
-
-### **Dynamic Role Changes**
-
-The configuration watcher monitors the FOLLOW file for changes:
-
-- **FOLLOW file created**: Node switches from leader to follower (requires restart)
-- **FOLLOW file deleted**: Node switches from follower to leader (requires restart)
-- **FOLLOW file modified**: Leader address changed (requires restart)
-
-Role changes are logged with warnings indicating that a restart is required.
-
-### **Testing Your Cluster**
-
-See `testing/2-nodes-cluster/` for a complete integration test setup with:
-- Example leader and follower configurations
-- Automated test script
-- Documentation of expected behavior
-
-Run the test:
-
-```sh
-cd testing/2-nodes-cluster
-./test-cluster.sh
-```
+See [Cluster Configuration](docs/ClusterConfiguration.md) and [Cluster and Docker](docs/ClusterAndDocker.md) for details.
 
 ## **Building the Application**
 
@@ -198,19 +114,21 @@ This will produce a single executable named `bot-detector`.
 
 ## **Command-Line Flags (Execution)**
 
-| Flag | Default | Description |
+| Flag | Arg. Type | Description |
 | :--- | :--- | :--- |
-| **`--config-dir`** | `""` | **Path to the configuration directory** containing `config.yaml`. |
-| **`--log-path`** | `""` | Path to the access log file to tail (or to read in dry-run mode). |
-| **`--dry-run`** | `false` | Runs in test mode, ignoring the blocking backend and live logging. |
-| **`--exit-on-eof`** | `false` | Exits after processing the log file to EOF instead of tailing. |
-| **`--dump-backends`** | `false` | Checks HAProxy backend sync status, lists all IPs, and exits. |
-| **`--version`** | `false` | Print the application version and exit. |
-| **`--check`** | `false` | Validates the configuration and exits with error code on failure. |
-| **`--reload-on`** | `""` | Controls config reloading: `watcher`, `HUP`, `USR1`, or `USR2`. |
-| **`--http-server`** | `""` | Starts a web server on this address to display live metrics. |
-| **`--top-n`** | `0` | In dry-run mode, show top N actors per chain. |
-| **`--state-dir`** | `""` | Path to the state directory. Enables persistence if set. |
+| **`--check`** | | Validates the configuration and exits with error code on failure. |
+| **`--cluster-node-name`** | string | Name of the node (cluster mode). |
+| **`--config-dir`** | dirpath | **Path to the configuration directory** containing `config.yaml`. |
+| **`--dry-run`** | | Runs in test mode, ignoring the blocking backend and live logging. |
+| **`--dump-backends`** | | Checks HAProxy backend sync status, lists all IPs, and exits. |
+| **`--exit-on-eof`** | | Exits after processing the log file to EOF instead of tailing. |
+| **`--help`** | | Display command-line help. |
+| **`--http-server`** | string | Starts a web server on this address to display live metrics. |
+| **`--log-path`** | filepath | Path to the access log file to tail (or to read in dry-run mode). |
+| **`--reload-on`** | string | Controls config reloading: `watcher`, `HUP`, `USR1`, or `USR2`. |
+| **`--state-dir`** | dirpath | Path to the state directory. Enables persistence if set. |
+| **`--top-n`** | number | In dry-run mode, show top N actors per chain. |
+| **`--version`** | | Print the application version and exit. |
 
 ---
 
@@ -218,10 +136,11 @@ This will produce a single executable named `bot-detector`.
 
 This file defines the sequential behavioral chains used by the bot-detector to identify and act upon suspicious traffic patterns.
 The file is structured as a top-level map containing a single key, chains, which holds an array of individual chain definitions.
+It also contains various settings to control the behavior of the application.
 
 ## **Configuration Structure**
 
-The configuration is now organized into logical top-level sections.
+### Top-level
 
 | Field | Type | Description |
 | :---- | :---- | :---- |
@@ -316,6 +235,8 @@ Optional cluster configuration for running multiple bot-detector nodes in a lead
 | **protocol** | string | Optional. Protocol for cluster communication (`http` or `https`). Default: `http`. |
 
 #### `cluster.nodes`
+
+The nodes configuration can be overridden by `BOT_DETECTOR_NODES` environment variable.
 
 | Field | Type | Description |
 | :---- | :---- | :---- |

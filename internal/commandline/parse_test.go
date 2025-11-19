@@ -25,6 +25,7 @@ func TestParseParameters(t *testing.T) {
 			want: &AppParameters{
 				ConfigDir: configDir,
 				LogPath:   logPath,
+				Envs:      &EnvParameters{},
 			},
 			wantErr: false,
 		},
@@ -56,13 +57,14 @@ func TestParseParameters(t *testing.T) {
 				ReloadOn:     "hup",
 				TopN:         15,
 				HTTPServer:   ":9090",
+				Envs:         &EnvParameters{},
 			},
 			wantErr: false,
 		},
 		{
 			name:    "version flag alone is valid",
 			args:    []string{"bot-detector", "--version"},
-			want:    &AppParameters{ShowVersion: true},
+			want:    &AppParameters{ShowVersion: true, Envs: &EnvParameters{}},
 			wantErr: false,
 		},
 		{
@@ -96,6 +98,18 @@ func TestParseParameters(t *testing.T) {
 				ConfigDir: configDir,
 				DryRun:    true,
 				LogPath:   "", // LogPath should be empty
+				Envs:      &EnvParameters{},
+			},
+			wantErr: false,
+		},
+		{
+			name: "cluster node name flag",
+			args: []string{"bot-detector", "--config-dir", configDir, "--log-path", logPath, "--cluster-node-name", "node-1"},
+			want: &AppParameters{
+				ConfigDir:       configDir,
+				LogPath:         logPath,
+				ClusterNodeName: "node-1",
+				Envs:            &EnvParameters{},
 			},
 			wantErr: false,
 		},
