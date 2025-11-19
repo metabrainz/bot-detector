@@ -617,9 +617,8 @@ func normalizeYAMLKeys(node *yaml.Node) {
 		for i := 0; i < len(node.Content); i += 2 {
 			keyNode := node.Content[i]
 			if keyNode.Kind == yaml.ScalarNode {
-				// Normalize to lowercase, then check for a canonical alias.
-				lowerKey := strings.ToLower(keyNode.Value)
-				keyNode.Value = lowerKey
+				// Normalize to lowercase for case-insensitive configuration.
+				keyNode.Value = strings.ToLower(keyNode.Value)
 			}
 			// Recursively normalize keys in the value node
 			normalizeYAMLKeys(node.Content[i+1])
