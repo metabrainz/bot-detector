@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -254,6 +255,48 @@ func restorePersistenceState(p *app.Processor) error {
 	return nil
 }
 
+// resolveLeaderAddress resolves a leader address from FOLLOW file content.
+// If the content looks like a URL or host:port, it's used directly.
+// Otherwise, it's treated as a node name and resolved from environment variables.
+func resolveLeaderAddress(followContent string, envParams *commandline.EnvParameters) (string, error) {
+	// Check if it's already a URL or host:port (use directly)
+	if strings.Contains(followContent, "://") {
+		return followContent, nil
+	}
+
+	// Check for host:port pattern (contains colon and numeric port)
+	parts := strings.Split(followContent, ":")
+	if len(parts) == 2 {
+		if _, err := strconv.Atoi(parts[1]); err == nil {
+			return followContent, nil
+		}
+	}
+
+	// Otherwise, treat as node name and resolve from environment
+	if envParams == nil || len(envParams.ClusterNodes) == 0 {
+		return "", fmt.Errorf(
+			"FOLLOW file contains node name '%s', but no BOT_DETECTOR_NODES environment variable is set. "+
+				"During bootstrap, either provide a direct address in FOLLOW or set BOT_DETECTOR_NODES",
+			followContent,
+		)
+	}
+
+	// Search for node by name
+	for _, node := range envParams.ClusterNodes {
+		if node.Name == followContent {
+			logging.LogOutput(logging.LevelInfo, "CLUSTER",
+				"Resolved leader name '%s' to address '%s' for bootstrap",
+				followContent, node.Address)
+			return node.Address, nil
+		}
+	}
+
+	return "", fmt.Errorf(
+		"FOLLOW file contains node name '%s', but no such node found in BOT_DETECTOR_NODES",
+		followContent,
+	)
+}
+
 // execute is the main application logic, decoupled from command-line parsing.
 func execute(params *commandline.AppParameters) error {
 	if err := handleStartupFlags(params); err != nil {
@@ -270,14 +313,20 @@ func execute(params *commandline.AppParameters) error {
 	followData, err := os.ReadFile(followPath)
 	if err == nil {
 		// FOLLOW file exists - this is a follower
-		leaderAddr := strings.TrimSpace(string(followData))
-		if leaderAddr == "" {
+		followContent := strings.TrimSpace(string(followData))
+		if followContent == "" {
 			return fmt.Errorf("FOLLOW file exists but is empty")
 		}
 
 		// Check if config file exists, if not, bootstrap
 		if _, err := os.Stat(configFilePath); os.IsNotExist(err) {
 			// Config doesn't exist, bootstrap from leader
+			// Resolve leader address from FOLLOW content (may be name or address)
+			leaderAddr, err := resolveLeaderAddress(followContent, params.Envs)
+			if err != nil {
+				return fmt.Errorf("failed to resolve leader address for bootstrap: %w", err)
+			}
+
 			// Add http:// prefix if not present
 			if !strings.HasPrefix(leaderAddr, "http://") && !strings.HasPrefix(leaderAddr, "https://") {
 				leaderAddr = "http://" + leaderAddr

@@ -292,3 +292,190 @@ func TestNodeIdentity_String(t *testing.T) {
 		})
 	}
 }
+
+func TestIsURLOrHostPort(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+		desc     string
+	}{
+		// URLs - should return true
+		{"http://localhost:8080", true, "HTTP URL"},
+		{"https://localhost:8080", true, "HTTPS URL"},
+		{"http://example.com:8080", true, "HTTP URL with domain"},
+
+		// Host:port - should return true
+		{"localhost:8080", true, "hostname:port"},
+		{"127.0.0.1:8080", true, "IP:port"},
+		{"192.168.1.10:9090", true, "IP:port"},
+		{"node-1:8080", true, "hostname with dash:port"},
+
+		// IPv6 - should return true
+		{"[2001:db8::1]:8080", true, "IPv6 with port"},
+		{"[::1]:8080", true, "IPv6 localhost with port"},
+
+		// Node names - should return false
+		{"leader", false, "simple node name"},
+		{"node-1", false, "node name with dash"},
+		{"my_node", false, "node name with underscore"},
+		{"follower123", false, "node name with numbers"},
+
+		// Edge cases
+		{"leader:notaport", false, "name with non-numeric after colon"},
+		{"", false, "empty string"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			got := isURLOrHostPort(tt.input)
+			if got != tt.expected {
+				t.Errorf("isURLOrHostPort(%q) = %v, want %v", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDetermineIdentity_FollowerWithNodeName(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	clusterCfg := &ClusterConfig{
+		Nodes: []NodeConfig{
+			{Name: "leader", Address: "http://leader-node:8080"},
+			{Name: "follower", Address: "http://follower-node:9090"},
+		},
+		ConfigPollInterval:    30 * time.Second,
+		MetricsReportInterval: 10 * time.Second,
+		Protocol:              "http",
+	}
+
+	// Create FOLLOW file with node name (not address)
+	followPath := tmpDir + "/FOLLOW"
+	if err := os.WriteFile(followPath, []byte("leader"), 0644); err != nil {
+		t.Fatalf("Failed to create FOLLOW file: %v", err)
+	}
+
+	identity, err := DetermineIdentity(tmpDir, ":9090", "", clusterCfg)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if identity.Role != RoleFollower {
+		t.Errorf("Expected role to be Follower, got: %v", identity.Role)
+	}
+
+	// The leader address should be resolved from the node name
+	if identity.LeaderAddress != "http://leader-node:8080" {
+		t.Errorf("Expected leader address to be 'http://leader-node:8080', got: %q", identity.LeaderAddress)
+	}
+}
+
+func TestDetermineIdentity_FollowerWithHostPort(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	clusterCfg := &ClusterConfig{
+		Nodes: []NodeConfig{
+			{Name: "leader", Address: "http://leader-node:8080"},
+			{Name: "follower", Address: "http://follower-node:9090"},
+		},
+		ConfigPollInterval:    30 * time.Second,
+		MetricsReportInterval: 10 * time.Second,
+		Protocol:              "http",
+	}
+
+	// Create FOLLOW file with host:port (backward compatible)
+	followPath := tmpDir + "/FOLLOW"
+	if err := os.WriteFile(followPath, []byte("http://localhost:8080"), 0644); err != nil {
+		t.Fatalf("Failed to create FOLLOW file: %v", err)
+	}
+
+	identity, err := DetermineIdentity(tmpDir, ":9090", "", clusterCfg)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if identity.Role != RoleFollower {
+		t.Errorf("Expected role to be Follower, got: %v", identity.Role)
+	}
+
+	// The leader address should be used as-is (backward compatible)
+	if identity.LeaderAddress != "http://localhost:8080" {
+		t.Errorf("Expected leader address to be 'http://localhost:8080', got: %q", identity.LeaderAddress)
+	}
+}
+
+func TestDetermineIdentity_FollowerWithUnknownNodeName(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	clusterCfg := &ClusterConfig{
+		Nodes: []NodeConfig{
+			{Name: "leader", Address: "http://leader-node:8080"},
+			{Name: "follower", Address: "http://follower-node:9090"},
+		},
+		ConfigPollInterval:    30 * time.Second,
+		MetricsReportInterval: 10 * time.Second,
+		Protocol:              "http",
+	}
+
+	// Create FOLLOW file with unknown node name
+	followPath := tmpDir + "/FOLLOW"
+	if err := os.WriteFile(followPath, []byte("unknown-node"), 0644); err != nil {
+		t.Fatalf("Failed to create FOLLOW file: %v", err)
+	}
+
+	_, err := DetermineIdentity(tmpDir, ":9090", "", clusterCfg)
+	if err == nil {
+		t.Fatal("Expected error for unknown node name, got nil")
+	}
+
+	expectedErr := "no such node found in cluster configuration"
+	if !strings.Contains(err.Error(), expectedErr) {
+		t.Errorf("Expected error message to contain %q, got: %q", expectedErr, err.Error())
+	}
+}
+
+func TestDetermineIdentity_FollowerWithNodeNameButNoClusterConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create FOLLOW file with node name but no cluster config
+	followPath := tmpDir + "/FOLLOW"
+	if err := os.WriteFile(followPath, []byte("leader"), 0644); err != nil {
+		t.Fatalf("Failed to create FOLLOW file: %v", err)
+	}
+
+	_, err := DetermineIdentity(tmpDir, ":9090", "", nil)
+	if err == nil {
+		t.Fatal("Expected error for node name without cluster config, got nil")
+	}
+
+	expectedErr := "no cluster configuration available"
+	if !strings.Contains(err.Error(), expectedErr) {
+		t.Errorf("Expected error message to contain %q, got: %q", expectedErr, err.Error())
+	}
+}
+
+func TestDetermineIdentity_FollowerWithNodeNameButEmptyClusterNodes(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	clusterCfg := &ClusterConfig{
+		Nodes:                 []NodeConfig{}, // Empty nodes list
+		ConfigPollInterval:    30 * time.Second,
+		MetricsReportInterval: 10 * time.Second,
+		Protocol:              "http",
+	}
+
+	// Create FOLLOW file with node name
+	followPath := tmpDir + "/FOLLOW"
+	if err := os.WriteFile(followPath, []byte("leader"), 0644); err != nil {
+		t.Fatalf("Failed to create FOLLOW file: %v", err)
+	}
+
+	_, err := DetermineIdentity(tmpDir, ":9090", "", clusterCfg)
+	if err == nil {
+		t.Fatal("Expected error for node name with empty cluster nodes, got nil")
+	}
+
+	expectedErr := "no cluster configuration available"
+	if !strings.Contains(err.Error(), expectedErr) {
+		t.Errorf("Expected error message to contain %q, got: %q", expectedErr, err.Error())
+	}
+}
