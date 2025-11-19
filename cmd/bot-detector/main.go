@@ -374,9 +374,9 @@ func execute(params *commandline.AppParameters) error {
 				len(params.Envs.ClusterNodes))
 			loadedCfg.Cluster = &cluster.ClusterConfig{
 				Nodes:                 params.Envs.ClusterNodes,
-				ConfigPollInterval:    10 * time.Second,    // Default value
-				MetricsReportInterval: 30 * time.Second,    // Default value
-				Protocol:              "http",              // Default value
+				ConfigPollInterval:    10 * time.Second, // Default value
+				MetricsReportInterval: 30 * time.Second, // Default value
+				Protocol:              "http",           // Default value
 			}
 		}
 	}

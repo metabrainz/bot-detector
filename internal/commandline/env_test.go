@@ -9,14 +9,14 @@ import (
 
 func TestParseEnv_Empty(t *testing.T) {
 	// Ensure BOT_DETECTOR_NODES is not set
-	os.Unsetenv("BOT_DETECTOR_NODES")
+	_ = os.Unsetenv("BOT_DETECTOR_NODES")
 
 	params, err := ParseEnv()
 	if err != nil {
 		t.Fatalf("ParseEnv() with no env vars should not error: %v", err)
 	}
 
-	if params.ClusterNodes != nil && len(params.ClusterNodes) > 0 {
+	if len(params.ClusterNodes) > 0 {
 		t.Errorf("Expected no cluster nodes when BOT_DETECTOR_NODES is not set, got %d nodes", len(params.ClusterNodes))
 	}
 }
@@ -167,15 +167,19 @@ func TestParseEnv_Integration(t *testing.T) {
 	originalValue := os.Getenv("BOT_DETECTOR_NODES")
 	defer func() {
 		if originalValue != "" {
-			os.Setenv("BOT_DETECTOR_NODES", originalValue)
+			if err := os.Setenv("BOT_DETECTOR_NODES", originalValue); err != nil {
+				t.Fatalf("Failed to reset env var BOT_DETECTOR_NODES: %v", err)
+			}
 		} else {
-			os.Unsetenv("BOT_DETECTOR_NODES")
+			_ = os.Unsetenv("BOT_DETECTOR_NODES")
 		}
 	}()
 
 	// Test with valid BOT_DETECTOR_NODES
 	testValue := "leader:http://localhost:8080;follower:http://localhost:9090"
-	os.Setenv("BOT_DETECTOR_NODES", testValue)
+	if err := os.Setenv("BOT_DETECTOR_NODES", testValue); err != nil {
+		t.Fatalf("Failed to set env var BOT_DETECTOR_NODES: %v", err)
+	}
 
 	params, err := ParseEnv()
 	if err != nil {
@@ -197,15 +201,19 @@ func TestParseEnv_Integration_Invalid(t *testing.T) {
 	originalValue := os.Getenv("BOT_DETECTOR_NODES")
 	defer func() {
 		if originalValue != "" {
-			os.Setenv("BOT_DETECTOR_NODES", originalValue)
+			if err := os.Setenv("BOT_DETECTOR_NODES", originalValue); err != nil {
+				t.Fatalf("Failed to reset env var BOT_DETECTOR_NODES: %v", err)
+			}
 		} else {
-			os.Unsetenv("BOT_DETECTOR_NODES")
+			_ = os.Unsetenv("BOT_DETECTOR_NODES")
 		}
 	}()
 
 	// Test with invalid BOT_DETECTOR_NODES
 	testValue := "invalid-no-colon"
-	os.Setenv("BOT_DETECTOR_NODES", testValue)
+	if err := os.Setenv("BOT_DETECTOR_NODES", testValue); err != nil {
+		t.Fatalf("Failed to set env var BOT_DETECTOR_NODES: %v", err)
+	}
 
 	_, err := ParseEnv()
 	if err == nil {
