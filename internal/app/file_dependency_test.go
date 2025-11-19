@@ -76,9 +76,9 @@ chains:
 	}
 
 	// Redirect global logging.LogOutput to our capture function
-	originalLogOutput := logging.LogOutput
-	logging.LogOutput = logCaptureFunc
-	t.Cleanup(func() { logging.LogOutput = originalLogOutput })
+	originalLogOutput := logging.GetLogOutput()
+	logging.SetLogOutput(logCaptureFunc)
+	t.Cleanup(func() { logging.SetLogOutput(originalLogOutput) })
 
 	// Create a processor with the loaded config
 	p := newTestProcessorWithFileDeps(t, &config.AppConfig{
@@ -180,13 +180,13 @@ chains:
 	// Capture logs to check for warnings
 	var capturedLogs []string
 	var logMutex sync.Mutex
-	originalLogOutput := logging.LogOutput
-	logging.LogOutput = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+	originalLogOutput := logging.GetLogOutput()
+	logging.SetLogOutput(func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		logMutex.Lock()
 		defer logMutex.Unlock()
 		capturedLogs = append(capturedLogs, fmt.Sprintf("[%s] %s: %s", level, tag, fmt.Sprintf(format, args...)))
-	}
-	t.Cleanup(func() { logging.LogOutput = originalLogOutput })
+	})
+	t.Cleanup(func() { logging.SetLogOutput(originalLogOutput) })
 
 	// --- Act ---
 	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: configFilePath})

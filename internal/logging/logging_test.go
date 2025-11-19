@@ -53,17 +53,17 @@ func TestSetLogLevel(t *testing.T) {
 
 func TestLogOutput(t *testing.T) {
 	// --- Setup ---
-	originalLogFunc := LogOutput
-	LogOutput = func(level LogLevel, tag string, format string, v ...interface{}) {
+	originalLogFunc := GetLogOutput()
+	SetLogOutput(func(level LogLevel, tag string, format string, v ...interface{}) {
 		// The mock must replicate the behavior of the real function.
 		// We call the internal function directly to test it.
 		logOutputInternal(level, tag, format, v...)
-	}
+	})
 	// The actual output is controlled by the standard logger, which we will capture.
 	var buf bytes.Buffer
 	log.SetOutput(&buf)
 	t.Cleanup(func() {
-		LogOutput = originalLogFunc
+		SetLogOutput(originalLogFunc)
 		currentLogLevel = LevelWarning // Reset to default
 		log.SetOutput(os.Stderr)       // Restore original log output
 	})
