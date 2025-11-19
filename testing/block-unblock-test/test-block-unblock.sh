@@ -99,16 +99,16 @@ cat >> "$TMPDIR/leader/config.yaml" <<EOF
 cluster:
   nodes:
     - name: "leader"
-      address: "http://localhost:$LEADER_PORT"
+      address: "localhost:$LEADER_PORT"
     - name: "follower"
-      address: "http://localhost:$FOLLOWER_PORT"
+      address: "localhost:$FOLLOWER_PORT"
   config_poll_interval: "30s"
   metrics_report_interval: "10s"
 EOF
 
 # Create FOLLOW file for follower
 # NOTE: Currently requires full URL (http://host:port) to match nodes configuration
-echo "http://localhost:$LEADER_PORT" > "$TMPDIR/follower/FOLLOW"
+echo "localhost:$LEADER_PORT" > "$TMPDIR/follower/FOLLOW"
 
 # Copy test log file
 cp test_logs.log "$TMPDIR/"
