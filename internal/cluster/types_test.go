@@ -67,15 +67,14 @@ func TestClusterConfig_Validate(t *testing.T) {
 			expectErr: false,
 		},
 		{
-			name: "no nodes",
+			name: "no nodes (valid when BOT_DETECTOR_NODES will be used)",
 			config: ClusterConfig{
 				Nodes:                 []NodeConfig{},
 				ConfigPollInterval:    30 * time.Second,
 				MetricsReportInterval: 10 * time.Second,
 				Protocol:              "http",
 			},
-			expectErr: true,
-			errMsg:    "cluster must have at least one node",
+			expectErr: false,
 		},
 		{
 			name: "zero config poll interval",

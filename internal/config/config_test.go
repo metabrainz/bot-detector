@@ -2064,11 +2064,14 @@ chains:
 }
 
 func TestLoadConfigFromYAML_ClusterConfig_InvalidNoNodes(t *testing.T) {
+	// Note: Empty nodes list is now VALID during config load because
+	// BOT_DETECTOR_NODES environment variable can populate nodes at runtime.
+	// Runtime validation happens in main.go after environment override.
 	yamlContent := `
 version: "1.0"
 
 cluster:
-  nodes: []  # Empty nodes list
+  nodes: []  # Empty nodes list (will be populated via BOT_DETECTOR_NODES)
   config_poll_interval: "30s"
 
 chains:
@@ -2081,13 +2084,17 @@ chains:
 	tmpConfigFilePath := setupTestYAML(t, yamlContent)
 	t.Cleanup(testutil.ResetGlobalState)
 
-	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: tmpConfigFilePath})
-	if err == nil {
-		t.Fatal("Expected error for cluster config with no nodes, got nil")
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: tmpConfigFilePath})
+	if err != nil {
+		t.Fatalf("Config load should succeed with empty nodes list, got error: %v", err)
 	}
 
-	if !strings.Contains(err.Error(), "cluster must have at least one node") {
-		t.Errorf("Expected error about missing nodes, got: %v", err)
+	// Verify cluster config was loaded with empty nodes
+	if loadedCfg.Cluster == nil {
+		t.Error("Expected cluster config to be loaded")
+	}
+	if len(loadedCfg.Cluster.Nodes) != 0 {
+		t.Errorf("Expected empty nodes list, got %d nodes", len(loadedCfg.Cluster.Nodes))
 	}
 }
 

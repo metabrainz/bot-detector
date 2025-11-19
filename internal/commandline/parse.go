@@ -9,7 +9,7 @@ import (
 )
 
 // AppParameters holds the fully parsed and validated configuration
-// from command-line flags, ready for execution.
+// from command-line flags and environment variables, ready for execution.
 type AppParameters struct {
 	Check           bool
 	ConfigDir       string // Directory containing config.yaml
@@ -23,6 +23,7 @@ type AppParameters struct {
 	StateDir        string
 	TopN            int
 	ClusterNodeName string
+	Envs            *EnvParameters
 }
 
 // String implements the fmt.Stringer interface for AppParameters.
@@ -49,6 +50,11 @@ func (p AppParameters) String() string {
 	writeField("TopN", "%v", p.TopN)
 	writeField("ClusterNodeName", "%q", p.ClusterNodeName)
 
+	// Include environment variable info
+	if p.Envs != nil && len(p.Envs.ClusterNodes) > 0 {
+		sb.WriteString(fmt.Sprintf(labelFormat+"%d nodes from BOT_DETECTOR_NODES\n", "ClusterNodes", len(p.Envs.ClusterNodes)))
+	}
+
 	sb.WriteString("----------------------\n")
 	return sb.String()
 }
@@ -56,6 +62,12 @@ func (p AppParameters) String() string {
 // ParseParameters defines and parses all command-line flags, validates them,
 // and returns a populated AppParameters struct.
 func ParseParameters(args []string) (*AppParameters, error) {
+	// Parse environment variables first (before flag parsing)
+	envParams, err := ParseEnv()
+	if err != nil {
+		return nil, fmt.Errorf("environment variable parsing failed: %w", err)
+	}
+
 	flagSet := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	cliFlags := registerCLIFlags(flagSet)
 
@@ -87,6 +99,7 @@ func ParseParameters(args []string) (*AppParameters, error) {
 		StateDir:        *cliFlags.StateDir,
 		TopN:            *cliFlags.TopN,
 		ClusterNodeName: *cliFlags.ClusterNodeName,
+		Envs:            envParams,
 	}
 
 	// --version is a special case, returns ASAP

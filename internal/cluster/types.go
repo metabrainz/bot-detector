@@ -67,9 +67,9 @@ type ClusterConfig struct {
 
 // Validate checks if the ClusterConfig is properly configured.
 func (c *ClusterConfig) Validate() error {
-	if len(c.Nodes) == 0 {
-		return fmt.Errorf("cluster must have at least one node")
-	}
+	// Note: Empty nodes list is allowed when BOT_DETECTOR_NODES environment
+	// variable will be used to populate nodes at runtime. Validation of
+	// non-empty nodes happens after environment override is applied.
 
 	// Check for duplicate node names or addresses
 	names := make(map[string]bool)

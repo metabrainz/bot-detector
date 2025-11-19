@@ -310,6 +310,33 @@ func execute(params *commandline.AppParameters) error {
 		return fmt.Errorf("configuration Load Error: %v", err)
 	}
 
+	// Apply environment variable overrides
+	if params.Envs != nil && len(params.Envs.ClusterNodes) > 0 {
+		if loadedCfg.Cluster != nil {
+			logging.LogOutput(logging.LevelInfo, "CONFIG",
+				"Cluster nodes from config.yaml replaced by BOT_DETECTOR_NODES environment variable (%d nodes)",
+				len(params.Envs.ClusterNodes))
+			loadedCfg.Cluster.Nodes = params.Envs.ClusterNodes
+		} else {
+			// Cluster wasn't configured in YAML, but BOT_DETECTOR_NODES is set
+			// Create a minimal ClusterConfig with the nodes from environment
+			logging.LogOutput(logging.LevelInfo, "CONFIG",
+				"Cluster configuration created from BOT_DETECTOR_NODES environment variable (%d nodes)",
+				len(params.Envs.ClusterNodes))
+			loadedCfg.Cluster = &cluster.ClusterConfig{
+				Nodes:                 params.Envs.ClusterNodes,
+				ConfigPollInterval:    10 * time.Second,    // Default value
+				MetricsReportInterval: 30 * time.Second,    // Default value
+				Protocol:              "http",              // Default value
+			}
+		}
+	}
+
+	// Runtime validation: if cluster is configured, it must have at least one node
+	if loadedCfg.Cluster != nil && len(loadedCfg.Cluster.Nodes) == 0 {
+		return fmt.Errorf("cluster configuration is present but has no nodes. Either add nodes to cluster.nodes in config.yaml or set BOT_DETECTOR_NODES environment variable")
+	}
+
 	logging.SetLogLevel(loadedCfg.Application.LogLevel)
 
 	appConfig := &config.AppConfig{
