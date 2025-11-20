@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -48,8 +49,15 @@ func archiveHandler(p Provider) http.HandlerFunc {
 			return
 		}
 
-		// Add all file dependencies to the archive.
-		for path, dep := range deps {
+		// Add all file dependencies to the archive in a deterministic order.
+		depPaths := make([]string, 0, len(deps))
+		for path := range deps {
+			depPaths = append(depPaths, path)
+		}
+		sort.Strings(depPaths)
+
+		for _, path := range depPaths {
+			dep := deps[path]
 			// Only add files that are currently loaded to the archive.
 			if dep.CurrentStatus != nil && dep.CurrentStatus.Status == types.FileStatusLoaded {
 				// Get the relative path of the dependency from the main config directory.
