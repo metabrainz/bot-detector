@@ -34,15 +34,15 @@ type LogFunc func(level logging.LogLevel, tag string, format string, v ...interf
 
 // ConfigPoller polls the leader node for configuration updates.
 type ConfigPoller struct {
-	leaderAddress     string
-	configFilePath    string
-	pollInterval      time.Duration
-	httpClient        *http.Client
-	configReloadCh    chan<- struct{}
-	shutdownCh        <-chan os.Signal
-	logFunc           LogFunc
-	lastModTime       time.Time
-	lastConfigContent []byte
+	leaderAddress  string
+	configFilePath string
+	pollInterval   time.Duration
+	httpClient     *http.Client
+	configReloadCh chan<- struct{}
+	shutdownCh     <-chan os.Signal
+	logFunc        LogFunc
+	lastModTime    time.Time
+	lastETag       string
 }
 
 // ConfigPollerOptions contains configuration for the config poller.
@@ -149,22 +149,19 @@ func (cp *ConfigPoller) poll() {
 		return
 	}
 
+	// Get ETag for change detection
+	etag := resp.Header.Get("ETag")
+	if etag != "" && etag == cp.lastETag {
+		cp.logFunc(logging.LevelDebug, "CLUSTER", "ETag unchanged, skipping update")
+		return
+	}
+
 	// Read archive content
 	archiveData, err := io.ReadAll(resp.Body)
 	if err != nil {
 		cp.logFunc(logging.LevelError, "CLUSTER", "Failed to read archive from leader: %v", err)
 		return
 	}
-
-	// Check if content has actually changed (not just mod time)
-	if bytes.Equal(archiveData, cp.lastConfigContent) {
-		cp.logFunc(logging.LevelDebug, "CLUSTER", "Archive content unchanged despite different mod time")
-		cp.lastModTime = lastModified
-		return
-	}
-
-	// Get ETag for checksum verification
-	etag := resp.Header.Get("ETag")
 
 	// Backup current config and dependencies
 	configDir := filepath.Dir(cp.configFilePath)
@@ -190,7 +187,7 @@ func (cp *ConfigPoller) poll() {
 
 	// Update tracking variables
 	cp.lastModTime = lastModified
-	cp.lastConfigContent = archiveData
+	cp.lastETag = etag
 
 	cp.logFunc(logging.LevelInfo, "CLUSTER", "Updated config from leader (mod time: %s)", lastModified.Format(time.RFC1123))
 
