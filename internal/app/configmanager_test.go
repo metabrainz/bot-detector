@@ -7,6 +7,7 @@ import (
 	"bot-detector/internal/metrics"
 	"bot-detector/internal/store"
 	"bot-detector/internal/testutil"
+	"github.com/stretchr/testify/assert"
 	"os"
 	"path/filepath"
 	"sync"
@@ -115,3 +116,89 @@ chains:
 }
 
 // TestCompaction verifies that the state snapshot and journal truncation work correctly.
+
+func TestReloadConfiguration_PreservesFileOpener(t *testing.T) {
+	// --- Setup ---
+	testutil.ResetGlobalState()
+	t.Cleanup(testutil.ResetGlobalState)
+
+	// 1. Create a temporary YAML file.
+	initialYAMLContent := `
+version: "1.0"
+application:
+  log_level: "info"
+`
+	tempDir := t.TempDir()
+	configFilePath := filepath.Join(tempDir, "config.yaml")
+	if err := os.WriteFile(configFilePath, []byte(initialYAMLContent), 0644); err != nil {
+		t.Fatalf("Failed to write initial temp yaml file: %v", err)
+	}
+	fileInfo, err := os.Stat(configFilePath)
+	if err != nil {
+		t.Fatalf("Failed to stat temp yaml file: %v", err)
+	}
+
+	// 2. Create a mock FileOpener to check for pointer preservation.
+	var fileOpenerCalled bool
+	mockFileOpener := func(name string) (config.FileHandle, error) {
+		fileOpenerCalled = true
+		return os.Open(name)
+	}
+
+	// 3. Load initial config and create a processor with the mock function.
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: configFilePath})
+	if err != nil {
+		t.Fatalf("Initial config.LoadConfigFromYAML() failed: %v", err)
+	}
+
+	appConfig := &config.AppConfig{
+		Application: loadedCfg.Application,
+		FileOpener:  mockFileOpener,
+		StatFunc:    func(name string) (os.FileInfo, error) { return os.Stat(name) },
+		LastModTime: fileInfo.ModTime(),
+	}
+
+	processor := &app.Processor{
+		ActivityMutex:  &sync.RWMutex{},
+		ActivityStore:  make(map[store.Actor]*store.ActorActivity),
+		ConfigMutex:    &sync.RWMutex{},
+		Metrics:        metrics.NewMetrics(),
+		Config:         appConfig,
+		Chains:         loadedCfg.Chains,
+		LogFunc:        func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
+		ConfigFilePath: configFilePath,
+	}
+
+	// Make a copy of the old config for the reload function, as the real caller would.
+	processor.ConfigMutex.RLock()
+	oldConfigForComparison := processor.Config.Clone()
+	processor.ConfigMutex.RUnlock()
+
+	// --- Act ---
+	// 4. Modify the config file on disk to trigger a change.
+	modifiedYAMLContent := `
+version: "1.0"
+application:
+  log_level: "debug" # Change log level
+`
+	if err := os.WriteFile(configFilePath, []byte(modifiedYAMLContent), 0644); err != nil {
+		t.Fatalf("Failed to write modified temp yaml file: %v", err)
+	}
+
+	// 5. Trigger the configuration reload directly.
+	app.ReloadConfiguration(processor, true, &oldConfigForComparison)
+
+	// --- Assert ---
+	// 6. Check if FileOpener is preserved after the reload.
+	processor.ConfigMutex.RLock()
+	reloadedFileOpener := processor.Config.FileOpener
+	processor.ConfigMutex.RUnlock()
+
+	assert.NotNil(t, reloadedFileOpener, "FileOpener should not be nil after reload")
+
+	// 7. Call the reloaded FileOpener to ensure it's our original mock function.
+	// This confirms the function pointer was preserved.
+	_, err = reloadedFileOpener(configFilePath)
+	assert.NoError(t, err, "FileOpener should be callable")
+	assert.True(t, fileOpenerCalled, "The mocked FileOpener function should have been called")
+}
