@@ -10,11 +10,24 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"bot-detector/internal/logging"
 )
+
+// schemeRegex is used to check if a URL has a scheme.
+var schemeRegex = regexp.MustCompile(`^[^:]+://`)
+
+// ensureURIScheme ensures that a given address has an HTTP scheme.
+// If no scheme is present, it prepends "http://".
+func ensureURIScheme(address string) string {
+	if !schemeRegex.MatchString(address) {
+		return "http://" + address
+	}
+	return address
+}
 
 // LogFunc is the function signature for logging.
 type LogFunc func(level logging.LogLevel, tag string, format string, v ...interface{})
@@ -50,7 +63,7 @@ func NewConfigPoller(opts ConfigPollerOptions) *ConfigPoller {
 	}
 
 	return &ConfigPoller{
-		leaderAddress:  opts.LeaderAddress,
+		leaderAddress:  ensureURIScheme(opts.LeaderAddress),
 		configFilePath: opts.ConfigFilePath,
 		pollInterval:   opts.PollInterval,
 		configReloadCh: opts.ConfigReloadCh,
@@ -253,7 +266,8 @@ func Bootstrap(opts BootstrapOptions) error {
 	}
 
 	// Fetch config archive from leader
-	archiveURL := fmt.Sprintf("%s/config/archive", opts.LeaderAddress)
+	leaderAddress := ensureURIScheme(opts.LeaderAddress)
+	archiveURL := fmt.Sprintf("%s/config/archive", leaderAddress)
 	resp, err := client.Get(archiveURL)
 	if err != nil {
 		return fmt.Errorf("failed to fetch config archive from leader: %w", err)
