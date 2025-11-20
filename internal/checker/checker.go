@@ -814,7 +814,7 @@ func EntryBufferWorker(p *app.Processor, stop <-chan struct{}) {
 
 		case <-p.OooBufferFlushSignal:
 			// An immediate flush was requested by a newer log entry.
-			p.LogFunc(logging.LevelDebug, "BUFFER_WORKER", "Immediate flush triggered.")
+			//p.LogFunc(logging.LevelDebug, "BUFFER_WORKER", "Immediate flush triggered.")
 			// Fall through to process the buffer.
 
 		case <-ticker.C:
