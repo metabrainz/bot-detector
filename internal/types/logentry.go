@@ -3,6 +3,7 @@ package types
 import (
 	"bot-detector/internal/utils"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -42,6 +43,18 @@ type LogEntry struct {
 	Size       int
 	UserAgent  string
 	VHost      string
+
+	// fieldCache stores extracted field values to avoid redundant GetMatchValue calls.
+	// Key: canonical field name (e.g., "Path", "UserAgent")
+	// Value: the extracted field value (string or int)
+	// This cache is populated lazily during matcher execution.
+	fieldCache map[string]interface{}
+
+	// matcherCache stores matcher evaluation results to avoid redundant matcher executions.
+	// Key: matcher cache key (e.g., "path:regex:^/login")
+	// Value: the boolean result of the matcher evaluation
+	// This cache is populated lazily during matcher execution.
+	matcherCache map[string]bool
 }
 
 // GetMatchValue returns the value and type of a field from a LogEntry.
@@ -76,10 +89,55 @@ func GetMatchValue(fieldName string, entry *LogEntry) (interface{}, FieldType, e
 }
 
 // GetMatchValueIfType retrieves a field's value only if it matches the expected type.
+// It uses a per-entry cache to avoid redundant field extractions.
 func GetMatchValueIfType(fieldName string, entry *LogEntry, expectedType FieldType) interface{} {
+	// Early return for nil entry - avoids unnecessary processing
+	if entry == nil {
+		return nil
+	}
+
+	// Build cache key once (includes both field name and expected type)
+	cacheKey := fieldName + ":" + strconv.Itoa(int(expectedType))
+
+	// Check cache first
+	if entry.fieldCache != nil {
+		if cachedVal, ok := entry.fieldCache[cacheKey]; ok {
+			return cachedVal // Cache hit - return immediately
+		}
+	}
+
+	// Cache miss - extract value normally
 	value, actualType, err := GetMatchValue(fieldName, entry) //nolint:errcheck
 	if err != nil || actualType != expectedType {
 		return nil
 	}
+
+	// Populate cache for future lookups
+	if entry.fieldCache == nil {
+		entry.fieldCache = make(map[string]interface{})
+	}
+	entry.fieldCache[cacheKey] = value
+
 	return value
+}
+
+// CheckMatcherCache looks up a cached matcher result.
+// Returns (result, found) where found indicates if the key exists in cache.
+func (e *LogEntry) CheckMatcherCache(cacheKey string) (bool, bool) {
+	if e == nil || e.matcherCache == nil {
+		return false, false
+	}
+	result, found := e.matcherCache[cacheKey]
+	return result, found
+}
+
+// StoreMatcherResult caches a matcher evaluation result.
+func (e *LogEntry) StoreMatcherResult(cacheKey string, result bool) {
+	if e == nil {
+		return
+	}
+	if e.matcherCache == nil {
+		e.matcherCache = make(map[string]bool)
+	}
+	e.matcherCache[cacheKey] = result
 }
