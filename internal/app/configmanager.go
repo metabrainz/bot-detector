@@ -268,6 +268,7 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 
 		// Preserve mockable functions and set the correct LastModTime.
 		StatFunc:    oldConfig.StatFunc,
+		FileOpener:  oldConfig.FileOpener,
 		LastModTime: newLastModTime,
 
 		YAMLContent: loadedCfg.YAMLContent,
