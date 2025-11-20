@@ -25,7 +25,6 @@ type mockProvider struct {
 	stepsReportContent string // New field for step metrics report
 	configFilePath     string // New field for the config file path
 	shutdownCh         chan os.Signal
-	readyCh            chan struct{} // Closed when the server is ready to accept connections.
 	logMutex           sync.Mutex
 	logs               []string
 }
@@ -35,7 +34,6 @@ func newMockProvider(addr, report string) *mockProvider {
 		listenAddr:    addr,
 		reportContent: report,
 		shutdownCh:    make(chan os.Signal, 1),
-		readyCh:       make(chan struct{}, 1),
 	}
 }
 
@@ -88,11 +86,6 @@ func (m *mockProvider) Log(level logging.LogLevel, tag string, format string, v 
 	m.logMutex.Lock()
 	m.logs = append(m.logs, logMsg)
 	m.logMutex.Unlock()
-
-	// If this is the startup message, signal that the server is ready.
-	if strings.HasPrefix(logMsg, "Starting web server") {
-		close(m.readyCh)
-	}
 }
 
 func (m *mockProvider) GetNodeStatus() NodeStatus {
@@ -143,11 +136,19 @@ func TestServer_StartAndShutdown(t *testing.T) {
 		Start(mockProvider)
 	}()
 
-	// Wait for the server to be ready.
-	select {
-	case <-mockProvider.readyCh:
-		// Server is ready.
-	case <-time.After(2 * time.Second):
+	// Wait for the server to be ready by polling.
+	var connected bool
+	for i := 0; i < 20; i++ { // Poll for up to 2 seconds
+		conn, err := net.Dial("tcp", addr)
+		if err == nil {
+			conn.Close()
+			connected = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if !connected {
 		t.Fatal("Timed out waiting for server to start.")
 	}
 
@@ -199,11 +200,19 @@ func TestServer_StepsEndpoint(t *testing.T) {
 		Start(mockProvider)
 	}()
 
-	// Wait for the server to be ready.
-	select {
-	case <-mockProvider.readyCh:
-		// Server is ready.
-	case <-time.After(2 * time.Second):
+	// Wait for the server to be ready by polling.
+	var connected bool
+	for i := 0; i < 20; i++ { // Poll for up to 2 seconds
+		conn, err := net.Dial("tcp", addr)
+		if err == nil {
+			conn.Close()
+			connected = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if !connected {
 		t.Fatal("Timed out waiting for server to start.")
 	}
 
@@ -248,9 +257,19 @@ func TestServer_ConfigEndpoint(t *testing.T) {
 		Start(mockProvider)
 	}()
 
-	select {
-	case <-mockProvider.readyCh:
-	case <-time.After(2 * time.Second):
+	// Wait for the server to be ready by polling.
+	var connected bool
+	for i := 0; i < 20; i++ { // Poll for up to 2 seconds
+		conn, err := net.Dial("tcp", addr)
+		if err == nil {
+			conn.Close()
+			connected = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if !connected {
 		t.Fatal("Timed out waiting for server to start.")
 	}
 
