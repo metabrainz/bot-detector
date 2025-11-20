@@ -32,6 +32,7 @@ WORKDIR /home/appuser/bot-detector
 
 # Create required directories and ensure correct ownership
 RUN mkdir -p /home/appuser/bot-detector/config \
+    && mkdir -p /home/appuser/bot-detector/config.backup \
     && mkdir -p /home/appuser/bot-detector/state \
     && chown -R appuser:appgroup /home/appuser/bot-detector
 
