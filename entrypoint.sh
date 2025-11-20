@@ -15,15 +15,27 @@ fi
 
 # Set the user and group IDs for 'appuser' to match the host user.
 # This allows the container to write to mounted volumes.
-echo "Setting user and group ID to $PUID:$PGID"
-deluser appuser >/dev/null 2>&1 || true
-addgroup -g "$PGID" appgroup >/dev/null 2>&1
-adduser -u "$PUID" -G appgroup -h /home/appuser -s /bin/sh -D appuser >/dev/null 2>&1
+echo "Setting user and group ID for appuser to $PUID:$PGID"
 
-# Take ownership of the application directories.
-# This is necessary for features like config backup to work correctly with mounted volumes.
-echo "Taking ownership of /home/appuser/bot-detector"
-chown -R "$PUID:$PGID" /home/appuser/bot-detector
+# Modify the existing 'appgroup' to match the provided PGID.
+# This command needs to run as root.
+groupmod -g "$PGID" appgroup
+
+# Modify the existing 'appuser' to match the provided PUID and assign to 'appgroup'.
+# This command needs to run as root.
+usermod -u "$PUID" -g appgroup appuser
+
+# Ensure the top-level application directory is owned by the correct user.
+# This allows for creating/removing subdirectories like config.backup.
+chown "$PUID:$PGID" /home/appuser/bot-detector
+
+# Take ownership of writable application subdirectories (mount points and internal directories).
+# The -R is important for the *contents* of these directories.
+chown -R "$PUID:$PGID" /home/appuser/bot-detector/config
+chown -R "$PUID:$PGID" /home/appuser/bot-detector/state
+# The config.backup directory is created by the app within /home/appuser/bot-detector.
+# This ensures its contents (if any exist) are also properly owned.
+chown -R "$PUID:$PGID" /home/appuser/bot-detector/config.backup || true
 
 # Execute the main application command, passing along all arguments.
 # su-exec drops root privileges and runs the command as the specified user.

@@ -37,8 +37,8 @@ RUN mkdir -p /home/appuser/bot-detector/config \
     && chown -R appuser:appgroup /home/appuser/bot-detector
 
 
-# Install su-exec for privilege-dropping
-RUN apk add --no-cache su-exec
+# Install su-exec for privilege-dropping and shadow for user/group modification
+RUN apk add --no-cache su-exec shadow
 
 # Copy the entrypoint script
 COPY entrypoint.sh /entrypoint.sh
