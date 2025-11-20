@@ -22,9 +22,9 @@ var schemeRegex = regexp.MustCompile(`^[^:]+://`)
 
 // ensureURIScheme ensures that a given address has an HTTP scheme.
 // If no scheme is present, it prepends "http://".
-func ensureURIScheme(address string) string {
+func ensureURIScheme(address, protocol string) string {
 	if !schemeRegex.MatchString(address) {
-		return "http://" + address
+		return protocol + "://" + address
 	}
 	return address
 }
@@ -54,6 +54,7 @@ type ConfigPollerOptions struct {
 	ShutdownCh     <-chan os.Signal // Shutdown signal channel
 	LogFunc        LogFunc          // Logging function
 	HTTPTimeout    time.Duration    // HTTP request timeout
+	Protocol       string           // Protocol for cluster communication (e.g., "http", "https")
 }
 
 // NewConfigPoller creates a new configuration poller for follower nodes.
@@ -63,7 +64,7 @@ func NewConfigPoller(opts ConfigPollerOptions) *ConfigPoller {
 	}
 
 	return &ConfigPoller{
-		leaderAddress:  ensureURIScheme(opts.LeaderAddress),
+		leaderAddress:  ensureURIScheme(opts.LeaderAddress, opts.Protocol),
 		configFilePath: opts.ConfigFilePath,
 		pollInterval:   opts.PollInterval,
 		configReloadCh: opts.ConfigReloadCh,
@@ -235,6 +236,7 @@ type BootstrapOptions struct {
 	LogFunc        LogFunc       // Logging function
 	HTTPTimeout    time.Duration // HTTP request timeout
 	ForceUpdate    bool          // Force update even if local config exists
+	Protocol       string        // Protocol for cluster communication (e.g., "http", "https")
 }
 
 // Bootstrap fetches the initial configuration from the leader and saves it locally.
@@ -266,7 +268,7 @@ func Bootstrap(opts BootstrapOptions) error {
 	}
 
 	// Fetch config archive from leader
-	leaderAddress := ensureURIScheme(opts.LeaderAddress)
+	leaderAddress := ensureURIScheme(opts.LeaderAddress, opts.Protocol)
 	archiveURL := fmt.Sprintf("%s/config/archive", leaderAddress)
 	resp, err := client.Get(archiveURL)
 	if err != nil {

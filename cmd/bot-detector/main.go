@@ -339,6 +339,7 @@ func execute(params *commandline.AppParameters) error {
 				LogFunc:        logging.LogOutput,
 				HTTPTimeout:    10 * time.Second,
 				ForceUpdate:    false,
+				Protocol:       config.DefaultClusterProtocol,
 			}); err != nil {
 				return fmt.Errorf("failed to bootstrap config from leader: %w", err)
 			}
@@ -655,6 +656,7 @@ func start(p *app.Processor) {
 					ShutdownCh:     p.SignalCh,
 					LogFunc:        p.LogFunc,
 					HTTPTimeout:    10 * time.Second,
+					Protocol:       p.Cluster.Protocol,
 				})
 				go poller.Start()
 
