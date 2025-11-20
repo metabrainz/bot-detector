@@ -27,12 +27,19 @@ FROM alpine:latest
 
 # Create a non-root user for security
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-USER appuser
 
 WORKDIR /home/appuser/bot-detector
 
+# Create required directories and ensure correct ownership
+RUN mkdir -p /home/appuser/bot-detector/config \
+    && mkdir -p /home/appuser/bot-detector/state \
+    && chown -R appuser:appgroup /home/appuser/bot-detector
+
 # Copy the built binary from the builder stage
 COPY --from=builder /app/bot-detector .
+
+# Drop privileges
+USER appuser
 
 # Default command to show help
 ENTRYPOINT ["./bot-detector"]
