@@ -36,12 +36,21 @@ RUN mkdir -p /home/appuser/bot-detector/config \
     && mkdir -p /home/appuser/bot-detector/state \
     && chown -R appuser:appgroup /home/appuser/bot-detector
 
+
+# Install su-exec for privilege-dropping
+RUN apk add --no-cache su-exec
+
+# Copy the entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Copy the built binary from the builder stage
 COPY --from=builder /app/bot-detector .
 
-# Drop privileges
-USER appuser
 
-# Default command to show help
-ENTRYPOINT ["./bot-detector"]
+# The entrypoint.sh script handles switching to the correct user (matching PUID/PGID from host)
+# and fixing permissions on mounted volumes. If PUID is 0 (root), it defaults to 'appuser'.
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Default command to show help, passed as arguments to the entrypoint
 CMD ["-h"]
