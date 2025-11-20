@@ -394,12 +394,25 @@ func CompileStringMatcher(ctx MatcherContext, value string) (FieldMatcher, error
 		if err != nil {
 			return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': invalid regex '%s': %w", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, pattern, err)
 		}
+		// Generate cache key for matcher result caching
+		cacheKey := ctx.CanonicalFieldName + ":regex:" + pattern
 		return func(entry *types.LogEntry) bool {
+			// Check matcher result cache first
+			if result, found := entry.CheckMatcherCache(cacheKey); found {
+				return result
+			}
+
+			// Cache miss - evaluate matcher
 			fieldVal := types.GetMatchValueIfType(ctx.CanonicalFieldName, entry, types.StringField)
 			if fieldVal == nil {
+				entry.StoreMatcherResult(cacheKey, false)
 				return false
 			}
-			return re.MatchString(fieldVal.(string))
+			result := re.MatchString(fieldVal.(string))
+
+			// Store result in cache
+			entry.StoreMatcherResult(cacheKey, result)
+			return result
 		}, nil
 	} else if strings.HasPrefix(value, "cidr:") {
 		if ctx.CanonicalFieldName != "IP" {

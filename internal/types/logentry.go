@@ -49,6 +49,12 @@ type LogEntry struct {
 	// Value: the extracted field value (string or int)
 	// This cache is populated lazily during matcher execution.
 	fieldCache map[string]interface{}
+
+	// matcherCache stores matcher evaluation results to avoid redundant matcher executions.
+	// Key: matcher cache key (e.g., "path:regex:^/login")
+	// Value: the boolean result of the matcher evaluation
+	// This cache is populated lazily during matcher execution.
+	matcherCache map[string]bool
 }
 
 // GetMatchValue returns the value and type of a field from a LogEntry.
@@ -113,4 +119,25 @@ func GetMatchValueIfType(fieldName string, entry *LogEntry, expectedType FieldTy
 	entry.fieldCache[cacheKey] = value
 
 	return value
+}
+
+// CheckMatcherCache looks up a cached matcher result.
+// Returns (result, found) where found indicates if the key exists in cache.
+func (e *LogEntry) CheckMatcherCache(cacheKey string) (bool, bool) {
+	if e == nil || e.matcherCache == nil {
+		return false, false
+	}
+	result, found := e.matcherCache[cacheKey]
+	return result, found
+}
+
+// StoreMatcherResult caches a matcher evaluation result.
+func (e *LogEntry) StoreMatcherResult(cacheKey string, result bool) {
+	if e == nil {
+		return
+	}
+	if e.matcherCache == nil {
+		e.matcherCache = make(map[string]bool)
+	}
+	e.matcherCache[cacheKey] = result
 }
