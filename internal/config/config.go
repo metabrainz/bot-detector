@@ -423,17 +423,31 @@ func CompileStringMatcher(ctx MatcherContext, value string) (FieldMatcher, error
 		if err != nil {
 			return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': invalid CIDR '%s' for 'cidr:' matcher: %w", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, cidrStr, err)
 		}
+		// Generate cache key for matcher result caching
+		cacheKey := ctx.CanonicalFieldName + ":cidr:" + cidrStr
 		return func(entry *types.LogEntry) bool {
+			// Check matcher result cache first
+			if result, found := entry.CheckMatcherCache(cacheKey); found {
+				return result
+			}
+
+			// Cache miss - evaluate matcher
 			fieldVal := types.GetMatchValueIfType(ctx.CanonicalFieldName, entry, types.StringField)
 			if fieldVal == nil {
+				entry.StoreMatcherResult(cacheKey, false)
 				return false
 			}
 			ipStr := fieldVal.(string)
 			ip := net.ParseIP(ipStr)
 			if ip == nil {
+				entry.StoreMatcherResult(cacheKey, false)
 				return false
 			}
-			return ipNet.Contains(ip)
+			result := ipNet.Contains(ip)
+
+			// Store result in cache
+			entry.StoreMatcherResult(cacheKey, result)
+			return result
 		}, nil
 	}
 
