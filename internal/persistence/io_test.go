@@ -253,6 +253,21 @@ func TestV1SnapshotFormat(t *testing.T) {
 			t.Errorf("Reason mismatch for %s: got %s, want %s", ip, info.Reason, expectedInfo.Reason)
 		}
 	}
+
+	// Verify IPStates is populated with all entries (blocked + unblocked if any)
+	if len(loaded.IPStates) != 3 {
+		t.Fatalf("Expected 3 IP states, got %d", len(loaded.IPStates))
+	}
+	for ip := range snap.ActiveBlocks {
+		state, ok := loaded.IPStates[ip]
+		if !ok {
+			t.Errorf("Expected IP %s in IPStates", ip)
+			continue
+		}
+		if state.State != BlockStateBlocked {
+			t.Errorf("Expected state 'blocked' for %s, got %s", ip, state.State)
+		}
+	}
 }
 
 func TestJournaling(t *testing.T) {
