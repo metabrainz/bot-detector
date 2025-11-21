@@ -53,6 +53,9 @@ RUN chmod +x /entrypoint.sh
 # Copy the built binary from the builder stage
 COPY --from=builder /app/bot-detector .
 
+# Add bot-detector to PATH by symlinking to /usr/local/bin
+RUN ln -s /home/appuser/bot-detector/bot-detector /usr/local/bin/bot-detector
+
 
 # The entrypoint.sh script handles switching to the correct user (matching PUID/PGID from host)
 # and fixing permissions on mounted volumes. If PUID is 0 (root), it defaults to 'appuser'.
