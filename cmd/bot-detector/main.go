@@ -367,6 +367,11 @@ func restorePersistenceState(p *app.Processor) error {
 
 	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "State restoration complete: %d restored, %d skipped", restored, skipped)
 
+	// Warn if we restored a large number of IPs that might exceed HAProxy table capacity
+	if restored > 50000 {
+		p.LogFunc(logging.LevelWarning, "STATE_RESTORE", "Restored %d IPs. Verify HAProxy stick table capacity (tune.bufsize, table size). HAProxy silently drops entries when tables are full.", restored)
+	}
+
 	// 4. Open journal for appending
 	p.JournalHandle, err = persistence.OpenJournalForAppend(journalPath)
 	if err != nil {
