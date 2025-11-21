@@ -315,6 +315,50 @@ func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[stri
 
 }
 
+// GetCurrentState retrieves current HAProxy state as a map of IP -> gpc0 value.
+func (b *HAProxyBlocker) GetCurrentState() (map[string]int, error) {
+	if b.IsDryRun {
+		return make(map[string]int), nil
+	}
+
+	addresses := b.P.GetBlockerAddresses()
+	if len(addresses) == 0 {
+		return make(map[string]int), nil
+	}
+
+	var (
+		state = make(map[string]int)
+		mu    sync.Mutex
+		wg    sync.WaitGroup
+	)
+
+	for _, addr := range addresses {
+		wg.Add(1)
+		go func(currentAddr string) {
+			defer wg.Done()
+			tableNames, err := b.getHAProxyTableNames(currentAddr)
+			if err != nil {
+				return
+			}
+			for _, tableName := range tableNames {
+				entries, err := b.getHAProxyAllIPsInTable(currentAddr, tableName)
+				if err != nil {
+					continue
+				}
+				mu.Lock()
+				for _, entry := range entries {
+					if existing, ok := state[entry.IP]; !ok || entry.Gpc0 > existing {
+						state[entry.IP] = entry.Gpc0
+					}
+				}
+				mu.Unlock()
+			}
+		}(addr)
+	}
+	wg.Wait()
+	return state, nil
+}
+
 // DumpBackends retrieves all currently blocked and unblocked IPs from HAProxy.
 
 func (b *HAProxyBlocker) DumpBackends() ([]string, error) {

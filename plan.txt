@@ -1,0 +1,50 @@
+  ⎿  Plan: Replace ConfigPath with ConfigDir for Directory Operations
+
+     The analysis revealed that ConfigDir is properly populated in AppParameters but not propagated to the rest of the application, causing repeated filepath.Dir() 
+     calls on ConfigPath. Here's the simplification plan:
+
+     Phase 1: Add ConfigDir to Core Structures
+
+     1. Add ConfigDir field to Processor struct (internal/app/types.go:74)
+       - Add ConfigDir string field alongside existing ConfigPath string
+     2. Initialize ConfigDir in main.go (cmd/bot-detector/main.go:138)
+       - Set ConfigDir: params.ConfigDir when creating Processor
+
+     Phase 2: Update Archive Handler Interface
+
+     3. Update GetConfigForArchive signature (internal/server/types.go)
+       - Change return to include ConfigDir instead of ConfigPath for directory
+       - Signature: GetConfigForArchive() ([]byte, time.Time, map[string]*types.FileDependency, string, error)
+       - Return ConfigDir (not ConfigPath) as 4th parameter
+     4. Update GetConfigForArchive implementation (internal/app/providers.go:34)
+       - Return p.ConfigDir instead of p.ConfigPath
+     5. Simplify archiveHandler (internal/server/handlers_archive.go:62)
+       - Remove: configDir := filepath.Dir(configPath)
+       - Use returned ConfigDir directly
+
+     Phase 3: Update Tests
+
+     6. Update MockProviderWithArchive (internal/server/handlers_archive_test.go)
+       - Update test mock to return ConfigDir
+     7. Update other test mocks (various test files)
+       - Ensure test Processor instances set both ConfigPath and ConfigDir
+
+     Expected Benefits
+
+     - Eliminates redundant path calculations: Remove filepath.Dir(configPath) calls
+     - Clearer intent: Code explicitly uses ConfigDir when it needs a directory
+     - Consistency: Aligns with the directory-first design established in ConfigPath/ConfigDir split
+     - Future-proof: Cluster code will use ConfigDir directly when implemented
+
+     Files to Modify
+
+     1. internal/app/types.go - Add field
+     2. cmd/bot-detector/main.go - Initialize field
+     3. internal/server/types.go - Update interface
+     4. internal/app/providers.go - Return ConfigDir
+     5. internal/server/handlers_archive.go - Use ConfigDir
+     6. internal/server/handlers_archive_test.go - Update test mock
+     7. Review test files for ConfigDir initialization
+
+     This is a straightforward refactoring with no behavior changes, only structural improvements.
+
