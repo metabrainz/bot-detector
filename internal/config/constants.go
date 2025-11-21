@@ -44,9 +44,9 @@ const (
 	DefaultBlockerMaxRetries        = 3
 	DefaultBlockerRetryDelay        = 200 * time.Millisecond
 	DefaultBlockerDialTimeout       = 5 * time.Second
-	DefaultBlockerCommandQueueSize  = 1000 // Default queue size
-	DefaultBlockerCommandsPerSecond = 10   // Default rate limit
-	DefaultMaxCommandsPerBatch      = 500  // Default batch size for HAProxy CLI commands
+	DefaultBlockerCommandQueueSize  = 10000 // Default queue size (increased for batching throughput)
+	DefaultBlockerCommandsPerSecond = 100   // Default rate limit (increased for batching throughput)
+	DefaultMaxCommandsPerBatch      = 500   // Default batch size for HAProxy CLI commands
 	DefaultUnblockCooldown          = "5m"
 	DefaultEnableMetrics            = true
 

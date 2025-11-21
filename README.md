@@ -79,9 +79,9 @@ The bot-detector monitors the unique file identifier (inode) of the log file. If
 
 To prevent overwhelming the blocking backend (e.g., HAProxy) during a sudden burst of activity, the bot-detector does not execute block or unblock commands immediately. Instead, all commands are sent to an in-memory queue.
 
-A separate worker process consumes commands from this queue at a configurable rate, defined by `blockers.commands_per_second` in the YAML configuration (default: 10 commands/sec). This ensures that the backend is not flooded with requests.
+A separate worker process consumes commands from this queue at a configurable rate, defined by `blockers.commands_per_second` in the YAML configuration (default: 100 commands/sec). This ensures that the backend is not flooded with requests.
 
-The queue itself has a configurable size (`blockers.command_queue_size`, default: 1000). If the rate of incoming commands exceeds the processing rate and the queue becomes full, any new commands will be dropped, and a warning will be logged. This design makes the system resilient to high-volume detection events without causing a "thundering herd" problem on the backend services.
+The queue itself has a configurable size (`blockers.command_queue_size`, default: 10000). If the rate of incoming commands exceeds the processing rate and the queue becomes full, any new commands will be dropped, and a warning will be logged. This design makes the system resilient to high-volume detection events without causing a "thundering herd" problem on the backend services.
 
 ## **Cluster Configuration**
 
@@ -207,8 +207,8 @@ It also contains various settings to control the behavior of the application.
 | Field | Type | Description |
 | :---- | :---- | :---- |
 | **default_duration** | string | Optional. A global block duration to apply to any `block` action chain that does not define its own `block_duration`. Format: Go duration string (e.g., "5m", "1h"). |
-| **commands_per_second** | int | Optional. The maximum number of commands per second to send to the blocker. Default: `10`. |
-| **command_queue_size** | int | Optional. The maximum number of commands that can be queued for the blocker. Default: `1000`. |
+| **commands_per_second** | int | Optional. The maximum number of commands per second to send to the blocker. Default: `100`. |
+| **command_queue_size** | int | Optional. The maximum number of commands that can be queued for the blocker. Default: `10000`. |
 | **max_commands_per_batch** | int | Optional. The maximum number of commands to batch together in a single request to the backend. HAProxy CLI supports semicolon-separated commands. Tested successfully with 1000. Default: `500`. |
 | **dial_timeout** | string | Optional. Timeout for establishing a connection to a blocker socket. Default: `5s`. |
 | **max_retries** | int | Optional. Number of attempts to send a command to a blocker instance. Default: `3`. |
@@ -647,8 +647,8 @@ checker:
 # Blocker configuration
 blockers:
   default_duration: "30m"  # Used by chains without a specific block_duration
-  commands_per_second: 10
-  command_queue_size: 1000
+  commands_per_second: 100
+  command_queue_size: 10000
   max_commands_per_batch: 500
   dial_timeout: "5s"
   max_retries: 3
