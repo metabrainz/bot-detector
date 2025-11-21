@@ -178,6 +178,7 @@ func restorePersistenceState(p *app.Processor) error {
 		return err
 	}
 	p.ActiveBlocks = snapshot.ActiveBlocks
+	p.IPStates = snapshot.IPStates
 
 	// 2. Replay Journal
 	journalPath := filepath.Join(p.StateDir, "events.log")
