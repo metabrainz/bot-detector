@@ -139,7 +139,7 @@ func WriteSnapshot(path string, snap *Snapshot) error {
 
 	if snap.Version == "v1" {
 		// Use v1 wrapper format with sorted entries from IPStates
-		var entries []BlockStateEntryV1
+		entries := make([]BlockStateEntryV1, 0, len(snap.IPStates))
 		for ip, state := range snap.IPStates {
 			entries = append(entries, BlockStateEntryV1{
 				IP:         ip,
