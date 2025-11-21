@@ -19,6 +19,11 @@ import (
 // Example: "0x564f26146268: key=1.10.230.15 use=0 exp=51153745 gpc0=1"
 var haProxyTableEntryRegex = regexp.MustCompile(`(?:key=(?P<ip>\S+))|(?:\s+exp=(?P<exp>\d+))|(?:\s+gpc0=(?P<gpc0>\d+))`)
 
+// HAProxyBatchSize is the number of commands to batch together with semicolons.
+// HAProxy CLI supports multiple commands separated by semicolons in a single request.
+// Tested successfully with 1000 commands (~52KB). Conservative default of 500.
+const HAProxyBatchSize = 500
+
 // HAProxyTableEntry represents a single entry in an HAProxy stick table.
 type HAProxyTableEntry struct {
 	IP      string
@@ -254,7 +259,7 @@ func (b *HAProxyBlocker) executeHAProxyCommand(addr, command string) (string, er
 }
 
 // executeCommandsConcurrently handles the concurrent execution of multiple commands.
-
+// For each address, it batches all commands together with semicolons for efficiency.
 func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[string]map[string]string, commandType string) error {
 
 	addresses := b.P.GetBlockerAddresses()
@@ -267,36 +272,34 @@ func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[stri
 
 	}
 
-	var wg sync.WaitGroup
-
-	errs := make(chan error, len(targets)*len(addresses))
-
-	for tableName, commandsByAddr := range targets {
-
-		for addr, command := range commandsByAddr {
-
-			wg.Add(1)
-
-			go func(a, c, tn string) {
-
-				defer wg.Done()
-
-				if err := b.Executor(a, ip, c); err != nil {
-
-					errs <- err
-
-					b.P.Log(logging.LevelError, "HAPROXY_FAIL", "HAProxy command failed on instance %s for IP %s (Table %s): %v", a, ip, tn, err)
-
-				} else {
-
-					b.P.Log(logging.LevelDebug, "HAPROXY_SUCCESS", "Successfully sent command for IP %s on instance %s to table %s.", ip, a, tn)
-
-				}
-
-			}(addr, command, tableName)
-
+	// Group commands by address for batching
+	commandsByAddr := make(map[string][]string)
+	for _, commandsMap := range targets {
+		for addr, command := range commandsMap {
+			commandsByAddr[addr] = append(commandsByAddr[addr], command)
 		}
+	}
 
+	var wg sync.WaitGroup
+	errs := make(chan error, len(commandsByAddr))
+
+	for addr, commands := range commandsByAddr {
+		wg.Add(1)
+
+		go func(a string, cmds []string) {
+			defer wg.Done()
+
+			// Batch commands with semicolons (HAProxy CLI supports this)
+			batchedCommand := strings.Join(cmds, "; ")
+
+			if err := b.Executor(a, ip, batchedCommand); err != nil {
+				errs <- err
+				b.P.Log(logging.LevelError, "HAPROXY_FAIL", "HAProxy batched command failed on instance %s for IP %s: %v", a, ip, err)
+			} else {
+				b.P.Log(logging.LevelDebug, "HAPROXY_SUCCESS", "Successfully sent %d batched commands for IP %s on instance %s.", len(cmds), ip, a)
+			}
+
+		}(addr, commands)
 	}
 
 	wg.Wait()

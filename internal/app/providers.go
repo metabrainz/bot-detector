@@ -310,9 +310,11 @@ func (p *Processor) IncrementBlockerRetries() {
 }
 
 func (p *Processor) IncrementCmdsPerBlocker(addr string) {
-	if val, ok := p.Metrics.CmdsPerBlocker.Load(addr); ok {
-		val.(*atomic.Int64).Add(1)
+	if p.Metrics == nil || p.Metrics.CmdsPerBlocker == nil {
+		return
 	}
+	val, _ := p.Metrics.CmdsPerBlocker.LoadOrStore(addr, new(atomic.Int64))
+	val.(*atomic.Int64).Add(1)
 }
 
 // GenerateHTMLMetricsReport creates the full metrics report as an HTML-safe string.

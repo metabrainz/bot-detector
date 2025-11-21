@@ -124,18 +124,21 @@ func TestHAProxyBlocker_Unblock(t *testing.T) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	expectedCmds := map[string]struct{}{
-		"set table table_10m_ipv4 key 192.0.2.1 data.gpc0 0":  {},
-		"set table table_long_ipv4 key 192.0.2.1 data.gpc0 0": {},
+	// Commands are now batched with semicolons
+	if len(h.commands) != 1 {
+		t.Fatalf("Expected 1 batched command, got %d", len(h.commands))
 	}
 
-	if len(h.commands) != len(expectedCmds) {
-		t.Fatalf("Expected %d unblock commands, got %d", len(expectedCmds), len(h.commands))
+	// Check that both commands are in the batched command
+	batchedCmd := h.commands[0]
+	expectedCmds := []string{
+		"set table table_10m_ipv4 key 192.0.2.1 data.gpc0 0",
+		"set table table_long_ipv4 key 192.0.2.1 data.gpc0 0",
 	}
 
-	for _, cmd := range h.commands {
-		if _, ok := expectedCmds[cmd]; !ok {
-			t.Errorf("Received unexpected unblock command: %s", cmd)
+	for _, expected := range expectedCmds {
+		if !strings.Contains(batchedCmd, expected) {
+			t.Errorf("Batched command missing expected command '%s'. Got: %s", expected, batchedCmd)
 		}
 	}
 }
