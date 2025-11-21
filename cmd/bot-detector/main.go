@@ -17,7 +17,6 @@ import (
 	"bot-detector/internal/testutil"
 	"bot-detector/internal/utils"
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -214,69 +213,35 @@ func restorePersistenceState(p *app.Processor) error {
 		unblockEvents := 0
 		skippedEvents := 0
 		parseErrors := 0
-		journalVersion := "unknown"
 
 		scanner := bufio.NewScanner(journalFile)
 		for scanner.Scan() {
 			line := scanner.Bytes()
 
-			// Detect version per line by structure
-			isV1 := bytes.Contains(line, []byte(`"event":{`))
-
-			var timestamp time.Time
-			var eventType persistence.EventType
-			var ip, reason string
-			var duration time.Duration
-
-			// Parse based on detected version
-			if isV1 {
-				var v1Entry persistence.JournalEntryV1
-				if err := json.Unmarshal(line, &v1Entry); err != nil {
-					p.LogFunc(logging.LevelWarning, "JOURNAL_PARSE_FAIL", "Failed to parse v1 journal event: %v", err)
-					parseErrors++
-					continue
-				}
-				timestamp = v1Entry.Timestamp
-				eventType = v1Entry.Event.Type
-				ip = v1Entry.Event.IP
-				duration = v1Entry.Event.Duration
-				reason = v1Entry.Event.Reason
-				if journalVersion == "unknown" {
-					journalVersion = "v1"
-				}
-			} else {
-				var v0Event persistence.AuditEvent
-				if err := json.Unmarshal(line, &v0Event); err != nil {
-					p.LogFunc(logging.LevelWarning, "JOURNAL_PARSE_FAIL", "Failed to parse v0 journal event: %v", err)
-					parseErrors++
-					continue
-				}
-				timestamp = v0Event.Timestamp
-				eventType = v0Event.Event
-				ip = v0Event.IP
-				duration = v0Event.Duration
-				reason = v0Event.Reason
-				if journalVersion == "unknown" {
-					journalVersion = "v0"
-				}
+			// Parse v1 format
+			var v1Entry persistence.JournalEntryV1
+			if err := json.Unmarshal(line, &v1Entry); err != nil {
+				p.LogFunc(logging.LevelWarning, "JOURNAL_PARSE_FAIL", "Failed to parse journal event: %v", err)
+				parseErrors++
+				continue
 			}
 
-			if timestamp.After(snapshot.Timestamp) {
+			if v1Entry.Timestamp.After(snapshot.Timestamp) {
 				// Intern reason to save memory
-				reason = p.InternReason(reason)
+				reason := p.InternReason(v1Entry.Event.Reason)
 
-				switch eventType {
+				switch v1Entry.Event.Type {
 				case persistence.EventTypeBlock:
 					blockEvents++
-					expireTime := timestamp.Add(duration)
-					p.IPStates[ip] = persistence.IPState{
+					expireTime := v1Entry.Timestamp.Add(v1Entry.Event.Duration)
+					p.IPStates[v1Entry.Event.IP] = persistence.IPState{
 						State:      persistence.BlockStateBlocked,
 						ExpireTime: expireTime,
 						Reason:     reason,
 					}
 				case persistence.EventTypeUnblock:
 					unblockEvents++
-					p.IPStates[ip] = persistence.IPState{
+					p.IPStates[v1Entry.Event.IP] = persistence.IPState{
 						State:  persistence.BlockStateUnblocked,
 						Reason: reason,
 					}
@@ -290,11 +255,11 @@ func restorePersistenceState(p *app.Processor) error {
 		}
 
 		if fileInfo, err := os.Stat(journalPath); err == nil {
-			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=%s, size=%d bytes, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
-				journalVersion, fileInfo.Size(), blockEvents, unblockEvents, skippedEvents, parseErrors)
+			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=v1, size=%d bytes, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
+				fileInfo.Size(), blockEvents, unblockEvents, skippedEvents, parseErrors)
 		} else {
-			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=%s, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
-				journalVersion, blockEvents, unblockEvents, skippedEvents, parseErrors)
+			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=v1, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
+				blockEvents, unblockEvents, skippedEvents, parseErrors)
 		}
 	} else if !os.IsNotExist(err) {
 		p.LogFunc(logging.LevelWarning, "JOURNAL_OPEN_FAIL", "Could not open journal file for replay: %v", err)

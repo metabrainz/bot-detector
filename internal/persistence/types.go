@@ -27,7 +27,7 @@ const (
 	EventTypeUnblock EventType = "unblock"
 )
 
-// AuditEvent is the structure for a single entry in the journal file (v0 format).
+// AuditEvent is used internally for writing journal entries.
 type AuditEvent struct {
 	Version   string        `json:"version"`
 	Timestamp time.Time     `json:"ts"`
@@ -51,11 +51,11 @@ type JournalEntryV1 struct {
 	Event     AuditEventDataV1 `json:"event"`
 }
 
-// Snapshot is the structure for the state snapshot file.
+// Snapshot is the internal structure for the state snapshot.
 type Snapshot struct {
 	Version   string             `json:"version,omitempty"`
 	Timestamp time.Time          `json:"snapshot_time"`
-	IPStates  map[string]IPState `json:"-"` // Not serialized in v0, populated from entries in v1
+	IPStates  map[string]IPState `json:"-"` // Not serialized, populated from v1 entries array
 }
 
 // BlockState represents the state of an IP in the blocking system.
@@ -119,12 +119,6 @@ type SnapshotDataV1 struct {
 type SnapshotV1 struct {
 	Timestamp time.Time      `json:"ts"`
 	Snapshot  SnapshotDataV1 `json:"snapshot"`
-}
-
-// ActiveBlockInfo holds information about a currently active block.
-type ActiveBlockInfo struct {
-	UnblockTime time.Time `json:"unblock_time"`
-	Reason      string    `json:"reason"`
 }
 
 // IPState represents the current state of an IP (blocked or unblocked).

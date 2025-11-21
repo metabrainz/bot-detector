@@ -12,43 +12,6 @@ import (
 	"time"
 )
 
-func TestV0BackwardCompatibility(t *testing.T) {
-	dir, err := os.MkdirTemp("", "persistence_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer func() {
-		_ = os.RemoveAll(dir)
-	}()
-
-	// Write a v0 snapshot without version field (simulating old format)
-	path := filepath.Join(dir, "state.snapshot")
-	oldFormatJSON := `{
-  "snapshot_time": "2025-11-21T12:00:00Z",
-  "active_blocks": {
-    "1.2.3.4": {
-      "unblock_time": "2025-11-21T13:00:00Z",
-      "reason": "test"
-    }
-  }
-}`
-	if err := os.WriteFile(path, []byte(oldFormatJSON), 0644); err != nil {
-		t.Fatalf("Failed to write old format snapshot: %v", err)
-	}
-
-	// Load it and verify it defaults to v0
-	snap, err := LoadSnapshot(path)
-	if err != nil {
-		t.Fatalf("LoadSnapshot failed: %v", err)
-	}
-	if snap.Version != "v0" {
-		t.Errorf("Expected version v0 for old format, got %s", snap.Version)
-	}
-	if len(snap.IPStates) != 1 {
-		t.Errorf("Expected 1 IP state, got %d", len(snap.IPStates))
-	}
-}
-
 func TestSnapshotting(t *testing.T) {
 	dir, err := os.MkdirTemp("", "persistence_test")
 	if err != nil {
@@ -337,9 +300,9 @@ func TestV1JournalFormat(t *testing.T) {
 	}
 	_ = handle.Close()
 
-	// Verify file name is correct
-	if filepath.Base(path) != "events.v1.log" {
-		t.Errorf("Expected filename events.v1.log, got %s", filepath.Base(path))
+	// Verify file name is correct (always events.log for v1)
+	if filepath.Base(path) != "events.log" {
+		t.Errorf("Expected filename events.log, got %s", filepath.Base(path))
 	}
 
 	// Verify content uses v1 wrapped format
