@@ -105,7 +105,8 @@ func GetConfigFilePath(params *commandline.AppParameters) string {
 // a clean exit, an error for failures, or nil to continue execution.
 func handleStartupFlags(params *commandline.AppParameters) error {
 	if params.ShowVersion {
-		fmt.Printf("bot-detector version %s\n", config.AppVersion)
+		fmt.Printf("bot-detector version %s (commit: %s, built: %s)\n",
+			config.AppVersion, config.GitCommit, config.BuildTime)
 		return fmt.Errorf("exit") // Signal clean exit
 	}
 
@@ -152,7 +153,8 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		// Initialize persistence fields
 		PersistenceEnabled: loadedCfg.Application.Persistence.Enabled,
 		CompactionInterval: loadedCfg.Application.Persistence.CompactionInterval,
-		ActiveBlocks:       make(map[string]persistence.ActiveBlockInfo),
+		IPStates:           make(map[string]persistence.IPState),
+		ReasonCache:        make(map[string]*string),
 
 		// Initialize cluster fields with defaults (will be set properly in later phases)
 		Cluster:           loadedCfg.Cluster,
@@ -171,45 +173,107 @@ func restorePersistenceState(p *app.Processor) error {
 	p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.StateDir)
 
 	// 1. Load snapshot
-	snapshot, err := persistence.LoadSnapshot(filepath.Join(p.StateDir, "state.snapshot"))
+	snapshotPath := filepath.Join(p.StateDir, "state.snapshot")
+	snapshot, err := persistence.LoadSnapshot(snapshotPath)
 	if err != nil {
 		p.LogFunc(logging.LevelError, "STATE_LOAD_FAIL", "Failed to load snapshot: %v", err)
 		return err
 	}
-	p.ActiveBlocks = snapshot.ActiveBlocks
+	p.IPStates = snapshot.IPStates
+
+	// Intern all reason strings to save memory
+	for ip, state := range p.IPStates {
+		state.Reason = p.InternReason(state.Reason)
+		p.IPStates[ip] = state
+	}
+
+	// Count blocked IPs for logging
+	blockedCount := 0
+	for _, state := range p.IPStates {
+		if state.State == persistence.BlockStateBlocked {
+			blockedCount++
+		}
+	}
+	unblockedCount := len(p.IPStates) - blockedCount
+
+	// Log snapshot details
+	if fileInfo, err := os.Stat(snapshotPath); err == nil {
+		p.LogFunc(logging.LevelInfo, "STATE_LOAD", "Loaded snapshot (version=%s, size=%d bytes, entries=%d blocked + %d unblocked, timestamp=%v)",
+			snapshot.Version, fileInfo.Size(), blockedCount, unblockedCount, snapshot.Timestamp)
+	} else {
+		p.LogFunc(logging.LevelInfo, "STATE_LOAD", "Loaded snapshot (version=%s, entries=%d blocked + %d unblocked, timestamp=%v)",
+			snapshot.Version, blockedCount, unblockedCount, snapshot.Timestamp)
+	}
 
 	// 2. Replay Journal
 	journalPath := filepath.Join(p.StateDir, "events.log")
 	journalFile, err := os.Open(journalPath)
 	if err == nil {
+		blockEvents := 0
+		unblockEvents := 0
+		skippedEvents := 0
+		parseErrors := 0
+
 		scanner := bufio.NewScanner(journalFile)
 		for scanner.Scan() {
-			var event persistence.AuditEvent
-			if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			line := scanner.Bytes()
+
+			// Parse v1 format
+			var v1Entry persistence.JournalEntryV1
+			if err := json.Unmarshal(line, &v1Entry); err != nil {
 				p.LogFunc(logging.LevelWarning, "JOURNAL_PARSE_FAIL", "Failed to parse journal event: %v", err)
+				parseErrors++
 				continue
 			}
-			if event.Timestamp.After(snapshot.Timestamp) {
-				switch event.Event {
+
+			if v1Entry.Timestamp.After(snapshot.Timestamp) {
+				// Intern reason to save memory
+				reason := p.InternReason(v1Entry.Event.Reason)
+
+				switch v1Entry.Event.Type {
 				case persistence.EventTypeBlock:
-					p.ActiveBlocks[event.IP] = persistence.ActiveBlockInfo{
-						UnblockTime: event.Timestamp.Add(event.Duration),
-						Reason:      event.Reason,
+					blockEvents++
+					expireTime := v1Entry.Timestamp.Add(v1Entry.Event.Duration)
+					p.IPStates[v1Entry.Event.IP] = persistence.IPState{
+						State:      persistence.BlockStateBlocked,
+						ExpireTime: expireTime,
+						Reason:     reason,
 					}
 				case persistence.EventTypeUnblock:
-					delete(p.ActiveBlocks, event.IP)
+					unblockEvents++
+					p.IPStates[v1Entry.Event.IP] = persistence.IPState{
+						State:  persistence.BlockStateUnblocked,
+						Reason: reason,
+					}
 				}
+			} else {
+				skippedEvents++
 			}
 		}
 		if err := journalFile.Close(); err != nil {
 			p.LogFunc(logging.LevelWarning, "JOURNAL_CLOSE_FAIL", "Failed to close journal file: %v", err)
+		}
+
+		if fileInfo, err := os.Stat(journalPath); err == nil {
+			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=v1, size=%d bytes, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
+				fileInfo.Size(), blockEvents, unblockEvents, skippedEvents, parseErrors)
+		} else {
+			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=v1, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
+				blockEvents, unblockEvents, skippedEvents, parseErrors)
 		}
 	} else if !os.IsNotExist(err) {
 		p.LogFunc(logging.LevelWarning, "JOURNAL_OPEN_FAIL", "Could not open journal file for replay: %v", err)
 	}
 
 	// 3. State Push
-	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Restoring %d active blocks to backend...", len(p.ActiveBlocks))
+	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Querying HAProxy current state...")
+	currentState, err := p.Blocker.GetCurrentState()
+	if err != nil {
+		p.LogFunc(logging.LevelWarning, "STATE_QUERY_FAIL", "Failed to query HAProxy state: %v. Will restore all IPs.", err)
+		currentState = make(map[string]int)
+	}
+
+	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Restoring %d IP states to backend...", len(p.IPStates))
 	// Create a sorted list of table durations for best-fit matching
 	type tableInfo struct {
 		duration time.Duration
@@ -223,27 +287,90 @@ func restorePersistenceState(p *app.Processor) error {
 		return sortedTables[i].duration < sortedTables[j].duration
 	})
 
-	for ip, info := range p.ActiveBlocks {
+	// Cast to RateLimitedBlocker to access BlockDirect/UnblockDirect
+	type directBlocker interface {
+		BlockDirect(ipInfo utils.IPInfo, duration time.Duration, reason string) error
+		UnblockDirect(ipInfo utils.IPInfo, reason string) error
+	}
+	directB, hasDirectMethods := p.Blocker.(directBlocker)
+
+	skipped := 0
+	skippedGoodActor := 0
+	skippedAlreadyBlocked := 0
+	skippedAlreadyUnblocked := 0
+	skippedExpired := 0
+	restored := 0
+	for ip, state := range p.IPStates {
 		// Before restoring, check if the IP is now a good actor.
 		tempEntry := &app.LogEntry{IPInfo: utils.NewIPInfo(ip)}
 		if isGood, reason := checker.IsGoodActor(p, tempEntry); isGood {
 			p.LogFunc(logging.LevelInfo, "STATE_RESTORE_SKIP", "Skipping restore for %s (good_actor: %s)", ip, reason)
+			skipped++
+			skippedGoodActor++
 			continue // Don't restore blocks for good actors.
 		}
 
-		remainingDuration := time.Until(info.UnblockTime)
-		if remainingDuration > 0 {
-			bestFitDuration := p.Config.Blockers.DefaultDuration
-			for _, t := range sortedTables {
-				if remainingDuration <= t.duration {
-					bestFitDuration = t.duration
-					break
-				}
+		if state.State == persistence.BlockStateBlocked {
+			// Check if already blocked in HAProxy
+			if gpc0, exists := currentState[ip]; exists && gpc0 > 0 {
+				skipped++
+				skippedAlreadyBlocked++
+				continue
 			}
-			if err := p.Blocker.Block(utils.NewIPInfo(ip), bestFitDuration, info.Reason); err != nil {
-				p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore block for IP %s: %v", ip, err)
+
+			remainingDuration := time.Until(state.ExpireTime)
+			if remainingDuration > 0 {
+				bestFitDuration := p.Config.Blockers.DefaultDuration
+				for _, t := range sortedTables {
+					if remainingDuration <= t.duration {
+						bestFitDuration = t.duration
+						break
+					}
+				}
+				var blockErr error
+				if hasDirectMethods {
+					blockErr = directB.BlockDirect(utils.NewIPInfo(ip), bestFitDuration, state.Reason)
+				} else {
+					blockErr = p.Blocker.Block(utils.NewIPInfo(ip), bestFitDuration, state.Reason)
+				}
+				if blockErr != nil {
+					p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore block for IP %s: %v", ip, blockErr)
+				} else {
+					restored++
+				}
+			} else {
+				skipped++
+				skippedExpired++
+			}
+		} else if state.State == persistence.BlockStateUnblocked {
+			// Check if already unblocked in HAProxy
+			if gpc0, exists := currentState[ip]; exists && gpc0 == 0 {
+				skipped++
+				skippedAlreadyUnblocked++
+				continue
+			}
+
+			// Restore unblock state (good actor protection)
+			var unblockErr error
+			if hasDirectMethods {
+				unblockErr = directB.UnblockDirect(utils.NewIPInfo(ip), state.Reason)
+			} else {
+				unblockErr = p.Blocker.Unblock(utils.NewIPInfo(ip), state.Reason)
+			}
+			if unblockErr != nil {
+				p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore unblock for IP %s: %v", ip, unblockErr)
+			} else {
+				restored++
 			}
 		}
+	}
+
+	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "State restoration complete: %d restored, %d skipped (already_blocked=%d, already_unblocked=%d, expired=%d, good_actors=%d)",
+		restored, skipped, skippedAlreadyBlocked, skippedAlreadyUnblocked, skippedExpired, skippedGoodActor)
+
+	// Warn if we restored a large number of IPs that might exceed HAProxy table capacity
+	if restored > 50000 {
+		p.LogFunc(logging.LevelWarning, "STATE_RESTORE", "Restored %d IPs. Verify HAProxy stick table capacity (tune.bufsize, table size). HAProxy silently drops entries when tables are full.", restored)
 	}
 
 	// 4. Open journal for appending
@@ -527,24 +654,54 @@ func runCompaction(p *app.Processor) {
 	p.PersistenceMutex.Lock()
 	defer p.PersistenceMutex.Unlock()
 
-	// Filter out expired blocks before snapshotting
+	// Filter out expired entries in-place
 	now := p.NowFunc()
-	activeBlocks := make(map[string]persistence.ActiveBlockInfo)
-	for ip, info := range p.ActiveBlocks {
-		if now.Before(info.UnblockTime) {
-			activeBlocks[ip] = info
+	expiredBlocks := 0
+
+	for ip, state := range p.IPStates {
+		if state.State == persistence.BlockStateBlocked && !now.Before(state.ExpireTime) {
+			delete(p.IPStates, ip)
+			expiredBlocks++
 		}
 	}
-	p.ActiveBlocks = activeBlocks // Update in-memory map
 
-	snapshot := &persistence.Snapshot{
-		Timestamp:    now,
-		ActiveBlocks: p.ActiveBlocks,
+	// Recreate map if it's shrunk significantly to free memory
+	ipStatesLen := len(p.IPStates)
+	if expiredBlocks > ipStatesLen {
+		newIPStates := make(map[string]persistence.IPState, ipStatesLen)
+		for ip, state := range p.IPStates {
+			newIPStates[ip] = state
+		}
+		p.IPStates = newIPStates
 	}
 
-	if err := persistence.WriteSnapshot(filepath.Join(p.StateDir, "state.snapshot"), snapshot); err != nil {
+	// Count blocked vs unblocked for logging
+	blockedCount := 0
+	for _, state := range p.IPStates {
+		if state.State == persistence.BlockStateBlocked {
+			blockedCount++
+		}
+	}
+	unblockedCount := ipStatesLen - blockedCount
+
+	snapshot := &persistence.Snapshot{
+		Timestamp: now,
+		IPStates:  p.IPStates,
+	}
+
+	snapshotPath := filepath.Join(p.StateDir, "state.snapshot")
+	if err := persistence.WriteSnapshot(snapshotPath, snapshot); err != nil {
 		p.LogFunc(logging.LevelError, "COMPACTION_FAIL", "Failed to write snapshot: %v", err)
 		return
+	}
+
+	// Log snapshot write details
+	if fileInfo, err := os.Stat(snapshotPath); err == nil {
+		p.LogFunc(logging.LevelInfo, "COMPACTION", "Snapshot written (size=%d bytes, entries=%d blocked + %d unblocked, expired=%d)",
+			fileInfo.Size(), blockedCount, unblockedCount, expiredBlocks)
+	} else {
+		p.LogFunc(logging.LevelInfo, "COMPACTION", "Snapshot written (entries=%d blocked + %d unblocked, expired=%d)",
+			blockedCount, unblockedCount, expiredBlocks)
 	}
 
 	// Truncate and re-open journal
@@ -559,6 +716,8 @@ func runCompaction(p *app.Processor) {
 		p.LogFunc(logging.LevelError, "COMPACTION_FAIL", "Failed to truncate and re-open journal: %v", err)
 		// Attempt to re-open in append mode as a fallback
 		handle, _ = persistence.OpenJournalForAppend(journalPath)
+	} else {
+		p.LogFunc(logging.LevelInfo, "COMPACTION", "Journal truncated and reset")
 	}
 	p.JournalHandle = handle
 	p.LogFunc(logging.LevelInfo, "COMPACTION", "State snapshot and journal compaction completed successfully.")

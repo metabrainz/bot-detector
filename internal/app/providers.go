@@ -305,14 +305,20 @@ func (p *Processor) GetBlockerDialTimeout() time.Duration {
 	return p.Config.Blockers.DialTimeout
 }
 
+func (p *Processor) GetMaxCommandsPerBatch() int {
+	return p.Config.Blockers.MaxCommandsPerBatch
+}
+
 func (p *Processor) IncrementBlockerRetries() {
 	p.Metrics.BlockerRetries.Add(1)
 }
 
 func (p *Processor) IncrementCmdsPerBlocker(addr string) {
-	if val, ok := p.Metrics.CmdsPerBlocker.Load(addr); ok {
-		val.(*atomic.Int64).Add(1)
+	if p.Metrics == nil || p.Metrics.CmdsPerBlocker == nil {
+		return
 	}
+	val, _ := p.Metrics.CmdsPerBlocker.LoadOrStore(addr, new(atomic.Int64))
+	val.(*atomic.Int64).Add(1)
 }
 
 // GenerateHTMLMetricsReport creates the full metrics report as an HTML-safe string.

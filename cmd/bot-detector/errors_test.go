@@ -74,7 +74,7 @@ func TestCorruptedSnapshot(t *testing.T) {
 		t.Fatal("Expected an error when running with a corrupted snapshot, but got nil")
 	}
 
-	expectedError := "failed to unmarshal snapshot"
+	expectedError := "failed to unmarshal v1 snapshot"
 	if !strings.Contains(err.Error(), expectedError) {
 		t.Errorf("Expected error message to contain '%s', but got: %v", expectedError, err)
 	}

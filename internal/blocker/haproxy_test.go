@@ -44,6 +44,7 @@ func (m *mockHAProxyProvider) GetBlockTableNameFallback() string    { return m.b
 func (m *mockHAProxyProvider) GetBlockerMaxRetries() int            { return m.blockerMaxRetries }
 func (m *mockHAProxyProvider) GetBlockerRetryDelay() time.Duration  { return m.blockerRetryDelay }
 func (m *mockHAProxyProvider) GetBlockerDialTimeout() time.Duration { return m.blockerDialTimeout }
+func (m *mockHAProxyProvider) GetMaxCommandsPerBatch() int          { return 500 }
 func (m *mockHAProxyProvider) IncrementBlockerRetries()             { m.retries.Add(1) }
 func (m *mockHAProxyProvider) IncrementCmdsPerBlocker(addr string) {
 	val, _ := m.cmdsPerBlocker.LoadOrStore(addr, new(atomic.Int32))
@@ -124,18 +125,21 @@ func TestHAProxyBlocker_Unblock(t *testing.T) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	expectedCmds := map[string]struct{}{
-		"set table table_10m_ipv4 key 192.0.2.1 data.gpc0 0":  {},
-		"set table table_long_ipv4 key 192.0.2.1 data.gpc0 0": {},
+	// Commands are now batched with semicolons
+	if len(h.commands) != 1 {
+		t.Fatalf("Expected 1 batched command, got %d", len(h.commands))
 	}
 
-	if len(h.commands) != len(expectedCmds) {
-		t.Fatalf("Expected %d unblock commands, got %d", len(expectedCmds), len(h.commands))
+	// Check that both commands are in the batched command
+	batchedCmd := h.commands[0]
+	expectedCmds := []string{
+		"set table table_10m_ipv4 key 192.0.2.1 data.gpc0 0",
+		"set table table_long_ipv4 key 192.0.2.1 data.gpc0 0",
 	}
 
-	for _, cmd := range h.commands {
-		if _, ok := expectedCmds[cmd]; !ok {
-			t.Errorf("Received unexpected unblock command: %s", cmd)
+	for _, expected := range expectedCmds {
+		if !strings.Contains(batchedCmd, expected) {
+			t.Errorf("Batched command missing expected command '%s'. Got: %s", expected, batchedCmd)
 		}
 	}
 }

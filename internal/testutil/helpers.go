@@ -89,6 +89,15 @@ func (m *MockBlocker) CompareHAProxyBackends(expTolerance time.Duration) ([]bloc
 	return args.Get(0).([]blocker.SyncDiscrepancy), args.Error(1)
 }
 
+// GetCurrentState calls the stored mock function to simulate getting current HAProxy state.
+func (m *MockBlocker) GetCurrentState() (map[string]int, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(map[string]int), args.Error(1)
+}
+
 // Shutdown is a no-op for the mock to satisfy the Blocker interface.
 func (m *MockBlocker) Shutdown() {
 	// No-op for mock

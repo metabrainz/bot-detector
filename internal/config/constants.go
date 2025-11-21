@@ -8,6 +8,12 @@ import (
 // AppVersion is the application's version string.
 const AppVersion = "0.1"
 
+// Build-time variables (set via -ldflags during build)
+var (
+	GitCommit = "unknown"
+	BuildTime = "unknown"
+)
+
 // --- CONSTANT FOR CRITICAL LOG LINE BUFFER LIMIT ---
 const MaxLogLineSize = 16 * 1024
 
@@ -44,8 +50,9 @@ const (
 	DefaultBlockerMaxRetries        = 3
 	DefaultBlockerRetryDelay        = 200 * time.Millisecond
 	DefaultBlockerDialTimeout       = 5 * time.Second
-	DefaultBlockerCommandQueueSize  = 1000 // Default queue size
-	DefaultBlockerCommandsPerSecond = 10   // Default rate limit
+	DefaultBlockerCommandQueueSize  = 10000 // Default queue size (increased for batching throughput)
+	DefaultBlockerCommandsPerSecond = 100   // Default rate limit (increased for batching throughput)
+	DefaultMaxCommandsPerBatch      = 500   // Default batch size for HAProxy CLI commands
 	DefaultUnblockCooldown          = "5m"
 	DefaultEnableMetrics            = true
 

@@ -7,15 +7,25 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 )
 
-// LoadSnapshot reads and unmarshals the snapshot file.
+// GetJournalPath returns the journal file path (always events.log for v1).
+func GetJournalPath(stateDir, version string) string {
+	return filepath.Join(stateDir, "events.log")
+}
+
+// LoadSnapshot reads and unmarshals the v1 snapshot file.
 // It automatically detects whether the file is gzipped or plain JSON.
 func LoadSnapshot(path string) (*Snapshot, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &Snapshot{ActiveBlocks: make(map[string]ActiveBlockInfo)}, nil // Return empty snapshot if not found
+			return &Snapshot{
+				Version:  CurrentVersion,
+				IPStates: make(map[string]IPState),
+			}, nil
 		}
 		return nil, fmt.Errorf("failed to read snapshot file: %w", err)
 	}
@@ -43,26 +53,63 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 		jsonData = data
 	}
 
-	var snapshot Snapshot
-	if err := json.Unmarshal(jsonData, &snapshot); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
+	// Parse v1 format
+	var snapV1 SnapshotV1
+	if err := json.Unmarshal(jsonData, &snapV1); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal v1 snapshot: %w", err)
 	}
-	if snapshot.ActiveBlocks == nil {
-		snapshot.ActiveBlocks = make(map[string]ActiveBlockInfo)
+
+	// Convert entries array to IPStates map
+	ipStates := make(map[string]IPState)
+	for _, entry := range snapV1.Snapshot.Entries {
+		ipStates[entry.IP] = IPState{
+			State:      entry.State,
+			ExpireTime: entry.ExpireTime,
+			Reason:     entry.Reason,
+		}
 	}
-	return &snapshot, nil
+
+	return &Snapshot{
+		Version:   CurrentVersion,
+		Timestamp: snapV1.Timestamp,
+		IPStates:  ipStates,
+	}, nil
 }
 
-// WriteSnapshot atomically writes a gzipped snapshot file.
+// WriteSnapshot atomically writes a gzipped v1 snapshot file.
 func WriteSnapshot(path string, snap *Snapshot) error {
-	data, err := json.MarshalIndent(snap, "", "  ")
+	// Use v1 wrapper format with sorted entries from IPStates
+	entries := make([]BlockStateEntryV1, 0, len(snap.IPStates))
+	for ip, state := range snap.IPStates {
+		entries = append(entries, BlockStateEntryV1{
+			IP:         ip,
+			State:      state.State,
+			ExpireTime: state.ExpireTime,
+			Reason:     state.Reason,
+		})
+	}
+	// Sort by ExpireTime (chronological order)
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].ExpireTime.Before(entries[j].ExpireTime)
+	})
+
+	snapV1 := SnapshotV1{
+		Timestamp: snap.Timestamp,
+		Snapshot: SnapshotDataV1{
+			Entries: entries,
+		},
+	}
+	data, err := json.Marshal(snapV1)
 	if err != nil {
 		return fmt.Errorf("failed to marshal snapshot: %w", err)
 	}
 
-	// Compress the JSON data
+	// Compress the JSON data with BestSpeed for faster writes
 	var buf bytes.Buffer
-	gzWriter := gzip.NewWriter(&buf)
+	gzWriter, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
+	if err != nil {
+		return fmt.Errorf("failed to create gzip writer: %w", err)
+	}
 	if _, err := gzWriter.Write(data); err != nil {
 		return fmt.Errorf("failed to gzip snapshot data: %w", err)
 	}
@@ -89,7 +136,17 @@ func OpenJournalForAppend(path string) (*os.File, error) {
 
 // WriteEventToJournal marshals and writes a single event to an open file handle.
 func WriteEventToJournal(handle *os.File, event *AuditEvent) error {
-	data, err := json.Marshal(event)
+	// Use v1 wrapper format
+	entry := JournalEntryV1{
+		Timestamp: event.Timestamp,
+		Event: AuditEventDataV1{
+			Type:     event.Event,
+			IP:       event.IP,
+			Duration: event.Duration,
+			Reason:   event.Reason,
+		},
+	}
+	data, err := json.Marshal(entry)
 	if err != nil {
 		return fmt.Errorf("failed to marshal audit event: %w", err)
 	}

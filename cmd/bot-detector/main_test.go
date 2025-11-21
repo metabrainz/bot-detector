@@ -6,6 +6,8 @@ import (
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/processor"
 	"bot-detector/internal/testutil"
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -169,10 +171,10 @@ func TestCompaction(t *testing.T) {
 	p.JournalHandle = journalHandle
 	_, _ = p.JournalHandle.WriteString("some old event\n")
 
-	// Add some active blocks to the processor's state.
-	p.ActiveBlocks = map[string]persistence.ActiveBlockInfo{
-		"1.1.1.1": {UnblockTime: p.NowFunc().Add(1 * time.Hour), Reason: "chain1"},
-		"2.2.2.2": {UnblockTime: p.NowFunc().Add(-1 * time.Minute), Reason: "chain2"}, // Expired
+	// Add some blocked IPs to the processor's state.
+	p.IPStates = map[string]persistence.IPState{
+		"1.1.1.1": {State: persistence.BlockStateBlocked, ExpireTime: p.NowFunc().Add(1 * time.Hour), Reason: "chain1"},
+		"2.2.2.2": {State: persistence.BlockStateBlocked, ExpireTime: p.NowFunc().Add(-1 * time.Minute), Reason: "chain2"}, // Expired
 	}
 
 	// --- Act ---
@@ -193,24 +195,30 @@ func TestCompaction(t *testing.T) {
 	}
 
 	// Verify only the non-expired block is in the snapshot
-	if len(loadedSnapshot.ActiveBlocks) != 1 {
-		t.Errorf("Expected 1 active block in snapshot, got %d", len(loadedSnapshot.ActiveBlocks))
+	blockedCount := 0
+	for _, state := range loadedSnapshot.IPStates {
+		if state.State == persistence.BlockStateBlocked {
+			blockedCount++
+		}
+	}
+	if blockedCount != 1 {
+		t.Errorf("Expected 1 blocked IP in snapshot, got %d", blockedCount)
 	}
 
-	if block, exists := loadedSnapshot.ActiveBlocks["1.1.1.1"]; !exists {
+	if state, exists := loadedSnapshot.IPStates["1.1.1.1"]; !exists {
 		t.Errorf("Expected block for 1.1.1.1 not found in snapshot")
 	} else {
-		expectedUnblockTime := time.Date(2025, 1, 1, 13, 0, 0, 0, time.UTC)
-		if !block.UnblockTime.Equal(expectedUnblockTime) {
-			t.Errorf("Block unblock time mismatch. Got: %v, Expected: %v", block.UnblockTime, expectedUnblockTime)
+		expectedExpireTime := time.Date(2025, 1, 1, 13, 0, 0, 0, time.UTC)
+		if !state.ExpireTime.Equal(expectedExpireTime) {
+			t.Errorf("Block expire time mismatch. Got: %v, Expected: %v", state.ExpireTime, expectedExpireTime)
 		}
-		if block.Reason != "chain1" {
-			t.Errorf("Block reason mismatch. Got: %v, Expected: chain1", block.Reason)
+		if state.Reason != "chain1" {
+			t.Errorf("Block reason mismatch. Got: %v, Expected: chain1", state.Reason)
 		}
 	}
 
 	// Verify the expired block (2.2.2.2) was filtered out
-	if _, exists := loadedSnapshot.ActiveBlocks["2.2.2.2"]; exists {
+	if _, exists := loadedSnapshot.IPStates["2.2.2.2"]; exists {
 		t.Errorf("Expired block for 2.2.2.2 should not be in snapshot")
 	}
 
@@ -222,4 +230,134 @@ func TestCompaction(t *testing.T) {
 	if journalInfo.Size() != 0 {
 		t.Errorf("Expected journal file to be empty after compaction, but size is %d", journalInfo.Size())
 	}
+}
+
+func TestCorruptedJournalHandling(t *testing.T) {
+	// --- Arrange ---
+	tempDir, err := os.MkdirTemp("", "bot_detector_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer func() {
+		_ = os.RemoveAll(tempDir)
+	}()
+
+	// Create a snapshot
+	snapshotPath := filepath.Join(tempDir, "state.snapshot")
+	snapshot := &persistence.Snapshot{
+		Version:   "v0",
+		Timestamp: time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
+		IPStates: map[string]persistence.IPState{
+			"1.1.1.1": {
+				State:      persistence.BlockStateBlocked,
+				ExpireTime: time.Date(2025, 1, 1, 13, 0, 0, 0, time.UTC),
+				Reason:     "initial-block",
+			},
+		},
+	}
+	if err := persistence.WriteSnapshot(snapshotPath, snapshot); err != nil {
+		t.Fatalf("Failed to write snapshot: %v", err)
+	}
+
+	// Create a journal with valid entries and a corrupted entry at the end
+	journalPath := filepath.Join(tempDir, "events.log")
+	journalContent := `{"version":"v0","ts":"2025-01-01T12:00:01Z","event":"block","ip":"2.2.2.2","duration":3600000000000,"reason":"valid-block-1"}
+{"version":"v0","ts":"2025-01-01T12:00:02Z","event":"unblock","ip":"1.1.1.1","reason":"good-actor"}
+{"version":"v0","ts":"2025-01-01T12:00:03Z","event":"block","ip":"3.3.3.3","duration":7200000000000,"reason":"valid-block-2"}
+{"version":"v0","ts":"2025-01-01T12:00:04Z","event":"block","ip":"4.4.4.4","duration":1800000000000,"reason":"truncated
+`
+	if err := os.WriteFile(journalPath, []byte(journalContent), 0644); err != nil {
+		t.Fatalf("Failed to write journal: %v", err)
+	}
+
+	// --- Act: Manually replay journal to test parsing ---
+	loadedSnapshot, err := persistence.LoadSnapshot(snapshotPath)
+	if err != nil {
+		t.Fatalf("Failed to load snapshot: %v", err)
+	}
+
+	ipStates := make(map[string]persistence.IPState)
+	for ip, state := range loadedSnapshot.IPStates {
+		ipStates[ip] = state
+	}
+
+	journalFile, err := os.Open(journalPath)
+	if err != nil {
+		t.Fatalf("Failed to open journal: %v", err)
+	}
+	defer func() {
+		_ = journalFile.Close()
+	}()
+
+	blockEvents := 0
+	unblockEvents := 0
+	parseErrors := 0
+
+	scanner := bufio.NewScanner(journalFile)
+	for scanner.Scan() {
+		var event persistence.AuditEvent
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			t.Logf("Parse error (expected): %v", err)
+			parseErrors++
+			continue
+		}
+		if event.Timestamp.After(loadedSnapshot.Timestamp) {
+			switch event.Event {
+			case persistence.EventTypeBlock:
+				blockEvents++
+				expireTime := event.Timestamp.Add(event.Duration)
+				ipStates[event.IP] = persistence.IPState{
+					State:      persistence.BlockStateBlocked,
+					ExpireTime: expireTime,
+					Reason:     event.Reason,
+				}
+			case persistence.EventTypeUnblock:
+				unblockEvents++
+				ipStates[event.IP] = persistence.IPState{
+					State:  persistence.BlockStateUnblocked,
+					Reason: event.Reason,
+				}
+			}
+		}
+	}
+
+	// --- Assert ---
+	if parseErrors != 1 {
+		t.Errorf("Expected 1 parse error, got %d", parseErrors)
+	}
+
+	if blockEvents != 2 {
+		t.Errorf("Expected 2 block events, got %d", blockEvents)
+	}
+
+	if unblockEvents != 1 {
+		t.Errorf("Expected 1 unblock event, got %d", unblockEvents)
+	}
+
+	// Verify that valid entries were processed despite the corrupted one
+	if len(ipStates) != 3 {
+		t.Errorf("Expected 3 IP states (2 blocked + 1 unblocked), got %d", len(ipStates))
+	}
+
+	// Check that the valid blocks were loaded
+	if _, exists := ipStates["2.2.2.2"]; !exists {
+		t.Errorf("Expected IP 2.2.2.2 to be in state (valid-block-1)")
+	}
+	if _, exists := ipStates["3.3.3.3"]; !exists {
+		t.Errorf("Expected IP 3.3.3.3 to be in state (valid-block-2)")
+	}
+
+	// Check that the unblock was processed
+	if state, exists := ipStates["1.1.1.1"]; !exists {
+		t.Errorf("Expected IP 1.1.1.1 to be in state (unblocked)")
+	} else if state.State != persistence.BlockStateUnblocked {
+		t.Errorf("Expected IP 1.1.1.1 to be unblocked, got state %s", state.State)
+	}
+
+	// Verify the corrupted entry was NOT processed
+	if _, exists := ipStates["4.4.4.4"]; exists {
+		t.Errorf("Corrupted entry for IP 4.4.4.4 should not have been processed")
+	}
+
+	t.Logf("✓ Corrupted journal handled correctly: 2 blocks + 1 unblock processed, 1 corrupted entry skipped")
 }

@@ -40,6 +40,10 @@ func (m *mockWrappedBlocker) CompareHAProxyBackends(expTolerance time.Duration) 
 	return []blocker.SyncDiscrepancy{}, nil
 }
 
+func (m *mockWrappedBlocker) GetCurrentState() (map[string]int, error) {
+	return make(map[string]int), nil
+}
+
 func (m *mockWrappedBlocker) Shutdown() {
 	// No-op for mock
 }

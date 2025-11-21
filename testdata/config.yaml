@@ -17,8 +17,9 @@ checker:
 
 blockers:
   default_duration: "30m"
-  commands_per_second: 10
-  command_queue_size: 1000
+  commands_per_second: 100
+  command_queue_size: 10000
+  max_commands_per_batch: 500
   dial_timeout: "5s"
   max_retries: 3
   retry_delay: "200ms"

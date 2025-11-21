@@ -65,13 +65,14 @@ type CheckerConfig struct {
 }
 
 type BlockersConfig struct {
-	DefaultDuration   time.Duration `config:"compare" summary:"default_block_duration"`
-	CommandsPerSecond int           `config:"compare" summary:"blocker_commands_per_second"`
-	CommandQueueSize  int           `config:"compare" summary:"blocker_command_queue_size"`
-	DialTimeout       time.Duration `config:"compare" summary:"blocker_dial_timeout"`
-	MaxRetries        int           `config:"compare" summary:"blocker_max_retries"`
-	RetryDelay        time.Duration `config:"compare" summary:"blocker_retry_delay"`
-	Backends          Backends      `config:"compare"`
+	DefaultDuration     time.Duration `config:"compare" summary:"default_block_duration"`
+	CommandsPerSecond   int           `config:"compare" summary:"blocker_commands_per_second"`
+	CommandQueueSize    int           `config:"compare" summary:"blocker_command_queue_size"`
+	MaxCommandsPerBatch int           `config:"compare" summary:"max_commands_per_batch"`
+	DialTimeout         time.Duration `config:"compare" summary:"blocker_dial_timeout"`
+	MaxRetries          int           `config:"compare" summary:"blocker_max_retries"`
+	RetryDelay          time.Duration `config:"compare" summary:"blocker_retry_delay"`
+	Backends            Backends      `config:"compare"`
 }
 
 type Backends struct {
@@ -136,13 +137,14 @@ type CheckerConfigYAML struct {
 }
 
 type BlockersConfigYAML struct {
-	DefaultDuration   string       `yaml:"default_duration"`
-	CommandsPerSecond int          `yaml:"commands_per_second"`
-	CommandQueueSize  int          `yaml:"command_queue_size"`
-	DialTimeout       string       `yaml:"dial_timeout"`
-	MaxRetries        int          `yaml:"max_retries"`
-	RetryDelay        string       `yaml:"retry_delay"`
-	Backends          BackendsYAML `yaml:"backends"`
+	DefaultDuration     string       `yaml:"default_duration"`
+	CommandsPerSecond   int          `yaml:"commands_per_second"`
+	CommandQueueSize    int          `yaml:"command_queue_size"`
+	MaxCommandsPerBatch int          `yaml:"max_commands_per_batch"`
+	DialTimeout         string       `yaml:"dial_timeout"`
+	MaxRetries          int          `yaml:"max_retries"`
+	RetryDelay          string       `yaml:"retry_delay"`
+	Backends            BackendsYAML `yaml:"backends"`
 }
 
 type BackendsYAML struct {
