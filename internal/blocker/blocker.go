@@ -12,7 +12,8 @@ type Blocker interface {
 	Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error
 	Unblock(ipInfo utils.IPInfo, reason string) error
 	DumpBackends() ([]string, error)
-	CompareHAProxyBackends(expTolerance time.Duration) ([]SyncDiscrepancy, error) // New method
+	CompareHAProxyBackends(expTolerance time.Duration) ([]SyncDiscrepancy, error)
+	GetCurrentState() (map[string]int, error)
 	Shutdown()
 }
 
@@ -114,6 +115,11 @@ func (b *RateLimitedBlocker) DumpBackends() ([]string, error) {
 // by delegating the call to the wrapped blocker.
 func (b *RateLimitedBlocker) CompareHAProxyBackends(expTolerance time.Duration) ([]SyncDiscrepancy, error) {
 	return b.WrappedBlocker.CompareHAProxyBackends(expTolerance)
+}
+
+// GetCurrentState retrieves current HAProxy state by delegating to the wrapped blocker.
+func (b *RateLimitedBlocker) GetCurrentState() (map[string]int, error) {
+	return b.WrappedBlocker.GetCurrentState()
 }
 
 // Stop stops the command queue worker.
