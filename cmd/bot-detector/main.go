@@ -153,6 +153,7 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		PersistenceEnabled: loadedCfg.Application.Persistence.Enabled,
 		CompactionInterval: loadedCfg.Application.Persistence.CompactionInterval,
 		ActiveBlocks:       make(map[string]persistence.ActiveBlockInfo),
+		IPStates:           make(map[string]persistence.IPState),
 
 		// Initialize cluster fields with defaults (will be set properly in later phases)
 		Cluster:           loadedCfg.Cluster,

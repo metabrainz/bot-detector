@@ -88,6 +88,7 @@ type Processor struct {
 	PersistenceWg      sync.WaitGroup
 	JournalHandle      *os.File
 	ActiveBlocks       map[string]persistence.ActiveBlockInfo
+	IPStates           map[string]persistence.IPState // Unified state: blocked + unblocked IPs
 	// ConfigReloaded is a flag to indicate if the configuration has been reloaded at least once.
 	ConfigReloaded bool
 	// ExitOnEOF is a flag to indicate if the tailer should exit when it reaches the end of the file.
