@@ -12,6 +12,7 @@ import (
 
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/persistence"
 	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
 )
@@ -167,8 +168,14 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 		return
 	}
 
+	// Count blocked IPs
 	p.PersistenceMutex.Lock()
-	blockedCount := len(p.ActiveBlocks)
+	blockedCount := 0
+	for _, state := range p.IPStates {
+		if state.State == persistence.BlockStateBlocked {
+			blockedCount++
+		}
+	}
 	p.PersistenceMutex.Unlock()
 
 	if blockedCount == 0 {
@@ -184,10 +191,14 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 			continue // No IP matcher, skip
 		}
 
-		// We need to iterate through activeBlocks for pattern matching (CIDR/regex)
-		// Create a temporary log entry for testing
+		// Iterate through blocked IPs for pattern matching (CIDR/regex)
 		p.PersistenceMutex.Lock()
-		for ip := range p.ActiveBlocks {
+		for ip, state := range p.IPStates {
+			// Skip if not blocked
+			if state.State != persistence.BlockStateBlocked {
+				continue
+			}
+
 			// Create a minimal LogEntry with just the IP set
 			testEntry := &LogEntry{
 				IPInfo: utils.NewIPInfo(ip),
@@ -196,8 +207,11 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 			// Test if this IP matches the good actor's IP matcher
 			if goodActor.IPMatchers[0](testEntry) {
 				// Match found - need to unblock
-				blockInfo := p.ActiveBlocks[ip]
-				delete(p.ActiveBlocks, ip)
+				// Update state to unblocked
+				p.IPStates[ip] = persistence.IPState{
+					State:  persistence.BlockStateUnblocked,
+					Reason: "added-to-good-actors",
+				}
 
 				// Issue unblock command to HAProxy
 				if !p.DryRun && p.Blocker != nil {
@@ -207,7 +221,7 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 
 				p.LogFunc(logging.LevelInfo, "UNBLOCK_WHITELIST",
 					"Unblocked %s (was blocked by %s): newly added to good_actors (%s)",
-					ip, blockInfo.Reason, goodActor.Name)
+					ip, state.Reason, goodActor.Name)
 				unblocked++
 			}
 		}

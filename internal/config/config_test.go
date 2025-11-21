@@ -1783,8 +1783,8 @@ chains:
 				UnblockOnGoodActor: true,
 			},
 		},
-		DryRun:       false,
-		ActiveBlocks: make(map[string]persistence.ActiveBlockInfo),
+		DryRun:   false,
+		IPStates: make(map[string]persistence.IPState),
 		Blocker: &testutil.MockBlocker{
 			UnblockFunc: func(ipInfo utils.IPInfo, reason string) error {
 				unblockMutex.Lock()
@@ -1811,13 +1811,15 @@ chains:
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
 	// Add some blocked IPs
-	processor.ActiveBlocks["1.2.3.4"] = persistence.ActiveBlockInfo{
-		Reason:      "test-chain",
-		UnblockTime: time.Now().Add(1 * time.Hour),
+	processor.IPStates["1.2.3.4"] = persistence.IPState{
+		State:      persistence.BlockStateBlocked,
+		Reason:     "test-chain",
+		ExpireTime: time.Now().Add(1 * time.Hour),
 	}
-	processor.ActiveBlocks["5.6.7.8"] = persistence.ActiveBlockInfo{
-		Reason:      "test-chain",
-		UnblockTime: time.Now().Add(1 * time.Hour),
+	processor.IPStates["5.6.7.8"] = persistence.IPState{
+		State:      persistence.BlockStateBlocked,
+		Reason:     "test-chain",
+		ExpireTime: time.Now().Add(1 * time.Hour),
 	}
 
 	// Start app.ConfigWatcher
@@ -1874,13 +1876,13 @@ chains:
 	}
 	unblockMutex.Unlock()
 
-	// Check activeBlocks
+	// Check IPStates
 	processor.PersistenceMutex.Lock()
-	if _, exists := processor.ActiveBlocks["1.2.3.4"]; exists {
-		t.Error("Expected 1.2.3.4 to be removed from activeBlocks")
+	if state, exists := processor.IPStates["1.2.3.4"]; exists && state.State == persistence.BlockStateBlocked {
+		t.Error("Expected 1.2.3.4 to be unblocked or removed from IPStates")
 	}
-	if _, exists := processor.ActiveBlocks["5.6.7.8"]; !exists {
-		t.Error("Expected 5.6.7.8 to remain in activeBlocks")
+	if state, exists := processor.IPStates["5.6.7.8"]; !exists || state.State != persistence.BlockStateBlocked {
+		t.Error("Expected 5.6.7.8 to remain blocked in IPStates")
 	}
 	processor.PersistenceMutex.Unlock()
 }

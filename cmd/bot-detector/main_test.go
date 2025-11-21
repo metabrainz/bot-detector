@@ -171,11 +171,7 @@ func TestCompaction(t *testing.T) {
 	p.JournalHandle = journalHandle
 	_, _ = p.JournalHandle.WriteString("some old event\n")
 
-	// Add some active blocks to the processor's state.
-	p.ActiveBlocks = map[string]persistence.ActiveBlockInfo{
-		"1.1.1.1": {UnblockTime: p.NowFunc().Add(1 * time.Hour), Reason: "chain1"},
-		"2.2.2.2": {UnblockTime: p.NowFunc().Add(-1 * time.Minute), Reason: "chain2"}, // Expired
-	}
+	// Add some blocked IPs to the processor's state.
 	p.IPStates = map[string]persistence.IPState{
 		"1.1.1.1": {State: persistence.BlockStateBlocked, ExpireTime: p.NowFunc().Add(1 * time.Hour), Reason: "chain1"},
 		"2.2.2.2": {State: persistence.BlockStateBlocked, ExpireTime: p.NowFunc().Add(-1 * time.Minute), Reason: "chain2"}, // Expired
@@ -199,24 +195,30 @@ func TestCompaction(t *testing.T) {
 	}
 
 	// Verify only the non-expired block is in the snapshot
-	if len(loadedSnapshot.ActiveBlocks) != 1 {
-		t.Errorf("Expected 1 active block in snapshot, got %d", len(loadedSnapshot.ActiveBlocks))
+	blockedCount := 0
+	for _, state := range loadedSnapshot.IPStates {
+		if state.State == persistence.BlockStateBlocked {
+			blockedCount++
+		}
+	}
+	if blockedCount != 1 {
+		t.Errorf("Expected 1 blocked IP in snapshot, got %d", blockedCount)
 	}
 
-	if block, exists := loadedSnapshot.ActiveBlocks["1.1.1.1"]; !exists {
+	if state, exists := loadedSnapshot.IPStates["1.1.1.1"]; !exists {
 		t.Errorf("Expected block for 1.1.1.1 not found in snapshot")
 	} else {
-		expectedUnblockTime := time.Date(2025, 1, 1, 13, 0, 0, 0, time.UTC)
-		if !block.UnblockTime.Equal(expectedUnblockTime) {
-			t.Errorf("Block unblock time mismatch. Got: %v, Expected: %v", block.UnblockTime, expectedUnblockTime)
+		expectedExpireTime := time.Date(2025, 1, 1, 13, 0, 0, 0, time.UTC)
+		if !state.ExpireTime.Equal(expectedExpireTime) {
+			t.Errorf("Block expire time mismatch. Got: %v, Expected: %v", state.ExpireTime, expectedExpireTime)
 		}
-		if block.Reason != "chain1" {
-			t.Errorf("Block reason mismatch. Got: %v, Expected: chain1", block.Reason)
+		if state.Reason != "chain1" {
+			t.Errorf("Block reason mismatch. Got: %v, Expected: chain1", state.Reason)
 		}
 	}
 
 	// Verify the expired block (2.2.2.2) was filtered out
-	if _, exists := loadedSnapshot.ActiveBlocks["2.2.2.2"]; exists {
+	if _, exists := loadedSnapshot.IPStates["2.2.2.2"]; exists {
 		t.Errorf("Expired block for 2.2.2.2 should not be in snapshot")
 	}
 
@@ -245,12 +247,6 @@ func TestCorruptedJournalHandling(t *testing.T) {
 	snapshot := &persistence.Snapshot{
 		Version:   "v0",
 		Timestamp: time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
-		ActiveBlocks: map[string]persistence.ActiveBlockInfo{
-			"1.1.1.1": {
-				UnblockTime: time.Date(2025, 1, 1, 13, 0, 0, 0, time.UTC),
-				Reason:      "initial-block",
-			},
-		},
 		IPStates: map[string]persistence.IPState{
 			"1.1.1.1": {
 				State:      persistence.BlockStateBlocked,
@@ -280,11 +276,7 @@ func TestCorruptedJournalHandling(t *testing.T) {
 		t.Fatalf("Failed to load snapshot: %v", err)
 	}
 
-	activeBlocks := make(map[string]persistence.ActiveBlockInfo)
 	ipStates := make(map[string]persistence.IPState)
-	for ip, info := range loadedSnapshot.ActiveBlocks {
-		activeBlocks[ip] = info
-	}
 	for ip, state := range loadedSnapshot.IPStates {
 		ipStates[ip] = state
 	}
@@ -314,10 +306,6 @@ func TestCorruptedJournalHandling(t *testing.T) {
 			case persistence.EventTypeBlock:
 				blockEvents++
 				expireTime := event.Timestamp.Add(event.Duration)
-				activeBlocks[event.IP] = persistence.ActiveBlockInfo{
-					UnblockTime: expireTime,
-					Reason:      event.Reason,
-				}
 				ipStates[event.IP] = persistence.IPState{
 					State:      persistence.BlockStateBlocked,
 					ExpireTime: expireTime,
@@ -325,7 +313,6 @@ func TestCorruptedJournalHandling(t *testing.T) {
 				}
 			case persistence.EventTypeUnblock:
 				unblockEvents++
-				delete(activeBlocks, event.IP)
 				ipStates[event.IP] = persistence.IPState{
 					State:  persistence.BlockStateUnblocked,
 					Reason: event.Reason,

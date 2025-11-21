@@ -152,7 +152,6 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		// Initialize persistence fields
 		PersistenceEnabled: loadedCfg.Application.Persistence.Enabled,
 		CompactionInterval: loadedCfg.Application.Persistence.CompactionInterval,
-		ActiveBlocks:       make(map[string]persistence.ActiveBlockInfo),
 		IPStates:           make(map[string]persistence.IPState),
 		ReasonCache:        make(map[string]*string),
 
@@ -179,7 +178,6 @@ func restorePersistenceState(p *app.Processor) error {
 		p.LogFunc(logging.LevelError, "STATE_LOAD_FAIL", "Failed to load snapshot: %v", err)
 		return err
 	}
-	p.ActiveBlocks = snapshot.ActiveBlocks
 	p.IPStates = snapshot.IPStates
 
 	// Intern all reason strings to save memory
@@ -187,18 +185,23 @@ func restorePersistenceState(p *app.Processor) error {
 		state.Reason = p.InternReason(state.Reason)
 		p.IPStates[ip] = state
 	}
-	for ip, info := range p.ActiveBlocks {
-		info.Reason = p.InternReason(info.Reason)
-		p.ActiveBlocks[ip] = info
+
+	// Count blocked IPs for logging
+	blockedCount := 0
+	for _, state := range p.IPStates {
+		if state.State == persistence.BlockStateBlocked {
+			blockedCount++
+		}
 	}
+	unblockedCount := len(p.IPStates) - blockedCount
 
 	// Log snapshot details
 	if fileInfo, err := os.Stat(snapshotPath); err == nil {
 		p.LogFunc(logging.LevelInfo, "STATE_LOAD", "Loaded snapshot (version=%s, size=%d bytes, entries=%d blocked + %d unblocked, timestamp=%v)",
-			snapshot.Version, fileInfo.Size(), len(snapshot.ActiveBlocks), len(snapshot.IPStates)-len(snapshot.ActiveBlocks), snapshot.Timestamp)
+			snapshot.Version, fileInfo.Size(), blockedCount, unblockedCount, snapshot.Timestamp)
 	} else {
 		p.LogFunc(logging.LevelInfo, "STATE_LOAD", "Loaded snapshot (version=%s, entries=%d blocked + %d unblocked, timestamp=%v)",
-			snapshot.Version, len(snapshot.ActiveBlocks), len(snapshot.IPStates)-len(snapshot.ActiveBlocks), snapshot.Timestamp)
+			snapshot.Version, blockedCount, unblockedCount, snapshot.Timestamp)
 	}
 
 	// 2. Replay Journal
@@ -226,10 +229,6 @@ func restorePersistenceState(p *app.Processor) error {
 				case persistence.EventTypeBlock:
 					blockEvents++
 					expireTime := event.Timestamp.Add(event.Duration)
-					p.ActiveBlocks[event.IP] = persistence.ActiveBlockInfo{
-						UnblockTime: expireTime,
-						Reason:      reason,
-					}
 					p.IPStates[event.IP] = persistence.IPState{
 						State:      persistence.BlockStateBlocked,
 						ExpireTime: expireTime,
@@ -237,8 +236,6 @@ func restorePersistenceState(p *app.Processor) error {
 					}
 				case persistence.EventTypeUnblock:
 					unblockEvents++
-					delete(p.ActiveBlocks, event.IP)
-					// Keep in IPStates as unblocked (no expiration for unblock events in journal)
 					p.IPStates[event.IP] = persistence.IPState{
 						State:  persistence.BlockStateUnblocked,
 						Reason: reason,
@@ -595,29 +592,14 @@ func runCompaction(p *app.Processor) {
 
 	for ip, state := range p.IPStates {
 		if state.State == persistence.BlockStateBlocked && !now.Before(state.ExpireTime) {
-			// Entry is expired - remove it
 			delete(p.IPStates, ip)
-			delete(p.ActiveBlocks, ip)
 			expiredBlocks++
 		}
 	}
 
-	// Recreate maps if they've shrunk significantly to free memory
-	// This handles the case where state grows large then shrinks
-	activeBlocksLen := len(p.ActiveBlocks)
+	// Recreate map if it's shrunk significantly to free memory
 	ipStatesLen := len(p.IPStates)
-
-	// If maps are using >2x the space they need, recreate them
-	// This is a heuristic - Go maps don't expose capacity, but we can estimate
-	// by checking if we removed a significant portion
 	if expiredBlocks > ipStatesLen {
-		// More than 50% was removed - recreate to free memory
-		newActiveBlocks := make(map[string]persistence.ActiveBlockInfo, activeBlocksLen)
-		for ip, info := range p.ActiveBlocks {
-			newActiveBlocks[ip] = info
-		}
-		p.ActiveBlocks = newActiveBlocks
-
 		newIPStates := make(map[string]persistence.IPState, ipStatesLen)
 		for ip, state := range p.IPStates {
 			newIPStates[ip] = state
@@ -625,13 +607,18 @@ func runCompaction(p *app.Processor) {
 		p.IPStates = newIPStates
 	}
 
-	blockedCount := len(p.ActiveBlocks)
-	unblockedCount := len(p.IPStates) - blockedCount
+	// Count blocked vs unblocked for logging
+	blockedCount := 0
+	for _, state := range p.IPStates {
+		if state.State == persistence.BlockStateBlocked {
+			blockedCount++
+		}
+	}
+	unblockedCount := ipStatesLen - blockedCount
 
 	snapshot := &persistence.Snapshot{
-		Timestamp:    now,
-		ActiveBlocks: p.ActiveBlocks,
-		IPStates:     p.IPStates,
+		Timestamp: now,
+		IPStates:  p.IPStates,
 	}
 
 	snapshotPath := filepath.Join(p.StateDir, "state.snapshot")

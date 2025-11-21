@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 // GetSnapshotPath returns the appropriate snapshot file path for the given version.
@@ -34,9 +35,8 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &Snapshot{
-				Version:      CurrentVersion,
-				ActiveBlocks: make(map[string]ActiveBlockInfo),
-				IPStates:     make(map[string]IPState),
+				Version:  CurrentVersion,
+				IPStates: make(map[string]IPState),
 			}, nil
 		}
 		return nil, fmt.Errorf("failed to read snapshot file: %w", err)
@@ -79,8 +79,7 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 			if err := json.Unmarshal(jsonData, &snapV1); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal v1 snapshot: %w", err)
 			}
-			// Convert entries array to both ActiveBlocks and IPStates maps
-			activeBlocks := make(map[string]ActiveBlockInfo)
+			// Convert entries array to IPStates map
 			ipStates := make(map[string]IPState)
 			for _, entry := range snapV1.Snapshot.Entries {
 				ipStates[entry.IP] = IPState{
@@ -88,44 +87,39 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 					ExpireTime: entry.ExpireTime,
 					Reason:     entry.Reason,
 				}
-				// Also populate ActiveBlocks for backward compatibility
-				if entry.State == BlockStateBlocked {
-					activeBlocks[entry.IP] = ActiveBlockInfo{
-						UnblockTime: entry.ExpireTime,
-						Reason:      entry.Reason,
-					}
-				}
 			}
 			return &Snapshot{
-				Version:      "v1",
-				Timestamp:    snapV1.Timestamp,
-				ActiveBlocks: activeBlocks,
-				IPStates:     ipStates,
+				Version:   "v1",
+				Timestamp: snapV1.Timestamp,
+				IPStates:  ipStates,
 			}, nil
 		}
 	}
 
-	// It's v0 format
-	var snapshot Snapshot
-	if err := json.Unmarshal(jsonData, &snapshot); err != nil {
+	// It's v0 format - load and convert ActiveBlocks to IPStates
+	var v0Snap struct {
+		Timestamp    time.Time                  `json:"snapshot_time"`
+		ActiveBlocks map[string]ActiveBlockInfo `json:"active_blocks"`
+	}
+	if err := json.Unmarshal(jsonData, &v0Snap); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal v0 snapshot: %w", err)
 	}
-	if snapshot.ActiveBlocks == nil {
-		snapshot.ActiveBlocks = make(map[string]ActiveBlockInfo)
-	}
-	if snapshot.Version == "" {
-		snapshot.Version = "v0"
-	}
-	// Populate IPStates from ActiveBlocks for v0 format
-	snapshot.IPStates = make(map[string]IPState)
-	for ip, info := range snapshot.ActiveBlocks {
-		snapshot.IPStates[ip] = IPState{
+
+	// Convert v0 ActiveBlocks to IPStates
+	ipStates := make(map[string]IPState)
+	for ip, info := range v0Snap.ActiveBlocks {
+		ipStates[ip] = IPState{
 			State:      BlockStateBlocked,
 			ExpireTime: info.UnblockTime,
 			Reason:     info.Reason,
 		}
 	}
-	return &snapshot, nil
+
+	return &Snapshot{
+		Version:   "v0",
+		Timestamp: v0Snap.Timestamp,
+		IPStates:  ipStates,
+	}, nil
 }
 
 // WriteSnapshot atomically writes a gzipped snapshot file.
@@ -161,8 +155,23 @@ func WriteSnapshot(path string, snap *Snapshot) error {
 		}
 		data, err = json.Marshal(snapV1)
 	} else {
-		// Use v0 format
-		data, err = json.Marshal(snap)
+		// Use v0 format - build ActiveBlocks from IPStates for backward compatibility
+		v0Snap := struct {
+			Timestamp    time.Time                  `json:"snapshot_time"`
+			ActiveBlocks map[string]ActiveBlockInfo `json:"active_blocks"`
+		}{
+			Timestamp:    snap.Timestamp,
+			ActiveBlocks: make(map[string]ActiveBlockInfo),
+		}
+		for ip, state := range snap.IPStates {
+			if state.State == BlockStateBlocked {
+				v0Snap.ActiveBlocks[ip] = ActiveBlockInfo{
+					UnblockTime: state.ExpireTime,
+					Reason:      state.Reason,
+				}
+			}
+		}
+		data, err = json.Marshal(v0Snap)
 	}
 
 	if err != nil {

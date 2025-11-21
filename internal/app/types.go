@@ -87,7 +87,6 @@ type Processor struct {
 	PersistenceMutex   sync.Mutex
 	PersistenceWg      sync.WaitGroup
 	JournalHandle      *os.File
-	ActiveBlocks       map[string]persistence.ActiveBlockInfo
 	IPStates           map[string]persistence.IPState // Unified state: blocked + unblocked IPs
 
 	// String interning for memory optimization

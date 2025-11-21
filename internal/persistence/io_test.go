@@ -70,8 +70,8 @@ func TestV0BackwardCompatibility(t *testing.T) {
 	if snap.Version != "v0" {
 		t.Errorf("Expected version v0 for old format, got %s", snap.Version)
 	}
-	if len(snap.ActiveBlocks) != 1 {
-		t.Errorf("Expected 1 active block, got %d", len(snap.ActiveBlocks))
+	if len(snap.IPStates) != 1 {
+		t.Errorf("Expected 1 IP state, got %d", len(snap.IPStates))
 	}
 }
 
@@ -91,7 +91,7 @@ func TestSnapshotting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSnapshot failed for non-existent file: %v", err)
 	}
-	if snap == nil || len(snap.ActiveBlocks) != 0 {
+	if snap == nil || len(snap.IPStates) != 0 {
 		t.Fatalf("Expected empty snapshot for non-existent file, got %+v", snap)
 	}
 
@@ -99,10 +99,11 @@ func TestSnapshotting(t *testing.T) {
 	unblockTime := time.Now().UTC().Truncate(time.Second).Add(1 * time.Hour)
 	expectedSnap := &Snapshot{
 		Timestamp: time.Now().UTC().Truncate(time.Second),
-		ActiveBlocks: map[string]ActiveBlockInfo{
+		IPStates: map[string]IPState{
 			"1.2.3.4": {
-				UnblockTime: unblockTime,
-				Reason:      "test-reason",
+				State:      BlockStateBlocked,
+				ExpireTime: unblockTime,
+				Reason:     "test-reason",
 			},
 		},
 	}
@@ -124,18 +125,18 @@ func TestSnapshotting(t *testing.T) {
 	if !loadedSnap.Timestamp.Equal(expectedSnap.Timestamp) {
 		t.Errorf("Timestamp mismatch: got %v, want %v", loadedSnap.Timestamp, expectedSnap.Timestamp)
 	}
-	if len(loadedSnap.ActiveBlocks) != 1 {
-		t.Fatalf("Expected 1 active block, got %d", len(loadedSnap.ActiveBlocks))
+	if len(loadedSnap.IPStates) != 1 {
+		t.Fatalf("Expected 1 IP state, got %d", len(loadedSnap.IPStates))
 	}
-	info, ok := loadedSnap.ActiveBlocks["1.2.3.4"]
+	state, ok := loadedSnap.IPStates["1.2.3.4"]
 	if !ok {
 		t.Fatalf("Expected IP 1.2.3.4 to be in snapshot")
 	}
-	if !info.UnblockTime.Equal(unblockTime) {
-		t.Errorf("UnblockTime mismatch: got %v, want %v", info.UnblockTime, unblockTime)
+	if !state.ExpireTime.Equal(unblockTime) {
+		t.Errorf("ExpireTime mismatch: got %v, want %v", state.ExpireTime, unblockTime)
 	}
-	if info.Reason != "test-reason" {
-		t.Errorf("Reason mismatch: got %s, want test-reason", info.Reason)
+	if state.Reason != "test-reason" {
+		t.Errorf("Reason mismatch: got %s, want test-reason", state.Reason)
 	}
 }
 
@@ -154,20 +155,6 @@ func TestV1SnapshotFormat(t *testing.T) {
 	snap := &Snapshot{
 		Version:   "v1",
 		Timestamp: now,
-		ActiveBlocks: map[string]ActiveBlockInfo{
-			"5.6.7.8": {
-				UnblockTime: now.Add(2 * time.Hour),
-				Reason:      "chain2",
-			},
-			"1.2.3.4": {
-				UnblockTime: now.Add(30 * time.Minute),
-				Reason:      "chain1",
-			},
-			"9.9.9.9": {
-				UnblockTime: now.Add(1 * time.Hour),
-				Reason:      "chain3",
-			},
-		},
 		IPStates: map[string]IPState{
 			"5.6.7.8": {
 				State:      BlockStateBlocked,
@@ -254,20 +241,29 @@ func TestV1SnapshotFormat(t *testing.T) {
 	if loaded.Version != "v1" {
 		t.Errorf("Version mismatch: got %s, want v1", loaded.Version)
 	}
-	if len(loaded.ActiveBlocks) != 3 {
-		t.Fatalf("Expected 3 active blocks, got %d", len(loaded.ActiveBlocks))
+
+	// Count blocked IPs
+	blockedCount := 0
+	for _, state := range loaded.IPStates {
+		if state.State == BlockStateBlocked {
+			blockedCount++
+		}
 	}
-	for ip, expectedInfo := range snap.ActiveBlocks {
-		info, ok := loaded.ActiveBlocks[ip]
+	if blockedCount != 3 {
+		t.Fatalf("Expected 3 blocked IPs, got %d", blockedCount)
+	}
+
+	for ip, expectedState := range snap.IPStates {
+		state, ok := loaded.IPStates[ip]
 		if !ok {
 			t.Errorf("Expected IP %s in loaded snapshot", ip)
 			continue
 		}
-		if !info.UnblockTime.Equal(expectedInfo.UnblockTime) {
-			t.Errorf("UnblockTime mismatch for %s: got %v, want %v", ip, info.UnblockTime, expectedInfo.UnblockTime)
+		if !state.ExpireTime.Equal(expectedState.ExpireTime) {
+			t.Errorf("ExpireTime mismatch for %s: got %v, want %v", ip, state.ExpireTime, expectedState.ExpireTime)
 		}
-		if info.Reason != expectedInfo.Reason {
-			t.Errorf("Reason mismatch for %s: got %s, want %s", ip, info.Reason, expectedInfo.Reason)
+		if state.Reason != expectedState.Reason {
+			t.Errorf("Reason mismatch for %s: got %s, want %s", ip, state.Reason, expectedState.Reason)
 		}
 	}
 
@@ -275,7 +271,7 @@ func TestV1SnapshotFormat(t *testing.T) {
 	if len(loaded.IPStates) != 3 {
 		t.Fatalf("Expected 3 IP states, got %d", len(loaded.IPStates))
 	}
-	for ip := range snap.ActiveBlocks {
+	for ip := range snap.IPStates {
 		state, ok := loaded.IPStates[ip]
 		if !ok {
 			t.Errorf("Expected IP %s in IPStates", ip)

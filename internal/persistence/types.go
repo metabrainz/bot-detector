@@ -51,12 +51,11 @@ type JournalEntryV1 struct {
 	Event     AuditEventDataV1 `json:"event"`
 }
 
-// Snapshot is the structure for the state snapshot file (v0 format).
+// Snapshot is the structure for the state snapshot file.
 type Snapshot struct {
-	Version      string                     `json:"version"`
-	Timestamp    time.Time                  `json:"snapshot_time"`
-	ActiveBlocks map[string]ActiveBlockInfo `json:"active_blocks"`
-	IPStates     map[string]IPState         `json:"-"` // Not serialized, populated from v1 entries
+	Version   string             `json:"version,omitempty"`
+	Timestamp time.Time          `json:"snapshot_time"`
+	IPStates  map[string]IPState `json:"-"` // Not serialized in v0, populated from entries in v1
 }
 
 // BlockState represents the state of an IP in the blocking system.

@@ -20,7 +20,14 @@ func TestProductionV0Conversion(t *testing.T) {
 		t.Fatalf("Failed to load production snapshot: %v", err)
 	}
 
-	t.Logf("Loaded snapshot with %d active blocks", len(snapshot.ActiveBlocks))
+	blockedCount := 0
+	for _, state := range snapshot.IPStates {
+		if state.State == BlockStateBlocked {
+			blockedCount++
+		}
+	}
+
+	t.Logf("Loaded snapshot with %d blocked IPs", blockedCount)
 	t.Logf("Snapshot timestamp: %v", snapshot.Timestamp)
 	t.Logf("Snapshot version: %s", snapshot.Version)
 
@@ -29,25 +36,10 @@ func TestProductionV0Conversion(t *testing.T) {
 		t.Errorf("Expected version v0, got %s", snapshot.Version)
 	}
 
-	// Verify IPStates was populated from ActiveBlocks
-	if len(snapshot.IPStates) != len(snapshot.ActiveBlocks) {
-		t.Errorf("IPStates count (%d) doesn't match ActiveBlocks count (%d)",
-			len(snapshot.IPStates), len(snapshot.ActiveBlocks))
-	}
-
 	// Verify all entries are marked as blocked
 	for ip, state := range snapshot.IPStates {
 		if state.State != BlockStateBlocked {
 			t.Errorf("IP %s should be blocked, got state %s", ip, state.State)
-		}
-		// Verify consistency with ActiveBlocks
-		if block, ok := snapshot.ActiveBlocks[ip]; ok {
-			if !state.ExpireTime.Equal(block.UnblockTime) {
-				t.Errorf("IP %s: ExpireTime mismatch", ip)
-			}
-			if state.Reason != block.Reason {
-				t.Errorf("IP %s: Reason mismatch", ip)
-			}
 		}
 	}
 
@@ -101,7 +93,7 @@ func TestProductionV0Conversion(t *testing.T) {
 	t.Logf("Final state: %d IPs tracked", len(ipStates))
 
 	// Count final states
-	blockedCount := 0
+	blockedCount = 0
 	unblockedCount := 0
 	for _, state := range ipStates {
 		if state.State == BlockStateBlocked {
@@ -113,8 +105,14 @@ func TestProductionV0Conversion(t *testing.T) {
 	t.Logf("Final: %d blocked, %d unblocked", blockedCount, unblockedCount)
 
 	// Verify expected counts from test data
-	if len(snapshot.ActiveBlocks) != 3 {
-		t.Errorf("Expected 3 blocks in snapshot, got %d", len(snapshot.ActiveBlocks))
+	initialBlockedCount := 0
+	for _, state := range snapshot.IPStates {
+		if state.State == BlockStateBlocked {
+			initialBlockedCount++
+		}
+	}
+	if initialBlockedCount != 3 {
+		t.Errorf("Expected 3 blocks in snapshot, got %d", initialBlockedCount)
 	}
 	if blockCount != 3 {
 		t.Errorf("Expected 3 block events in journal, got %d", blockCount)
@@ -134,17 +132,6 @@ func TestProductionV0Conversion(t *testing.T) {
 		Version:   "v1",
 		Timestamp: time.Now().UTC(),
 		IPStates:  ipStates,
-	}
-
-	// Populate ActiveBlocks for v1 write
-	v1Snapshot.ActiveBlocks = make(map[string]ActiveBlockInfo)
-	for ip, state := range ipStates {
-		if state.State == BlockStateBlocked {
-			v1Snapshot.ActiveBlocks[ip] = ActiveBlockInfo{
-				UnblockTime: state.ExpireTime,
-				Reason:      state.Reason,
-			}
-		}
 	}
 
 	if err := WriteSnapshot(v1Path, v1Snapshot); err != nil {
@@ -305,17 +292,6 @@ func TestV1FormatRoundTrip(t *testing.T) {
 		Version:   "v1",
 		Timestamp: time.Now().UTC(),
 		IPStates:  ipStates,
-	}
-
-	// Populate ActiveBlocks
-	v1Snapshot.ActiveBlocks = make(map[string]ActiveBlockInfo)
-	for ip, state := range ipStates {
-		if state.State == BlockStateBlocked {
-			v1Snapshot.ActiveBlocks[ip] = ActiveBlockInfo{
-				UnblockTime: state.ExpireTime,
-				Reason:      state.Reason,
-			}
-		}
 	}
 
 	if err := WriteSnapshot(v1Path, v1Snapshot); err != nil {
