@@ -575,33 +575,44 @@ func runCompaction(p *app.Processor) {
 	p.PersistenceMutex.Lock()
 	defer p.PersistenceMutex.Unlock()
 
-	// Filter out expired entries from IPStates before snapshotting
+	// Filter out expired entries in-place
 	now := p.NowFunc()
-	activeBlocks := make(map[string]persistence.ActiveBlockInfo)
-	ipStates := make(map[string]persistence.IPState)
-
 	expiredBlocks := 0
+
 	for ip, state := range p.IPStates {
-		// Keep blocked IPs that haven't expired
-		if state.State == persistence.BlockStateBlocked && now.Before(state.ExpireTime) {
-			activeBlocks[ip] = persistence.ActiveBlockInfo{
-				UnblockTime: state.ExpireTime,
-				Reason:      state.Reason,
-			}
-			ipStates[ip] = state
-		} else if state.State == persistence.BlockStateUnblocked {
-			// Keep all unblocked IPs (no expiration)
-			ipStates[ip] = state
-		} else if state.State == persistence.BlockStateBlocked {
+		if state.State == persistence.BlockStateBlocked && !now.Before(state.ExpireTime) {
+			// Entry is expired - remove it
+			delete(p.IPStates, ip)
+			delete(p.ActiveBlocks, ip)
 			expiredBlocks++
 		}
 	}
 
-	blockedCount := len(activeBlocks)
-	unblockedCount := len(ipStates) - blockedCount
+	// Recreate maps if they've shrunk significantly to free memory
+	// This handles the case where state grows large then shrinks
+	activeBlocksLen := len(p.ActiveBlocks)
+	ipStatesLen := len(p.IPStates)
 
-	p.ActiveBlocks = activeBlocks // Update in-memory map
-	p.IPStates = ipStates         // Update in-memory map
+	// If maps are using >2x the space they need, recreate them
+	// This is a heuristic - Go maps don't expose capacity, but we can estimate
+	// by checking if we removed a significant portion
+	if expiredBlocks > ipStatesLen {
+		// More than 50% was removed - recreate to free memory
+		newActiveBlocks := make(map[string]persistence.ActiveBlockInfo, activeBlocksLen)
+		for ip, info := range p.ActiveBlocks {
+			newActiveBlocks[ip] = info
+		}
+		p.ActiveBlocks = newActiveBlocks
+
+		newIPStates := make(map[string]persistence.IPState, ipStatesLen)
+		for ip, state := range p.IPStates {
+			newIPStates[ip] = state
+		}
+		p.IPStates = newIPStates
+	}
+
+	blockedCount := len(p.ActiveBlocks)
+	unblockedCount := len(p.IPStates) - blockedCount
 
 	snapshot := &persistence.Snapshot{
 		Timestamp:    now,
