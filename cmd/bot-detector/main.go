@@ -222,7 +222,7 @@ func restorePersistenceState(p *app.Processor) error {
 	}
 
 	// 3. State Push
-	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Restoring %d active blocks to backend...", len(p.ActiveBlocks))
+	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Restoring %d IP states to backend...", len(p.IPStates))
 	// Create a sorted list of table durations for best-fit matching
 	type tableInfo struct {
 		duration time.Duration
@@ -236,7 +236,7 @@ func restorePersistenceState(p *app.Processor) error {
 		return sortedTables[i].duration < sortedTables[j].duration
 	})
 
-	for ip, info := range p.ActiveBlocks {
+	for ip, state := range p.IPStates {
 		// Before restoring, check if the IP is now a good actor.
 		tempEntry := &app.LogEntry{IPInfo: utils.NewIPInfo(ip)}
 		if isGood, reason := checker.IsGoodActor(p, tempEntry); isGood {
@@ -244,17 +244,24 @@ func restorePersistenceState(p *app.Processor) error {
 			continue // Don't restore blocks for good actors.
 		}
 
-		remainingDuration := time.Until(info.UnblockTime)
-		if remainingDuration > 0 {
-			bestFitDuration := p.Config.Blockers.DefaultDuration
-			for _, t := range sortedTables {
-				if remainingDuration <= t.duration {
-					bestFitDuration = t.duration
-					break
+		if state.State == persistence.BlockStateBlocked {
+			remainingDuration := time.Until(state.ExpireTime)
+			if remainingDuration > 0 {
+				bestFitDuration := p.Config.Blockers.DefaultDuration
+				for _, t := range sortedTables {
+					if remainingDuration <= t.duration {
+						bestFitDuration = t.duration
+						break
+					}
+				}
+				if err := p.Blocker.Block(utils.NewIPInfo(ip), bestFitDuration, state.Reason); err != nil {
+					p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore block for IP %s: %v", ip, err)
 				}
 			}
-			if err := p.Blocker.Block(utils.NewIPInfo(ip), bestFitDuration, info.Reason); err != nil {
-				p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore block for IP %s: %v", ip, err)
+		} else if state.State == persistence.BlockStateUnblocked {
+			// Restore unblock state (good actor protection)
+			if err := p.Blocker.Unblock(utils.NewIPInfo(ip), state.Reason); err != nil {
+				p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore unblock for IP %s: %v", ip, err)
 			}
 		}
 	}
