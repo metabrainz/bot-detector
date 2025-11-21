@@ -194,12 +194,23 @@ func restorePersistenceState(p *app.Processor) error {
 			if event.Timestamp.After(snapshot.Timestamp) {
 				switch event.Event {
 				case persistence.EventTypeBlock:
+					expireTime := event.Timestamp.Add(event.Duration)
 					p.ActiveBlocks[event.IP] = persistence.ActiveBlockInfo{
-						UnblockTime: event.Timestamp.Add(event.Duration),
+						UnblockTime: expireTime,
 						Reason:      event.Reason,
+					}
+					p.IPStates[event.IP] = persistence.IPState{
+						State:      persistence.BlockStateBlocked,
+						ExpireTime: expireTime,
+						Reason:     event.Reason,
 					}
 				case persistence.EventTypeUnblock:
 					delete(p.ActiveBlocks, event.IP)
+					// Keep in IPStates as unblocked (no expiration for unblock events in journal)
+					p.IPStates[event.IP] = persistence.IPState{
+						State:  persistence.BlockStateUnblocked,
+						Reason: event.Reason,
+					}
 				}
 			}
 		}
