@@ -52,6 +52,7 @@ type Snapshot struct {
 	Version      string                     `json:"version"`
 	Timestamp    time.Time                  `json:"snapshot_time"`
 	ActiveBlocks map[string]ActiveBlockInfo `json:"active_blocks"`
+	IPStates     map[string]IPState         `json:"-"` // Not serialized, populated from v1 entries
 }
 
 // BlockState represents the state of an IP in the blocking system.

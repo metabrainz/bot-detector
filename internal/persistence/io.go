@@ -33,7 +33,11 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &Snapshot{Version: CurrentVersion, ActiveBlocks: make(map[string]ActiveBlockInfo)}, nil
+			return &Snapshot{
+				Version:      CurrentVersion,
+				ActiveBlocks: make(map[string]ActiveBlockInfo),
+				IPStates:     make(map[string]IPState),
+			}, nil
 		}
 		return nil, fmt.Errorf("failed to read snapshot file: %w", err)
 	}
@@ -75,9 +79,16 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 			if err := json.Unmarshal(jsonData, &snapV1); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal v1 snapshot: %w", err)
 			}
-			// Convert entries array to ActiveBlocks map (only blocked entries)
+			// Convert entries array to both ActiveBlocks and IPStates maps
 			activeBlocks := make(map[string]ActiveBlockInfo)
+			ipStates := make(map[string]IPState)
 			for _, entry := range snapV1.Snapshot.Entries {
+				ipStates[entry.IP] = IPState{
+					State:      entry.State,
+					ExpireTime: entry.ExpireTime,
+					Reason:     entry.Reason,
+				}
+				// Also populate ActiveBlocks for backward compatibility
 				if entry.State == BlockStateBlocked {
 					activeBlocks[entry.IP] = ActiveBlockInfo{
 						UnblockTime: entry.ExpireTime,
@@ -89,6 +100,7 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 				Version:      "v1",
 				Timestamp:    snapV1.Timestamp,
 				ActiveBlocks: activeBlocks,
+				IPStates:     ipStates,
 			}, nil
 		}
 	}
@@ -103,6 +115,15 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 	}
 	if snapshot.Version == "" {
 		snapshot.Version = "v0"
+	}
+	// Populate IPStates from ActiveBlocks for v0 format
+	snapshot.IPStates = make(map[string]IPState)
+	for ip, info := range snapshot.ActiveBlocks {
+		snapshot.IPStates[ip] = IPState{
+			State:      BlockStateBlocked,
+			ExpireTime: info.UnblockTime,
+			Reason:     info.Reason,
+		}
 	}
 	return &snapshot, nil
 }
