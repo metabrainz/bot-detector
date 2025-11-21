@@ -19,8 +19,14 @@ COPY --chown=appuser:appgroup . .
 # Switch to non-root user for the build
 USER appuser
 
-# Build the Go application for a static binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bot-detector ./cmd/bot-detector
+# Build arguments for version info
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+
+# Build the Go application for a static binary with version info
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
+    -ldflags "-X bot-detector/internal/config.GitCommit=${GIT_COMMIT} -X bot-detector/internal/config.BuildTime=${BUILD_TIME}" \
+    -o bot-detector ./cmd/bot-detector
 
 # Stage 2: Create the final minimal image
 FROM alpine:latest

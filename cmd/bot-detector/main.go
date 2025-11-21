@@ -106,7 +106,8 @@ func GetConfigFilePath(params *commandline.AppParameters) string {
 // a clean exit, an error for failures, or nil to continue execution.
 func handleStartupFlags(params *commandline.AppParameters) error {
 	if params.ShowVersion {
-		fmt.Printf("bot-detector version %s\n", config.AppVersion)
+		fmt.Printf("bot-detector version %s (commit: %s, built: %s)\n",
+			config.AppVersion, config.GitCommit, config.BuildTime)
 		return fmt.Errorf("exit") // Signal clean exit
 	}
 
@@ -219,14 +220,8 @@ func restorePersistenceState(p *app.Processor) error {
 		for scanner.Scan() {
 			line := scanner.Bytes()
 
-			// Detect version from structure if not yet known
-			if journalVersion == "unknown" {
-				if bytes.Contains(line, []byte(`"event":{`)) {
-					journalVersion = "v1"
-				} else if bytes.Contains(line, []byte(`"event":"`)) {
-					journalVersion = "v0"
-				}
-			}
+			// Detect version per line by structure
+			isV1 := bytes.Contains(line, []byte(`"event":{`))
 
 			var timestamp time.Time
 			var eventType persistence.EventType
@@ -234,7 +229,7 @@ func restorePersistenceState(p *app.Processor) error {
 			var duration time.Duration
 
 			// Parse based on detected version
-			if journalVersion == "v1" {
+			if isV1 {
 				var v1Entry persistence.JournalEntryV1
 				if err := json.Unmarshal(line, &v1Entry); err != nil {
 					p.LogFunc(logging.LevelWarning, "JOURNAL_PARSE_FAIL", "Failed to parse v1 journal event: %v", err)
@@ -246,6 +241,9 @@ func restorePersistenceState(p *app.Processor) error {
 				ip = v1Entry.Event.IP
 				duration = v1Entry.Event.Duration
 				reason = v1Entry.Event.Reason
+				if journalVersion == "unknown" {
+					journalVersion = "v1"
+				}
 			} else {
 				var v0Event persistence.AuditEvent
 				if err := json.Unmarshal(line, &v0Event); err != nil {
@@ -258,6 +256,9 @@ func restorePersistenceState(p *app.Processor) error {
 				ip = v0Event.IP
 				duration = v0Event.Duration
 				reason = v0Event.Reason
+				if journalVersion == "unknown" {
+					journalVersion = "v0"
+				}
 			}
 
 			if timestamp.After(snapshot.Timestamp) {

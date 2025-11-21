@@ -8,6 +8,12 @@ import (
 // AppVersion is the application's version string.
 const AppVersion = "0.1"
 
+// Build-time variables (set via -ldflags during build)
+var (
+	GitCommit = "unknown"
+	BuildTime = "unknown"
+)
+
 // --- CONSTANT FOR CRITICAL LOG LINE BUFFER LIMIT ---
 const MaxLogLineSize = 16 * 1024
 
