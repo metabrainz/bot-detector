@@ -88,3 +88,10 @@ type ActiveBlockInfo struct {
 	UnblockTime time.Time `json:"unblock_time"`
 	Reason      string    `json:"reason"`
 }
+
+// IPState represents the current state of an IP (blocked or unblocked).
+type IPState struct {
+	State      BlockState `json:"state"`
+	ExpireTime time.Time  `json:"expire_time"`
+	Reason     string     `json:"reason"`
+}
