@@ -322,6 +322,11 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 				UnblockTime: unblockTime,
 				Reason:      chain.Name,
 			}
+			p.IPStates[entry.IPInfo.Address] = persistence.IPState{
+				State:      persistence.BlockStateBlocked,
+				ExpireTime: unblockTime,
+				Reason:     chain.Name,
+			}
 		}()
 	}
 
@@ -726,6 +731,10 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 
 						// Update in-memory state
 						delete(p.ActiveBlocks, entry.IPInfo.Address)
+						p.IPStates[entry.IPInfo.Address] = persistence.IPState{
+							State:  persistence.BlockStateUnblocked,
+							Reason: "good-actor-match",
+						}
 					}()
 				}
 
