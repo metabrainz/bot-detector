@@ -154,6 +154,7 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		CompactionInterval: loadedCfg.Application.Persistence.CompactionInterval,
 		ActiveBlocks:       make(map[string]persistence.ActiveBlockInfo),
 		IPStates:           make(map[string]persistence.IPState),
+		ReasonCache:        make(map[string]*string),
 
 		// Initialize cluster fields with defaults (will be set properly in later phases)
 		Cluster:           loadedCfg.Cluster,
@@ -180,6 +181,16 @@ func restorePersistenceState(p *app.Processor) error {
 	}
 	p.ActiveBlocks = snapshot.ActiveBlocks
 	p.IPStates = snapshot.IPStates
+
+	// Intern all reason strings to save memory
+	for ip, state := range p.IPStates {
+		state.Reason = p.InternReason(state.Reason)
+		p.IPStates[ip] = state
+	}
+	for ip, info := range p.ActiveBlocks {
+		info.Reason = p.InternReason(info.Reason)
+		p.ActiveBlocks[ip] = info
+	}
 
 	// Log snapshot details
 	if fileInfo, err := os.Stat(snapshotPath); err == nil {
@@ -208,18 +219,21 @@ func restorePersistenceState(p *app.Processor) error {
 				continue
 			}
 			if event.Timestamp.After(snapshot.Timestamp) {
+				// Intern reason to save memory
+				reason := p.InternReason(event.Reason)
+
 				switch event.Event {
 				case persistence.EventTypeBlock:
 					blockEvents++
 					expireTime := event.Timestamp.Add(event.Duration)
 					p.ActiveBlocks[event.IP] = persistence.ActiveBlockInfo{
 						UnblockTime: expireTime,
-						Reason:      event.Reason,
+						Reason:      reason,
 					}
 					p.IPStates[event.IP] = persistence.IPState{
 						State:      persistence.BlockStateBlocked,
 						ExpireTime: expireTime,
-						Reason:     event.Reason,
+						Reason:     reason,
 					}
 				case persistence.EventTypeUnblock:
 					unblockEvents++
@@ -227,7 +241,7 @@ func restorePersistenceState(p *app.Processor) error {
 					// Keep in IPStates as unblocked (no expiration for unblock events in journal)
 					p.IPStates[event.IP] = persistence.IPState{
 						State:  persistence.BlockStateUnblocked,
-						Reason: event.Reason,
+						Reason: reason,
 					}
 				}
 			} else {

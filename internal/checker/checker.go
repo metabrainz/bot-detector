@@ -306,12 +306,13 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 			defer p.PersistenceMutex.Unlock()
 
 			unblockTime := p.NowFunc().Add(chain.BlockDuration)
+			reason := p.InternReason(chain.Name)
 			event := &persistence.AuditEvent{
 				Timestamp: p.NowFunc(),
 				Event:     persistence.EventTypeBlock,
 				IP:        entry.IPInfo.Address,
 				Duration:  chain.BlockDuration,
-				Reason:    chain.Name,
+				Reason:    reason,
 			}
 			if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
 				p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write block event to journal for %s: %v", entry.IPInfo.Address, err)
@@ -320,12 +321,12 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 			// Update in-memory state
 			p.ActiveBlocks[entry.IPInfo.Address] = persistence.ActiveBlockInfo{
 				UnblockTime: unblockTime,
-				Reason:      chain.Name,
+				Reason:      reason,
 			}
 			p.IPStates[entry.IPInfo.Address] = persistence.IPState{
 				State:      persistence.BlockStateBlocked,
 				ExpireTime: unblockTime,
-				Reason:     chain.Name,
+				Reason:     reason,
 			}
 		}()
 	}
@@ -719,11 +720,12 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 						p.PersistenceMutex.Lock()
 						defer p.PersistenceMutex.Unlock()
 
+						reason := p.InternReason("good-actor-match")
 						event := &persistence.AuditEvent{
 							Timestamp: p.NowFunc(),
 							Event:     persistence.EventTypeUnblock,
 							IP:        entry.IPInfo.Address,
-							Reason:    "good-actor-match",
+							Reason:    reason,
 						}
 						if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
 							p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write unblock event to journal for %s: %v", entry.IPInfo.Address, err)
@@ -733,7 +735,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 						delete(p.ActiveBlocks, entry.IPInfo.Address)
 						p.IPStates[entry.IPInfo.Address] = persistence.IPState{
 							State:  persistence.BlockStateUnblocked,
-							Reason: "good-actor-match",
+							Reason: reason,
 						}
 					}()
 				}
