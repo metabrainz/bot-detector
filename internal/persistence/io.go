@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 // GetSnapshotPath returns the appropriate snapshot file path for the given version.
@@ -74,10 +75,20 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 			if err := json.Unmarshal(jsonData, &snapV1); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal v1 snapshot: %w", err)
 			}
+			// Convert entries array to ActiveBlocks map (only blocked entries)
+			activeBlocks := make(map[string]ActiveBlockInfo)
+			for _, entry := range snapV1.Snapshot.Entries {
+				if entry.State == BlockStateBlocked {
+					activeBlocks[entry.IP] = ActiveBlockInfo{
+						UnblockTime: entry.ExpireTime,
+						Reason:      entry.Reason,
+					}
+				}
+			}
 			return &Snapshot{
 				Version:      "v1",
 				Timestamp:    snapV1.Timestamp,
-				ActiveBlocks: snapV1.Snapshot.ActiveBlocks,
+				ActiveBlocks: activeBlocks,
 			}, nil
 		}
 	}
@@ -106,11 +117,25 @@ func WriteSnapshot(path string, snap *Snapshot) error {
 	var err error
 
 	if snap.Version == "v1" {
-		// Use v1 wrapper format
+		// Use v1 wrapper format with sorted entries
+		var entries []BlockStateEntryV1
+		for ip, info := range snap.ActiveBlocks {
+			entries = append(entries, BlockStateEntryV1{
+				IP:         ip,
+				State:      BlockStateBlocked,
+				ExpireTime: info.UnblockTime,
+				Reason:     info.Reason,
+			})
+		}
+		// Sort by ExpireTime (chronological order)
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].ExpireTime.Before(entries[j].ExpireTime)
+		})
+
 		snapV1 := SnapshotV1{
 			Timestamp: snap.Timestamp,
 			Snapshot: SnapshotDataV1{
-				ActiveBlocks: snap.ActiveBlocks,
+				Entries: entries,
 			},
 		}
 		data, err = json.MarshalIndent(snapV1, "", "  ")

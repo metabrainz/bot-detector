@@ -3,6 +3,7 @@ package persistence
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -147,16 +148,24 @@ func TestV1SnapshotFormat(t *testing.T) {
 		_ = os.RemoveAll(dir)
 	}()
 
-	// Test v1 snapshot with new naming convention and wrapped format
+	// Test v1 snapshot with multiple entries to verify sorting
 	path := GetSnapshotPath(dir, "v1")
-	unblockTime := time.Now().UTC().Truncate(time.Second).Add(1 * time.Hour)
+	now := time.Now().UTC().Truncate(time.Second)
 	snap := &Snapshot{
 		Version:   "v1",
-		Timestamp: time.Now().UTC().Truncate(time.Second),
+		Timestamp: now,
 		ActiveBlocks: map[string]ActiveBlockInfo{
 			"5.6.7.8": {
-				UnblockTime: unblockTime,
-				Reason:      "v1-test",
+				UnblockTime: now.Add(2 * time.Hour),
+				Reason:      "chain2",
+			},
+			"1.2.3.4": {
+				UnblockTime: now.Add(30 * time.Minute),
+				Reason:      "chain1",
+			},
+			"9.9.9.9": {
+				UnblockTime: now.Add(1 * time.Hour),
+				Reason:      "chain3",
 			},
 		},
 	}
@@ -170,7 +179,7 @@ func TestV1SnapshotFormat(t *testing.T) {
 		t.Errorf("Expected filename snapshot.v1.gz, got %s", filepath.Base(path))
 	}
 
-	// Verify the file uses v1 wrapped format
+	// Verify the file uses v1 wrapped format with entries array
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("Failed to read snapshot file: %v", err)
@@ -191,11 +200,36 @@ func TestV1SnapshotFormat(t *testing.T) {
 	if !strings.Contains(content, `"snapshot"`) {
 		t.Errorf("v1 snapshot missing 'snapshot' wrapper: %s", content)
 	}
+	if !strings.Contains(content, `"entries"`) {
+		t.Errorf("v1 snapshot missing 'entries' array: %s", content)
+	}
+	if !strings.Contains(content, `"state"`) {
+		t.Errorf("v1 snapshot missing 'state' field: %s", content)
+	}
 	if strings.Contains(content, `"version"`) {
 		t.Errorf("v1 snapshot should not contain 'version' field: %s", content)
 	}
 
-	// Load and verify
+	// Verify entries are sorted by expire_time
+	var snapV1 SnapshotV1
+	if err := json.Unmarshal(jsonData, &snapV1); err != nil {
+		t.Fatalf("Failed to unmarshal v1 snapshot: %v", err)
+	}
+	if len(snapV1.Snapshot.Entries) != 3 {
+		t.Fatalf("Expected 3 entries, got %d", len(snapV1.Snapshot.Entries))
+	}
+	// Check chronological order
+	if snapV1.Snapshot.Entries[0].IP != "1.2.3.4" {
+		t.Errorf("First entry should be 1.2.3.4 (earliest), got %s", snapV1.Snapshot.Entries[0].IP)
+	}
+	if snapV1.Snapshot.Entries[1].IP != "9.9.9.9" {
+		t.Errorf("Second entry should be 9.9.9.9, got %s", snapV1.Snapshot.Entries[1].IP)
+	}
+	if snapV1.Snapshot.Entries[2].IP != "5.6.7.8" {
+		t.Errorf("Third entry should be 5.6.7.8 (latest), got %s", snapV1.Snapshot.Entries[2].IP)
+	}
+
+	// Load and verify conversion back to map
 	loaded, err := LoadSnapshot(path)
 	if err != nil {
 		t.Fatalf("LoadSnapshot failed: %v", err)
@@ -203,15 +237,21 @@ func TestV1SnapshotFormat(t *testing.T) {
 	if loaded.Version != "v1" {
 		t.Errorf("Version mismatch: got %s, want v1", loaded.Version)
 	}
-	if len(loaded.ActiveBlocks) != 1 {
-		t.Fatalf("Expected 1 active block, got %d", len(loaded.ActiveBlocks))
+	if len(loaded.ActiveBlocks) != 3 {
+		t.Fatalf("Expected 3 active blocks, got %d", len(loaded.ActiveBlocks))
 	}
-	info, ok := loaded.ActiveBlocks["5.6.7.8"]
-	if !ok {
-		t.Fatalf("Expected IP 5.6.7.8 in snapshot")
-	}
-	if info.Reason != "v1-test" {
-		t.Errorf("Reason mismatch: got %s, want v1-test", info.Reason)
+	for ip, expectedInfo := range snap.ActiveBlocks {
+		info, ok := loaded.ActiveBlocks[ip]
+		if !ok {
+			t.Errorf("Expected IP %s in loaded snapshot", ip)
+			continue
+		}
+		if !info.UnblockTime.Equal(expectedInfo.UnblockTime) {
+			t.Errorf("UnblockTime mismatch for %s: got %v, want %v", ip, info.UnblockTime, expectedInfo.UnblockTime)
+		}
+		if info.Reason != expectedInfo.Reason {
+			t.Errorf("Reason mismatch for %s: got %s, want %s", ip, info.Reason, expectedInfo.Reason)
+		}
 	}
 }
 

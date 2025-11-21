@@ -54,9 +54,27 @@ type Snapshot struct {
 	ActiveBlocks map[string]ActiveBlockInfo `json:"active_blocks"`
 }
 
+// BlockState represents the state of an IP in the blocking system.
+type BlockState string
+
+const (
+	// BlockStateBlocked indicates an IP is currently blocked.
+	BlockStateBlocked BlockState = "blocked"
+	// BlockStateUnblocked indicates an IP is explicitly unblocked (good actor).
+	BlockStateUnblocked BlockState = "unblocked"
+)
+
+// BlockStateEntryV1 represents a single IP state entry in v1 snapshots.
+type BlockStateEntryV1 struct {
+	IP         string     `json:"ip"`
+	State      BlockState `json:"state"`
+	ExpireTime time.Time  `json:"expire_time"`
+	Reason     string     `json:"reason"`
+}
+
 // SnapshotDataV1 is the snapshot data structure for v1 format (without timestamp).
 type SnapshotDataV1 struct {
-	ActiveBlocks map[string]ActiveBlockInfo `json:"active_blocks"`
+	Entries []BlockStateEntryV1 `json:"entries"`
 }
 
 // SnapshotV1 is the wrapper structure for v1 snapshots.
