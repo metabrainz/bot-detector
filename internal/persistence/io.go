@@ -169,9 +169,12 @@ func WriteSnapshot(path string, snap *Snapshot) error {
 		return fmt.Errorf("failed to marshal snapshot: %w", err)
 	}
 
-	// Compress the JSON data
+	// Compress the JSON data with BestSpeed for faster writes
 	var buf bytes.Buffer
-	gzWriter := gzip.NewWriter(&buf)
+	gzWriter, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
+	if err != nil {
+		return fmt.Errorf("failed to create gzip writer: %w", err)
+	}
 	if _, err := gzWriter.Write(data); err != nil {
 		return fmt.Errorf("failed to gzip snapshot data: %w", err)
 	}
