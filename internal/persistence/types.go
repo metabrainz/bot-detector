@@ -1,6 +1,10 @@
 package persistence
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 const (
 	// CurrentVersion is the current persistence format version.
@@ -56,14 +60,48 @@ type Snapshot struct {
 }
 
 // BlockState represents the state of an IP in the blocking system.
-type BlockState string
+type BlockState uint8
 
 const (
-	// BlockStateBlocked indicates an IP is currently blocked.
-	BlockStateBlocked BlockState = "blocked"
 	// BlockStateUnblocked indicates an IP is explicitly unblocked (good actor).
-	BlockStateUnblocked BlockState = "unblocked"
+	BlockStateUnblocked BlockState = 0
+	// BlockStateBlocked indicates an IP is currently blocked.
+	BlockStateBlocked BlockState = 1
 )
+
+// String returns the string representation of the block state.
+func (bs BlockState) String() string {
+	switch bs {
+	case BlockStateBlocked:
+		return "blocked"
+	case BlockStateUnblocked:
+		return "unblocked"
+	default:
+		return "unknown"
+	}
+}
+
+// MarshalJSON implements json.Marshaler for BlockState.
+func (bs BlockState) MarshalJSON() ([]byte, error) {
+	return json.Marshal(bs.String())
+}
+
+// UnmarshalJSON implements json.Unmarshaler for BlockState.
+func (bs *BlockState) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	switch s {
+	case "blocked":
+		*bs = BlockStateBlocked
+	case "unblocked":
+		*bs = BlockStateUnblocked
+	default:
+		return fmt.Errorf("invalid block state: %s", s)
+	}
+	return nil
+}
 
 // BlockStateEntryV1 represents a single IP state entry in v1 snapshots.
 type BlockStateEntryV1 struct {
