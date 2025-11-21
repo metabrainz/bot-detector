@@ -13,7 +13,7 @@ import (
 
 func TestV1FormatRoundTrip(t *testing.T) {
 	// Load v1 snapshot
-	snapshotPath := filepath.Join("..", "..", "testdata", "v1", "snapshot.v1.gz")
+	snapshotPath := filepath.Join("..", "..", "testdata", "v1", "state.snapshot")
 	snapshot, err := LoadSnapshot(snapshotPath)
 	if err != nil {
 		t.Fatalf("Failed to load v1 snapshot: %v", err)
@@ -52,7 +52,7 @@ func TestV1FormatRoundTrip(t *testing.T) {
 	}
 
 	// Load and replay v1 journal
-	journalPath := filepath.Join("..", "..", "testdata", "v1", "events.v1.log")
+	journalPath := filepath.Join("..", "..", "testdata", "v1", "events.log")
 	journalFile, err := os.Open(journalPath)
 	if err != nil {
 		t.Fatalf("Failed to open v1 journal: %v", err)

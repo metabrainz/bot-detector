@@ -1,5 +1,0 @@
-{"ts":"2025-11-21T12:00:01Z","event":"block","ip":"192.0.2.4","duration":3600000000000,"reason":"Test-Chain-3"}
-{"ts":"2025-11-21T12:00:02Z","event":"unblock","ip":"192.0.2.1","reason":"good-actor-match"}
-{"ts":"2025-11-21T12:00:03Z","event":"block","ip":"192.0.2.5","duration":7200000000000,"reason":"Test-Chain-1"}
-{"ts":"2025-11-21T12:00:04Z","event":"unblock","ip":"192.0.2.2","reason":"good-actor-match"}
-{"ts":"2025-11-21T12:00:05Z","event":"block","ip":"192.0.2.6","duration":1800000000000,"reason":"Test-Chain-2"}
