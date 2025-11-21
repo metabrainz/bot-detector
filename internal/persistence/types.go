@@ -8,7 +8,7 @@ import (
 
 const (
 	// CurrentVersion is the current persistence format version.
-	CurrentVersion = "v0"
+	CurrentVersion = "v1"
 )
 
 // PersistenceConfig holds settings for the state persistence layer.

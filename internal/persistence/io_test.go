@@ -327,10 +327,10 @@ func TestJournaling(t *testing.T) {
 	}
 
 	lines := string(data)
-	if !strings.Contains(lines, "\"event\":\"block\"") || !strings.Contains(lines, "\"ip\":\"1.1.1.1\"") {
+	if !strings.Contains(lines, "\"type\":\"block\"") || !strings.Contains(lines, "\"ip\":\"1.1.1.1\"") {
 		t.Errorf("Journal does not contain event 1: %s", lines)
 	}
-	if !strings.Contains(lines, "\"event\":\"unblock\"") || !strings.Contains(lines, "\"ip\":\"2.2.2.2\"") {
+	if !strings.Contains(lines, "\"type\":\"unblock\"") || !strings.Contains(lines, "\"ip\":\"2.2.2.2\"") {
 		t.Errorf("Journal does not contain event 2: %s", lines)
 	}
 	if !strings.HasSuffix(lines, "\n") {
