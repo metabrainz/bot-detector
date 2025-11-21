@@ -19,10 +19,11 @@ import (
 // Example: "0x564f26146268: key=1.10.230.15 use=0 exp=51153745 gpc0=1"
 var haProxyTableEntryRegex = regexp.MustCompile(`(?:key=(?P<ip>\S+))|(?:\s+exp=(?P<exp>\d+))|(?:\s+gpc0=(?P<gpc0>\d+))`)
 
-// HAProxyBatchSize is the number of commands to batch together with semicolons.
+// DefaultHAProxyBatchSize is the default number of commands to batch together with semicolons.
 // HAProxy CLI supports multiple commands separated by semicolons in a single request.
 // Tested successfully with 1000 commands (~52KB). Conservative default of 500.
-const HAProxyBatchSize = 500
+// This can be overridden via the blockers.max_commands_per_batch configuration setting.
+const DefaultHAProxyBatchSize = 500
 
 // HAProxyTableEntry represents a single entry in an HAProxy stick table.
 type HAProxyTableEntry struct {
@@ -54,6 +55,7 @@ type HAProxyProvider interface {
 	GetBlockerMaxRetries() int
 	GetBlockerRetryDelay() time.Duration
 	GetBlockerDialTimeout() time.Duration
+	GetMaxCommandsPerBatch() int
 	IncrementBlockerRetries()
 	IncrementCmdsPerBlocker(addr string)
 }

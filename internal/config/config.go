@@ -1090,10 +1090,10 @@ func parseDurationTables(config *TopLevelConfig) (map[time.Duration]string, stri
 	return newDurationTables, newFallbackName, nil
 }
 
-func parseBlockerSettings(config *TopLevelConfig) (int, time.Duration, time.Duration, int, int, error) {
+func parseBlockerSettings(config *TopLevelConfig) (int, time.Duration, time.Duration, int, int, int, error) {
 	var blockerMaxRetries int
 	var blockerRetryDelay, blockerDialTimeout time.Duration
-	var blockerCommandQueueSize, blockerCommandsPerSecond int
+	var blockerCommandQueueSize, blockerCommandsPerSecond, maxCommandsPerBatch int
 	var err error
 
 	if config.Blockers.MaxRetries > 0 {
@@ -1105,7 +1105,7 @@ func parseBlockerSettings(config *TopLevelConfig) (int, time.Duration, time.Dura
 	if config.Blockers.RetryDelay != "" {
 		blockerRetryDelay, err = time.ParseDuration(config.Blockers.RetryDelay)
 		if err != nil {
-			return 0, 0, 0, 0, 0, fmt.Errorf("invalid blocker_retry_delay: %w", err)
+			return 0, 0, 0, 0, 0, 0, fmt.Errorf("invalid blocker_retry_delay: %w", err)
 		}
 	} else {
 		blockerRetryDelay = DefaultBlockerRetryDelay
@@ -1114,7 +1114,7 @@ func parseBlockerSettings(config *TopLevelConfig) (int, time.Duration, time.Dura
 	if config.Blockers.DialTimeout != "" {
 		blockerDialTimeout, err = time.ParseDuration(config.Blockers.DialTimeout)
 		if err != nil {
-			return 0, 0, 0, 0, 0, fmt.Errorf("invalid blocker_dial_timeout: %w", err)
+			return 0, 0, 0, 0, 0, 0, fmt.Errorf("invalid blocker_dial_timeout: %w", err)
 		}
 	} else {
 		blockerDialTimeout = DefaultBlockerDialTimeout
@@ -1132,7 +1132,13 @@ func parseBlockerSettings(config *TopLevelConfig) (int, time.Duration, time.Dura
 		blockerCommandsPerSecond = DefaultBlockerCommandsPerSecond
 	}
 
-	return blockerMaxRetries, blockerRetryDelay, blockerDialTimeout, blockerCommandQueueSize, blockerCommandsPerSecond, nil
+	if config.Blockers.MaxCommandsPerBatch > 0 {
+		maxCommandsPerBatch = config.Blockers.MaxCommandsPerBatch
+	} else {
+		maxCommandsPerBatch = DefaultMaxCommandsPerBatch
+	}
+
+	return blockerMaxRetries, blockerRetryDelay, blockerDialTimeout, blockerCommandQueueSize, blockerCommandsPerSecond, maxCommandsPerBatch, nil
 }
 
 // LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
@@ -1202,7 +1208,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		return nil, err
 	}
 
-	blockerMaxRetries, blockerRetryDelay, blockerDialTimeout, blockerCommandQueueSize, blockerCommandsPerSecond, err := parseBlockerSettings(config)
+	blockerMaxRetries, blockerRetryDelay, blockerDialTimeout, blockerCommandQueueSize, blockerCommandsPerSecond, maxCommandsPerBatch, err := parseBlockerSettings(config)
 	if err != nil {
 		return nil, err
 	}
@@ -1273,12 +1279,13 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 			MaxTimeSinceLastHit:   maxTimeSinceLastHit,
 		},
 		Blockers: BlockersConfig{
-			DefaultDuration:   defaultBlockDuration,
-			CommandsPerSecond: blockerCommandsPerSecond,
-			CommandQueueSize:  blockerCommandQueueSize,
-			DialTimeout:       blockerDialTimeout,
-			MaxRetries:        blockerMaxRetries,
-			RetryDelay:        blockerRetryDelay,
+			DefaultDuration:     defaultBlockDuration,
+			CommandsPerSecond:   blockerCommandsPerSecond,
+			CommandQueueSize:    blockerCommandQueueSize,
+			MaxCommandsPerBatch: maxCommandsPerBatch,
+			DialTimeout:         blockerDialTimeout,
+			MaxRetries:          blockerMaxRetries,
+			RetryDelay:          blockerRetryDelay,
 			Backends: Backends{
 				HAProxy: HAProxyConfig{
 					Addresses:         config.Blockers.Backends.HAProxy.Addresses,

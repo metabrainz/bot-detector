@@ -44,6 +44,7 @@ func (m *mockHAProxyProvider) GetBlockTableNameFallback() string    { return m.b
 func (m *mockHAProxyProvider) GetBlockerMaxRetries() int            { return m.blockerMaxRetries }
 func (m *mockHAProxyProvider) GetBlockerRetryDelay() time.Duration  { return m.blockerRetryDelay }
 func (m *mockHAProxyProvider) GetBlockerDialTimeout() time.Duration { return m.blockerDialTimeout }
+func (m *mockHAProxyProvider) GetMaxCommandsPerBatch() int          { return 500 }
 func (m *mockHAProxyProvider) IncrementBlockerRetries()             { m.retries.Add(1) }
 func (m *mockHAProxyProvider) IncrementCmdsPerBlocker(addr string) {
 	val, _ := m.cmdsPerBlocker.LoadOrStore(addr, new(atomic.Int32))

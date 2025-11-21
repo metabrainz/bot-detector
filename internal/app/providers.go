@@ -305,6 +305,10 @@ func (p *Processor) GetBlockerDialTimeout() time.Duration {
 	return p.Config.Blockers.DialTimeout
 }
 
+func (p *Processor) GetMaxCommandsPerBatch() int {
+	return p.Config.Blockers.MaxCommandsPerBatch
+}
+
 func (p *Processor) IncrementBlockerRetries() {
 	p.Metrics.BlockerRetries.Add(1)
 }
