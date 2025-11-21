@@ -6,10 +6,46 @@ This guide provides instructions for building and running the bot-detector in a 
 
 A multi-stage [`Dockerfile`](../Dockerfile) is provided at the root of this project. It compiles the application in a build container and then copies the static binary to a minimal `alpine` image for a small and secure result.
 
-To build the image, run the following command from the project root:
+### Using the Build Script (Recommended)
+
+The easiest way to build the image with version information is to use the provided build script:
+
+```sh
+./docker-build.sh
+```
+
+This script automatically:
+- Captures the current git commit hash
+- Records the build timestamp
+- Embeds this information into the binary (visible with `--version`)
+- Tags the image as both `bot-detector:latest` and `bot-detector:<commit>`
+
+### Manual Build
+
+Alternatively, you can build manually:
 
 ```sh
 docker build -t bot-detector:latest .
+```
+
+Note: Manual builds will show `commit: unknown` and `built: unknown` in the version output.
+
+### Verifying the Build
+
+After building, you can verify the version information:
+
+```sh
+docker run --rm --entrypoint bot-detector bot-detector:latest --version
+```
+
+Example output:
+```
+bot-detector version 0.1 (commit: ebaa0a5, built: 2025-11-21_22:34:05)
+```
+
+For a running container:
+```sh
+docker exec <container-name> bot-detector --version
 ```
 
 ## Running the Container
