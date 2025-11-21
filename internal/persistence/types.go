@@ -2,6 +2,11 @@ package persistence
 
 import "time"
 
+const (
+	// CurrentVersion is the current persistence format version.
+	CurrentVersion = "v0"
+)
+
 // PersistenceConfig holds settings for the state persistence layer.
 type PersistenceConfig struct {
 	Enabled            bool          `yaml:"enabled"`
@@ -20,6 +25,7 @@ const (
 
 // AuditEvent is the structure for a single entry in the journal file.
 type AuditEvent struct {
+	Version   string        `json:"version"`
 	Timestamp time.Time     `json:"ts"`
 	Event     EventType     `json:"event"`
 	IP        string        `json:"ip"`
@@ -29,6 +35,7 @@ type AuditEvent struct {
 
 // Snapshot is the structure for the state snapshot file.
 type Snapshot struct {
+	Version      string                     `json:"version"`
 	Timestamp    time.Time                  `json:"snapshot_time"`
 	ActiveBlocks map[string]ActiveBlockInfo `json:"active_blocks"`
 }

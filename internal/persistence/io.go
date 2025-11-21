@@ -7,7 +7,24 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
+
+// GetSnapshotPath returns the appropriate snapshot file path for the given version.
+func GetSnapshotPath(stateDir, version string) string {
+	if version == "v0" {
+		return filepath.Join(stateDir, "state.snapshot")
+	}
+	return filepath.Join(stateDir, fmt.Sprintf("snapshot.%s.gz", version))
+}
+
+// GetJournalPath returns the appropriate journal file path for the given version.
+func GetJournalPath(stateDir, version string) string {
+	if version == "v0" {
+		return filepath.Join(stateDir, "events.log")
+	}
+	return filepath.Join(stateDir, fmt.Sprintf("events.%s.log", version))
+}
 
 // LoadSnapshot reads and unmarshals the snapshot file.
 // It automatically detects whether the file is gzipped or plain JSON.
@@ -15,7 +32,7 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &Snapshot{ActiveBlocks: make(map[string]ActiveBlockInfo)}, nil // Return empty snapshot if not found
+			return &Snapshot{Version: CurrentVersion, ActiveBlocks: make(map[string]ActiveBlockInfo)}, nil
 		}
 		return nil, fmt.Errorf("failed to read snapshot file: %w", err)
 	}
@@ -50,11 +67,17 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 	if snapshot.ActiveBlocks == nil {
 		snapshot.ActiveBlocks = make(map[string]ActiveBlockInfo)
 	}
+	if snapshot.Version == "" {
+		snapshot.Version = "v0"
+	}
 	return &snapshot, nil
 }
 
 // WriteSnapshot atomically writes a gzipped snapshot file.
 func WriteSnapshot(path string, snap *Snapshot) error {
+	if snap.Version == "" {
+		snap.Version = CurrentVersion
+	}
 	data, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal snapshot: %w", err)
@@ -89,6 +112,9 @@ func OpenJournalForAppend(path string) (*os.File, error) {
 
 // WriteEventToJournal marshals and writes a single event to an open file handle.
 func WriteEventToJournal(handle *os.File, event *AuditEvent) error {
+	if event.Version == "" {
+		event.Version = CurrentVersion
+	}
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("failed to marshal audit event: %w", err)
