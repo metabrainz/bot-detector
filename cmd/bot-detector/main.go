@@ -400,7 +400,7 @@ func restorePersistenceState(p *app.Processor) error {
 		}
 	}
 
-	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "State restoration complete: %d restored, %d skipped (already_blocked=%d, already_unblocked=%d, expired=%d, good_actor=%d)",
+	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "State restoration complete: %d restored, %d skipped (already_blocked=%d, already_unblocked=%d, expired=%d, good_actors=%d)",
 		restored, skipped, skippedAlreadyBlocked, skippedAlreadyUnblocked, skippedExpired, skippedGoodActor)
 
 	// Warn if we restored a large number of IPs that might exceed HAProxy table capacity
