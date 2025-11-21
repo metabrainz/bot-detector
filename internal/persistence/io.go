@@ -159,10 +159,10 @@ func WriteSnapshot(path string, snap *Snapshot) error {
 				Entries: entries,
 			},
 		}
-		data, err = json.MarshalIndent(snapV1, "", "  ")
+		data, err = json.Marshal(snapV1)
 	} else {
 		// Use v0 format
-		data, err = json.MarshalIndent(snap, "", "  ")
+		data, err = json.Marshal(snap)
 	}
 
 	if err != nil {
