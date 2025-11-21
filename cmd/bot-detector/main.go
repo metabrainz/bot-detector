@@ -212,6 +212,7 @@ func restorePersistenceState(p *app.Processor) error {
 		unblockEvents := 0
 		skippedEvents := 0
 		parseErrors := 0
+		journalVersion := "unknown"
 
 		scanner := bufio.NewScanner(journalFile)
 		for scanner.Scan() {
@@ -220,6 +221,20 @@ func restorePersistenceState(p *app.Processor) error {
 				p.LogFunc(logging.LevelWarning, "JOURNAL_PARSE_FAIL", "Failed to parse journal event: %v", err)
 				parseErrors++
 				continue
+			}
+			// Detect version from first event
+			if journalVersion == "unknown" {
+				if event.Version != "" {
+					journalVersion = event.Version
+				} else {
+					// v0 events don't have a version field, detect by structure
+					line := scanner.Text()
+					if strings.Contains(line, `"ts":`) && strings.Contains(line, `"event":{`) {
+						journalVersion = "v1"
+					} else {
+						journalVersion = "v0"
+					}
+				}
 			}
 			if event.Timestamp.After(snapshot.Timestamp) {
 				// Intern reason to save memory
@@ -250,11 +265,11 @@ func restorePersistenceState(p *app.Processor) error {
 		}
 
 		if fileInfo, err := os.Stat(journalPath); err == nil {
-			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (size=%d bytes, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
-				fileInfo.Size(), blockEvents, unblockEvents, skippedEvents, parseErrors)
+			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=%s, size=%d bytes, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
+				journalVersion, fileInfo.Size(), blockEvents, unblockEvents, skippedEvents, parseErrors)
 		} else {
-			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
-				blockEvents, unblockEvents, skippedEvents, parseErrors)
+			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=%s, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
+				journalVersion, blockEvents, unblockEvents, skippedEvents, parseErrors)
 		}
 	} else if !os.IsNotExist(err) {
 		p.LogFunc(logging.LevelWarning, "JOURNAL_OPEN_FAIL", "Could not open journal file for replay: %v", err)
