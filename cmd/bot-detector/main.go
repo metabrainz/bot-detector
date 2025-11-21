@@ -305,6 +305,10 @@ func restorePersistenceState(p *app.Processor) error {
 	directB, hasDirectMethods := p.Blocker.(directBlocker)
 
 	skipped := 0
+	skippedGoodActor := 0
+	skippedAlreadyBlocked := 0
+	skippedAlreadyUnblocked := 0
+	skippedExpired := 0
 	restored := 0
 	for ip, state := range p.IPStates {
 		// Before restoring, check if the IP is now a good actor.
@@ -312,6 +316,7 @@ func restorePersistenceState(p *app.Processor) error {
 		if isGood, reason := checker.IsGoodActor(p, tempEntry); isGood {
 			p.LogFunc(logging.LevelInfo, "STATE_RESTORE_SKIP", "Skipping restore for %s (good_actor: %s)", ip, reason)
 			skipped++
+			skippedGoodActor++
 			continue // Don't restore blocks for good actors.
 		}
 
@@ -319,6 +324,7 @@ func restorePersistenceState(p *app.Processor) error {
 			// Check if already blocked in HAProxy
 			if gpc0, exists := currentState[ip]; exists && gpc0 > 0 {
 				skipped++
+				skippedAlreadyBlocked++
 				continue
 			}
 
@@ -342,11 +348,15 @@ func restorePersistenceState(p *app.Processor) error {
 				} else {
 					restored++
 				}
+			} else {
+				skipped++
+				skippedExpired++
 			}
 		} else if state.State == persistence.BlockStateUnblocked {
 			// Check if already unblocked in HAProxy
 			if gpc0, exists := currentState[ip]; exists && gpc0 == 0 {
 				skipped++
+				skippedAlreadyUnblocked++
 				continue
 			}
 
@@ -365,7 +375,8 @@ func restorePersistenceState(p *app.Processor) error {
 		}
 	}
 
-	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "State restoration complete: %d restored, %d skipped", restored, skipped)
+	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "State restoration complete: %d restored, %d skipped (already_blocked=%d, already_unblocked=%d, expired=%d, good_actor=%d)",
+		restored, skipped, skippedAlreadyBlocked, skippedAlreadyUnblocked, skippedExpired, skippedGoodActor)
 
 	// Warn if we restored a large number of IPs that might exceed HAProxy table capacity
 	if restored > 50000 {
