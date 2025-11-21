@@ -172,7 +172,8 @@ func restorePersistenceState(p *app.Processor) error {
 	p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.StateDir)
 
 	// 1. Load snapshot
-	snapshot, err := persistence.LoadSnapshot(filepath.Join(p.StateDir, "state.snapshot"))
+	snapshotPath := filepath.Join(p.StateDir, "state.snapshot")
+	snapshot, err := persistence.LoadSnapshot(snapshotPath)
 	if err != nil {
 		p.LogFunc(logging.LevelError, "STATE_LOAD_FAIL", "Failed to load snapshot: %v", err)
 		return err
@@ -180,20 +181,36 @@ func restorePersistenceState(p *app.Processor) error {
 	p.ActiveBlocks = snapshot.ActiveBlocks
 	p.IPStates = snapshot.IPStates
 
+	// Log snapshot details
+	if fileInfo, err := os.Stat(snapshotPath); err == nil {
+		p.LogFunc(logging.LevelInfo, "STATE_LOAD", "Loaded snapshot (version=%s, size=%d bytes, entries=%d blocked + %d unblocked, timestamp=%v)",
+			snapshot.Version, fileInfo.Size(), len(snapshot.ActiveBlocks), len(snapshot.IPStates)-len(snapshot.ActiveBlocks), snapshot.Timestamp)
+	} else {
+		p.LogFunc(logging.LevelInfo, "STATE_LOAD", "Loaded snapshot (version=%s, entries=%d blocked + %d unblocked, timestamp=%v)",
+			snapshot.Version, len(snapshot.ActiveBlocks), len(snapshot.IPStates)-len(snapshot.ActiveBlocks), snapshot.Timestamp)
+	}
+
 	// 2. Replay Journal
 	journalPath := filepath.Join(p.StateDir, "events.log")
 	journalFile, err := os.Open(journalPath)
 	if err == nil {
+		blockEvents := 0
+		unblockEvents := 0
+		skippedEvents := 0
+		parseErrors := 0
+
 		scanner := bufio.NewScanner(journalFile)
 		for scanner.Scan() {
 			var event persistence.AuditEvent
 			if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
 				p.LogFunc(logging.LevelWarning, "JOURNAL_PARSE_FAIL", "Failed to parse journal event: %v", err)
+				parseErrors++
 				continue
 			}
 			if event.Timestamp.After(snapshot.Timestamp) {
 				switch event.Event {
 				case persistence.EventTypeBlock:
+					blockEvents++
 					expireTime := event.Timestamp.Add(event.Duration)
 					p.ActiveBlocks[event.IP] = persistence.ActiveBlockInfo{
 						UnblockTime: expireTime,
@@ -205,6 +222,7 @@ func restorePersistenceState(p *app.Processor) error {
 						Reason:     event.Reason,
 					}
 				case persistence.EventTypeUnblock:
+					unblockEvents++
 					delete(p.ActiveBlocks, event.IP)
 					// Keep in IPStates as unblocked (no expiration for unblock events in journal)
 					p.IPStates[event.IP] = persistence.IPState{
@@ -212,10 +230,20 @@ func restorePersistenceState(p *app.Processor) error {
 						Reason: event.Reason,
 					}
 				}
+			} else {
+				skippedEvents++
 			}
 		}
 		if err := journalFile.Close(); err != nil {
 			p.LogFunc(logging.LevelWarning, "JOURNAL_CLOSE_FAIL", "Failed to close journal file: %v", err)
+		}
+
+		if fileInfo, err := os.Stat(journalPath); err == nil {
+			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (size=%d bytes, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
+				fileInfo.Size(), blockEvents, unblockEvents, skippedEvents, parseErrors)
+		} else {
+			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
+				blockEvents, unblockEvents, skippedEvents, parseErrors)
 		}
 	} else if !os.IsNotExist(err) {
 		p.LogFunc(logging.LevelWarning, "JOURNAL_OPEN_FAIL", "Could not open journal file for replay: %v", err)
@@ -552,6 +580,7 @@ func runCompaction(p *app.Processor) {
 	activeBlocks := make(map[string]persistence.ActiveBlockInfo)
 	ipStates := make(map[string]persistence.IPState)
 
+	expiredBlocks := 0
 	for ip, state := range p.IPStates {
 		// Keep blocked IPs that haven't expired
 		if state.State == persistence.BlockStateBlocked && now.Before(state.ExpireTime) {
@@ -563,8 +592,13 @@ func runCompaction(p *app.Processor) {
 		} else if state.State == persistence.BlockStateUnblocked {
 			// Keep all unblocked IPs (no expiration)
 			ipStates[ip] = state
+		} else if state.State == persistence.BlockStateBlocked {
+			expiredBlocks++
 		}
 	}
+
+	blockedCount := len(activeBlocks)
+	unblockedCount := len(ipStates) - blockedCount
 
 	p.ActiveBlocks = activeBlocks // Update in-memory map
 	p.IPStates = ipStates         // Update in-memory map
@@ -575,9 +609,19 @@ func runCompaction(p *app.Processor) {
 		IPStates:     p.IPStates,
 	}
 
-	if err := persistence.WriteSnapshot(filepath.Join(p.StateDir, "state.snapshot"), snapshot); err != nil {
+	snapshotPath := filepath.Join(p.StateDir, "state.snapshot")
+	if err := persistence.WriteSnapshot(snapshotPath, snapshot); err != nil {
 		p.LogFunc(logging.LevelError, "COMPACTION_FAIL", "Failed to write snapshot: %v", err)
 		return
+	}
+
+	// Log snapshot write details
+	if fileInfo, err := os.Stat(snapshotPath); err == nil {
+		p.LogFunc(logging.LevelInfo, "COMPACTION", "Snapshot written (size=%d bytes, entries=%d blocked + %d unblocked, expired=%d)",
+			fileInfo.Size(), blockedCount, unblockedCount, expiredBlocks)
+	} else {
+		p.LogFunc(logging.LevelInfo, "COMPACTION", "Snapshot written (entries=%d blocked + %d unblocked, expired=%d)",
+			blockedCount, unblockedCount, expiredBlocks)
 	}
 
 	// Truncate and re-open journal
@@ -592,6 +636,8 @@ func runCompaction(p *app.Processor) {
 		p.LogFunc(logging.LevelError, "COMPACTION_FAIL", "Failed to truncate and re-open journal: %v", err)
 		// Attempt to re-open in append mode as a fallback
 		handle, _ = persistence.OpenJournalForAppend(journalPath)
+	} else {
+		p.LogFunc(logging.LevelInfo, "COMPACTION", "Journal truncated and reset")
 	}
 	p.JournalHandle = handle
 	p.LogFunc(logging.LevelInfo, "COMPACTION", "State snapshot and journal compaction completed successfully.")
