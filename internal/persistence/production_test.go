@@ -126,7 +126,7 @@ func TestProductionV0Conversion(t *testing.T) {
 
 	// Write as v1 snapshot
 	tempDir := t.TempDir()
-	v1Path := GetSnapshotPath(tempDir, "v1")
+	v1Path := filepath.Join(tempDir, "state.snapshot")
 
 	v1Snapshot := &Snapshot{
 		Version:   "v1",
@@ -286,7 +286,7 @@ func TestV1FormatRoundTrip(t *testing.T) {
 
 	// Write back as v1 and verify round-trip
 	tempDir := t.TempDir()
-	v1Path := GetSnapshotPath(tempDir, "v1")
+	v1Path := filepath.Join(tempDir, "state.snapshot")
 
 	v1Snapshot := &Snapshot{
 		Version:   "v1",

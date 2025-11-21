@@ -12,14 +12,6 @@ import (
 	"time"
 )
 
-// GetSnapshotPath returns the appropriate snapshot file path for the given version.
-func GetSnapshotPath(stateDir, version string) string {
-	if version == "v0" {
-		return filepath.Join(stateDir, "state.snapshot")
-	}
-	return filepath.Join(stateDir, fmt.Sprintf("snapshot.%s.gz", version))
-}
-
 // GetJournalPath returns the appropriate journal file path for the given version.
 func GetJournalPath(stateDir, version string) string {
 	if version == "v0" {

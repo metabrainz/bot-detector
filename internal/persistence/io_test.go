@@ -12,32 +12,6 @@ import (
 	"time"
 )
 
-func TestVersionedFilePaths(t *testing.T) {
-	tests := []struct {
-		version      string
-		wantSnapshot string
-		wantJournal  string
-	}{
-		{"v0", "state.snapshot", "events.log"},
-		{"v1", "snapshot.v1.gz", "events.v1.log"},
-		{"v2", "snapshot.v2.gz", "events.v2.log"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.version, func(t *testing.T) {
-			gotSnapshot := GetSnapshotPath("/tmp", tt.version)
-			gotJournal := GetJournalPath("/tmp", tt.version)
-
-			if filepath.Base(gotSnapshot) != tt.wantSnapshot {
-				t.Errorf("GetSnapshotPath(%s) = %s, want %s", tt.version, gotSnapshot, tt.wantSnapshot)
-			}
-			if filepath.Base(gotJournal) != tt.wantJournal {
-				t.Errorf("GetJournalPath(%s) = %s, want %s", tt.version, gotJournal, tt.wantJournal)
-			}
-		})
-	}
-}
-
 func TestV0BackwardCompatibility(t *testing.T) {
 	dir, err := os.MkdirTemp("", "persistence_test")
 	if err != nil {
@@ -150,7 +124,7 @@ func TestV1SnapshotFormat(t *testing.T) {
 	}()
 
 	// Test v1 snapshot with multiple entries to verify sorting
-	path := GetSnapshotPath(dir, "v1")
+	path := filepath.Join(dir, "state.snapshot")
 	now := time.Now().UTC().Truncate(time.Second)
 	snap := &Snapshot{
 		Version:   "v1",
@@ -176,11 +150,6 @@ func TestV1SnapshotFormat(t *testing.T) {
 
 	if err := WriteSnapshot(path, snap); err != nil {
 		t.Fatalf("WriteSnapshot failed: %v", err)
-	}
-
-	// Verify file name is correct
-	if filepath.Base(path) != "snapshot.v1.gz" {
-		t.Errorf("Expected filename snapshot.v1.gz, got %s", filepath.Base(path))
 	}
 
 	// Verify the file uses v1 wrapped format with entries array
