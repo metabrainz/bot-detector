@@ -1,0 +1,17 @@
+{
+  "snapshot_time": "2025-11-21T12:00:00Z",
+  "active_blocks": {
+    "192.0.2.1": {
+      "unblock_time": "2025-11-21T13:00:00Z",
+      "reason": "Test-Chain-1"
+    },
+    "192.0.2.2": {
+      "unblock_time": "2025-11-21T14:00:00Z",
+      "reason": "Test-Chain-2"
+    },
+    "192.0.2.3": {
+      "unblock_time": "2025-11-21T15:00:00Z",
+      "reason": "Test-Chain-1"
+    }
+  }
+}

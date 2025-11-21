@@ -138,14 +138,14 @@ func WriteSnapshot(path string, snap *Snapshot) error {
 	var err error
 
 	if snap.Version == "v1" {
-		// Use v1 wrapper format with sorted entries
+		// Use v1 wrapper format with sorted entries from IPStates
 		var entries []BlockStateEntryV1
-		for ip, info := range snap.ActiveBlocks {
+		for ip, state := range snap.IPStates {
 			entries = append(entries, BlockStateEntryV1{
 				IP:         ip,
-				State:      BlockStateBlocked,
-				ExpireTime: info.UnblockTime,
-				Reason:     info.Reason,
+				State:      state.State,
+				ExpireTime: state.ExpireTime,
+				Reason:     state.Reason,
 			})
 		}
 		// Sort by ExpireTime (chronological order)

@@ -168,6 +168,23 @@ func TestV1SnapshotFormat(t *testing.T) {
 				Reason:      "chain3",
 			},
 		},
+		IPStates: map[string]IPState{
+			"5.6.7.8": {
+				State:      BlockStateBlocked,
+				ExpireTime: now.Add(2 * time.Hour),
+				Reason:     "chain2",
+			},
+			"1.2.3.4": {
+				State:      BlockStateBlocked,
+				ExpireTime: now.Add(30 * time.Minute),
+				Reason:     "chain1",
+			},
+			"9.9.9.9": {
+				State:      BlockStateBlocked,
+				ExpireTime: now.Add(1 * time.Hour),
+				Reason:     "chain3",
+			},
+		},
 	}
 
 	if err := WriteSnapshot(path, snap); err != nil {
