@@ -547,19 +547,32 @@ func runCompaction(p *app.Processor) {
 	p.PersistenceMutex.Lock()
 	defer p.PersistenceMutex.Unlock()
 
-	// Filter out expired blocks before snapshotting
+	// Filter out expired entries from IPStates before snapshotting
 	now := p.NowFunc()
 	activeBlocks := make(map[string]persistence.ActiveBlockInfo)
-	for ip, info := range p.ActiveBlocks {
-		if now.Before(info.UnblockTime) {
-			activeBlocks[ip] = info
+	ipStates := make(map[string]persistence.IPState)
+
+	for ip, state := range p.IPStates {
+		// Keep blocked IPs that haven't expired
+		if state.State == persistence.BlockStateBlocked && now.Before(state.ExpireTime) {
+			activeBlocks[ip] = persistence.ActiveBlockInfo{
+				UnblockTime: state.ExpireTime,
+				Reason:      state.Reason,
+			}
+			ipStates[ip] = state
+		} else if state.State == persistence.BlockStateUnblocked {
+			// Keep all unblocked IPs (no expiration)
+			ipStates[ip] = state
 		}
 	}
+
 	p.ActiveBlocks = activeBlocks // Update in-memory map
+	p.IPStates = ipStates         // Update in-memory map
 
 	snapshot := &persistence.Snapshot{
 		Timestamp:    now,
 		ActiveBlocks: p.ActiveBlocks,
+		IPStates:     p.IPStates,
 	}
 
 	if err := persistence.WriteSnapshot(filepath.Join(p.StateDir, "state.snapshot"), snapshot); err != nil {

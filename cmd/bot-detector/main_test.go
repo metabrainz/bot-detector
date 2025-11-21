@@ -174,6 +174,10 @@ func TestCompaction(t *testing.T) {
 		"1.1.1.1": {UnblockTime: p.NowFunc().Add(1 * time.Hour), Reason: "chain1"},
 		"2.2.2.2": {UnblockTime: p.NowFunc().Add(-1 * time.Minute), Reason: "chain2"}, // Expired
 	}
+	p.IPStates = map[string]persistence.IPState{
+		"1.1.1.1": {State: persistence.BlockStateBlocked, ExpireTime: p.NowFunc().Add(1 * time.Hour), Reason: "chain1"},
+		"2.2.2.2": {State: persistence.BlockStateBlocked, ExpireTime: p.NowFunc().Add(-1 * time.Minute), Reason: "chain2"}, // Expired
+	}
 
 	// --- Act ---
 	runCompaction(p)
