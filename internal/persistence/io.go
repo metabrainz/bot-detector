@@ -60,9 +60,32 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 		jsonData = data
 	}
 
+	// Try to detect format by checking for v1 wrapper structure
+	var rawMap map[string]interface{}
+	if err := json.Unmarshal(jsonData, &rawMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
+	}
+
+	// Check if it's v1 format (has "ts" and "snapshot" keys, no "version" key)
+	if _, hasTs := rawMap["ts"]; hasTs {
+		if _, hasSnapshot := rawMap["snapshot"]; hasSnapshot {
+			// It's v1 format
+			var snapV1 SnapshotV1
+			if err := json.Unmarshal(jsonData, &snapV1); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal v1 snapshot: %w", err)
+			}
+			return &Snapshot{
+				Version:      "v1",
+				Timestamp:    snapV1.Timestamp,
+				ActiveBlocks: snapV1.Snapshot.ActiveBlocks,
+			}, nil
+		}
+	}
+
+	// It's v0 format
 	var snapshot Snapshot
 	if err := json.Unmarshal(jsonData, &snapshot); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal snapshot: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal v0 snapshot: %w", err)
 	}
 	if snapshot.ActiveBlocks == nil {
 		snapshot.ActiveBlocks = make(map[string]ActiveBlockInfo)
@@ -78,7 +101,24 @@ func WriteSnapshot(path string, snap *Snapshot) error {
 	if snap.Version == "" {
 		snap.Version = CurrentVersion
 	}
-	data, err := json.MarshalIndent(snap, "", "  ")
+
+	var data []byte
+	var err error
+
+	if snap.Version == "v1" {
+		// Use v1 wrapper format
+		snapV1 := SnapshotV1{
+			Timestamp: snap.Timestamp,
+			Snapshot: SnapshotDataV1{
+				ActiveBlocks: snap.ActiveBlocks,
+			},
+		}
+		data, err = json.MarshalIndent(snapV1, "", "  ")
+	} else {
+		// Use v0 format
+		data, err = json.MarshalIndent(snap, "", "  ")
+	}
+
 	if err != nil {
 		return fmt.Errorf("failed to marshal snapshot: %w", err)
 	}
@@ -115,7 +155,27 @@ func WriteEventToJournal(handle *os.File, event *AuditEvent) error {
 	if event.Version == "" {
 		event.Version = CurrentVersion
 	}
-	data, err := json.Marshal(event)
+
+	var data []byte
+	var err error
+
+	if event.Version == "v1" {
+		// Use v1 wrapper format
+		entry := JournalEntryV1{
+			Timestamp: event.Timestamp,
+			Event: AuditEventDataV1{
+				Type:     event.Event,
+				IP:       event.IP,
+				Duration: event.Duration,
+				Reason:   event.Reason,
+			},
+		}
+		data, err = json.Marshal(entry)
+	} else {
+		// Use v0 format
+		data, err = json.Marshal(event)
+	}
+
 	if err != nil {
 		return fmt.Errorf("failed to marshal audit event: %w", err)
 	}

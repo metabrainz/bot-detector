@@ -1,6 +1,9 @@
 package persistence
 
 import (
+	"bytes"
+	"compress/gzip"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,7 +147,7 @@ func TestV1SnapshotFormat(t *testing.T) {
 		_ = os.RemoveAll(dir)
 	}()
 
-	// Test v1 snapshot with new naming convention
+	// Test v1 snapshot with new naming convention and wrapped format
 	path := GetSnapshotPath(dir, "v1")
 	unblockTime := time.Now().UTC().Truncate(time.Second).Add(1 * time.Hour)
 	snap := &Snapshot{
@@ -165,6 +168,31 @@ func TestV1SnapshotFormat(t *testing.T) {
 	// Verify file name is correct
 	if filepath.Base(path) != "snapshot.v1.gz" {
 		t.Errorf("Expected filename snapshot.v1.gz, got %s", filepath.Base(path))
+	}
+
+	// Verify the file uses v1 wrapped format
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("Failed to read snapshot file: %v", err)
+	}
+	gzReader, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("Failed to create gzip reader: %v", err)
+	}
+	jsonData, err := io.ReadAll(gzReader)
+	_ = gzReader.Close()
+	if err != nil {
+		t.Fatalf("Failed to decompress snapshot: %v", err)
+	}
+	content := string(jsonData)
+	if !strings.Contains(content, `"ts"`) {
+		t.Errorf("v1 snapshot missing 'ts' field: %s", content)
+	}
+	if !strings.Contains(content, `"snapshot"`) {
+		t.Errorf("v1 snapshot missing 'snapshot' wrapper: %s", content)
+	}
+	if strings.Contains(content, `"version"`) {
+		t.Errorf("v1 snapshot should not contain 'version' field: %s", content)
 	}
 
 	// Load and verify
@@ -251,7 +279,7 @@ func TestV1JournalFormat(t *testing.T) {
 		_ = os.RemoveAll(dir)
 	}()
 
-	// Test v1 journal with new naming convention
+	// Test v1 journal with new naming convention and wrapped format
 	path := GetJournalPath(dir, "v1")
 	handle, err := OpenJournalForAppend(path)
 	if err != nil {
@@ -277,14 +305,23 @@ func TestV1JournalFormat(t *testing.T) {
 		t.Errorf("Expected filename events.v1.log, got %s", filepath.Base(path))
 	}
 
-	// Verify content
+	// Verify content uses v1 wrapped format
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("Failed to read journal: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, "\"version\":\"v1\"") {
-		t.Errorf("Journal missing version field: %s", content)
+	if strings.Contains(content, "\"version\"") {
+		t.Errorf("v1 journal should not contain 'version' field: %s", content)
+	}
+	if !strings.Contains(content, "\"ts\"") {
+		t.Errorf("v1 journal missing 'ts' field: %s", content)
+	}
+	if !strings.Contains(content, "\"event\":{") {
+		t.Errorf("v1 journal missing 'event' wrapper: %s", content)
+	}
+	if !strings.Contains(content, "\"type\":\"block\"") {
+		t.Errorf("v1 journal should use 'type' instead of 'event': %s", content)
 	}
 	if !strings.Contains(content, "\"ip\":\"9.9.9.9\"") {
 		t.Errorf("Journal missing IP: %s", content)

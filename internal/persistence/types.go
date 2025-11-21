@@ -23,7 +23,7 @@ const (
 	EventTypeUnblock EventType = "unblock"
 )
 
-// AuditEvent is the structure for a single entry in the journal file.
+// AuditEvent is the structure for a single entry in the journal file (v0 format).
 type AuditEvent struct {
 	Version   string        `json:"version"`
 	Timestamp time.Time     `json:"ts"`
@@ -33,11 +33,36 @@ type AuditEvent struct {
 	Reason    string        `json:"reason,omitempty"`
 }
 
-// Snapshot is the structure for the state snapshot file.
+// AuditEventDataV1 is the event data structure for v1 format (without timestamp).
+type AuditEventDataV1 struct {
+	Type     EventType     `json:"type"`
+	IP       string        `json:"ip"`
+	Duration time.Duration `json:"duration,omitempty"`
+	Reason   string        `json:"reason,omitempty"`
+}
+
+// JournalEntryV1 is the wrapper structure for v1 journal entries.
+type JournalEntryV1 struct {
+	Timestamp time.Time        `json:"ts"`
+	Event     AuditEventDataV1 `json:"event"`
+}
+
+// Snapshot is the structure for the state snapshot file (v0 format).
 type Snapshot struct {
 	Version      string                     `json:"version"`
 	Timestamp    time.Time                  `json:"snapshot_time"`
 	ActiveBlocks map[string]ActiveBlockInfo `json:"active_blocks"`
+}
+
+// SnapshotDataV1 is the snapshot data structure for v1 format (without timestamp).
+type SnapshotDataV1 struct {
+	ActiveBlocks map[string]ActiveBlockInfo `json:"active_blocks"`
+}
+
+// SnapshotV1 is the wrapper structure for v1 snapshots.
+type SnapshotV1 struct {
+	Timestamp time.Time      `json:"ts"`
+	Snapshot  SnapshotDataV1 `json:"snapshot"`
 }
 
 // ActiveBlockInfo holds information about a currently active block.
