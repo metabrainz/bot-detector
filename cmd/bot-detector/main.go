@@ -261,6 +261,13 @@ func restorePersistenceState(p *app.Processor) error {
 	}
 
 	// 3. State Push
+	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Querying HAProxy current state...")
+	currentState, err := p.Blocker.GetCurrentState()
+	if err != nil {
+		p.LogFunc(logging.LevelWarning, "STATE_QUERY_FAIL", "Failed to query HAProxy state: %v. Will restore all IPs.", err)
+		currentState = make(map[string]int)
+	}
+
 	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Restoring %d IP states to backend...", len(p.IPStates))
 	// Create a sorted list of table durations for best-fit matching
 	type tableInfo struct {
@@ -275,15 +282,31 @@ func restorePersistenceState(p *app.Processor) error {
 		return sortedTables[i].duration < sortedTables[j].duration
 	})
 
+	// Cast to RateLimitedBlocker to access BlockDirect/UnblockDirect
+	type directBlocker interface {
+		BlockDirect(ipInfo utils.IPInfo, duration time.Duration, reason string) error
+		UnblockDirect(ipInfo utils.IPInfo, reason string) error
+	}
+	directB, hasDirectMethods := p.Blocker.(directBlocker)
+
+	skipped := 0
+	restored := 0
 	for ip, state := range p.IPStates {
 		// Before restoring, check if the IP is now a good actor.
 		tempEntry := &app.LogEntry{IPInfo: utils.NewIPInfo(ip)}
 		if isGood, reason := checker.IsGoodActor(p, tempEntry); isGood {
 			p.LogFunc(logging.LevelInfo, "STATE_RESTORE_SKIP", "Skipping restore for %s (good_actor: %s)", ip, reason)
+			skipped++
 			continue // Don't restore blocks for good actors.
 		}
 
 		if state.State == persistence.BlockStateBlocked {
+			// Check if already blocked in HAProxy
+			if gpc0, exists := currentState[ip]; exists && gpc0 > 0 {
+				skipped++
+				continue
+			}
+
 			remainingDuration := time.Until(state.ExpireTime)
 			if remainingDuration > 0 {
 				bestFitDuration := p.Config.Blockers.DefaultDuration
@@ -293,17 +316,41 @@ func restorePersistenceState(p *app.Processor) error {
 						break
 					}
 				}
-				if err := p.Blocker.Block(utils.NewIPInfo(ip), bestFitDuration, state.Reason); err != nil {
-					p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore block for IP %s: %v", ip, err)
+				var blockErr error
+				if hasDirectMethods {
+					blockErr = directB.BlockDirect(utils.NewIPInfo(ip), bestFitDuration, state.Reason)
+				} else {
+					blockErr = p.Blocker.Block(utils.NewIPInfo(ip), bestFitDuration, state.Reason)
+				}
+				if blockErr != nil {
+					p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore block for IP %s: %v", ip, blockErr)
+				} else {
+					restored++
 				}
 			}
 		} else if state.State == persistence.BlockStateUnblocked {
+			// Check if already unblocked in HAProxy
+			if gpc0, exists := currentState[ip]; exists && gpc0 == 0 {
+				skipped++
+				continue
+			}
+
 			// Restore unblock state (good actor protection)
-			if err := p.Blocker.Unblock(utils.NewIPInfo(ip), state.Reason); err != nil {
-				p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore unblock for IP %s: %v", ip, err)
+			var unblockErr error
+			if hasDirectMethods {
+				unblockErr = directB.UnblockDirect(utils.NewIPInfo(ip), state.Reason)
+			} else {
+				unblockErr = p.Blocker.Unblock(utils.NewIPInfo(ip), state.Reason)
+			}
+			if unblockErr != nil {
+				p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore unblock for IP %s: %v", ip, unblockErr)
+			} else {
+				restored++
 			}
 		}
 	}
+
+	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "State restoration complete: %d restored, %d skipped", restored, skipped)
 
 	// 4. Open journal for appending
 	p.JournalHandle, err = persistence.OpenJournalForAppend(journalPath)
