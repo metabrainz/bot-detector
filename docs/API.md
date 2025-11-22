@@ -6,7 +6,7 @@ This API is intended for monitoring and administrative purposes.
 
 ## Endpoints
 
-### **`/` or `/stats`**
+### `/` or `/stats`
 
 *   **Method:** `GET`
 *   **Content-Type:** `text/html; charset=utf-8`
@@ -16,13 +16,13 @@ This API is intended for monitoring and administrative purposes.
     *   Chain and action statistics.
     *   Per-chain metrics (hits, completions, resets).
 
-### **`/stats/steps`**
+### `/stats/steps`
 
 *   **Method:** `GET`
 *   **Content-Type:** `text/plain; charset=utf-8`
 *   **Description:** Provides a plain text list of all behavioral chain steps and the number of times each has been executed. This is useful for debugging chain performance and identifying which rules are matching most frequently. The list is sorted by execution count in descending order.
 
-### **`/config`**
+### `/config`
 
 *   **Method:** `GET`
 *   **Content-Type:** `text/yaml; charset=utf-8`
@@ -31,7 +31,7 @@ This API is intended for monitoring and administrative purposes.
     *   `200 OK`: Successfully returns the YAML configuration.
     *   `500 Internal Server Error`: If the server fails to retrieve or marshal the configuration content.
 
-### **`/config/archive`**
+### `/config/archive`
 
 *   **Method:** `GET`
 *   **Content-Type:** `application/gzip`
@@ -40,13 +40,12 @@ This API is intended for monitoring and administrative purposes.
     *   `200 OK`: Successfully begins streaming the gzipped tar archive.
     *   `500 Internal Server Error`: If the server fails to access the configuration or its dependencies to create the archive.
 
----
 
 ## Cluster Endpoints
 
 These endpoints are available when cluster mode is enabled. They provide cluster status, metrics collection, and aggregation capabilities.
 
-### **`/cluster/status`**
+### `/cluster/status`
 
 *   **Method:** `GET`
 *   **Content-Type:** `application/json`
@@ -72,7 +71,7 @@ These endpoints are available when cluster mode is enabled. They provide cluster
     *   `200 OK`: Successfully returns the node status.
     *   `500 Internal Server Error`: If the server fails to retrieve node status information.
 
-### **`/cluster/metrics`**
+### `/cluster/metrics`
 
 *   **Method:** `GET`
 *   **Content-Type:** `application/json`
@@ -136,7 +135,7 @@ These endpoints are available when cluster mode is enabled. They provide cluster
     *   `200 OK`: Successfully returns the metrics snapshot.
     *   `500 Internal Server Error`: If the server fails to generate the metrics snapshot.
 
-### **`/cluster/metrics/aggregate`**
+### `/cluster/metrics/aggregate`
 
 *   **Method:** `GET`
 *   **Content-Type:** `application/json`
@@ -232,13 +231,12 @@ These endpoints are available when cluster mode is enabled. They provide cluster
     *   `404 Not Found`: This endpoint is only available on leader nodes. Returned when querying a follower node.
     *   `500 Internal Server Error`: If the server fails to aggregate metrics.
 
----
 
 ## IP Lookup Endpoints
 
 These endpoints allow you to query the block/unblock status of specific IP addresses. They provide visibility into which IPs are currently blocked, why they were blocked, and when blocks will expire.
 
-### **`/ip/{ip}`**
+### `/ip/{ip}`
 
 *   **Method:** `GET`
 *   **Content-Type:** `text/plain; charset=utf-8`
@@ -279,7 +277,7 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `200 OK`: Successfully returns IP status.
     *   `400 Bad Request`: Invalid IP address format.
 
-### **`/api/v1/ip/{ip}`**
+### `/api/v1/ip/{ip}`
 
 *   **Method:** `GET`
 *   **Content-Type:** `application/json`
@@ -333,7 +331,7 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `200 OK`: Successfully returns IP status.
     *   `400 Bad Request`: Invalid IP address format.
 
-### **`/cluster/ip/{ip}`** (Leader Only)
+### `/cluster/ip/{ip}` (Leader Only)
 
 *   **Method:** `GET`
 *   **Content-Type:** `text/plain; charset=utf-8`
@@ -385,7 +383,7 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `400 Bad Request`: Invalid IP address format.
     *   `404 Not Found`: This endpoint is only available on leader nodes.
 
-### **`/api/v1/cluster/ip/{ip}`** (Leader Only)
+### `/api/v1/cluster/ip/{ip}` (Leader Only)
 
 *   **Method:** `GET`
 *   **Content-Type:** `application/json`
@@ -439,7 +437,7 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `400 Bad Request`: Invalid IP address format.
     *   `404 Not Found`: This endpoint is only available on leader nodes.
 
-### **`/api/v1/cluster/internal/ip/{ip}`** (Internal Use)
+### `/api/v1/cluster/internal/ip/{ip}` (Internal Use)
 
 *   **Method:** `GET`
 *   **Content-Type:** `application/json`
@@ -451,7 +449,6 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `200 OK`: Successfully returns IP status.
     *   `400 Bad Request`: Invalid IP address format.
 
----
 
 ## Usage Examples
 

@@ -1,19 +1,18 @@
-# HaProxy setup
+# HAProxy Setup
 
-This document details how to configure HAProxy to work with the bot-detector.
+This document details how to configure [HAProxy](https://www.haproxy.org/) to work with the bot-detector.
 
-The key to this setup is that the bot detector uses a unified list of HAProxy targets defined in config.yaml, and its internal logic automatically chooses between the faster **Unix Domain Socket (UDS)** for the local HAProxy and **TCP/IP** for the remote one.
+The key to this setup is that the bot detector uses a unified list of HAProxy targets defined in `config.yaml`, and its internal logic automatically chooses between the faster **Unix Domain Socket (UDS)** for the local HAProxy and **TCP/IP** for the remote one.
 
----
 
-## **1. Core Concepts**
+## 1. Core Concepts
 
 For the bot-detector to work, HAProxy must be configured to do three things:
 1.  **Listen for commands:** Expose a Runtime API endpoint so the bot-detector can send `block` and `unblock` instructions.
 2.  **Remember bad IPs:** Use `stick-tables` to store the list of blocked IP addresses and for how long they should be blocked.
 3.  **Deny traffic:** Use Access Control Lists (`ACLs`) to check incoming requests against the stick-tables and deny access if an IP is on the list.
 
-### **A. Exposing the Runtime API (`stats socket`)**
+### A. Exposing the Runtime API (`stats socket`)
 
 The bot-detector communicates with HAProxy via its Runtime API. You must expose this API in the `global` section of your `haproxy.cfg`.
 
@@ -28,7 +27,7 @@ The bot-detector communicates with HAProxy via its Runtime API. You must expose 
         stats socket ipv4@127.0.0.1:9999 level admin
     ```
 
-### **B. Defining Stick Tables (HAProxy's Memory)**
+### B. Defining Stick Tables (HAProxy's Memory)
 
 Think of HAProxy's **stick-tables** as temporary in-memory lists where HAProxy can remember information about clients. The bot-detector uses these tables to tell HAProxy which IPs to block. They are defined inside `backend` blocks.
 
@@ -45,7 +44,7 @@ Here's what each part means:
 *   **`store gpc0`**: This is the key flag. It tells HAProxy to store a "General Purpose Counter" for each IP. The bot-detector sets this counter to `1` to mark an IP as blocked.
 *   **`peers mypeers`**: If you have multiple HAProxy servers in a cluster, this enables synchronization of the table's contents between them.
 
-### **C. Creating ACLs and Denying Requests**
+### C. Creating ACLs and Denying Requests
 
 In your `frontend`, you need rules to check the stick-tables for each incoming request. This is done with **ACLs** (Access Control Lists).
 
@@ -61,7 +60,7 @@ In your `frontend`, you need rules to check the stick-tables for each incoming r
     ```
     This rule tells HAProxy to deny the request with a `429 Too Many Requests` status if any of the "blocked" ACLs are true.
 
-### **D. Synchronizing State Across a Cluster (`peers`)**
+### D. Synchronizing State Across a Cluster (`peers`)
 
 If you run multiple HAProxy instances in a cluster for high availability, you need to synchronize their stick-tables. This ensures that when the bot-detector blocks an IP on one node, all other nodes in the cluster also block that IP. This is achieved using the `peers` section.
 
@@ -86,9 +85,8 @@ backend table_1h_ipv4
 	stick-table type ip size 2m expire 1h store gpc0 peers mypeers
 ```
 
----
 
-## **2. Full HAProxy Configuration Example (haproxy.cfg)**
+## 2. Full HAProxy Configuration Example (haproxy.cfg)
 
 Here is a complete `haproxy.cfg` example incorporating the concepts above.
 
@@ -96,28 +94,28 @@ Here is a complete `haproxy.cfg` example incorporating the concepts above.
 # haproxy.cfg
 
 global
-	log /dev/log	local0
-	log /dev/log	local1 notice
-	chroot /var/lib/haproxy
-	stats socket /run/haproxy/admin.sock mode 660 level admin
+    log /dev/log    local0
+    log /dev/log    local1 notice
+    chroot /var/lib/haproxy
+    stats socket /run/haproxy/admin.sock mode 660 level admin
     # for communication with haproxy you may want to use tcp instead of local socket
     # especially with multiple instances
     stats socket ipv4@127.0.0.1:9999  level admin  expose-fd listeners
-	stats timeout 30s
-	user haproxy
-	group haproxy
-	daemon
+    stats timeout 30s
+    user haproxy
+    group haproxy
+    daemon
 
-	# Default SSL material locations
-	ca-base /etc/ssl/certs
-	crt-base /etc/ssl/private
+    # Default SSL material locations
+    ca-base /etc/ssl/certs
+    crt-base /etc/ssl/private
 
-	# See: https://ssl-config.mozilla.org/#server=haproxy&server-version=2.0.3&config=intermediate
+    # See: https://ssl-config.mozilla.org/#server=haproxy&server-version=2.0.3&config=intermediate
     ssl-default-bind-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
     ssl-default-bind-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
     ssl-default-bind-options ssl-min-ver TLSv1.2 no-tls-tickets
 
-    # see peears section below, change depending on which node this config is
+    # see peers section below, change depending on which node this config is
     localpeer node1
 
 peers mypeers
@@ -126,45 +124,45 @@ peers mypeers
     peer node2 192.168.1.2:10000
 
 defaults
-	log	global
-	mode	http
-	option	httplog
-	option	dontlognull
+    log    global
+    mode    http
+    option    httplog
+    option    dontlognull
     timeout connect 5000
     timeout client  50000
     timeout server  50000
-	errorfile 400 /etc/haproxy/errors/400.http
-	errorfile 403 /etc/haproxy/errors/403.http
-	errorfile 408 /etc/haproxy/errors/408.http
-	errorfile 500 /etc/haproxy/errors/500.http
-	errorfile 502 /etc/haproxy/errors/502.http
-	errorfile 503 /etc/haproxy/errors/503.http
-	errorfile 504 /etc/haproxy/errors/504.http
+    errorfile 400 /etc/haproxy/errors/400.http
+    errorfile 403 /etc/haproxy/errors/403.http
+    errorfile 408 /etc/haproxy/errors/408.http
+    errorfile 500 /etc/haproxy/errors/500.http
+    errorfile 502 /etc/haproxy/errors/502.http
+    errorfile 503 /etc/haproxy/errors/503.http
+    errorfile 504 /etc/haproxy/errors/504.http
 
 backend table_1h_ipv4
-	stick-table type ip size 2m expire 1h store gpc0 peers mypeers
+    stick-table type ip size 2m expire 1h store gpc0 peers mypeers
 
 backend table_5m_ipv4
-	stick-table type ip size 500k expire 5m store gpc0 peers mypeers
+    stick-table type ip size 500k expire 5m store gpc0 peers mypeers
 
 backend table_1h_ipv6
-	stick-table type ipv6 size 2m expire 1h store gpc0 peers mypeers
+    stick-table type ipv6 size 2m expire 1h store gpc0 peers mypeers
 
 backend table_5m_ipv6
-	stick-table type ipv6 size 500k expire 5m store gpc0 peers mypeers
+    stick-table type ipv6 size 500k expire 5m store gpc0 peers mypeers
 
 frontend fe_main
-  # Listen on both ipv4 & ipv6 (this depends on your setup)
-  bind :::80 v4v6
+    # Listen on both ipv4 & ipv6 (this depends on your setup)
+    bind :::80 v4v6
 
-  acl blocked_1h_ipv4 src_get_gpc0(table_1h_ipv4) gt 0
-  acl blocked_1h_ipv6 src_get_gpc0(table_1h_ipv6) gt 0
-  acl blocked_5m_ipv4 src_get_gpc0(table_5m_ipv4) gt 0
-  acl blocked_5m_ipv6 src_get_gpc0(table_5m_ipv6) gt 0
-  
-  http-request deny deny_status 429 if blocked_1h_ipv4 or blocked_5m_ipv4 or blocked_1h_ipv6 or blocked_5m_ipv6
+    acl blocked_1h_ipv4 src_get_gpc0(table_1h_ipv4) gt 0
+    acl blocked_1h_ipv6 src_get_gpc0(table_1h_ipv6) gt 0
+    acl blocked_5m_ipv4 src_get_gpc0(table_5m_ipv4) gt 0
+    acl blocked_5m_ipv6 src_get_gpc0(table_5m_ipv6) gt 0
+    
+    http-request deny deny_status 429 if blocked_1h_ipv4 or blocked_5m_ipv4 or blocked_1h_ipv6 or blocked_5m_ipv6
 
-  default_backend be_servers
+    default_backend be_servers
 
 backend be_servers
     mode http
@@ -183,9 +181,8 @@ Content-Type: text/plain
 200 Found
 ```
 
----
 
-## **2\. Bot Detector Configuration (config.yaml)**
+## 2\. Bot Detector Configuration (`config.yaml`)
 
 The bot-detector's YAML configuration file is the **master list** of all targets and should be kept consistent across your cluster. The `blocker_addresses` list specifies every endpoint the bot detector must communicate with.
 

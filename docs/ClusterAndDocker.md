@@ -2,17 +2,6 @@
 
 This guide covers deploying bot-detector in containerized environments (Docker, Kubernetes) with the enhanced cluster features for container-friendly configuration.
 
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Node Identification with --cluster-node-name](#node-identification-with---cluster-node-name)
-3. [Dynamic Configuration with BOT_DETECTOR_NODES](#dynamic-configuration-with-bot_detector_nodes)
-4. [Name-Based FOLLOW Files](#name-based-follow-files)
-5. [Docker Compose Example](#docker-compose-example)
-6. [Kubernetes Deployment](#kubernetes-deployment)
-7. [Migration Guide](#migration-guide)
-8. [Troubleshooting](#troubleshooting)
-
 ## Overview
 
 Traditional cluster configuration relies on static IP addresses and ports, which conflicts with container orchestration where:
@@ -23,7 +12,7 @@ Traditional cluster configuration relies on static IP addresses and ports, which
 This guide introduces three features that enable seamless containerized deployments:
 1. **--cluster-node-name**: Explicit node identification independent of listen address
 2. **BOT_DETECTOR_NODES**: Environment variable for dynamic cluster topology
-3. **Name-based FOLLOW**: Using node names instead of addresses in FOLLOW files
+3. **Name-based `FOLLOW`**: Using node names instead of addresses in `FOLLOW` files
 
 For general cluster architecture and concepts, see [ClusterConfiguration.md](ClusterConfiguration.md).
 
@@ -31,7 +20,7 @@ For general cluster architecture and concepts, see [ClusterConfiguration.md](Clu
 
 ### The Problem
 
-In traditional deployments, bot-detector identifies which node it represents by matching its listen address against the `cluster.nodes` list in config.yaml. For example:
+In traditional deployments, bot-detector identifies which node it represents by matching its listen address against the `cluster.nodes` list in `config.yaml`. For example:
 
 ```yaml
 # config.yaml
@@ -90,7 +79,7 @@ If `--cluster-node-name` is not provided, bot-detector attempts address matching
 
 ### The Problem
 
-Static cluster configuration in config.yaml doesn't work well with containers:
+Static cluster configuration in `config.yaml` doesn't work well with containers:
 - Service names vary by environment (dev, staging, prod)
 - Cannot use environment variables in YAML
 - Requires building different images or config files per environment
@@ -143,20 +132,20 @@ BOT_DETECTOR_NODES="leader:leader.example.com:8080;follower:follower.example.com
 ### Behavior
 
 **Complete Replacement:**
-When `BOT_DETECTOR_NODES` is set, it completely replaces `cluster.nodes` from config.yaml. This is intentional - the environment variable takes full precedence.
+When `BOT_DETECTOR_NODES` is set, it completely replaces `cluster.nodes` from `config.yaml`. This is intentional - the environment variable takes full precedence.
 
 **Other Settings Preserved:**
-Only the nodes list is replaced. Other cluster settings still come from config.yaml:
+Only the nodes list is replaced. Other cluster settings still come from `config.yaml`:
 - `config_poll_interval`
 - `metrics_report_interval`
 - `protocol`
 
-Or use defaults if not specified in config.yaml.
+Or use defaults if not specified in `config.yaml`.
 
 **Critical Requirement:**
 All nodes in the cluster MUST have identical `BOT_DETECTOR_NODES` values. Each node needs the complete topology:
 - Leaders use it to know which followers to poll for metrics
-- Followers use it to resolve leader names in FOLLOW files
+- Followers use it to resolve leader names in `FOLLOW` files
 - Both use it for node identification
 
 ### Docker Compose Example
@@ -181,7 +170,6 @@ metadata:
   name: bot-detector-cluster
 data:
   CLUSTER_NODES: "leader:bot-detector-leader:8080;follower-0:bot-detector-follower-0:8080;follower-1:bot-detector-follower-1:8080"
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -199,14 +187,14 @@ spec:
               key: CLUSTER_NODES
 ```
 
-## Name-Based FOLLOW Files
+## Name-Based `FOLLOW` Files
 
 ### The Problem
 
-Traditional FOLLOW files contain the leader's full address:
+Traditional `FOLLOW` files contain the leader's full address:
 
 ```bash
-# FOLLOW file
+# `FOLLOW` file
 http://192.168.1.10:8080
 ```
 
@@ -220,22 +208,22 @@ This breaks in containers because:
 Use the leader's **node name** instead of its address:
 
 ```bash
-# FOLLOW file
+# `FOLLOW` file
 leader
 ```
 
-Bot-detector resolves the name to an address using the cluster configuration (from config.yaml or `BOT_DETECTOR_NODES`).
+Bot-detector resolves the name to an address using the cluster configuration (from `config.yaml` or `BOT_DETECTOR_NODES`).
 
 ### Benefits
 
-1. **Environment Independence**: Same FOLLOW file works in dev, staging, and prod
+1. **Environment Independence**: Same `FOLLOW` file works in dev, staging, and prod
 2. **Simpler Configuration**: Just "leader" instead of full URL
-3. **Centralized Management**: Change addresses by updating cluster config, not FOLLOW files
+3. **Centralized Management**: Change addresses by updating cluster config, not `FOLLOW` files
 4. **Container-Friendly**: Use service names directly
 
 ### Resolution Process
 
-When reading the FOLLOW file, bot-detector determines if the content is an address or a name:
+When reading the `FOLLOW` file, bot-detector determines if the content is an address or a name:
 
 **Treated as Address (backward compatible):**
 - Contains `://` → URL (e.g., `http://leader:8080`)
@@ -265,11 +253,11 @@ echo "192.168.1.10:8080" > /config/FOLLOW
 
 ### Requirements
 
-For name-based FOLLOW to work:
-- Cluster configuration must be available (config.yaml or `BOT_DETECTOR_NODES`)
+For name-based `FOLLOW` to work:
+- Cluster configuration must be available (`config.yaml` or `BOT_DETECTOR_NODES`)
 - The referenced node name must exist in the cluster nodes list
 
-During bootstrap (when follower has no config.yaml yet):
+During bootstrap (when follower has no `config.yaml` yet):
 - `BOT_DETECTOR_NODES` must be set
 - The leader node name must be in `BOT_DETECTOR_NODES`
 
@@ -381,7 +369,7 @@ leader
 Just the node name! Bot-detector will:
 1. Read `BOT_DETECTOR_NODES` environment variable
 2. Resolve "leader" to "leader:8080"
-3. Bootstrap config.yaml from `http://leader:8080/config/archive`
+3. Bootstrap `config.yaml` from `http://leader:8080/config/archive`
 4. Start as follower
 
 ### Running the Cluster
@@ -390,7 +378,7 @@ Just the node name! Bot-detector will:
 # Build the image
 docker build -t bot-detector:latest .
 
-# Create FOLLOW file for follower
+# Create `FOLLOW` file for follower
 mkdir -p follower/config
 echo "leader" > follower/config/FOLLOW
 
@@ -471,7 +459,6 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: bot-detector
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -530,7 +517,6 @@ spec:
       - name: config
         configMap:
           name: bot-detector-config  # Your main config
----
 apiVersion: v1
 kind: Service
 metadata:
@@ -605,15 +591,13 @@ spec:
       - name: follow-file
         configMap:
           name: follower-follow
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: follower-follow
   namespace: bot-detector
 data:
-  FOLLOW: "leader"
----
+  `FOLLOW`: "leader"
 apiVersion: v1
 kind: Service
 metadata:
@@ -650,7 +634,7 @@ kubectl rollout restart statefulset/bot-detector-follower -n bot-detector
 
 **Before:**
 ```yaml
-# config.yaml on all VMs
+# `config.yaml` on all VMs
 cluster:
   nodes:
     - name: vm-1
@@ -663,7 +647,7 @@ cluster:
 # Start on vm-1
 bot-detector --config=/etc/bot-detector
 
-# FOLLOW file on vm-2
+# `FOLLOW` file on vm-2
 echo "192.168.1.10:8080" > /etc/bot-detector/FOLLOW
 ```
 
@@ -683,7 +667,7 @@ services:
 ```
 
 ```bash
-# FOLLOW file
+# `FOLLOW` file
 echo "leader" > follower/config/FOLLOW
 ```
 
@@ -712,22 +696,22 @@ bot-detector --cluster-node-name=leader --config=/config
 - Check spelling and case sensitivity
 - Ensure all nodes have identical cluster topology
 
-### "FOLLOW file contains node name 'X', but no cluster configuration available"
+### "`FOLLOW` file contains node name 'X', but no cluster configuration available"
 
-**Cause:** Using name-based FOLLOW but cluster config isn't loaded.
+**Cause:** Using name-based `FOLLOW` but cluster config isn't loaded.
 
 **Solution:**
 - Set `BOT_DETECTOR_NODES` environment variable
-- Ensure config.yaml has `cluster.nodes` section
+- Ensure `config.yaml` has `cluster.nodes` section
 - For bootstrap, `BOT_DETECTOR_NODES` is required
 
-### "FOLLOW file contains node name 'X', but no such node found in cluster configuration"
+### "`FOLLOW` file contains node name 'X', but no such node found in cluster configuration"
 
-**Cause:** Leader name in FOLLOW file isn't in the nodes list.
+**Cause:** Leader name in `FOLLOW` file isn't in the nodes list.
 
 **Solution:**
 - Add leader to `BOT_DETECTOR_NODES`
-- Or use direct address format in FOLLOW file: `echo "http://leader:8080" > FOLLOW`
+- Or use direct address format in `FOLLOW` file: `echo "http://leader:8080" > FOLLOW`
 
 ### Follower Can't Reach Leader in Docker
 
@@ -772,7 +756,7 @@ docker logs bot-detector-follower
 ```
 
 **Common Causes:**
-- Leader address incorrect in FOLLOW file or cluster config
+- Leader address incorrect in `FOLLOW` file or cluster config
 - Network connectivity issues
 - Leader not serving `/config/archive` endpoint
 
@@ -786,7 +770,7 @@ docker logs bot-detector-follower
    - Use ConfigMaps (Kubernetes) or shared environment files (Docker Compose)
    - Validate with scripts before deployment
 
-3. **Use name-based FOLLOW files**
+3. **Use name-based `FOLLOW` files**
    - More maintainable than hardcoded addresses
    - Environment-independent
 
