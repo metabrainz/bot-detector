@@ -303,7 +303,7 @@ func Bootstrap(opts BootstrapOptions) error {
 
 // extractTarGz extracts a tar.gz archive to the specified directory.
 // It excludes the FOLLOW file for safety (to prevent overwriting role determination).
-// Returns the ETag (checksum) if present in the headers.
+// Verifies the archive checksum against the provided ETag (SHA256).
 func extractTarGz(archiveData []byte, targetDir string, etag string, logFunc LogFunc) error {
 	// Verify checksum if ETag is provided
 	if etag != "" {
@@ -315,10 +315,9 @@ func extractTarGz(archiveData []byte, targetDir string, etag string, logFunc Log
 		computedHash := fmt.Sprintf("%x", hash)
 
 		if computedHash != etag {
-			logFunc(logging.LevelWarning, "CLUSTER", "Archive checksum mismatch (expected: %s, got: %s)", etag, computedHash)
-		} else {
-			logFunc(logging.LevelDebug, "CLUSTER", "Archive checksum verified: %s", etag)
+			return fmt.Errorf("archive checksum verification failed (expected: %s, got: %s)", etag, computedHash)
 		}
+		logFunc(logging.LevelDebug, "CLUSTER", "Archive checksum verified: %s", etag)
 	}
 
 	// Create gzip reader
