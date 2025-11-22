@@ -16,7 +16,7 @@ type Provider interface {
 }
 
 var defaultLogRegex = regexp.MustCompile(
-	`^(?P<VHost>\S+) (?P<IP>\S+) (?P<Identity>\S+) (?P<User>\S+) \[(?P<Timestamp>[^\]]+)\] (?:\"(?P<Method>\S+)\s+(?P<Path>.+?)\s+(?P<Protocol>\S+)\"|\"-\"|-) (?P<StatusCode>\d{1,3}) (?P<Size>\S+) \"(?P<Referrer>[^\"]*)\" \"(?P<UserAgent>[^\"]*)\"$`,
+	`^(?P<VHost>\S+) (?P<IP>\S+) (?P<Identity>\S+) (?P<User>\S+) \[(?P<Timestamp>[^\]]+)\] (?:\"(?P<Method>\S+)\s+(?P<Path>.+?)(?:\s+(?P<Protocol>\S+))?\"|\"-\"|-) (?P<StatusCode>\d{1,3}) (?P<Size>\S+) \"(?P<Referrer>[^\"]*)\" \"(?P<UserAgent>[^\"]*)\"$`,
 )
 
 // getMatch safely retrieves a value from a named capture group.
