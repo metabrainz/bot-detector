@@ -691,7 +691,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 	if isGood {
 		// Only log the skip message and set the state the first time.
 		if activity.SkipInfo.Type == utils.SkipTypeNone {
-			activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeGoodActor, Source: goodActorRuleName}
+			activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeGoodActor, Source: p.InternReason(goodActorRuleName)}
 			p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (good_actor:%s).", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName)
 		}
 
