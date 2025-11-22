@@ -48,7 +48,6 @@ This file is a complete, point-in-time snapshot of all IP states known to the sy
 - **Format:** A gzip-compressed JSON object. The application automatically compresses snapshots on write and decompresses them on read.
 - **Content:** Contains the timestamp of the snapshot and all IP states (both blocked and unblocked).
 - **Compression:** Snapshots are automatically gzipped to reduce disk usage (typically 80-90% size reduction) and improve I/O performance.
-- **Backward Compatibility:** The loader automatically detects and handles both gzipped and legacy plain JSON snapshots by checking the gzip magic number.
 - **Reliability:** The snapshot is written using an **atomic rename** pattern (`compress -> write to .tmp -> fsync -> rename`). This ensures that a valid, non-corrupt snapshot is always available, even if the application crashes mid-write.
 - **Purpose:** Its primary role is to ensure fast application startups by avoiding the need to replay a long history of events.
 
@@ -164,78 +163,27 @@ If the entire server is lost, the snapshot file is the key asset for recovery.
 
 1.  **Prepare New Server:** Set up a new machine with the `bot-detector` binary and its backend.
 2.  **Restore Snapshot:** Place the backed-up snapshot file into the state directory. **Ensure no journal file is present.**
-3.  **Start Application:** Launch `bot-detector`. It will load the snapshot (automatically detecting the format version), see there is no journal to replay, and proceed to push the state to the backend.
+3.  **Start Application:** Launch `bot-detector`. It will load the snapshot and proceed to push the state to the backend.
 4.  **Resume:** The system will create a new journal and resume normal operation.
 
 This means your Recovery Point Objective (RPO) is determined by how frequently you back up the snapshot file.
 
 ### Backup Considerations
 
-- **Format Compatibility:** Snapshot files are gzip-compressed for efficiency. Both compressed and legacy plain JSON snapshots can be restored.
-- **Version Detection:** The application automatically detects v0 or v1 format and handles conversion transparently.
-- **Size:** Gzipped snapshots are typically 80-90% smaller than plain JSON, making backups faster and more storage-efficient.
-- **Inspection:** To manually inspect a gzipped snapshot:
-  - v0: `gunzip -c state.snapshot | jq .`
-  - v1: `gunzip -c snapshot.v1.gz | jq .`
+- **Format:** Snapshot files are gzip-compressed for efficiency
+- **Size:** Gzipped snapshots are typically 80-90% smaller than plain JSON, making backups faster and more storage-efficient
+- **Inspection:** To manually inspect a gzipped snapshot: `gunzip -c state.snapshot | jq .`
 
----
+## Format Specification
 
-## Format Specifications
+### File Naming
 
-### v0 Format (Legacy)
+Both files are located in the directory specified by the `--state-dir` flag:
 
-The original persistence format, still fully supported for backward compatibility.
-
-#### File Naming
 - **Snapshot:** `state.snapshot` (gzipped JSON)
 - **Journal:** `events.log` (JSONL)
 
-#### Snapshot Structure
-```json
-{
-  "version": "v0",
-  "snapshot_time": "2025-11-21T12:00:00Z",
-  "active_blocks": {
-    "192.0.2.1": {
-      "unblock_time": "2025-11-21T13:00:00Z",
-      "reason": "chain-name"
-    }
-  }
-}
-```
-
-**Characteristics:**
-- Only stores **blocked IPs** (no unblocked state)
-- Flat map structure with IP as key
-- Version field may be absent in very old snapshots (defaults to v0)
-
-#### Journal Entry Format
-```json
-{"version":"v0","ts":"2025-11-21T12:00:00Z","event":"block","ip":"192.0.2.1","duration":3600000000000,"reason":"chain-name"}
-{"version":"v0","ts":"2025-11-21T12:00:01Z","event":"unblock","ip":"192.0.2.2","reason":"good-actor-match"}
-```
-
-**Characteristics:**
-- Flat structure with all fields at top level
-- `event` field contains event type ("block" or "unblock")
-- Duration in nanoseconds for block events
-
-#### Limitations
-- **No unblock state preservation:** When an IP is unblocked, it's removed from state entirely
-- **Lost good actor protections:** After restart, unblocked IPs (`gpc0=0`) are not restored to HAProxy
-- **No chronological ordering:** Snapshot entries are unordered
-
----
-
-### v1 Format (Current)
-
-The enhanced format with unified state management and improved structure.
-
-#### File Naming
-- **Snapshot:** `snapshot.v1.gz` (gzipped JSON)
-- **Journal:** `events.v1.log` (JSONL)
-
-#### Snapshot Structure
+### Snapshot Structure
 ```json
 {
   "ts": "2025-11-21T12:00:00Z",
@@ -262,10 +210,9 @@ The enhanced format with unified state management and improved structure.
 - Stores **both blocked and unblocked IPs**
 - Wrapped structure: timestamp at top level, data nested in `snapshot` object
 - Entries are **sorted chronologically** by `expire_time`
-- No `version` field (format detected by structure)
 - `state` field explicitly indicates "blocked" or "unblocked"
 
-#### Journal Entry Format
+### Journal Entry Format
 ```json
 {"ts":"2025-11-21T12:00:00Z","event":{"type":"block","ip":"192.0.2.1","duration":3600000000000,"reason":"chain-name"}}
 {"ts":"2025-11-21T12:00:01Z","event":{"type":"unblock","ip":"192.0.2.2","reason":"good-actor-match"}}
@@ -273,38 +220,16 @@ The enhanced format with unified state management and improved structure.
 
 **Characteristics:**
 - Wrapped structure: timestamp at top level, event data nested in `event` object
-- `type` field (not `event`) contains event type
-- No `version` field (format detected by structure)
+- `type` field contains event type ("block" or "unblock")
 - Cleaner separation of metadata from payload
+- Duration in nanoseconds for block events
 
-#### Advantages
+### Advantages
 - **Complete state restoration:** Both blocks and unblocks are preserved
 - **Good actor protection:** Unblocked IPs (`gpc0=0`) are restored to HAProxy after restart
 - **Chronological ordering:** Snapshot entries sorted by expiration time for efficient processing
 - **Cleaner structure:** Consistent wrapping pattern for both snapshot and journal
-- **Future-proof:** Easier to add metadata fields without touching event structure
 
-#### Migration from v0 to v1
-
-The application handles v0 to v1 migration transparently:
-
-1. **Loading v0 files:** Automatically detected and converted to internal v1 structure
-2. **Writing v1 files:** New snapshots use v1 format with version-aware naming
-3. **Backward compatibility:** v0 files remain readable indefinitely
-4. **Unblocked IPs:** When loading v0 snapshots, only blocked IPs are present; unblocked state is built from journal replay
-
-**Example migration:**
-```
-Before (v0):
-  state.snapshot (3 blocked IPs)
-  events.log (10 blocks + 2 unblocks)
-
-After restart with v1:
-  snapshot.v1.gz (11 blocked + 2 unblocked IPs)
-  events.v1.log (new events in v1 format)
-```
-
----
 
 ## Logging Output
 
@@ -312,7 +237,7 @@ The application provides detailed logging for all persistence operations:
 
 ### Startup
 ```
-STATE_LOAD: Loaded snapshot (version=v1, size=1234 bytes, entries=100 blocked + 5 unblocked, timestamp=2025-11-21T12:00:00Z)
+STATE_LOAD: Loaded snapshot (size=1234 bytes, entries=100 blocked + 5 unblocked, timestamp=2025-11-21T12:00:00Z)
 JOURNAL_REPLAY: Replayed journal (size=5678 bytes, blocks=10, unblocks=2, skipped=50, errors=0)
 STATE_RESTORE: Restoring 105 IP states to backend...
 ```

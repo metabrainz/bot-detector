@@ -2,19 +2,17 @@
 
 This document describes the Leader/Follower architecture for `bot-detector` clusters. This model enables configuration synchronization and metrics aggregation while maintaining independent threat detection and execution on each node.
 
-## Implementation Status
+## Features
 
-The cluster implementation is **complete and operational** as of Phases 1-7:
+The cluster implementation provides the following capabilities:
 
-- ✅ **Configuration synchronization**: Leader serves config via `/config/archive`, followers poll and hot-reload
-- ✅ **Bootstrap mode**: New followers can start with only a `FOLLOW` file and fetch initial config
-- ✅ **Metrics collection**: Leader polls followers via `/cluster/metrics` at configurable intervals
-- ✅ **Metrics aggregation**: Cluster-wide metrics available via `/cluster/metrics/aggregate`
-- ✅ **Node health tracking**: Automatic health status determination (healthy/stale/error)
-- ✅ **Dynamic role changes**: Nodes can transition between leader/follower without restart
-- ✅ **FOLLOW file mechanism**: Role designation via presence/absence of FOLLOW file
-
-**Future enhancements** (Phases 8-12) include retry logic with exponential backoff, HTTPS support, comprehensive integration tests, and optional features. See `work_in_progress/cluster2.md` for detailed planning.
+- **Configuration synchronization**: Leader serves config via `/config/archive`, followers poll and hot-reload
+- **Bootstrap mode**: New followers can start with only a `FOLLOW` file and fetch initial config
+- **Metrics collection**: Leader polls followers via `/cluster/metrics` at configurable intervals
+- **Metrics aggregation**: Cluster-wide metrics available via `/cluster/metrics/aggregate`
+- **Node health tracking**: Automatic health status determination (healthy/stale/error)
+- **Dynamic role changes**: Nodes can transition between leader/follower without restart
+- **`FOLLOW` file mechanism**: Role designation via presence/absence of `FOLLOW` file
 
 ## Guiding Principles
 
@@ -69,7 +67,6 @@ graph TD
 
 4. **Metrics Aggregation:** The leader collects metrics from all followers (blocks per chain, top IPs, error rates, etc.) and provides a unified cluster-wide dashboard.
 
----
 
 ## Configuration
 
@@ -83,10 +80,10 @@ The node's role (leader or follower) is determined by the presence of a file nam
 **Examples:**
 
 ```bash
-# Start as leader (/etc/bot-detector/FOLLOW does not exist)
+# Start as leader (/etc/bot-detector/`FOLLOW` does not exist)
 ./bot-detector --config-dir /etc/bot-detector --log-path /var/log/haproxy/access.log
 
-# Start as follower (/etc/bot-detector/FOLLOW contains "node-1.internal:8080")
+# Start as follower (/etc/bot-detector/`FOLLOW` contains "node-1.internal:8080")
 ./bot-detector --config-dir /etc/bot-detector --log-path /var/log/haproxy/access.log
 ```
 
@@ -167,7 +164,6 @@ A node determines its identity by:
 
 For example, if a node listens on `node-2.internal:8080`, it identifies as `"node-2"` based on the matching entry in the config.
 
----
 
 ## Detailed Scenarios
 
@@ -234,11 +230,11 @@ sequenceDiagram
 
     Admin->>NewFollower: echo "leader:port" > /etc/bot-detector/FOLLOW
     Admin->>NewFollower: Starts bot-detector service
-    NewFollower->>NewFollower: Detects FOLLOW file but no config.yaml
+    NewFollower->>NewFollower: Detects `FOLLOW` file but no config.yaml
     NewFollower->>Leader: GET /config/archive
     Leader-->>NewFollower: 200 OK [.tar.gz archive]
     NewFollower->>NewFollower: Extracts archive
-    NewFollower->>NewFollower: Validates leader address from FOLLOW file against cluster.nodes in new config
+    NewFollower->>NewFollower: Validates leader address from `FOLLOW` file against cluster.nodes in new config
     alt Validation Fails
         NewFollower->>Admin: Exits with fatal error
     else Validation Succeeds
@@ -254,10 +250,10 @@ This model uses a dynamic, manual failover process that does not require service
 **Scenario:** The Leader node fails or becomes unreachable.
 
 **Impact During Leader Failure:**
-- ✅ **Threat detection continues:** All followers continue to parse logs, detect threats, and send commands to HAProxy.
-- ✅ **Blocking continues:** No impact on core security functionality.
-- ❌ **No config updates:** Followers cannot receive new configuration changes.
-- ❌ **No centralized metrics:** Cluster-wide metrics dashboard is unavailable.
+- **Threat detection continues:** All followers continue to parse logs, detect threats, and send commands to HAProxy.
+- **Blocking continues:** No impact on core security functionality.
+- **No config updates:** Followers cannot receive new configuration changes.
+- **No centralized metrics:** Cluster-wide metrics dashboard is unavailable.
 
 **Dynamic Failover Steps:**
 
@@ -306,36 +302,18 @@ sequenceDiagram
     Note over FollowerA,NewLeader: Cluster fully operational without restarts
 ```
 
----
 
 ## API Endpoints
 
-The following HTTP endpoints are used for cluster coordination:
+For detailed information about all cluster-related HTTP endpoints, including request/response formats and usage examples, see the [Cluster Endpoints](API.md#cluster-endpoints) section in the API documentation.
 
-### Leader Endpoints
+**Quick Reference:**
+- `/cluster/status` - Node role and identity information
+- `/cluster/metrics` - Individual node metrics (used by leader for collection)
+- `/cluster/metrics/aggregate` - Cluster-wide aggregated metrics (leader only)
+- `/cluster/ip/{ip}` - Aggregated IP status across all nodes (leader only)
+- `/config/archive` - Configuration archive with integrity verification
 
-| Endpoint | Method | Purpose | Used By |
-|----------|--------|---------|---------|
-| `/config/archive` | HEAD | Check `Last-Modified` header for config version | Followers (poll) |
-| `/config/archive` | GET | Serves the current configuration as a `.tar.gz` archive | Followers (download) |
-| `/cluster/metrics/aggregate` | GET | Returns aggregated metrics from all followers | Admins (dashboard) |
-
-### Follower Endpoints
-
-| Endpoint | Method | Purpose | Used By |
-|----------|--------|---------|---------|
-| `/cluster/metrics` | GET | Returns local instance metrics as JSON (includes node `name` for identification) | Leader (collection) |
-
-### Shared Endpoints (All Instances)
-
-| Endpoint | Method | Purpose | Used By |
-|----------|--------|---------|---------|
-| `/cluster/status` | GET | Returns instance status (role, name, address, leader) | Monitoring |
-| `/` or `/stats` | GET | HTML metrics report | Admins (browser) |
-| `/stats/steps` | GET | Plain text step execution counts | Admins (monitoring) |
-| `/config` | GET | Raw YAML configuration content | Admins (inspection) |
-
----
 
 ## Metrics Aggregation
 
@@ -381,7 +359,6 @@ Per-Instance Metrics:
 └─ instance-3: 423,988 lines, 155 blocks, healthy
 ```
 
----
 
 ## Implementation Notes
 
@@ -402,3 +379,13 @@ Per-Instance Metrics:
 - Consider using HTTPS for production deployments (configure via `cluster.http_protocol`)
 - No authentication is implemented in the initial design (rely on network isolation)
 - Future enhancement: Add API token authentication for leader/follower communication
+
+## Future Enhancements
+
+Planned improvements for future releases:
+
+- **Retry logic with exponential backoff**: Improve resilience during temporary network issues
+- **HTTPS support**: Enhanced security for cluster communication
+- **Comprehensive integration tests**: Automated testing of cluster scenarios
+- **API token authentication**: Secure leader/follower communication
+- **Additional optional features**: See `work_in_progress/cluster2.md` for detailed planning

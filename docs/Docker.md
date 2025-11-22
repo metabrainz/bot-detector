@@ -8,17 +8,24 @@ A multi-stage [`Dockerfile`](../Dockerfile) is provided at the root of this proj
 
 ### Using the Build Script (Recommended)
 
-The easiest way to build the image with version information is to use the provided build script:
+The easiest way to build the image is to use the provided [`docker-build.sh`](../docker-build.sh) script:
 
 ```sh
 ./docker-build.sh
 ```
 
-This script automatically:
-- Captures the current git commit hash
-- Records the build timestamp
-- Embeds this information into the binary (visible with `--version`)
-- Tags the image as both `bot-detector:latest` and `bot-detector:<commit>`
+#### What the Script Does
+
+The build script automates the Docker build process and handles version tagging:
+
+1. **Captures git commit** - Retrieves the current short commit hash (or "unknown" if not in a git repository)
+2. **Builds the image** - Executes `docker build` with the Dockerfile
+3. **Embeds version info** - Go 1.18+ automatically embeds VCS information when the `.git` directory is present
+4. **Creates dual tags** - Tags the image as both:
+   - `bot-detector:latest` (for convenience)
+   - `bot-detector:<commit>` (for version tracking)
+
+This ensures that every build is traceable to a specific commit, which is essential for production deployments and debugging.
 
 ### Manual Build
 
@@ -52,7 +59,7 @@ docker exec <container-name> bot-detector --version
 
 The recommended way to run the container is to use environment variables to define your paths and ports, which makes the command easier to read and manage.
 
-### **Live Mode Example**
+### Live Mode Example
 
 This example demonstrates a robust setup for a production environment.
 
@@ -61,7 +68,7 @@ This example demonstrates a robust setup for a production environment.
 # --- Configuration ---
 # The name for this specific instance (e.g., for a specific log file)
 INSTANCE_NAME="prod-website"
-# The directory on the HOST machine where your config.yaml and its dependencies are.
+# The directory on the HOST machine where your `config.yaml` and its dependencies are.
 HOST_CONFIG_DIR="/etc/bot-detector/${INSTANCE_NAME}"
 # The directory on the HOST machine where the logs to be tailed are.
 HOST_LOGS_DIR="/var/log/nginx/"
@@ -106,7 +113,7 @@ docker run -d \
   --http-server "0.0.0.0:$INTERNAL_PORT"
 ```
 
-### **Explanation of the `docker run` command:**
+### Explanation of the docker run Command
 
 *   `-d`: Runs the container in detached mode (in the background).
 *   `--name "$CONTAINER_NAME"`: Assigns a predictable name to the container.
@@ -119,7 +126,41 @@ docker run -d \
 *   `--state-dir "state"`: Enables persistence and tells the application to use the `state` directory (which is the volume mounted from the host) to store its data.
 *   `--http-server "0.0.0.0:$INTERNAL_PORT"`: Tells the application to listen on all network interfaces inside the container, which is required for the published port to be accessible from the host.
 
-### **Running Commands on a Live Container**
+### File Permissions and User Mapping
+
+The container uses an [`entrypoint.sh`](../entrypoint.sh) script to handle file permissions when mounting host directories. By default, the application runs as user `appuser` (UID 1000, GID 1000).
+
+**Matching Host User Permissions:**
+
+If your host directories are owned by a different user, you can map the container's user to match your host user by setting the `PUID` and `PGID` environment variables:
+
+```sh
+# Get your host user's UID and GID
+HOST_UID=$(id -u)
+HOST_GID=$(id -g)
+
+# Add to docker run command
+docker run -d \
+  --name "$CONTAINER_NAME" \
+  --restart always \
+  --env "PUID=$HOST_UID" \
+  --env "PGID=$HOST_GID" \
+  -v "$HOST_CONFIG_DIR":/home/appuser/bot-detector/config:ro \
+  -v "$HOST_LOGS_DIR":/home/appuser/bot-detector/logs:ro \
+  -v "$HOST_STATE_DIR":/home/appuser/bot-detector/state \
+  --publish $BOTDET_API_PORT:$INTERNAL_PORT \
+  "$IMAGE_NAME" \
+  --config-dir "config" \
+  --log-path "logs/$LOG_FILE_NAME" \
+  --state-dir "state" \
+  --http-server "0.0.0.0:$INTERNAL_PORT"
+```
+
+The entrypoint script will automatically adjust the container's internal user to match these IDs, ensuring proper file access to mounted volumes. This is particularly important for the `state` directory which requires write access.
+
+**Note:** Running as root (PUID=0) is not supported for security reasons. The container will default to UID 1000 if root is specified.
+
+### Running Commands on a Live Container
 
 To run one-off commands like `--dump-backends` against a running container, use `docker exec`. This executes a new command inside the existing container without stopping it.
 
