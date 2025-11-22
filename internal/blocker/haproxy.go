@@ -960,9 +960,11 @@ func (b *HAProxyBlocker) ResyncBackend(addr string, blockedIPs map[string]BlockI
 		return nil
 	}
 
+	// Clear the flag immediately to prevent duplicate resync triggers
+	b.SetBackendNeedsResync(addr, false)
+
 	if len(blockedIPs) == 0 {
 		b.P.Log(logging.LevelInfo, "RESYNC", "No blocked IPs to resync for backend %s", addr)
-		b.SetBackendNeedsResync(addr, false)
 		return nil
 	}
 
@@ -1015,7 +1017,6 @@ func (b *HAProxyBlocker) ResyncBackend(addr string, blockedIPs map[string]BlockI
 	}
 
 	b.P.Log(logging.LevelInfo, "RESYNC", "Resync completed for backend %s: %d succeeded, %d failed", addr, successCount, errorCount)
-	b.SetBackendNeedsResync(addr, false)
 
 	if errorCount > 0 {
 		return fmt.Errorf("resync had %d errors", errorCount)
