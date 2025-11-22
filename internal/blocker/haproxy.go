@@ -82,6 +82,7 @@ type HAProxyBlocker struct {
 	healthMu                  sync.RWMutex
 	healthCheckStop           chan struct{}
 	healthCheckWg             sync.WaitGroup
+	ResyncCallback            func(addr string) // Called when a backend needs resync
 }
 
 // NewHAProxyBlocker creates a new HAProxyBlocker.
@@ -929,6 +930,101 @@ func (b *HAProxyBlocker) SetBackendNeedsResync(addr string, needsResync bool) {
 	health.NeedsResync = needsResync
 }
 
+// GetBackendsNeedingResync returns a list of backend addresses that need resynchronization.
+func (b *HAProxyBlocker) GetBackendsNeedingResync() []string {
+	b.healthMu.RLock()
+	defer b.healthMu.RUnlock()
+
+	var backends []string
+	for addr, health := range b.backendHealth {
+		health.mu.RLock()
+		needsResync := health.NeedsResync
+		health.mu.RUnlock()
+
+		if needsResync {
+			backends = append(backends, addr)
+		}
+	}
+	return backends
+}
+
+// ResyncBackend re-sends all currently blocked IPs to a specific backend.
+// This is called when a backend restarts or recovers from being down.
+// The blockedIPs map should contain IP -> (duration, reason) for all currently blocked IPs.
+func (b *HAProxyBlocker) ResyncBackend(addr string, blockedIPs map[string]BlockInfo) error {
+	if b.IsDryRun {
+		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would resync %d IPs to backend %s", len(blockedIPs), addr)
+		return nil
+	}
+
+	if len(blockedIPs) == 0 {
+		b.P.Log(logging.LevelInfo, "RESYNC", "No blocked IPs to resync for backend %s", addr)
+		b.SetBackendNeedsResync(addr, false)
+		return nil
+	}
+
+	b.P.Log(logging.LevelInfo, "RESYNC", "Starting resync of %d IPs to backend %s", len(blockedIPs), addr)
+
+	successCount := 0
+	errorCount := 0
+
+	for ip, info := range blockedIPs {
+		ipInfo := utils.NewIPInfo(ip)
+		if ipInfo.Version == utils.VersionInvalid {
+			b.P.Log(logging.LevelWarning, "RESYNC", "Skipping invalid IP %s during resync", ip)
+			continue
+		}
+
+		// Determine table name
+		baseTableName, found := b.P.GetDurationTables()[info.Duration]
+		if !found {
+			baseTableName = b.P.GetBlockTableNameFallback()
+		}
+
+		if baseTableName == "" {
+			errorCount++
+			continue
+		}
+
+		tableName := baseTableName
+		if !strings.HasSuffix(baseTableName, "_ipv4") && !strings.HasSuffix(baseTableName, "_ipv6") {
+			switch ipInfo.Version {
+			case 4:
+				tableName += "_ipv4"
+			case 6:
+				tableName += "_ipv6"
+			default:
+				errorCount++
+				continue
+			}
+		}
+
+		command := fmt.Sprintf("set table %s key %s data.gpc0 1\n", tableName, ipInfo.Address)
+
+		// Execute directly on this specific backend
+		if err := b.Executor(addr, ip, command); err != nil {
+			b.P.Log(logging.LevelError, "RESYNC", "Failed to resync IP %s to backend %s: %v", ip, addr, err)
+			errorCount++
+		} else {
+			successCount++
+		}
+	}
+
+	b.P.Log(logging.LevelInfo, "RESYNC", "Resync completed for backend %s: %d succeeded, %d failed", addr, successCount, errorCount)
+	b.SetBackendNeedsResync(addr, false)
+
+	if errorCount > 0 {
+		return fmt.Errorf("resync had %d errors", errorCount)
+	}
+	return nil
+}
+
+// BlockInfo holds information about a blocked IP for resync purposes.
+type BlockInfo struct {
+	Duration time.Duration
+	Reason   string
+}
+
 // StartHealthCheck starts the periodic health check goroutine.
 func (b *HAProxyBlocker) StartHealthCheck(interval time.Duration) {
 	if b.IsDryRun {
@@ -996,6 +1092,10 @@ func (b *HAProxyBlocker) performHealthChecks() {
 
 		if needsResync {
 			b.SetBackendNeedsResync(addr, true)
+			// Trigger resync callback if set
+			if b.ResyncCallback != nil {
+				go b.ResyncCallback(addr)
+			}
 		}
 	}
 }
