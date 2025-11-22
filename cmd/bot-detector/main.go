@@ -821,6 +821,15 @@ func start(p *app.Processor) {
 			}
 			go store.CleanUpIdleActors(p, stopWatcher)
 			go checker.EntryBufferWorker(p, stopWatcher)
+
+			// Set up signal handling before starting server
+			signal.Notify(p.SignalCh, syscall.SIGINT, syscall.SIGTERM)
+			go func() {
+				<-p.SignalCh
+				signal.Stop(p.SignalCh)
+				close(p.SignalCh)
+			}()
+
 			go server.Start(p)
 
 			// Start config poller for follower nodes
@@ -885,8 +894,6 @@ func start(p *app.Processor) {
 				go collector.Start()
 			}
 		}
-		// Listen for OS signals on the processor's channel
-		signal.Notify(p.SignalCh, syscall.SIGINT, syscall.SIGTERM)
 
 		// LiveLogTailer is the blocking main loop
 		processor.LiveLogTailer(p, p.SignalCh, nil) // Pass the processor's channel to the tailer

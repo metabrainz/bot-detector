@@ -268,12 +268,11 @@ func DelayOrShutdown(p *app.Processor, delay time.Duration, signalCh <-chan os.S
 	select {
 	case <-time.After(delay):
 		return false // Delay completed
-	case s := <-signalCh:
-		p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
-		// Re-broadcast the signal so other listeners (like in main()) can also receive it.
-		// This is crucial for a coordinated shutdown.
-		if p.SignalCh != nil {
-			p.SignalCh <- s
+	case s, ok := <-signalCh:
+		if !ok || s == nil {
+			p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Shutdown signal received. Shutting down gracefully.")
+		} else {
+			p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
 		}
 		return true // Shutdown signal received
 	}
@@ -497,8 +496,12 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 		// Inner loop for reading new lines. This loop will be broken by file rotation or shutdown.
 		for {
 			select {
-			case s := <-signalCh:
-				p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
+			case s, ok := <-signalCh:
+				if !ok || s == nil {
+					p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Shutdown signal received. Shutting down gracefully.")
+				} else {
+					p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Received signal %v. Shutting down gracefully.", s)
+				}
 				checker.FlushEntryBuffer(p) // Final flush on shutdown.
 				_ = tailer.Close()
 				return
