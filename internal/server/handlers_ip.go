@@ -382,8 +382,73 @@ type NodeInfo struct {
 	Address string
 }
 
-// clusterIPAggregateHandler queries all nodes and returns aggregated status (leader only)
+// clusterIPAggregateHandler queries all nodes and returns aggregated status in plain text (leader only)
 func clusterIPAggregateHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Check if leader
+		if p.GetNodeRole() != "leader" {
+			http.Error(w, "Cluster IP aggregation only available on leader nodes", http.StatusNotFound)
+			return
+		}
+
+		// Extract and validate IP
+		ipStr := r.PathValue("ip")
+		if ipStr == "" {
+			http.Error(w, "IP address required", http.StatusBadRequest)
+			return
+		}
+
+		// Canonicalize IP
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			return
+		}
+		canonical := ip.String()
+
+		// Get cluster nodes and query them
+		response := queryAllNodes(p, canonical)
+
+		// Format as plain text
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = fmt.Fprintf(w, "cluster_status: %s\n", response.ClusterStatus)
+		_, _ = fmt.Fprint(w, "nodes:\n")
+		for _, node := range response.Nodes {
+			_, _ = fmt.Fprintf(w, "  - name: %s\n", node.Name)
+			_, _ = fmt.Fprintf(w, "    status: %s\n", node.Status)
+			if node.Error != "" {
+				_, _ = fmt.Fprintf(w, "    error: %s\n", node.Error)
+			}
+			if node.Actors > 0 {
+				_, _ = fmt.Fprintf(w, "    actors: %d\n", node.Actors)
+			}
+			if len(node.Chains) > 0 {
+				_, _ = fmt.Fprint(w, "    chains:\n")
+				for chain, expiry := range node.Chains {
+					_, _ = fmt.Fprintf(w, "      - %s (until: %s)\n", chain, expiry)
+				}
+			}
+			if node.EarliestBlock != "" {
+				_, _ = fmt.Fprintf(w, "    earliest_block: %s\n", node.EarliestBlock)
+			}
+			if node.LatestExpiry != "" {
+				_, _ = fmt.Fprintf(w, "    latest_expiry: %s\n", node.LatestExpiry)
+			}
+			if node.LastSeen != "" {
+				_, _ = fmt.Fprintf(w, "    last_seen: %s\n", node.LastSeen)
+			}
+			if node.LastUnblock != "" {
+				_, _ = fmt.Fprintf(w, "    last_unblock: %s\n", node.LastUnblock)
+			}
+			if node.UnblockReason != "" {
+				_, _ = fmt.Fprintf(w, "    reason: %s\n", node.UnblockReason)
+			}
+		}
+	}
+}
+
+// apiClusterIPAggregateHandler queries all nodes and returns aggregated status as JSON (leader only)
+func apiClusterIPAggregateHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Check if leader
 		if p.GetNodeRole() != "leader" {
@@ -410,51 +475,8 @@ func clusterIPAggregateHandler(p Provider) http.HandlerFunc {
 		}
 		canonical := ip.String()
 
-		// Get cluster nodes
-		nodes := extractNodeInfo(p.GetClusterNodes())
-		if len(nodes) == 0 {
-			http.Error(w, "No cluster nodes available", http.StatusInternalServerError)
-			return
-		}
-
-		protocol := p.GetClusterProtocol()
-
-		response := ClusterIPAggregateResponse{
-			Nodes: make([]NodeIPStatusResponse, 0, len(nodes)),
-		}
-
-		// Track overall cluster status
-		hasBlocked := false
-		hasUnblocked := false
-		hasUnknown := false
-
-		for _, node := range nodes {
-			nodeResponse := queryNodeIPStatus(p, node.Name, node.Address, protocol, canonical)
-			response.Nodes = append(response.Nodes, nodeResponse)
-
-			// Track status for cluster-wide determination
-			switch nodeResponse.Status {
-			case "blocked":
-				hasBlocked = true
-			case "unblocked":
-				hasUnblocked = true
-			case "unknown":
-				hasUnknown = true
-			}
-		}
-
-		// Determine cluster-wide status
-		if hasBlocked {
-			if hasUnblocked || hasUnknown {
-				response.ClusterStatus = "mixed"
-			} else {
-				response.ClusterStatus = "blocked"
-			}
-		} else if hasUnblocked {
-			response.ClusterStatus = "unblocked"
-		} else {
-			response.ClusterStatus = "unknown"
-		}
+		// Get cluster nodes and query them
+		response := queryAllNodes(p, canonical)
 
 		// Return JSON
 		w.Header().Set("Content-Type", "application/json")
@@ -462,6 +484,51 @@ func clusterIPAggregateHandler(p Provider) http.HandlerFunc {
 			p.Log(logging.LevelError, "CLUSTER", "Failed to encode cluster IP response: %v", err)
 		}
 	}
+}
+
+// queryAllNodes queries all cluster nodes and aggregates their responses
+func queryAllNodes(p Provider, canonical string) ClusterIPAggregateResponse {
+	nodes := extractNodeInfo(p.GetClusterNodes())
+	protocol := p.GetClusterProtocol()
+
+	response := ClusterIPAggregateResponse{
+		Nodes: make([]NodeIPStatusResponse, 0, len(nodes)),
+	}
+
+	// Track overall cluster status
+	hasBlocked := false
+	hasUnblocked := false
+	hasUnknown := false
+
+	for _, node := range nodes {
+		nodeResponse := queryNodeIPStatus(p, node.Name, node.Address, protocol, canonical)
+		response.Nodes = append(response.Nodes, nodeResponse)
+
+		// Track status for cluster-wide determination
+		switch nodeResponse.Status {
+		case "blocked":
+			hasBlocked = true
+		case "unblocked":
+			hasUnblocked = true
+		case "unknown":
+			hasUnknown = true
+		}
+	}
+
+	// Determine cluster-wide status
+	if hasBlocked {
+		if hasUnblocked || hasUnknown {
+			response.ClusterStatus = "mixed"
+		} else {
+			response.ClusterStatus = "blocked"
+		}
+	} else if hasUnblocked {
+		response.ClusterStatus = "unblocked"
+	} else {
+		response.ClusterStatus = "unknown"
+	}
+
+	return response
 }
 
 // extractNodeInfo extracts node information from interface{} to avoid import cycles
@@ -491,7 +558,7 @@ func extractNodeInfo(nodesInterface interface{}) []NodeInfo {
 
 // queryNodeIPStatus queries a single node for IP status
 func queryNodeIPStatus(p Provider, nodeName, nodeAddr, protocol, ip string) NodeIPStatusResponse {
-	url := fmt.Sprintf("%s://%s/cluster/internal/ip/%s", protocol, nodeAddr, ip)
+	url := fmt.Sprintf("%s://%s/api/v1/cluster/internal/ip/%s", protocol, nodeAddr, ip)
 
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(url)

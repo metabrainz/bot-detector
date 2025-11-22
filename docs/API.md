@@ -336,8 +336,60 @@ These endpoints allow you to query the block/unblock status of specific IP addre
 ### **`/cluster/ip/{ip}`** (Leader Only)
 
 *   **Method:** `GET`
+*   **Content-Type:** `text/plain; charset=utf-8`
+*   **Description:** Returns aggregated IP status across all cluster nodes in human-readable plain text format. This endpoint queries all nodes in the cluster and provides a comprehensive view of the IP's status across the entire deployment. Only available on leader nodes.
+*   **Parameters:**
+    *   `ip` - IPv4 or IPv6 address (will be canonicalized)
+*   **Response Format:**
+    ```
+    cluster_status: blocked
+    nodes:
+      - name: follower-1
+        status: blocked
+        actors: 1
+        chains:
+          - SimpleBlockChain (until: 2025-11-22T02:00:00Z)
+        earliest_block: 2025-11-22T01:00:00Z
+        latest_expiry: 2025-11-22T02:00:00Z
+      - name: follower-2
+        status: blocked
+        actors: 2
+        chains:
+          - SimpleBlockChain (until: 2025-11-22T02:00:05Z)
+          - API-Abuse-Chain (until: 2025-11-22T01:30:05Z)
+        earliest_block: 2025-11-22T01:00:05Z
+        latest_expiry: 2025-11-22T02:00:05Z
+      - name: follower-3
+        status: unblocked
+        last_seen: 2025-11-22T00:50:00Z
+      - name: follower-4
+        status: error
+        error: HTTP 500
+    ```
+*   **Cluster Status Values:**
+    *   `"blocked"`: IP is blocked on all nodes that have information about it
+    *   `"unblocked"`: IP is not blocked on any node (but may have been seen)
+    *   `"unknown"`: IP is not known to any node
+    *   `"mixed"`: IP has different statuses across nodes (e.g., blocked on some, unblocked on others)
+*   **Node Status Values:**
+    *   `"blocked"`: IP is currently blocked on this node
+    *   `"unblocked"`: IP is known but not blocked on this node
+    *   `"unknown"`: IP is not known to this node
+    *   `"error"`: Failed to query this node (network error, timeout, etc.)
+*   **Notes:**
+    *   The leader queries all nodes concurrently with a 5-second timeout per node
+    *   Nodes that fail to respond are marked with `"status": "error"` and include an error message
+    *   This endpoint provides the most complete view of an IP's status across the cluster
+*   **Responses:**
+    *   `200 OK`: Successfully returns aggregated IP status.
+    *   `400 Bad Request`: Invalid IP address format.
+    *   `404 Not Found`: This endpoint is only available on leader nodes.
+
+### **`/api/v1/cluster/ip/{ip}`** (Leader Only)
+
+*   **Method:** `GET`
 *   **Content-Type:** `application/json`
-*   **Description:** Returns aggregated IP status across all cluster nodes. This endpoint queries all nodes in the cluster and provides a comprehensive view of the IP's status across the entire deployment. Only available on leader nodes.
+*   **Description:** Returns aggregated IP status across all cluster nodes in JSON format. This is the JSON version of `/cluster/ip/{ip}`, designed for programmatic access. Only available on leader nodes.
 *   **Parameters:**
     *   `ip` - IPv4 or IPv6 address (will be canonicalized)
 *   **Response Format:**
@@ -379,27 +431,15 @@ These endpoints allow you to query the block/unblock status of specific IP addre
       ]
     }
     ```
-*   **Cluster Status Values:**
-    *   `"blocked"`: IP is blocked on all nodes that have information about it
-    *   `"unblocked"`: IP is not blocked on any node (but may have been seen)
-    *   `"unknown"`: IP is not known to any node
-    *   `"mixed"`: IP has different statuses across nodes (e.g., blocked on some, unblocked on others)
-*   **Node Status Values:**
-    *   `"blocked"`: IP is currently blocked on this node
-    *   `"unblocked"`: IP is known but not blocked on this node
-    *   `"unknown"`: IP is not known to this node
-    *   `"error"`: Failed to query this node (network error, timeout, etc.)
-*   **Notes:**
-    *   The leader queries all nodes concurrently with a 5-second timeout per node
-    *   Nodes that fail to respond are marked with `"status": "error"` and include an error message
-    *   This endpoint provides the most complete view of an IP's status across the cluster
+*   **Cluster Status Values:** Same as `/cluster/ip/{ip}`
+*   **Node Status Values:** Same as `/cluster/ip/{ip}`
+*   **Notes:** Same as `/cluster/ip/{ip}`
 *   **Responses:**
     *   `200 OK`: Successfully returns aggregated IP status.
     *   `400 Bad Request`: Invalid IP address format.
     *   `404 Not Found`: This endpoint is only available on leader nodes.
-    *   `500 Internal Server Error`: Cluster configuration not available.
 
-### **`/cluster/internal/ip/{ip}`** (Internal Use)
+### **`/api/v1/cluster/internal/ip/{ip}`** (Internal Use)
 
 *   **Method:** `GET`
 *   **Content-Type:** `application/json`
