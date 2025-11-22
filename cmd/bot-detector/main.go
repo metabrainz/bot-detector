@@ -608,7 +608,7 @@ func execute(params *commandline.AppParameters) error {
 		}
 	}
 
-	haproxyBlocker.StartHealthCheck(5 * time.Second)
+	haproxyBlocker.StartHealthCheck(p.Config.Blockers.HealthCheckInterval)
 	rateLimitedBlocker := blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.Blockers.CommandQueueSize, p.Config.Blockers.CommandsPerSecond)
 	p.Blocker = rateLimitedBlocker
 

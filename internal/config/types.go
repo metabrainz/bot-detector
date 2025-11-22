@@ -72,6 +72,7 @@ type BlockersConfig struct {
 	DialTimeout         time.Duration `config:"compare" summary:"blocker_dial_timeout"`
 	MaxRetries          int           `config:"compare" summary:"blocker_max_retries"`
 	RetryDelay          time.Duration `config:"compare" summary:"blocker_retry_delay"`
+	HealthCheckInterval time.Duration `config:"compare" summary:"health_check_interval"`
 	Backends            Backends      `config:"compare"`
 }
 
@@ -144,6 +145,7 @@ type BlockersConfigYAML struct {
 	DialTimeout         string       `yaml:"dial_timeout"`
 	MaxRetries          int          `yaml:"max_retries"`
 	RetryDelay          string       `yaml:"retry_delay"`
+	HealthCheckInterval string       `yaml:"health_check_interval"`
 	Backends            BackendsYAML `yaml:"backends"`
 }
 
