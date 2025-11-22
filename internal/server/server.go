@@ -19,8 +19,10 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 
 	"bot-detector/internal/logging"
@@ -61,7 +63,11 @@ func Start(p Provider) {
 		wg.Add(1)
 		go func(srv *http.Server, config ListenConfig) {
 			defer wg.Done()
-			p.Log(logging.LevelInfo, "SERVER", "Starting server on %s://%s", config.GetProtocol(), config.String())
+			logMsg := fmt.Sprintf("Starting server on %s://%s", config.GetProtocol(), config.String())
+			if config.HasExplicitRoles() {
+				logMsg += fmt.Sprintf(" (roles: %s)", getRolesString(config))
+			}
+			p.Log(logging.LevelInfo, "SERVER", logMsg)
 			if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 				p.Log(logging.LevelError, "SERVER", "Server failed on %s: %v", config.GetAddress(), err)
 			}
@@ -144,4 +150,19 @@ func loggingMiddleware(p Provider, next http.Handler) http.Handler {
 		p.Log(logging.LevelDebug, "SERVER", "Request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// getRolesString extracts role information from a ListenConfig for logging.
+func getRolesString(config ListenConfig) string {
+	// Extract roles by checking which ones the config has
+	var roles []string
+	for _, role := range []string{"api", "metrics", "cluster", "all"} {
+		if config.HasRole(role) {
+			roles = append(roles, role)
+		}
+	}
+	if len(roles) == 0 {
+		return "all"
+	}
+	return strings.Join(roles, ", ")
 }
