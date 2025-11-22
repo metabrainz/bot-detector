@@ -36,15 +36,6 @@ func (p *Processor) GetConfigForArchive() ([]byte, time.Time, map[string]*types.
 	return p.Config.YAMLContent, p.Config.LastModTime, depsCopy, p.ConfigDir, nil
 }
 
-// GetListenAddr returns the HTTP listen address from the config.
-// Deprecated: Use GetListenConfigs() instead.
-func (p *Processor) GetListenAddr() string {
-	if len(p.ListenConfigs) > 0 {
-		return p.ListenConfigs[0].Address
-	}
-	return ""
-}
-
 // GetListenConfigs returns all configured listen addresses.
 func (p *Processor) GetListenConfigs() interface{} {
 	return p.ListenConfigs

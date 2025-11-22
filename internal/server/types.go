@@ -24,11 +24,6 @@ type NodeStatus struct {
 // allowing the server to request metrics, configuration, and lifecycle information
 // without direct dependencies on internal application structures.
 type Provider interface {
-	// GetListenAddr returns the HTTP server listen address (e.g., "127.0.0.1:8080").
-	// Returns empty string if the HTTP server is disabled.
-	// Deprecated: Use GetListenConfigs() instead.
-	GetListenAddr() string
-
 	// GetListenConfigs returns all configured listen addresses.
 	// Returns interface{} to avoid import cycle (actual type: []*commandline.ListenConfig).
 	GetListenConfigs() interface{}

@@ -38,10 +38,6 @@ func newMockProvider(addr, report string) *mockProvider {
 	}
 }
 
-func (m *mockProvider) GetListenAddr() string {
-	return m.listenAddr
-}
-
 func (m *mockProvider) GetListenConfigs() interface{} {
 	if m.listenAddr == "" {
 		return []ListenConfig{}

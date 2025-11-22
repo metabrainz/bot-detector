@@ -35,7 +35,6 @@ func (m *MockProvider) Log(level logging.LogLevel, tag string, format string, v 
 }
 
 // Implement other Provider methods with dummy implementations as needed for this test.
-func (m *MockProvider) GetListenAddr() string                                  { return "" }
 func (m *MockProvider) GetListenConfigs() interface{}                          { return []*struct{}{} }
 func (m *MockProvider) GetShutdownChannel() chan os.Signal                     { return nil }
 func (m *MockProvider) GetNodeStatus() NodeStatus                              { return NodeStatus{} }
