@@ -2279,3 +2279,65 @@ chains:
 		t.Errorf("Expected error about empty node address, got: %v", err)
 	}
 }
+
+func TestLoadConfigFromYAML_DuplicateChainName(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+
+blockers:
+  default_duration: "30m"
+
+chains:
+  - name: "DuplicateChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches: { method: "GET" }
+  - name: "DuplicateChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches: { method: "POST" }
+`
+	tmpConfigFilePath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: tmpConfigFilePath})
+	if err == nil {
+		t.Fatal("Expected error for duplicate chain name, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "duplicate chain name") {
+		t.Errorf("Expected error about duplicate chain name, got: %v", err)
+	}
+}
+
+func TestLoadConfigFromYAML_DuplicateGoodActorName(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+
+good_actors:
+  - name: "duplicate_actor"
+    ip: "10.0.0.1"
+  - name: "duplicate_actor"
+    ip: "10.0.0.2"
+
+chains:
+  - name: "TestChain"
+    match_key: "ip"
+    action: "log"
+    steps:
+      - field_matches: { method: "GET" }
+`
+	tmpConfigFilePath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: tmpConfigFilePath})
+	if err == nil {
+		t.Fatal("Expected error for duplicate good_actors name, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "duplicate good_actors name") {
+		t.Errorf("Expected error about duplicate good_actors name, got: %v", err)
+	}
+}

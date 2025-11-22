@@ -1253,6 +1253,11 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		}
 	}
 
+	// Validate unique names
+	if err := validateUniqueNames(newChains, newGoodActors); err != nil {
+		return nil, err
+	}
+
 	var defaultBlockDuration time.Duration
 	if config.Blockers.DefaultDuration != "" {
 		defaultBlockDuration, _ = utils.ParseDuration(config.Blockers.DefaultDuration)
@@ -1301,4 +1306,27 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		LogFormatRegex:   customLogRegex,
 		YAMLContent:      data,
 	}, nil
+}
+
+// validateUniqueNames checks that chain names and good actor names are unique
+func validateUniqueNames(chains []BehavioralChain, goodActors []GoodActorDef) error {
+	// Check chain names
+	chainNames := make(map[string]bool, len(chains))
+	for _, chain := range chains {
+		if chainNames[chain.Name] {
+			return fmt.Errorf("duplicate chain name: '%s'", chain.Name)
+		}
+		chainNames[chain.Name] = true
+	}
+
+	// Check good actor names
+	goodActorNames := make(map[string]bool, len(goodActors))
+	for _, actor := range goodActors {
+		if goodActorNames[actor.Name] {
+			return fmt.Errorf("duplicate good_actors name: '%s'", actor.Name)
+		}
+		goodActorNames[actor.Name] = true
+	}
+
+	return nil
 }
