@@ -2,6 +2,7 @@ package server
 
 import (
 	"bot-detector/internal/logging"
+	"bot-detector/internal/store"
 	"bot-detector/internal/types"
 	"bufio"
 	"errors"
@@ -111,6 +112,34 @@ func (m *mockProvider) GetMetricsSnapshot() MetricsSnapshot {
 
 func (m *mockProvider) GetAggregatedMetrics() interface{} {
 	return nil // Mock returns nil (not a leader)
+}
+
+func (m *mockProvider) GetActivityStore() map[store.Actor]*store.ActorActivity {
+	return nil
+}
+
+func (m *mockProvider) GetActivityMutex() *sync.RWMutex {
+	return nil
+}
+
+func (m *mockProvider) GetNodeName() string {
+	return ""
+}
+
+func (m *mockProvider) GetNodeRole() string {
+	return ""
+}
+
+func (m *mockProvider) GetNodeLeaderAddress() string {
+	return ""
+}
+
+func (m *mockProvider) GetClusterNodes() interface{} {
+	return nil
+}
+
+func (m *mockProvider) GetClusterProtocol() string {
+	return "http"
 }
 
 // TestServer_StartAndShutdown verifies the full lifecycle of the stats server.
