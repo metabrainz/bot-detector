@@ -50,6 +50,9 @@ func (m *mockHAProxyProvider) IncrementCmdsPerBlocker(addr string) {
 	val, _ := m.cmdsPerBlocker.LoadOrStore(addr, new(atomic.Int32))
 	val.(*atomic.Int32).Add(1)
 }
+func (m *mockHAProxyProvider) IncrementBackendResyncs()    {}
+func (m *mockHAProxyProvider) IncrementBackendRestarts()   {}
+func (m *mockHAProxyProvider) IncrementBackendRecoveries() {}
 
 func newMockHAProxyProvider() *mockHAProxyProvider {
 	return &mockHAProxyProvider{

@@ -339,6 +339,18 @@ func (p *Processor) IncrementBlockerRetries() {
 	p.Metrics.BlockerRetries.Add(1)
 }
 
+func (p *Processor) IncrementBackendResyncs() {
+	p.Metrics.BackendResyncs.Add(1)
+}
+
+func (p *Processor) IncrementBackendRestarts() {
+	p.Metrics.BackendRestarts.Add(1)
+}
+
+func (p *Processor) IncrementBackendRecoveries() {
+	p.Metrics.BackendRecoveries.Add(1)
+}
+
 func (p *Processor) IncrementCmdsPerBlocker(addr string) {
 	if p.Metrics == nil || p.Metrics.CmdsPerBlocker == nil {
 		return

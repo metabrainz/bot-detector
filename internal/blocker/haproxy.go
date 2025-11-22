@@ -58,6 +58,9 @@ type HAProxyProvider interface {
 	GetMaxCommandsPerBatch() int
 	IncrementBlockerRetries()
 	IncrementCmdsPerBlocker(addr string)
+	IncrementBackendResyncs()
+	IncrementBackendRestarts()
+	IncrementBackendRecoveries()
 }
 
 // CommandExecutor defines the function signature for executing a single backend command.
@@ -964,6 +967,7 @@ func (b *HAProxyBlocker) ResyncBackend(addr string, blockedIPs map[string]BlockI
 	}
 
 	b.P.Log(logging.LevelInfo, "RESYNC", "Starting resync of %d IPs to backend %s", len(blockedIPs), addr)
+	b.P.IncrementBackendResyncs()
 
 	successCount := 0
 	errorCount := 0
@@ -1079,12 +1083,14 @@ func (b *HAProxyBlocker) performHealthChecks() {
 		needsResync := false
 		if !wasHealthy {
 			b.P.Log(logging.LevelInfo, "HEALTH_CHECK", "Backend %s recovered and is now healthy (resync needed)", addr)
+			b.P.IncrementBackendRecoveries()
 			needsResync = true
 		}
 
 		// Check for uptime decrease (restart/reload)
 		if wasHealthy && lastUptime > 0 && uptime < lastUptime {
 			b.P.Log(logging.LevelWarning, "HEALTH_CHECK", "Backend %s restarted/reloaded (uptime: %d -> %d, resync needed)", addr, lastUptime, uptime)
+			b.P.IncrementBackendRestarts()
 			needsResync = true
 		}
 

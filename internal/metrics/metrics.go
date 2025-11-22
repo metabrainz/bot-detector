@@ -36,6 +36,9 @@ type Metrics struct {
 	BlockerCmdsDropped  atomic.Int64 `metric:"Blocker Commands Dropped" dryrun:"false"`
 	BlockerCmdsExecuted atomic.Int64 `metric:"Blocker Commands Executed" dryrun:"false"`
 	BlockerRetries      atomic.Int64 `metric:"Blocker Retries" dryrun:"false"`
+	BackendResyncs      atomic.Int64 `metric:"Backend Resyncs Triggered" dryrun:"false"`
+	BackendRestarts     atomic.Int64 `metric:"Backend Restarts Detected" dryrun:"false"`
+	BackendRecoveries   atomic.Int64 `metric:"Backend Recoveries" dryrun:"false"`
 }
 
 // NewMetrics initializes a new Metrics struct.
