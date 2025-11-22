@@ -252,7 +252,7 @@ The nodes configuration can be overridden by `BOT_DETECTOR_NODES` environment va
 
 | Field | Type | Description |
 | :---- | :---- | :---- |
-| **name** | string | A unique name for the good actor rule. |
+| **name** | string | A unique name for the good actor rule. Must be unique across all good actors. |
 | **ip** | string or list | An IP address, CIDR block, `file:` path, or `regex:` pattern to match against the log entry's IP address. Can be a single string or a list of strings. |
 | **useragent** | string or list | A string, `file:` path, or `regex:` pattern to match against the log entry's User-Agent. Can be a single string or a list of strings. |
 
@@ -264,11 +264,13 @@ The `chains` key is a list of behavioral chain definitions. Each chain represent
 
 Chains are processed in the order they are defined. Each chain definition must include a unique name, an action, a match key, and a list of steps. See table [`chains[].fields`](#chainsfields) for detailed field descriptions.
 
+**Important:** Chain names must be unique. Duplicate names will cause a configuration error.
+
 #### `chains[].fields`
 
 | Field | Type | Required | Description |
 | :---- | :---- | :---- | :---- |
-| **name** | string | Yes | A unique, descriptive name for the chain (e.g., `API-Abuse-Low-Agent`). |
+| **name** | string | Yes | A unique, descriptive name for the chain (e.g., `API-Abuse-Low-Agent`). Must be unique across all chains. |
 | **action** | string | Yes | The action to take when the chain is completed: `block` or `log`. To temporarily disable a chain, prefix the action with `!` (e.g., `!block`). |
 | **block_duration** | string | No | The duration for which the IP should be blocked if `action` is `block`. Format: Go duration string (e.g., `5m`, `1h`, `30m`, `1h30m`). If not specified, uses `blockers.default_duration`. |
 | **match_key** | string | Yes | The key used to track activity. Determines if behavior is tracked per IP, per IP version, or per unique client (IP + User-Agent). See [`match_key` values](#match_key-values) below. |
@@ -478,6 +480,8 @@ The `good_actors` key is a list of trusted actors that should be skipped from al
 When a log entry matches a `good_actors` rule, it is immediately ignored, and no chains are evaluated for it.
 
 Each object must have a unique `name` and a definition containing an `ip` and/or `useragent` matcher:
+
+**Important:** Good actor names must be unique. Duplicate names will cause a configuration error.
 
 *   If only `ip` is defined, any entry with a matching IP is skipped.
 *   If only `useragent` is defined, any entry with a matching User-Agent is skipped.
