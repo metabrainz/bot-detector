@@ -279,12 +279,13 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 		// Update the in-memory state to reflect the block for both live and dry runs.
 		ipOnlyActor := store.Actor(store.Actor{IPInfo: entry.IPInfo, UA: ""})
 		ipActivity := store.GetOrCreateUnsafe(p.ActivityStore, ipOnlyActor)
-		ipActivity.IsBlocked = true                                                           // Mark as blocked_
-		ipActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
+		internedChainName := p.InternReason(chain.Name)
+		ipActivity.IsBlocked = true                                                                  // Mark as blocked_
+		ipActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedChainName} // Set SkipInfo
 		ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration)
 
-		currentActivity.IsBlocked = true                                                           // Mark as blocked
-		currentActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
+		currentActivity.IsBlocked = true                                                                  // Mark as blocked
+		currentActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedChainName} // Set SkipInfo
 		currentActivity.BlockedUntil = ipActivity.BlockedUntil
 	case "log":
 		if p.EnableMetrics {
