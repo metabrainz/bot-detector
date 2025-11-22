@@ -44,10 +44,10 @@ func (m *mockProvider) GetListenAddr() string {
 
 func (m *mockProvider) GetListenConfigs() interface{} {
 	if m.listenAddr == "" {
-		return []*struct{}{}
+		return []ListenConfig{}
 	}
-	// Return a simple slice with one element for testing
-	return []*struct{ Address string }{{Address: m.listenAddr}}
+	// Return a slice of ListenConfig interface
+	return []ListenConfig{&mockListenConfig{address: m.listenAddr}}
 }
 
 func (m *mockProvider) GenerateHTMLMetricsReport() string {

@@ -200,6 +200,11 @@ func (lc *ListenConfig) HasExplicitRoles() bool {
 	return len(lc.Roles) > 0
 }
 
+// GetAddress returns the listen address.
+func (lc *ListenConfig) GetAddress() string {
+	return lc.Address
+}
+
 // String returns a human-readable representation of the ListenConfig.
 func (lc *ListenConfig) String() string {
 	if len(lc.Roles) == 0 {

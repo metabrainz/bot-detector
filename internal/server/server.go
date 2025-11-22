@@ -20,54 +20,119 @@ package server
 
 import (
 	"net/http"
+	"reflect"
+	"sync"
 
 	"bot-detector/internal/logging"
 )
 
-// Start initializes and starts the HTTP server in a separate goroutine.
-// It registers all HTTP endpoints and handles graceful shutdown when the
-// application receives a termination signal.
+// Start initializes and starts the HTTP server(s) in separate goroutines.
+// It registers all HTTP endpoints with role-based filtering and handles
+// graceful shutdown when the application receives a termination signal.
 //
-// If the HTTP server is disabled (empty listen address), this function
-// returns immediately without starting the server.
+// If no listeners are configured, this function returns immediately.
 func Start(p Provider) {
-	listenAddr := p.GetListenAddr()
-	if listenAddr == "" {
+	configsInterface := p.GetListenConfigs()
+	if configsInterface == nil {
 		p.Log(logging.LevelInfo, "HTTP_SERVER", "HTTP server is disabled.")
 		return
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", rootHandler(p))
-	mux.HandleFunc("/stats", rootHandler(p)) // Alias for root
-	mux.HandleFunc("/stats/steps", stepsHandler(p))
-	mux.HandleFunc("/config", configHandler(p))
-	mux.HandleFunc("/config/archive", archiveHandler(p))
-	mux.HandleFunc("GET /ip/{ip}", ipLookupHandler(p))
-	mux.HandleFunc("GET /api/v1/ip/{ip}", apiIPLookupHandler(p))
-	mux.HandleFunc("/cluster/status", clusterStatusHandler(p))
-	mux.HandleFunc("/cluster/metrics", clusterMetricsHandler(p))
-	mux.HandleFunc("/cluster/metrics/aggregate", clusterMetricsAggregateHandler(p))
-	mux.HandleFunc("GET /cluster/ip/{ip}", clusterIPAggregateHandler(p))
-	mux.HandleFunc("GET /api/v1/cluster/ip/{ip}", apiClusterIPAggregateHandler(p))
-	mux.HandleFunc("GET /api/v1/cluster/internal/ip/{ip}", clusterIPLookupHandler(p))
-
-	server := &http.Server{
-		Addr:    listenAddr,
-		Handler: mux,
+	// Convert to slice of our interface type using reflection
+	listenConfigs := convertToListenConfigSlice(configsInterface)
+	if len(listenConfigs) == 0 {
+		p.Log(logging.LevelInfo, "HTTP_SERVER", "HTTP server is disabled.")
+		return
 	}
 
-	go func() {
-		p.Log(logging.LevelInfo, "HTTP_SERVER", "Starting web server on http://%s", listenAddr)
-		if err := server.ListenAndServe(); err != http.ErrServerClosed {
-			p.Log(logging.LevelError, "HTTP_SERVER", "Web server failed: %v", err)
+	var wg sync.WaitGroup
+	servers := make([]*http.Server, 0, len(listenConfigs))
+
+	// Start a server for each listen config
+	for _, cfg := range listenConfigs {
+		mux := createRoleFilteredHandler(p, listenConfigs, cfg)
+
+		server := &http.Server{
+			Addr:    cfg.GetAddress(),
+			Handler: mux,
 		}
-	}()
+		servers = append(servers, server)
+
+		wg.Add(1)
+		go func(srv *http.Server, config ListenConfig) {
+			defer wg.Done()
+			p.Log(logging.LevelInfo, "HTTP_SERVER", "Starting web server on http://%s", config.String())
+			if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+				p.Log(logging.LevelError, "HTTP_SERVER", "Web server failed on %s: %v", config.GetAddress(), err)
+			}
+		}(server, cfg)
+	}
 
 	// Wait for shutdown signal
 	<-p.GetShutdownChannel()
-	p.Log(logging.LevelInfo, "HTTP_SERVER", "Shutting down web server.")
-	if err := server.Close(); err != nil {
-		logging.LogOutput(logging.LevelError, "StopServer", "Error stopping server: %v", err)
+	p.Log(logging.LevelInfo, "HTTP_SERVER", "Shutting down web server(s).")
+
+	// Close all servers
+	for _, srv := range servers {
+		if err := srv.Close(); err != nil {
+			logging.LogOutput(logging.LevelError, "StopServer", "Error stopping server on %s: %v", srv.Addr, err)
+		}
 	}
+
+	// Wait for all goroutines to finish
+	wg.Wait()
+}
+
+// convertToListenConfigSlice converts interface{} to []ListenConfig using reflection.
+func convertToListenConfigSlice(v interface{}) []ListenConfig {
+	if v == nil {
+		return nil
+	}
+
+	val := reflect.ValueOf(v)
+	if val.Kind() != reflect.Slice {
+		return nil
+	}
+
+	result := make([]ListenConfig, 0, val.Len())
+	for i := 0; i < val.Len(); i++ {
+		item := val.Index(i).Interface()
+		if cfg, ok := item.(ListenConfig); ok {
+			result = append(result, cfg)
+		}
+	}
+
+	return result
+}
+
+// createRoleFilteredHandler creates an HTTP handler with role-based endpoint filtering.
+func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentConfig ListenConfig) http.Handler {
+	mux := http.NewServeMux()
+
+	// Metrics endpoints (role=metrics)
+	if shouldServeEndpoint(allConfigs, currentConfig, RoleMetrics) {
+		mux.HandleFunc("/", rootHandler(p))
+		mux.HandleFunc("/stats", rootHandler(p))
+		mux.HandleFunc("/stats/steps", stepsHandler(p))
+	}
+
+	// API endpoints (role=api)
+	if shouldServeEndpoint(allConfigs, currentConfig, RoleAPI) {
+		mux.HandleFunc("/config", configHandler(p))
+		mux.HandleFunc("/config/archive", archiveHandler(p))
+		mux.HandleFunc("GET /ip/{ip}", ipLookupHandler(p))
+		mux.HandleFunc("GET /api/v1/ip/{ip}", apiIPLookupHandler(p))
+	}
+
+	// Cluster endpoints (role=cluster)
+	if shouldServeEndpoint(allConfigs, currentConfig, RoleCluster) {
+		mux.HandleFunc("/cluster/status", clusterStatusHandler(p))
+		mux.HandleFunc("/cluster/metrics", clusterMetricsHandler(p))
+		mux.HandleFunc("/cluster/metrics/aggregate", clusterMetricsAggregateHandler(p))
+		mux.HandleFunc("GET /cluster/ip/{ip}", clusterIPAggregateHandler(p))
+		mux.HandleFunc("GET /api/v1/cluster/ip/{ip}", apiClusterIPAggregateHandler(p))
+		mux.HandleFunc("GET /api/v1/cluster/internal/ip/{ip}", clusterIPLookupHandler(p))
+	}
+
+	return mux
 }

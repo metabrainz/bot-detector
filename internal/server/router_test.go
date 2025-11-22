@@ -4,7 +4,8 @@ import "testing"
 
 // mockListenConfig implements the ListenConfig interface for testing.
 type mockListenConfig struct {
-	roles []string
+	roles   []string
+	address string
 }
 
 func (m *mockListenConfig) HasRole(role string) bool {
@@ -21,6 +22,20 @@ func (m *mockListenConfig) HasRole(role string) bool {
 
 func (m *mockListenConfig) HasExplicitRoles() bool {
 	return len(m.roles) > 0
+}
+
+func (m *mockListenConfig) GetAddress() string {
+	if m.address != "" {
+		return m.address
+	}
+	return ":8080"
+}
+
+func (m *mockListenConfig) String() string {
+	if m.address != "" {
+		return m.address
+	}
+	return ":8080"
 }
 
 func TestShouldServeEndpoint_NoRolesAnywhere(t *testing.T) {

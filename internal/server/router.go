@@ -19,6 +19,8 @@ const (
 type ListenConfig interface {
 	HasRole(role string) bool
 	HasExplicitRoles() bool
+	GetAddress() string
+	String() string
 }
 
 // shouldServeEndpoint determines if a specific listener should serve an endpoint
