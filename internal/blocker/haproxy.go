@@ -838,6 +838,35 @@ func (b *HAProxyBlocker) Shutdown() {
 
 }
 
+// GetHAProxyUptime queries "show info" and returns the Uptime_sec value.
+func (b *HAProxyBlocker) GetHAProxyUptime(addr string) (int64, error) {
+	command := "show info\n"
+	response, err := b.ExecuteHAProxyCommandFunc(addr, command)
+	if err != nil {
+		return 0, err
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(response))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "Uptime_sec:") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				uptimeStr := strings.TrimSpace(parts[1])
+				uptime, parseErr := utils.ParseInt64(uptimeStr)
+				if parseErr != nil {
+					return 0, fmt.Errorf("failed to parse Uptime_sec value '%s': %w", uptimeStr, parseErr)
+				}
+				return uptime, nil
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+	return 0, fmt.Errorf("uptime_sec not found in HAProxy info response")
+}
+
 // getHAProxyTableNames executes "show table" and parses the response to get table names.
 func (b *HAProxyBlocker) getHAProxyTableNames(addr string) ([]string, error) {
 	command := "show table\n"

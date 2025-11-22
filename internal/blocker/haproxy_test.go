@@ -713,3 +713,64 @@ func TestHAProxyBlocker_DumpBackends_MultipleFormats(t *testing.T) {
 		}
 	}
 }
+
+func TestHAProxyBlocker_GetHAProxyUptime(t *testing.T) {
+	tests := []struct {
+		name          string
+		response      string
+		expectedValue int64
+		expectError   bool
+	}{
+		{
+			name:          "valid uptime",
+			response:      "Name: HAProxy\nVersion: 2.4.0\nUptime_sec: 188\nCurrConns: 10\n",
+			expectedValue: 188,
+			expectError:   false,
+		},
+		{
+			name:          "uptime with spaces",
+			response:      "Name: HAProxy\nUptime_sec:   42  \nCurrConns: 5\n",
+			expectedValue: 42,
+			expectError:   false,
+		},
+		{
+			name:          "missing uptime",
+			response:      "Name: HAProxy\nVersion: 2.4.0\nCurrConns: 10\n",
+			expectedValue: 0,
+			expectError:   true,
+		},
+		{
+			name:          "invalid uptime value",
+			response:      "Name: HAProxy\nUptime_sec: invalid\nCurrConns: 10\n",
+			expectedValue: 0,
+			expectError:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockProvider := newMockHAProxyProvider()
+			b := blocker.NewHAProxyBlocker(mockProvider, false)
+
+			// Mock the ExecuteHAProxyCommandFunc
+			b.ExecuteHAProxyCommandFunc = func(addr, command string) (string, error) {
+				return tt.response, nil
+			}
+
+			uptime, err := b.GetHAProxyUptime("127.0.0.1:9999")
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				if uptime != tt.expectedValue {
+					t.Errorf("Expected uptime %d, got %d", tt.expectedValue, uptime)
+				}
+			}
+		})
+	}
+}
