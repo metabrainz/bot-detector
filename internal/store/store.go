@@ -65,12 +65,13 @@ func NewActorFromString(actorStr string) (Actor, error) {
 
 // ActorActivity tracks state for a single actor.
 type ActorActivity struct {
-	LastRequestTime time.Time
-	BlockedUntil    time.Time
-	LastUnblockTime time.Time
-	ChainProgress   map[string]StepState
-	IsBlocked       bool
-	SkipInfo        SkipInfo
+	LastRequestTime   time.Time
+	BlockedUntil      time.Time
+	LastUnblockTime   time.Time
+	LastUnblockReason string // Interned string for memory efficiency
+	ChainProgress     map[string]StepState
+	IsBlocked         bool
+	SkipInfo          SkipInfo
 }
 
 // StepState holds the progress of an actor within a single behavioral chain.
