@@ -205,6 +205,11 @@ func (lc *ListenConfig) GetAddress() string {
 	return lc.Address
 }
 
+// GetProtocol returns the protocol (currently only "http").
+func (lc *ListenConfig) GetProtocol() string {
+	return lc.Protocol
+}
+
 // String returns a human-readable representation of the ListenConfig.
 func (lc *ListenConfig) String() string {
 	if len(lc.Roles) == 0 {

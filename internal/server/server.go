@@ -1,6 +1,6 @@
 // Package server provides an HTTP API for accessing bot-detector metrics,
 // configuration, and operational data. The server is optional and enabled
-// via the --http-server flag.
+// via the --listen flag.
 //
 // Current endpoints:
 //   - GET /                - Plain-text metrics dashboard
@@ -26,22 +26,22 @@ import (
 	"bot-detector/internal/logging"
 )
 
-// Start initializes and starts the HTTP server(s) in separate goroutines.
-// It registers all HTTP endpoints with role-based filtering and handles
+// Start initializes and starts the server(s) in separate goroutines.
+// It registers all endpoints with role-based filtering and handles
 // graceful shutdown when the application receives a termination signal.
 //
 // If no listeners are configured, this function returns immediately.
 func Start(p Provider) {
 	configsInterface := p.GetListenConfigs()
 	if configsInterface == nil {
-		p.Log(logging.LevelInfo, "HTTP_SERVER", "HTTP server is disabled.")
+		p.Log(logging.LevelInfo, "SERVER", "Server is disabled.")
 		return
 	}
 
 	// Convert to slice of our interface type using reflection
 	listenConfigs := convertToListenConfigSlice(configsInterface)
 	if len(listenConfigs) == 0 {
-		p.Log(logging.LevelInfo, "HTTP_SERVER", "HTTP server is disabled.")
+		p.Log(logging.LevelInfo, "SERVER", "Server is disabled.")
 		return
 	}
 
@@ -61,21 +61,21 @@ func Start(p Provider) {
 		wg.Add(1)
 		go func(srv *http.Server, config ListenConfig) {
 			defer wg.Done()
-			p.Log(logging.LevelInfo, "HTTP_SERVER", "Starting web server on http://%s", config.String())
+			p.Log(logging.LevelInfo, "SERVER", "Starting server on %s://%s", config.GetProtocol(), config.String())
 			if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-				p.Log(logging.LevelError, "HTTP_SERVER", "Web server failed on %s: %v", config.GetAddress(), err)
+				p.Log(logging.LevelError, "SERVER", "Server failed on %s: %v", config.GetAddress(), err)
 			}
 		}(server, cfg)
 	}
 
 	// Wait for shutdown signal
 	<-p.GetShutdownChannel()
-	p.Log(logging.LevelInfo, "HTTP_SERVER", "Shutting down web server(s).")
+	p.Log(logging.LevelInfo, "SERVER", "Shutting down server(s).")
 
 	// Close all servers
 	for _, srv := range servers {
 		if err := srv.Close(); err != nil {
-			logging.LogOutput(logging.LevelError, "StopServer", "Error stopping server on %s: %v", srv.Addr, err)
+			logging.LogOutput(logging.LevelError, "SERVER", "Error stopping server on %s: %v", srv.Addr, err)
 		}
 	}
 

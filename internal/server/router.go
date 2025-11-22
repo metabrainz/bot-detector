@@ -20,6 +20,7 @@ type ListenConfig interface {
 	HasRole(role string) bool
 	HasExplicitRoles() bool
 	GetAddress() string
+	GetProtocol() string
 	String() string
 }
 

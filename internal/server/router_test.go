@@ -31,6 +31,10 @@ func (m *mockListenConfig) GetAddress() string {
 	return ":8080"
 }
 
+func (m *mockListenConfig) GetProtocol() string {
+	return "http"
+}
+
 func (m *mockListenConfig) String() string {
 	if m.address != "" {
 		return m.address
