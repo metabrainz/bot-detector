@@ -279,12 +279,13 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 		// Update the in-memory state to reflect the block for both live and dry runs.
 		ipOnlyActor := store.Actor(store.Actor{IPInfo: entry.IPInfo, UA: ""})
 		ipActivity := store.GetOrCreateUnsafe(p.ActivityStore, ipOnlyActor)
-		ipActivity.IsBlocked = true                                                           // Mark as blocked_
-		ipActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
+		internedChainName := p.InternReason(chain.Name)
+		ipActivity.IsBlocked = true                                                                  // Mark as blocked_
+		ipActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedChainName} // Set SkipInfo
 		ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration)
 
-		currentActivity.IsBlocked = true                                                           // Mark as blocked
-		currentActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: chain.Name} // Set SkipInfo
+		currentActivity.IsBlocked = true                                                                  // Mark as blocked
+		currentActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedChainName} // Set SkipInfo
 		currentActivity.BlockedUntil = ipActivity.BlockedUntil
 	case "log":
 		if p.EnableMetrics {
@@ -690,7 +691,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 	if isGood {
 		// Only log the skip message and set the state the first time.
 		if activity.SkipInfo.Type == utils.SkipTypeNone {
-			activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeGoodActor, Source: goodActorRuleName}
+			activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeGoodActor, Source: p.InternReason(goodActorRuleName)}
 			p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (good_actor:%s).", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName)
 		}
 
@@ -709,19 +710,21 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 
 			// Check if the cooldown has passed or if it has never been unblocked.
 			if activity.LastUnblockTime.IsZero() || time.Since(activity.LastUnblockTime) > unblockCooldown {
-				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s. Issuing unblock command.", entry.IPInfo.Address)
+				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s (rule: %s). Issuing unblock command.", entry.IPInfo.Address, goodActorRuleName)
+
+				// Create detailed unblock reason with good actor name
+				unblockReason := p.InternReason("good-actor:" + goodActorRuleName)
 
 				if p.PersistenceEnabled {
 					func() {
 						p.PersistenceMutex.Lock()
 						defer p.PersistenceMutex.Unlock()
 
-						reason := p.InternReason("good-actor-match")
 						event := &persistence.AuditEvent{
 							Timestamp: p.NowFunc(),
 							Event:     persistence.EventTypeUnblock,
 							IP:        entry.IPInfo.Address,
-							Reason:    reason,
+							Reason:    unblockReason,
 						}
 						if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
 							p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write unblock event to journal for %s: %v", entry.IPInfo.Address, err)
@@ -730,7 +733,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 						// Update in-memory state
 						p.IPStates[entry.IPInfo.Address] = persistence.IPState{
 							State:  persistence.BlockStateUnblocked,
-							Reason: reason,
+							Reason: unblockReason,
 						}
 					}()
 				}
@@ -741,10 +744,11 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 					Version: entry.IPInfo.Version,
 				}
 				// The blocker's Unblock method is non-blocking and rate-limited.
-				if err := p.Blocker.Unblock(blockerIPInfo, "good-actor-match"); err != nil {
+				if err := p.Blocker.Unblock(blockerIPInfo, unblockReason); err != nil {
 					p.LogFunc(logging.LevelError, "UNBLOCK_FAIL", "Failed to queue unblock command for %s: %v", entry.IPInfo.Address, err)
 				}
 				activity.LastUnblockTime = time.Now()
+				activity.LastUnblockReason = unblockReason
 			}
 		}
 	}

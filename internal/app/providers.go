@@ -251,6 +251,32 @@ func (p *Processor) GetActivityMutex() *sync.RWMutex {
 	return p.ActivityMutex
 }
 
+func (p *Processor) GetNodeName() string {
+	return p.NodeName
+}
+
+func (p *Processor) GetNodeRole() string {
+	return p.NodeRole
+}
+
+func (p *Processor) GetNodeLeaderAddress() string {
+	return p.NodeLeaderAddress
+}
+
+func (p *Processor) GetClusterNodes() interface{} {
+	if p.Cluster == nil {
+		return nil
+	}
+	return p.Cluster.Nodes
+}
+
+func (p *Processor) GetClusterProtocol() string {
+	if p.Cluster == nil {
+		return "http"
+	}
+	return p.Cluster.Protocol
+}
+
 func (p *Processor) GetTestSignals() *store.TestSignals {
 	if p.TestSignals == nil {
 		return nil

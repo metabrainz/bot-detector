@@ -2,9 +2,11 @@ package server
 
 import (
 	"os"
+	"sync"
 	"time"
 
 	"bot-detector/internal/logging"
+	"bot-detector/internal/store"
 	"bot-detector/internal/types"
 )
 
@@ -54,4 +56,26 @@ type Provider interface {
 	// GetAggregatedMetrics returns cluster-wide aggregated metrics (leader only).
 	// Returns nil if this node is not a leader or if cluster is not configured.
 	GetAggregatedMetrics() interface{}
+
+	// GetActivityStore returns the actor activity map for IP lookup.
+	GetActivityStore() map[store.Actor]*store.ActorActivity
+
+	// GetActivityMutex returns the mutex for ActivityStore.
+	GetActivityMutex() *sync.RWMutex
+
+	// GetNodeName returns the cluster node name (empty if not in cluster).
+	GetNodeName() string
+
+	// GetNodeRole returns "leader", "follower", or empty string.
+	GetNodeRole() string
+
+	// GetNodeLeaderAddress returns leader address (for followers).
+	GetNodeLeaderAddress() string
+
+	// GetClusterNodes returns list of cluster nodes (nil if not in cluster).
+	// Returns []cluster.NodeConfig but typed as interface{} to avoid import cycle.
+	GetClusterNodes() interface{}
+
+	// GetClusterProtocol returns cluster protocol ("http" or "https").
+	GetClusterProtocol() string
 }

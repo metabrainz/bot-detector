@@ -2,11 +2,13 @@ package server
 
 import (
 	"bot-detector/internal/logging"
+	"bot-detector/internal/store"
 	"bot-detector/internal/types"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -33,14 +35,21 @@ func (m *MockProvider) Log(level logging.LogLevel, tag string, format string, v 
 }
 
 // Implement other Provider methods with dummy implementations as needed for this test.
-func (m *MockProvider) GetListenAddr() string                           { return "" }
-func (m *MockProvider) GetShutdownChannel() chan os.Signal              { return nil }
-func (m *MockProvider) GetNodeStatus() NodeStatus                       { return NodeStatus{} }
-func (m *MockProvider) GetMetricsSnapshot() MetricsSnapshot             { return MetricsSnapshot{} }
-func (m *MockProvider) GetAggregatedMetrics() interface{}               { return nil }
-func (m *MockProvider) GenerateHTMLMetricsReport() string               { return "" }
-func (m *MockProvider) GenerateStepsMetricsReport() string              { return "" }
-func (m *MockProvider) GetMarshalledConfig() ([]byte, time.Time, error) { return nil, time.Time{}, nil }
+func (m *MockProvider) GetListenAddr() string                                  { return "" }
+func (m *MockProvider) GetShutdownChannel() chan os.Signal                     { return nil }
+func (m *MockProvider) GetNodeStatus() NodeStatus                              { return NodeStatus{} }
+func (m *MockProvider) GetMetricsSnapshot() MetricsSnapshot                    { return MetricsSnapshot{} }
+func (m *MockProvider) GetAggregatedMetrics() interface{}                      { return nil }
+func (m *MockProvider) GenerateHTMLMetricsReport() string                      { return "" }
+func (m *MockProvider) GenerateStepsMetricsReport() string                     { return "" }
+func (m *MockProvider) GetMarshalledConfig() ([]byte, time.Time, error)        { return nil, time.Time{}, nil }
+func (m *MockProvider) GetActivityStore() map[store.Actor]*store.ActorActivity { return nil }
+func (m *MockProvider) GetActivityMutex() *sync.RWMutex                        { return nil }
+func (m *MockProvider) GetNodeName() string                                    { return "" }
+func (m *MockProvider) GetNodeRole() string                                    { return "" }
+func (m *MockProvider) GetNodeLeaderAddress() string                           { return "" }
+func (m *MockProvider) GetClusterNodes() interface{}                           { return nil }
+func (m *MockProvider) GetClusterProtocol() string                             { return "http" }
 
 func TestArchiveHandler_StableETag(t *testing.T) {
 	// Common setup

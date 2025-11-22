@@ -120,6 +120,8 @@ func NewTestProcessor(cfg *config.AppConfig, chains []config.BehavioralChain) *a
 		EntryBuffer:       make([]*app.LogEntry, 0),
 		TopActorsPerChain: make(map[string]map[string]*store.ActorStats),
 		EnableMetrics:     cfg.Application.EnableMetrics,
+		ReasonCache:       make(map[string]*string),
+		ReasonCacheMutex:  sync.RWMutex{},
 
 		NowFunc: time.Now, // Default to real time for tests unless overridden.
 	}

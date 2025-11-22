@@ -24,6 +24,24 @@ func TestNewIPInfo(t *testing.T) {
 			expectedVersion: VersionIPv6,
 		},
 		{
+			name:            "IPv6 with leading zeros (canonicalized)",
+			ipStr:           "2001:0db8::1",
+			expectedAddress: "2001:db8::1",
+			expectedVersion: VersionIPv6,
+		},
+		{
+			name:            "IPv6 full form (canonicalized to compressed)",
+			ipStr:           "2001:0db8:0000:0000:0000:0000:0000:0001",
+			expectedAddress: "2001:db8::1",
+			expectedVersion: VersionIPv6,
+		},
+		{
+			name:            "IPv6 localhost (canonicalized)",
+			ipStr:           "0000:0000:0000:0000:0000:0000:0000:0001",
+			expectedAddress: "::1",
+			expectedVersion: VersionIPv6,
+		},
+		{
 			name:            "Invalid IP String",
 			ipStr:           "not-an-ip",
 			expectedAddress: "not-an-ip",

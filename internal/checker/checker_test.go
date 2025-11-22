@@ -710,8 +710,10 @@ regex:NastyBot`), 0644); err != nil {
 				MaxTimeSinceLastHit: loadedCfg.Checker.MaxTimeSinceLastHit,
 			},
 		},
-		DryRun:  true,                                                                            // Simulate dry-run mode
-		LogFunc: func(level logging.LogLevel, tag string, format string, args ...interface{}) {}, // Will be replaced
+		DryRun:           true,                                                                            // Simulate dry-run mode
+		LogFunc:          func(level logging.LogLevel, tag string, format string, args ...interface{}) {}, // Will be replaced
+		ReasonCache:      make(map[string]*string),
+		ReasonCacheMutex: sync.RWMutex{},
 	}
 
 	// Set the CheckChainsFunc on the processor instance to avoid nil pointers.
