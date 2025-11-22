@@ -7,13 +7,12 @@ import (
 	"bot-detector/internal/logging"
 )
 
-// rootHandler returns an HTTP handler that serves the HTML metrics dashboard.
+// rootHandler returns an HTTP handler that serves the plain-text metrics dashboard.
 // This handler is registered for both "/" and "/stats" endpoints.
 func rootHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		// Wrap the metrics report in <pre> tags to preserve formatting
-		_, err := fmt.Fprintf(w, "<html><head><title>Bot-Detector Metrics</title></head><body><pre>%s</pre></body></html>", p.GenerateHTMLMetricsReport())
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, err := fmt.Fprint(w, p.GenerateHTMLMetricsReport())
 		if err != nil {
 			logging.LogOutput(logging.LevelError, "metricsHandler", "Error writing metrics report: %v", err)
 		}
