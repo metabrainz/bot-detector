@@ -156,7 +156,8 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		LogPath:              params.LogPath,
 		ReloadOn:             params.ReloadOn,
 		TopN:                 params.TopN,
-		HTTPServer:           params.HTTPServer,
+		HTTPServer:           params.HTTPServer, // Deprecated, kept for backward compat
+		ListenConfigs:        params.ListenConfigs,
 		ConfigReloaded:       false,
 
 		// Initialize persistence fields
@@ -561,7 +562,13 @@ func execute(params *commandline.AppParameters) error {
 	}
 
 	// Determine node identity based on FOLLOW file and cluster configuration
-	identity, err := cluster.DetermineIdentity(params.ConfigDir, params.HTTPServer, params.ClusterNodeName, loadedCfg.Cluster)
+	// Extract addresses from ListenConfigs for cluster matching
+	listenAddrs := make([]string, 0, len(params.ListenConfigs))
+	for _, cfg := range params.ListenConfigs {
+		listenAddrs = append(listenAddrs, cfg.Address)
+	}
+
+	identity, err := cluster.DetermineIdentity(params.ConfigDir, listenAddrs, params.ClusterNodeName, loadedCfg.Cluster)
 	if err != nil {
 		return fmt.Errorf("failed to determine node identity: %w", err)
 	}
