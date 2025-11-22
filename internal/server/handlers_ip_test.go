@@ -198,6 +198,7 @@ func (m *mockIPProvider) GetClusterProtocol() string {
 
 // Stub implementations for other Provider methods
 func (m *mockIPProvider) GetListenAddr() string                                                   { return "" }
+func (m *mockIPProvider) GetListenConfigs() interface{}                                           { return []*struct{}{} }
 func (m *mockIPProvider) GetShutdownChannel() chan os.Signal                                      { return nil }
 func (m *mockIPProvider) Log(level logging.LogLevel, tag string, format string, v ...interface{}) {}
 func (m *mockIPProvider) GetConfigForArchive() ([]byte, time.Time, map[string]*types.FileDependency, string, error) {
