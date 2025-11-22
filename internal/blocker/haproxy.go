@@ -58,10 +58,22 @@ type HAProxyProvider interface {
 	GetMaxCommandsPerBatch() int
 	IncrementBlockerRetries()
 	IncrementCmdsPerBlocker(addr string)
+	IncrementBackendResyncs()
+	IncrementBackendRestarts()
+	IncrementBackendRecoveries()
 }
 
 // CommandExecutor defines the function signature for executing a single backend command.
 type CommandExecutor func(addr, ip, command string) error
+
+// BackendHealth tracks the health state of a single HAProxy backend instance.
+type BackendHealth struct {
+	LastUptime  int64
+	Healthy     bool
+	LastCheck   time.Time
+	NeedsResync bool
+	mu          sync.RWMutex
+}
 
 // HAProxyBlocker is a concrete implementation of the Blocker interface that interacts with HAProxy.
 type HAProxyBlocker struct {
@@ -69,14 +81,60 @@ type HAProxyBlocker struct {
 	Executor                  CommandExecutor
 	IsDryRun                  bool
 	ExecuteHAProxyCommandFunc func(addr, command string) (string, error)
+	backendHealth             map[string]*BackendHealth
+	healthMu                  sync.RWMutex
+	healthCheckStop           chan struct{}
+	healthCheckWg             sync.WaitGroup
+	ResyncCallback            func(addr string) // Called when a backend needs resync
 }
 
 // NewHAProxyBlocker creates a new HAProxyBlocker.
 func NewHAProxyBlocker(p HAProxyProvider, dryRun bool) *HAProxyBlocker {
-	b := &HAProxyBlocker{P: p, IsDryRun: dryRun}
+	b := &HAProxyBlocker{
+		P:               p,
+		IsDryRun:        dryRun,
+		backendHealth:   make(map[string]*BackendHealth),
+		healthCheckStop: make(chan struct{}),
+	}
 	b.Executor = b.executeCommandImpl
 	b.ExecuteHAProxyCommandFunc = b.executeHAProxyCommand // Initialize the function field
+
+	// Initialize health state for all backends
+	for _, addr := range p.GetBlockerAddresses() {
+		b.backendHealth[addr] = &BackendHealth{
+			Healthy:   true,
+			LastCheck: time.Now(),
+		}
+	}
+
 	return b
+}
+
+// getTableNameWithSuffix returns the table name with appropriate IP version suffix.
+func getTableNameWithSuffix(baseTableName string, ipVersion utils.IPVersion) string {
+	// Avoid double-suffixing if the user-provided table name already has one
+	if strings.HasSuffix(baseTableName, "_ipv4") || strings.HasSuffix(baseTableName, "_ipv6") {
+		return baseTableName
+	}
+
+	switch ipVersion {
+	case 4:
+		return baseTableName + "_ipv4"
+	case 6:
+		return baseTableName + "_ipv6"
+	default:
+		return baseTableName
+	}
+}
+
+// makeBlockCommand creates a HAProxy command to block an IP (set gpc0=1).
+func makeBlockCommand(tableName, ip string) string {
+	return fmt.Sprintf("set table %s key %s data.gpc0 1\n", tableName, ip)
+}
+
+// makeUnblockCommand creates a HAProxy command to unblock an IP (set gpc0=0).
+func makeUnblockCommand(tableName, ip string) string {
+	return fmt.Sprintf("set table %s key %s data.gpc0 0\n", tableName, ip)
 }
 
 // Block adds an IP to the appropriate HAProxy stick table.
@@ -96,21 +154,13 @@ func (b *HAProxyBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reas
 		return nil
 	}
 
-	tableName := baseTableName
-	// Avoid double-suffixing if the user-provided table name already has one.
-	if !strings.HasSuffix(baseTableName, "_ipv4") && !strings.HasSuffix(baseTableName, "_ipv6") {
-		switch ipInfo.Version {
-		case 4:
-			tableName += "_ipv4"
-		case 6:
-			tableName += "_ipv6"
-		default:
-			b.P.Log(logging.LevelError, "SKIP_BLOCK", "cannot block IP %s: invalid IP version", ipInfo.Address)
-			return nil
-		}
+	tableName := getTableNameWithSuffix(baseTableName, ipInfo.Version)
+	if tableName == baseTableName && ipInfo.Version != 4 && ipInfo.Version != 6 {
+		b.P.Log(logging.LevelError, "SKIP_BLOCK", "cannot block IP %s: invalid IP version", ipInfo.Address)
+		return nil
 	}
 
-	command := fmt.Sprintf("set table %s key %s data.gpc0 1\n", tableName, ipInfo.Address)
+	command := makeBlockCommand(tableName, ipInfo.Address)
 	targets := make(map[string]map[string]string)
 	targets[tableName] = make(map[string]string)
 	for _, addr := range b.P.GetBlockerAddresses() {
@@ -127,13 +177,7 @@ func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 		return nil
 	}
 
-	var ipSuffix string
-	switch ipInfo.Version {
-	case 4:
-		ipSuffix = "_ipv4"
-	case 6:
-		ipSuffix = "_ipv6"
-	default:
+	if ipInfo.Version != 4 && ipInfo.Version != 6 {
 		b.P.Log(logging.LevelError, "SKIP_UNBLOCK", "Cannot unblock IP %s: unrecognized IP version", ipInfo.Address)
 		return nil
 	}
@@ -148,12 +192,9 @@ func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 
 	targets := make(map[string]map[string]string)
 	for baseName := range baseTables {
-		tableName := baseName
-		if !strings.HasSuffix(baseName, "_ipv4") && !strings.HasSuffix(baseName, "_ipv6") {
-			tableName += ipSuffix
-		}
+		tableName := getTableNameWithSuffix(baseName, ipInfo.Version)
 		targets[tableName] = make(map[string]string)
-		command := fmt.Sprintf("set table %s key %s data.gpc0 0\n", tableName, ipInfo.Address)
+		command := makeUnblockCommand(tableName, ipInfo.Address)
 		for _, addr := range b.P.GetBlockerAddresses() {
 			targets[tableName][addr] = command
 		}
@@ -284,8 +325,17 @@ func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[stri
 
 	var wg sync.WaitGroup
 	errs := make(chan error, len(commandsByAddr))
+	skippedCount := 0
 
 	for addr, commands := range commandsByAddr {
+		// Check if backend is healthy
+		healthy, _, _ := b.GetBackendHealth(addr)
+		if !healthy {
+			skippedCount++
+			b.P.Log(logging.LevelDebug, "SKIP_UNHEALTHY", "Skipping %s command for IP %s on unhealthy backend %s", commandType, ip, addr)
+			continue
+		}
+
 		wg.Add(1)
 
 		go func(a string, cmds []string) {
@@ -314,6 +364,10 @@ func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[stri
 
 		return fmt.Errorf("%d HAProxy '%s' commands failed for IP %s", numErrs, commandType, ip)
 
+	}
+
+	if skippedCount > 0 && skippedCount == len(commandsByAddr) {
+		b.P.Log(logging.LevelWarning, "ALL_BACKENDS_UNHEALTHY", "All backends are unhealthy. Command for IP %s queued but not executed.", ip)
 	}
 
 	return nil
@@ -830,12 +884,323 @@ func (b *HAProxyBlocker) CompareHAProxyBackends(expTolerance time.Duration) ([]S
 
 }
 
-// Shutdown is a no-op for the HAProxyBlocker to satisfy the Blocker interface.
-
+// Shutdown stops the health checker and cleans up resources.
 func (b *HAProxyBlocker) Shutdown() {
+	// Stop health checker if running
+	select {
+	case <-b.healthCheckStop:
+		// Already stopped
+	default:
+		b.StopHealthCheck()
+	}
+}
 
-	// Nothing to do here.
+// GetBackendHealth returns the health state for a backend address.
+func (b *HAProxyBlocker) GetBackendHealth(addr string) (healthy bool, lastUptime int64, lastCheck time.Time) {
+	b.healthMu.RLock()
+	defer b.healthMu.RUnlock()
 
+	if health, ok := b.backendHealth[addr]; ok {
+		health.mu.RLock()
+		defer health.mu.RUnlock()
+		return health.Healthy, health.LastUptime, health.LastCheck
+	}
+	return true, 0, time.Time{}
+}
+
+// SetBackendHealth updates the health state for a backend address.
+func (b *HAProxyBlocker) SetBackendHealth(addr string, healthy bool, uptime int64) {
+	b.healthMu.RLock()
+	health, ok := b.backendHealth[addr]
+	b.healthMu.RUnlock()
+
+	if !ok {
+		b.healthMu.Lock()
+		health = &BackendHealth{}
+		b.backendHealth[addr] = health
+		b.healthMu.Unlock()
+	}
+
+	health.mu.Lock()
+	defer health.mu.Unlock()
+	health.Healthy = healthy
+	health.LastUptime = uptime
+	health.LastCheck = time.Now()
+}
+
+// SetBackendNeedsResync marks a backend as needing resynchronization.
+func (b *HAProxyBlocker) SetBackendNeedsResync(addr string, needsResync bool) {
+	b.healthMu.RLock()
+	health, ok := b.backendHealth[addr]
+	b.healthMu.RUnlock()
+
+	if !ok {
+		return
+	}
+
+	health.mu.Lock()
+	defer health.mu.Unlock()
+	health.NeedsResync = needsResync
+}
+
+// GetBackendsNeedingResync returns a list of backend addresses that need resynchronization.
+func (b *HAProxyBlocker) GetBackendsNeedingResync() []string {
+	b.healthMu.RLock()
+	defer b.healthMu.RUnlock()
+
+	var backends []string
+	for addr, health := range b.backendHealth {
+		health.mu.RLock()
+		needsResync := health.NeedsResync
+		health.mu.RUnlock()
+
+		if needsResync {
+			backends = append(backends, addr)
+		}
+	}
+	return backends
+}
+
+// ResyncBackend re-sends all currently blocked IPs to a specific backend.
+// This is called when a backend restarts or recovers from being down.
+// The blockedIPs map should contain IP -> (duration, reason) for all currently blocked IPs.
+func (b *HAProxyBlocker) ResyncBackend(addr string, blockedIPs map[string]BlockInfo) error {
+	if b.IsDryRun {
+		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would resync %d IPs to backend %s", len(blockedIPs), addr)
+		return nil
+	}
+
+	// Clear the flag immediately to prevent duplicate resync triggers
+	b.SetBackendNeedsResync(addr, false)
+
+	if len(blockedIPs) == 0 {
+		b.P.Log(logging.LevelInfo, "RESYNC", "No blocked IPs to resync for backend %s", addr)
+		return nil
+	}
+
+	b.P.Log(logging.LevelInfo, "RESYNC", "Starting resync of %d IPs to backend %s", len(blockedIPs), addr)
+	b.P.IncrementBackendResyncs()
+
+	successCount := 0
+	errorCount := 0
+
+	for ip, info := range blockedIPs {
+		ipInfo := utils.NewIPInfo(ip)
+		if ipInfo.Version == utils.VersionInvalid {
+			b.P.Log(logging.LevelWarning, "RESYNC", "Skipping invalid IP %s during resync", ip)
+			continue
+		}
+
+		// Determine table name
+		baseTableName, found := b.P.GetDurationTables()[info.Duration]
+		if !found {
+			baseTableName = b.P.GetBlockTableNameFallback()
+		}
+
+		if baseTableName == "" {
+			errorCount++
+			continue
+		}
+
+		tableName := getTableNameWithSuffix(baseTableName, ipInfo.Version)
+		if tableName == baseTableName && ipInfo.Version != 4 && ipInfo.Version != 6 {
+			errorCount++
+			continue
+		}
+
+		command := makeBlockCommand(tableName, ipInfo.Address)
+
+		// Execute directly on this specific backend
+		if err := b.Executor(addr, ip, command); err != nil {
+			b.P.Log(logging.LevelError, "RESYNC", "Failed to resync IP %s to backend %s: %v", ip, addr, err)
+			errorCount++
+		} else {
+			successCount++
+		}
+	}
+
+	b.P.Log(logging.LevelInfo, "RESYNC", "Resync completed for backend %s: %d succeeded, %d failed", addr, successCount, errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("resync had %d errors", errorCount)
+	}
+	return nil
+}
+
+// ResyncUnblockedIPs re-sends unblock commands (gpc0=0) for good actors to a specific backend.
+// This ensures good actors remain marked as unblocked and skip chain processing.
+func (b *HAProxyBlocker) ResyncUnblockedIPs(addr string, unblockedIPs map[string]string) error {
+	if b.IsDryRun {
+		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would resync %d unblocked IPs to backend %s", len(unblockedIPs), addr)
+		return nil
+	}
+
+	// Clear the flag immediately to prevent duplicate resync triggers
+	b.SetBackendNeedsResync(addr, false)
+
+	if len(unblockedIPs) == 0 {
+		return nil
+	}
+
+	b.P.Log(logging.LevelInfo, "RESYNC", "Starting unblock resync of %d IPs to backend %s", len(unblockedIPs), addr)
+
+	successCount := 0
+	errorCount := 0
+
+	// Get all table names for unblocking
+	baseTables := make(map[string]struct{})
+	for _, baseName := range b.P.GetDurationTables() {
+		baseTables[baseName] = struct{}{}
+	}
+	if fallback := b.P.GetBlockTableNameFallback(); fallback != "" {
+		baseTables[fallback] = struct{}{}
+	}
+
+	for ip := range unblockedIPs {
+		ipInfo := utils.NewIPInfo(ip)
+		if ipInfo.Version == utils.VersionInvalid {
+			b.P.Log(logging.LevelWarning, "RESYNC", "Skipping invalid IP %s during unblock resync", ip)
+			continue
+		}
+
+		if ipInfo.Version != 4 && ipInfo.Version != 6 {
+			errorCount++
+			continue
+		}
+
+		// Unblock in all tables
+		for baseName := range baseTables {
+			tableName := getTableNameWithSuffix(baseName, ipInfo.Version)
+
+			command := makeUnblockCommand(tableName, ipInfo.Address)
+
+			if err := b.Executor(addr, ip, command); err != nil {
+				b.P.Log(logging.LevelError, "RESYNC", "Failed to resync unblock for IP %s to backend %s: %v", ip, addr, err)
+				errorCount++
+			} else {
+				successCount++
+			}
+		}
+	}
+
+	b.P.Log(logging.LevelInfo, "RESYNC", "Unblock resync completed for backend %s: %d succeeded, %d failed", addr, successCount, errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("unblock resync had %d errors", errorCount)
+	}
+	return nil
+}
+
+// BlockInfo holds information about a blocked IP for resync purposes.
+type BlockInfo struct {
+	Duration time.Duration
+	Reason   string
+}
+
+// StartHealthCheck starts the periodic health check goroutine.
+func (b *HAProxyBlocker) StartHealthCheck(interval time.Duration) {
+	if b.IsDryRun {
+		return
+	}
+
+	b.healthCheckWg.Add(1)
+	go b.healthCheckWorker(interval)
+}
+
+// StopHealthCheck stops the health check goroutine.
+func (b *HAProxyBlocker) StopHealthCheck() {
+	close(b.healthCheckStop)
+	b.healthCheckWg.Wait()
+}
+
+// healthCheckWorker performs periodic health checks on all backends.
+func (b *HAProxyBlocker) healthCheckWorker(interval time.Duration) {
+	defer b.healthCheckWg.Done()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-b.healthCheckStop:
+			return
+		case <-ticker.C:
+			b.performHealthChecks()
+		}
+	}
+}
+
+// performHealthChecks checks all backends and updates their health state.
+func (b *HAProxyBlocker) performHealthChecks() {
+	addresses := b.P.GetBlockerAddresses()
+
+	for _, addr := range addresses {
+		wasHealthy, lastUptime, _ := b.GetBackendHealth(addr)
+
+		uptime, err := b.GetHAProxyUptime(addr)
+		if err != nil {
+			// Backend is down or unreachable
+			if wasHealthy {
+				b.P.Log(logging.LevelWarning, "HEALTH_CHECK", "Backend %s became unhealthy: %v", addr, err)
+			}
+			b.SetBackendHealth(addr, false, 0)
+			continue
+		}
+
+		// Backend is reachable
+		needsResync := false
+		if !wasHealthy {
+			b.P.Log(logging.LevelInfo, "HEALTH_CHECK", "Backend %s recovered and is now healthy (resync needed)", addr)
+			b.P.IncrementBackendRecoveries()
+			needsResync = true
+		}
+
+		// Check for uptime decrease (restart/reload)
+		if wasHealthy && lastUptime > 0 && uptime < lastUptime {
+			b.P.Log(logging.LevelWarning, "HEALTH_CHECK", "Backend %s restarted/reloaded (uptime: %d -> %d, resync needed)", addr, lastUptime, uptime)
+			b.P.IncrementBackendRestarts()
+			needsResync = true
+		}
+
+		b.SetBackendHealth(addr, true, uptime)
+
+		if needsResync {
+			b.SetBackendNeedsResync(addr, true)
+			// Trigger resync callback if set
+			if b.ResyncCallback != nil {
+				go b.ResyncCallback(addr)
+			}
+		}
+	}
+}
+
+// GetHAProxyUptime queries "show info" and returns the Uptime_sec value.
+func (b *HAProxyBlocker) GetHAProxyUptime(addr string) (int64, error) {
+	command := "show info\n"
+	response, err := b.ExecuteHAProxyCommandFunc(addr, command)
+	if err != nil {
+		return 0, err
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(response))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "Uptime_sec:") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				uptimeStr := strings.TrimSpace(parts[1])
+				uptime, parseErr := utils.ParseInt64(uptimeStr)
+				if parseErr != nil {
+					return 0, fmt.Errorf("failed to parse Uptime_sec value '%s': %w", uptimeStr, parseErr)
+				}
+				return uptime, nil
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return 0, err
+	}
+	return 0, fmt.Errorf("uptime_sec not found in HAProxy info response")
 }
 
 // getHAProxyTableNames executes "show table" and parses the response to get table names.

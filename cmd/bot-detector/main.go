@@ -583,6 +583,60 @@ func execute(params *commandline.AppParameters) error {
 	app.InitializeMetrics(p, loadedCfg)
 
 	haproxyBlocker := blocker.NewHAProxyBlocker(p, p.DryRun)
+
+	// Set up resync callback to handle backend restarts/recoveries
+	haproxyBlocker.ResyncCallback = func(addr string) {
+		blockedIPs := make(map[string]blocker.BlockInfo)
+		unblockedIPs := make(map[string]string)
+
+		// Use persistence state if available, otherwise use activity store
+		if p.PersistenceEnabled && len(p.IPStates) > 0 {
+			// Resync from persistence state (more reliable)
+			for ip, state := range p.IPStates {
+				switch state.State {
+				case persistence.BlockStateBlocked:
+					remaining := time.Until(state.ExpireTime)
+					if remaining > 0 {
+						blockedIPs[ip] = blocker.BlockInfo{
+							Duration: remaining,
+							Reason:   state.Reason,
+						}
+					}
+				case persistence.BlockStateUnblocked:
+					unblockedIPs[ip] = state.Reason
+				}
+			}
+		} else {
+			// Resync from activity store (in-memory only)
+			p.ActivityMutex.RLock()
+			for actor, activity := range p.ActivityStore {
+				if activity.IsBlocked && time.Now().Before(activity.BlockedUntil) {
+					remaining := time.Until(activity.BlockedUntil)
+					blockedIPs[actor.IPInfo.Address] = blocker.BlockInfo{
+						Duration: remaining,
+						Reason:   "resync",
+					}
+				} else if activity.LastUnblockTime.After(time.Time{}) {
+					unblockedIPs[actor.IPInfo.Address] = activity.LastUnblockReason
+				}
+			}
+			p.ActivityMutex.RUnlock()
+		}
+
+		// Trigger resync for blocked IPs
+		if err := haproxyBlocker.ResyncBackend(addr, blockedIPs); err != nil {
+			p.LogFunc(logging.LevelError, "RESYNC", "Resync failed for backend %s: %v", addr, err)
+		}
+
+		// Trigger resync for unblocked IPs (good actors)
+		if len(unblockedIPs) > 0 {
+			if err := haproxyBlocker.ResyncUnblockedIPs(addr, unblockedIPs); err != nil {
+				p.LogFunc(logging.LevelError, "RESYNC", "Unblock resync failed for backend %s: %v", addr, err)
+			}
+		}
+	}
+
+	haproxyBlocker.StartHealthCheck(p.Config.Blockers.HealthCheckInterval)
 	rateLimitedBlocker := blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.Blockers.CommandQueueSize, p.Config.Blockers.CommandsPerSecond)
 	p.Blocker = rateLimitedBlocker
 
