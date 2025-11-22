@@ -583,6 +583,7 @@ func execute(params *commandline.AppParameters) error {
 	app.InitializeMetrics(p, loadedCfg)
 
 	haproxyBlocker := blocker.NewHAProxyBlocker(p, p.DryRun)
+	haproxyBlocker.StartHealthCheck(5 * time.Second)
 	rateLimitedBlocker := blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.Blockers.CommandQueueSize, p.Config.Blockers.CommandsPerSecond)
 	p.Blocker = rateLimitedBlocker
 

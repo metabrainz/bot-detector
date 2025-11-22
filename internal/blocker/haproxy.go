@@ -79,14 +79,17 @@ type HAProxyBlocker struct {
 	ExecuteHAProxyCommandFunc func(addr, command string) (string, error)
 	backendHealth             map[string]*BackendHealth
 	healthMu                  sync.RWMutex
+	healthCheckStop           chan struct{}
+	healthCheckWg             sync.WaitGroup
 }
 
 // NewHAProxyBlocker creates a new HAProxyBlocker.
 func NewHAProxyBlocker(p HAProxyProvider, dryRun bool) *HAProxyBlocker {
 	b := &HAProxyBlocker{
-		P:             p,
-		IsDryRun:      dryRun,
-		backendHealth: make(map[string]*BackendHealth),
+		P:               p,
+		IsDryRun:        dryRun,
+		backendHealth:   make(map[string]*BackendHealth),
+		healthCheckStop: make(chan struct{}),
 	}
 	b.Executor = b.executeCommandImpl
 	b.ExecuteHAProxyCommandFunc = b.executeHAProxyCommand // Initialize the function field
@@ -853,12 +856,15 @@ func (b *HAProxyBlocker) CompareHAProxyBackends(expTolerance time.Duration) ([]S
 
 }
 
-// Shutdown is a no-op for the HAProxyBlocker to satisfy the Blocker interface.
-
+// Shutdown stops the health checker and cleans up resources.
 func (b *HAProxyBlocker) Shutdown() {
-
-	// Nothing to do here.
-
+	// Stop health checker if running
+	select {
+	case <-b.healthCheckStop:
+		// Already stopped
+	default:
+		b.StopHealthCheck()
+	}
 }
 
 // GetBackendHealth returns the health state for a backend address.
@@ -892,6 +898,70 @@ func (b *HAProxyBlocker) SetBackendHealth(addr string, healthy bool, uptime int6
 	health.Healthy = healthy
 	health.LastUptime = uptime
 	health.LastCheck = time.Now()
+}
+
+// StartHealthCheck starts the periodic health check goroutine.
+func (b *HAProxyBlocker) StartHealthCheck(interval time.Duration) {
+	if b.IsDryRun {
+		return
+	}
+
+	b.healthCheckWg.Add(1)
+	go b.healthCheckWorker(interval)
+}
+
+// StopHealthCheck stops the health check goroutine.
+func (b *HAProxyBlocker) StopHealthCheck() {
+	close(b.healthCheckStop)
+	b.healthCheckWg.Wait()
+}
+
+// healthCheckWorker performs periodic health checks on all backends.
+func (b *HAProxyBlocker) healthCheckWorker(interval time.Duration) {
+	defer b.healthCheckWg.Done()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-b.healthCheckStop:
+			return
+		case <-ticker.C:
+			b.performHealthChecks()
+		}
+	}
+}
+
+// performHealthChecks checks all backends and updates their health state.
+func (b *HAProxyBlocker) performHealthChecks() {
+	addresses := b.P.GetBlockerAddresses()
+
+	for _, addr := range addresses {
+		wasHealthy, lastUptime, _ := b.GetBackendHealth(addr)
+
+		uptime, err := b.GetHAProxyUptime(addr)
+		if err != nil {
+			// Backend is down or unreachable
+			if wasHealthy {
+				b.P.Log(logging.LevelWarning, "HEALTH_CHECK", "Backend %s became unhealthy: %v", addr, err)
+			}
+			b.SetBackendHealth(addr, false, 0)
+			continue
+		}
+
+		// Backend is reachable
+		if !wasHealthy {
+			b.P.Log(logging.LevelInfo, "HEALTH_CHECK", "Backend %s recovered and is now healthy", addr)
+		}
+
+		// Check for uptime decrease (restart/reload)
+		if wasHealthy && lastUptime > 0 && uptime < lastUptime {
+			b.P.Log(logging.LevelWarning, "HEALTH_CHECK", "Backend %s restarted/reloaded (uptime: %d -> %d)", addr, lastUptime, uptime)
+		}
+
+		b.SetBackendHealth(addr, true, uptime)
+	}
 }
 
 // GetHAProxyUptime queries "show info" and returns the Uptime_sec value.
