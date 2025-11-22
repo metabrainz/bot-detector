@@ -3,12 +3,14 @@
 // via the --http-server flag.
 //
 // Current endpoints:
-//   - GET /               - HTML metrics dashboard
-//   - GET /stats          - HTML metrics dashboard (alias)
-//   - GET /stats/steps    - Plain-text step execution counts
-//   - GET /config         - Raw YAML configuration
-//   - GET /config/archive - Tar.gz archive of config + dependencies
-//   - GET /cluster/status - Node cluster status (role, name, address, leader)
+//   - GET /                - Plain-text metrics dashboard
+//   - GET /stats           - Plain-text metrics dashboard (alias)
+//   - GET /stats/steps     - Plain-text step execution counts
+//   - GET /config          - Raw YAML configuration
+//   - GET /config/archive  - Tar.gz archive of config + dependencies
+//   - GET /ip/{ip}         - IP block/unblock status (local node, plain text)
+//   - GET /api/v1/ip/{ip}  - IP block/unblock status (local node, JSON)
+//   - GET /cluster/status  - Node cluster status (role, name, address, leader)
 //   - GET /cluster/metrics - Node metrics snapshot in JSON format
 //   - GET /cluster/metrics/aggregate - Cluster-wide aggregated metrics (leader only)
 package server
@@ -38,6 +40,8 @@ func Start(p Provider) {
 	mux.HandleFunc("/stats/steps", stepsHandler(p))
 	mux.HandleFunc("/config", configHandler(p))
 	mux.HandleFunc("/config/archive", archiveHandler(p))
+	mux.HandleFunc("GET /ip/{ip}", ipLookupHandler(p))
+	mux.HandleFunc("GET /api/v1/ip/{ip}", apiIPLookupHandler(p))
 	mux.HandleFunc("/cluster/status", clusterStatusHandler(p))
 	mux.HandleFunc("/cluster/metrics", clusterMetricsHandler(p))
 	mux.HandleFunc("/cluster/metrics/aggregate", clusterMetricsAggregateHandler(p))
