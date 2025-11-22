@@ -1,6 +1,9 @@
 # Stage 1: Build the Go application
 FROM golang:1.25-alpine AS builder
 
+# Install git for VCS info embedding
+RUN apk add --no-cache git
+
 # Create a non-root user for security in the builder stage as well
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
@@ -13,19 +16,15 @@ COPY go.mod go.sum ./
 RUN go mod download
 RUN go mod tidy
 
-# Copy the rest of the source code with proper ownership
+# Copy the rest of the source code with proper ownership (including .git for VCS info)
 COPY --chown=appuser:appgroup . .
 
 # Switch to non-root user for the build
 USER appuser
 
-# Build arguments for version info
-ARG GIT_COMMIT=unknown
-ARG BUILD_TIME=unknown
-
-# Build the Go application for a static binary with version info
+# Build the Go application for a static binary
+# Go 1.18+ automatically embeds VCS info when .git directory is present
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
-    -ldflags "-X bot-detector/internal/config.GitCommit=${GIT_COMMIT} -X bot-detector/internal/config.BuildTime=${BUILD_TIME}" \
     -o bot-detector ./cmd/bot-detector
 
 # Stage 2: Create the final minimal image
