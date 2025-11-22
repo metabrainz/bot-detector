@@ -24,7 +24,7 @@ The application operates in a continuous loop:
 *   **Graceful Shutdown:** Implements signal handlers (SIGINT, SIGTERM) for safe, controlled process termination.
 *   **Dry Run Mode:** Allows testing behavioral chains against static log files without affecting a live blocking backend.
 *   **Memory Optimization:** Automatically purges state for IPs that are no longer relevant, minimizing memory footprint.
-*   **Metrics & Configuration API:** An optional embedded web server (enabled with `--http-server`) provides live performance metrics and allows for inspecting and archiving the running configuration. See [API.md](docs/API.md) for details.
+*   **Metrics & Configuration API:** An optional embedded web server (enabled with `--listen`) provides live performance metrics and allows for inspecting and archiving the running configuration. See [API.md](docs/API.md) for details.
 
 ## Building the Application
 
@@ -124,12 +124,51 @@ See [Cluster Configuration](docs/ClusterConfiguration.md) and [Cluster and Docke
 | **`--dump-backends`** | | Checks HAProxy backend sync status, lists all IPs, and exits. |
 | **`--exit-on-eof`** | | Exits after processing the log file to EOF instead of tailing. |
 | **`--help`** | | Display command-line help. |
-| **`--http-server`** | string | Starts a web server on this address to display live metrics. |
+| **`--listen`** | string | Starts a web server on this address (e.g., `:8080` or `:8080,role=api`). Can be specified multiple times for multiple listeners. |
 | **`--log-path`** | filepath | Path to the access log file to tail (or to read in dry-run mode). |
 | **`--reload-on`** | string | Controls config reloading: `watcher`, `HUP`, `USR1`, or `USR2`. |
 | **`--state-dir`** | dirpath | Path to the state directory. Enables persistence if set. |
 | **`--top-n`** | number | In dry-run mode, show top N actors per chain. |
 | **`--version`** | | Print the application version and exit. |
+
+### Listen Flag Options
+
+The `--listen` flag supports multiple formats and can be specified multiple times:
+
+**Basic usage:**
+```bash
+# Single listener on all interfaces
+--listen :8080
+
+# Multiple listeners
+--listen :8080 --listen :9090
+
+# IPv4 and IPv6 explicit
+--listen 0.0.0.0:8080 --listen [::]:8080
+```
+
+**Role-based routing:**
+```bash
+# Separate API and metrics endpoints
+--listen :8080,role=api --listen :9090,role=metrics
+
+# Multiple roles on one listener
+--listen :8080,role=api+metrics
+
+# Cluster communication on dedicated port
+--listen :8080 --listen :9090,role=cluster
+```
+
+**Available roles:**
+- `api` - Configuration and IP lookup endpoints
+- `metrics` - Metrics and stats endpoints
+- `cluster` - Cluster communication endpoints
+- `all` - Serves all endpoints (default when no role specified)
+
+**Routing rules:**
+- If no roles specified on any listener → all listeners serve all endpoints
+- If roles specified on at least one listener → role-based routing applies
+- Listeners without roles serve endpoints not claimed by role-specific listeners
 
 ## Configuration
 

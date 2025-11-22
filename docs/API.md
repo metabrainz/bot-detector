@@ -1,8 +1,22 @@
 # Internal HTTP Server API
 
-When the `--http-server` flag is used (e.g., `--http-server "127.0.0.1:8080"`), the bot-detector starts an internal web server to provide live metrics and access to the current configuration.
+When the `--listen` flag is used (e.g., `--listen :8080`), the bot-detector starts an internal web server to provide live metrics and access to the current configuration.
 
 This API is intended for monitoring and administrative purposes.
+
+## Multiple Listeners and Role-Based Routing
+
+The `--listen` flag supports multiple listeners with optional role-based routing. API endpoints can be isolated using `role=api`:
+
+```bash
+# Dedicated API listener
+--listen :8080,role=api
+
+# API and metrics on separate ports
+--listen :8080,role=api --listen :9090,role=metrics
+```
+
+See the main [README.md](../README.md) for complete `--listen` flag documentation and routing rules.
 
 ## Endpoints
 

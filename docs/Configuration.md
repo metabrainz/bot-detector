@@ -104,7 +104,9 @@ The nodes configuration can be overridden by `BOT_DETECTOR_NODES` environment va
 | **name** | string | Unique name for this node (e.g., `leader`, `follower-1`). |
 | **address** | string | Network address for this node (e.g., `node-1.example.com:8080` or `127.0.0.1:8080`). |
 
-**Note**: Node identity is determined by matching the `--http-server` bind address to a node's address or port. If no `FOLLOW` file exists in the config directory, the node assumes the leader role. If a `FOLLOW` file exists, the node assumes the follower role and uses the address in the `FOLLOW` file to contact the leader.
+**Note**: Node identity is determined by matching the `--listen` bind address(es) to a node's address or port. The `--cluster-node-name` flag can also be used to explicitly specify the node name. If no `FOLLOW` file exists in the config directory, the node assumes the leader role. If a `FOLLOW` file exists, the node assumes the follower role and uses the address in the `FOLLOW` file to contact the leader.
+
+For cluster communication, you can dedicate a specific listener using `--listen :9091,role=cluster` to separate cluster traffic from API and metrics endpoints.
 
 
 ### `good_actors`

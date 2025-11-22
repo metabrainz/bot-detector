@@ -43,7 +43,7 @@ func TestParseParameters(t *testing.T) {
 				"--dump-backends",
 				"--reload-on", "hup",
 				"--top-n", "15",
-				"--http-server", ":9090",
+				"--listen", ":9090",
 			},
 			want: &AppParameters{
 				ConfigDir:    configDir,
@@ -56,8 +56,10 @@ func TestParseParameters(t *testing.T) {
 				DumpBackends: true,
 				ReloadOn:     "hup",
 				TopN:         15,
-				HTTPServer:   ":9090",
-				Envs:         &EnvParameters{},
+				ListenConfigs: []*ListenConfig{
+					{Address: ":9090", Protocol: "http", Roles: []string{}},
+				},
+				Envs: &EnvParameters{},
 			},
 			wantErr: false,
 		},
@@ -118,6 +120,52 @@ func TestParseParameters(t *testing.T) {
 			args:        []string{"bot-detector"},
 			wantErr:     true,
 			errContains: "no flag: help requested",
+		},
+		{
+			name: "single listen flag",
+			args: []string{"bot-detector", "--config-dir", configDir, "--log-path", logPath, "--listen", ":8080"},
+			want: &AppParameters{
+				ConfigDir: configDir,
+				LogPath:   logPath,
+				ListenConfigs: []*ListenConfig{
+					{Address: ":8080", Protocol: "http", Roles: []string{}},
+				},
+				Envs: &EnvParameters{},
+			},
+			wantErr: false,
+		},
+		{
+			name: "multiple listen flags",
+			args: []string{"bot-detector", "--config-dir", configDir, "--log-path", logPath, "--listen", ":8080", "--listen", ":9090"},
+			want: &AppParameters{
+				ConfigDir: configDir,
+				LogPath:   logPath,
+				ListenConfigs: []*ListenConfig{
+					{Address: ":8080", Protocol: "http", Roles: []string{}},
+					{Address: ":9090", Protocol: "http", Roles: []string{}},
+				},
+				Envs: &EnvParameters{},
+			},
+			wantErr: false,
+		},
+		{
+			name: "listen flag with roles",
+			args: []string{"bot-detector", "--config-dir", configDir, "--log-path", logPath, "--listen", ":8080,role=api+metrics"},
+			want: &AppParameters{
+				ConfigDir: configDir,
+				LogPath:   logPath,
+				ListenConfigs: []*ListenConfig{
+					{Address: ":8080", Protocol: "http", Roles: []string{"api", "metrics"}},
+				},
+				Envs: &EnvParameters{},
+			},
+			wantErr: false,
+		},
+		{
+			name:        "invalid listen flag",
+			args:        []string{"bot-detector", "--config-dir", configDir, "--log-path", logPath, "--listen", "invalid"},
+			wantErr:     true,
+			errContains: "invalid --listen flag",
 		},
 	}
 

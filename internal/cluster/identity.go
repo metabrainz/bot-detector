@@ -29,16 +29,16 @@ type NodeIdentity struct {
 }
 
 // DetermineIdentity determines the node's identity based on the FOLLOW file,
-// listen address, and cluster configuration.
+// listen addresses, and cluster configuration.
 //
 // Parameters:
 //   - configDir: Directory containing config.yaml (and potentially FOLLOW file)
-//   - listenAddr: The HTTP server listen address (e.g., ":8080")
+//   - listenAddrs: Slice of listen addresses (e.g., [":8080", ":9090"])
 //   - clusterNodeName: Explicit node name from command line (e.g., "node-1")
 //   - clusterCfg: The cluster configuration from the YAML file (can be nil)
 //
 // Returns the NodeIdentity or an error if configuration is invalid.
-func DetermineIdentity(configDir, listenAddr, clusterNodeName string, clusterCfg *ClusterConfig) (*NodeIdentity, error) {
+func DetermineIdentity(configDir string, listenAddrs []string, clusterNodeName string, clusterCfg *ClusterConfig) (*NodeIdentity, error) {
 	identity := &NodeIdentity{}
 
 	// Determine role based on FOLLOW file existence
@@ -103,8 +103,14 @@ func DetermineIdentity(configDir, listenAddr, clusterNodeName string, clusterCfg
 			return nil, fmt.Errorf("node '%s' provided via --cluster-node-name not found in cluster configuration", clusterNodeName)
 		}
 	} else {
-		// Fallback method: for backward compatibility, match by listen address
-		node, found = matchNodeByListenAddress(listenAddr, clusterCfg)
+		// Fallback method: for backward compatibility, match by listen addresses
+		// Try each listen address until we find a match
+		for _, addr := range listenAddrs {
+			node, found = matchNodeByListenAddress(addr, clusterCfg)
+			if found {
+				break
+			}
+		}
 	}
 
 	if found {

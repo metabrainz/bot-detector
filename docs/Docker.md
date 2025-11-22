@@ -82,7 +82,7 @@ BOTDET_API_PORT=8090
 # --- Docker Settings ---
 CONTAINER_NAME="bot-detector-${INSTANCE_NAME}"
 IMAGE_NAME="bot-detector:latest"
-# The internal port the app listens on. This should match the --http-server flag.
+# The internal port the app listens on. This should match the --listen flag.
 INTERNAL_PORT=8088
 ```
 
@@ -110,7 +110,7 @@ docker run -d \
   --config-dir "config" \
   --log-path "logs/$LOG_FILE_NAME" \
   --state-dir "state" \
-  --http-server "0.0.0.0:$INTERNAL_PORT"
+  --listen "0.0.0.0:$INTERNAL_PORT"
 ```
 
 ### Explanation of the docker run Command
@@ -124,7 +124,7 @@ docker run -d \
 *   `--publish $BOTDET_API_PORT:$INTERNAL_PORT`: Exposes the application's web server port to the host machine.
 *   `--config-dir "config"`: Points to the config directory *relative to the container's working directory* (`/home/appuser/bot-detector`). This directory must contain `config.yaml`.
 *   `--state-dir "state"`: Enables persistence and tells the application to use the `state` directory (which is the volume mounted from the host) to store its data.
-*   `--http-server "0.0.0.0:$INTERNAL_PORT"`: Tells the application to listen on all network interfaces inside the container, which is required for the published port to be accessible from the host.
+*   `--listen "0.0.0.0:$INTERNAL_PORT"`: Tells the application to listen on all network interfaces inside the container, which is required for the published port to be accessible from the host.
 
 ### File Permissions and User Mapping
 
@@ -153,7 +153,7 @@ docker run -d \
   --config-dir "config" \
   --log-path "logs/$LOG_FILE_NAME" \
   --state-dir "state" \
-  --http-server "0.0.0.0:$INTERNAL_PORT"
+  --listen "0.0.0.0:$INTERNAL_PORT"
 ```
 
 The entrypoint script will automatically adjust the container's internal user to match these IDs, ensuring proper file access to mounted volumes. This is particularly important for the `state` directory which requires write access.

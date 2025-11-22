@@ -38,8 +38,12 @@ func newMockProvider(addr, report string) *mockProvider {
 	}
 }
 
-func (m *mockProvider) GetListenAddr() string {
-	return m.listenAddr
+func (m *mockProvider) GetListenConfigs() interface{} {
+	if m.listenAddr == "" {
+		return []ListenConfig{}
+	}
+	// Return a slice of ListenConfig interface
+	return []ListenConfig{&mockListenConfig{address: m.listenAddr}}
 }
 
 func (m *mockProvider) GenerateHTMLMetricsReport() string {
@@ -359,7 +363,7 @@ func TestServer_Disabled(t *testing.T) {
 	// This call should be non-blocking and return immediately.
 	Start(mockProvider)
 
-	if len(mockProvider.logs) != 1 || !strings.Contains(mockProvider.logs[0], "HTTP server is disabled") {
+	if len(mockProvider.logs) != 1 || !strings.Contains(mockProvider.logs[0], "Server is disabled") {
 		t.Errorf("Expected disabled server log message, but got: %v", mockProvider.logs)
 	}
 }

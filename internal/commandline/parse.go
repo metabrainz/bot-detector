@@ -16,7 +16,7 @@ type AppParameters struct {
 	DryRun          bool
 	DumpBackends    bool
 	ExitOnEOF       bool
-	HTTPServer      string
+	ListenConfigs   []*ListenConfig
 	LogPath         string
 	ReloadOn        string
 	ShowVersion     bool
@@ -42,7 +42,14 @@ func (p AppParameters) String() string {
 	writeField("DryRun", "%v", p.DryRun)
 	writeField("DumpBackends", "%v", p.DumpBackends)
 	writeField("ExitOnEOF", "%v", p.ExitOnEOF)
-	writeField("HTTPServer", "%q", p.HTTPServer)
+	if len(p.ListenConfigs) > 0 {
+		sb.WriteString(fmt.Sprintf(labelFormat+"%d listener(s)\n", "Listen", len(p.ListenConfigs)))
+		for i, lc := range p.ListenConfigs {
+			sb.WriteString(fmt.Sprintf("    [%d] %s\n", i, lc.String()))
+		}
+	} else {
+		writeField("Listen", "%s", "(disabled)")
+	}
 	writeField("LogPath", "%q", p.LogPath)
 	writeField("ReloadOn", "%q", p.ReloadOn)
 	writeField("ShowVersion", "%v", p.ShowVersion)
@@ -92,7 +99,6 @@ func ParseParameters(args []string) (*AppParameters, error) {
 		DryRun:          *cliFlags.DryRun,
 		DumpBackends:    *cliFlags.DumpBackends,
 		ExitOnEOF:       *cliFlags.ExitOnEOF,
-		HTTPServer:      *cliFlags.HTTPServer,
 		LogPath:         *cliFlags.LogPath,
 		ReloadOn:        *cliFlags.ReloadOn,
 		ShowVersion:     *cliFlags.ShowVersion,
@@ -100,6 +106,17 @@ func ParseParameters(args []string) (*AppParameters, error) {
 		TopN:            *cliFlags.TopN,
 		ClusterNodeName: *cliFlags.ClusterNodeName,
 		Envs:            envParams,
+	}
+
+	// Parse --listen flags
+	for _, listenFlag := range cliFlags.Listen {
+		if listenFlag != "" {
+			lc, err := ParseListenFlag(listenFlag)
+			if err != nil {
+				return nil, fmt.Errorf("invalid --listen flag %q: %w", listenFlag, err)
+			}
+			params.ListenConfigs = append(params.ListenConfigs, lc)
+		}
 	}
 
 	// --version is a special case, returns ASAP
@@ -163,7 +180,7 @@ type CLIFlagValues struct {
 	DryRun          *bool
 	DumpBackends    *bool
 	ExitOnEOF       *bool
-	HTTPServer      *string
+	Listen          []string
 	LogPath         *string
 	ReloadOn        *string
 	ShowVersion     *bool
@@ -180,7 +197,6 @@ func registerCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 		DryRun:          fs.Bool("dry-run", false, "Enable dry-run mode. Processes a static log file and exits."),
 		DumpBackends:    fs.Bool("dump-backends", false, "List currently blocked IPs and exit."),
 		ExitOnEOF:       fs.Bool("exit-on-eof", false, "Exit after processing the existing log file instead of tailing."),
-		HTTPServer:      fs.String("http-server", "", "Enable the HTTP server for metrics on the given address (e.g., :8080)."),
 		LogPath:         fs.String("log-path", "", "Path to the log file to monitor."),
 		ReloadOn:        fs.String("reload-on", "", "Trigger a configuration reload on a specific signal (hup, usr1, usr2) or 'watcher'. By default, both are enabled."),
 		ShowVersion:     fs.Bool("version", false, "Show the application version and exit."),
@@ -188,5 +204,12 @@ func registerCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 		TopN:            fs.Int("top-n", 0, "Number of top actors to display in the metrics summary."),
 		ClusterNodeName: fs.String("cluster-node-name", "", "Node name for cluster identification. Overrides port-based matching."),
 	}
+
+	// Custom handling for multiple --listen flags
+	fs.Func("listen", "Listen address with optional configuration (e.g., :8080 or :8080,role=api). Can be specified multiple times.", func(s string) error {
+		flags.Listen = append(flags.Listen, s)
+		return nil
+	})
+
 	return flags
 }

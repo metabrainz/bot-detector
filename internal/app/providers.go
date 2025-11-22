@@ -36,9 +36,9 @@ func (p *Processor) GetConfigForArchive() ([]byte, time.Time, map[string]*types.
 	return p.Config.YAMLContent, p.Config.LastModTime, depsCopy, p.ConfigDir, nil
 }
 
-// GetListenAddr returns the HTTP listen address from the config.
-func (p *Processor) GetListenAddr() string {
-	return p.HTTPServer
+// GetListenConfigs returns all configured listen addresses.
+func (p *Processor) GetListenConfigs() interface{} {
+	return p.ListenConfigs
 }
 
 // GetShutdownChannel returns the channel used for shutdown signals.
