@@ -127,6 +127,16 @@ func getTableNameWithSuffix(baseTableName string, ipVersion utils.IPVersion) str
 	}
 }
 
+// makeBlockCommand creates a HAProxy command to block an IP (set gpc0=1).
+func makeBlockCommand(tableName, ip string) string {
+	return fmt.Sprintf("set table %s key %s data.gpc0 1\n", tableName, ip)
+}
+
+// makeUnblockCommand creates a HAProxy command to unblock an IP (set gpc0=0).
+func makeUnblockCommand(tableName, ip string) string {
+	return fmt.Sprintf("set table %s key %s data.gpc0 0\n", tableName, ip)
+}
+
 // Block adds an IP to the appropriate HAProxy stick table.
 func (b *HAProxyBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
 	if b.IsDryRun {
@@ -150,7 +160,7 @@ func (b *HAProxyBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reas
 		return nil
 	}
 
-	command := fmt.Sprintf("set table %s key %s data.gpc0 1\n", tableName, ipInfo.Address)
+	command := makeBlockCommand(tableName, ipInfo.Address)
 	targets := make(map[string]map[string]string)
 	targets[tableName] = make(map[string]string)
 	for _, addr := range b.P.GetBlockerAddresses() {
@@ -184,7 +194,7 @@ func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 	for baseName := range baseTables {
 		tableName := getTableNameWithSuffix(baseName, ipInfo.Version)
 		targets[tableName] = make(map[string]string)
-		command := fmt.Sprintf("set table %s key %s data.gpc0 0\n", tableName, ipInfo.Address)
+		command := makeUnblockCommand(tableName, ipInfo.Address)
 		for _, addr := range b.P.GetBlockerAddresses() {
 			targets[tableName][addr] = command
 		}
@@ -998,7 +1008,7 @@ func (b *HAProxyBlocker) ResyncBackend(addr string, blockedIPs map[string]BlockI
 			continue
 		}
 
-		command := fmt.Sprintf("set table %s key %s data.gpc0 1\n", tableName, ipInfo.Address)
+		command := makeBlockCommand(tableName, ipInfo.Address)
 
 		// Execute directly on this specific backend
 		if err := b.Executor(addr, ip, command); err != nil {
@@ -1062,7 +1072,7 @@ func (b *HAProxyBlocker) ResyncUnblockedIPs(addr string, unblockedIPs map[string
 		for baseName := range baseTables {
 			tableName := getTableNameWithSuffix(baseName, ipInfo.Version)
 
-			command := fmt.Sprintf("set table %s key %s data.gpc0 0\n", tableName, ipInfo.Address)
+			command := makeUnblockCommand(tableName, ipInfo.Address)
 
 			if err := b.Executor(addr, ip, command); err != nil {
 				b.P.Log(logging.LevelError, "RESYNC", "Failed to resync unblock for IP %s to backend %s: %v", ip, addr, err)
