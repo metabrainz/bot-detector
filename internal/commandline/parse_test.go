@@ -43,7 +43,7 @@ func TestParseParameters(t *testing.T) {
 				"--dump-backends",
 				"--reload-on", "hup",
 				"--top-n", "15",
-				"--http-server", ":9090",
+				"--listen", ":9090",
 			},
 			want: &AppParameters{
 				ConfigDir:    configDir,
@@ -56,7 +56,6 @@ func TestParseParameters(t *testing.T) {
 				DumpBackends: true,
 				ReloadOn:     "hup",
 				TopN:         15,
-				HTTPServer:   ":9090",
 				ListenConfigs: []*ListenConfig{
 					{Address: ":9090", Protocol: "http", Roles: []string{}},
 				},
@@ -167,20 +166,6 @@ func TestParseParameters(t *testing.T) {
 			args:        []string{"bot-detector", "--config-dir", configDir, "--log-path", logPath, "--listen", "invalid"},
 			wantErr:     true,
 			errContains: "invalid --listen flag",
-		},
-		{
-			name: "http-server backward compatibility",
-			args: []string{"bot-detector", "--config-dir", configDir, "--log-path", logPath, "--http-server", ":8080"},
-			want: &AppParameters{
-				ConfigDir:  configDir,
-				LogPath:    logPath,
-				HTTPServer: ":8080",
-				ListenConfigs: []*ListenConfig{
-					{Address: ":8080", Protocol: "http", Roles: []string{}},
-				},
-				Envs: &EnvParameters{},
-			},
-			wantErr: false,
 		},
 	}
 

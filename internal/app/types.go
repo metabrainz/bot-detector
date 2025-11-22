@@ -78,7 +78,6 @@ type Processor struct {
 	LogPath              string       `test:"-"`
 	ReloadOn             string
 	TopActorsPerChain    map[string]map[string]*store.ActorStats // Dry-run only: tracks top actors per chain.
-	HTTPServer           string                                  // Deprecated: use ListenConfigs
 	ListenConfigs        []*commandline.ListenConfig
 	TopN                 int // For dry-run stats: show top N actors.
 	StartTime            time.Time

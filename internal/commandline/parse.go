@@ -16,7 +16,6 @@ type AppParameters struct {
 	DryRun          bool
 	DumpBackends    bool
 	ExitOnEOF       bool
-	HTTPServer      string // Deprecated: use ListenConfigs
 	ListenConfigs   []*ListenConfig
 	LogPath         string
 	ReloadOn        string
@@ -120,17 +119,6 @@ func ParseParameters(args []string) (*AppParameters, error) {
 		}
 	}
 
-	// Backward compatibility: --http-server (deprecated)
-	if *cliFlags.HTTPServer != "" {
-		fmt.Fprintf(os.Stderr, "[DEPRECATION WARNING] --http-server is deprecated, use --listen instead\n")
-		lc, err := ParseListenFlag(*cliFlags.HTTPServer)
-		if err != nil {
-			return nil, fmt.Errorf("invalid --http-server flag %q: %w", *cliFlags.HTTPServer, err)
-		}
-		params.ListenConfigs = append(params.ListenConfigs, lc)
-		params.HTTPServer = *cliFlags.HTTPServer // Keep for backward compat
-	}
-
 	// --version is a special case, returns ASAP
 	if params.ShowVersion {
 		return params, nil
@@ -192,7 +180,6 @@ type CLIFlagValues struct {
 	DryRun          *bool
 	DumpBackends    *bool
 	ExitOnEOF       *bool
-	HTTPServer      *string // Deprecated
 	Listen          []string
 	LogPath         *string
 	ReloadOn        *string
@@ -210,7 +197,6 @@ func registerCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 		DryRun:          fs.Bool("dry-run", false, "Enable dry-run mode. Processes a static log file and exits."),
 		DumpBackends:    fs.Bool("dump-backends", false, "List currently blocked IPs and exit."),
 		ExitOnEOF:       fs.Bool("exit-on-eof", false, "Exit after processing the existing log file instead of tailing."),
-		HTTPServer:      fs.String("http-server", "", "[DEPRECATED] Use --listen instead. Enable the HTTP server for metrics on the given address (e.g., :8080)."),
 		LogPath:         fs.String("log-path", "", "Path to the log file to monitor."),
 		ReloadOn:        fs.String("reload-on", "", "Trigger a configuration reload on a specific signal (hup, usr1, usr2) or 'watcher'. By default, both are enabled."),
 		ShowVersion:     fs.Bool("version", false, "Show the application version and exit."),

@@ -156,7 +156,6 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		LogPath:              params.LogPath,
 		ReloadOn:             params.ReloadOn,
 		TopN:                 params.TopN,
-		HTTPServer:           params.HTTPServer, // Deprecated, kept for backward compat
 		ListenConfigs:        params.ListenConfigs,
 		ConfigReloaded:       false,
 
