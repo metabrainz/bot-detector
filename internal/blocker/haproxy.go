@@ -65,10 +65,11 @@ type CommandExecutor func(addr, ip, command string) error
 
 // BackendHealth tracks the health state of a single HAProxy backend instance.
 type BackendHealth struct {
-	LastUptime int64
-	Healthy    bool
-	LastCheck  time.Time
-	mu         sync.RWMutex
+	LastUptime  int64
+	Healthy     bool
+	LastCheck   time.Time
+	NeedsResync bool
+	mu          sync.RWMutex
 }
 
 // HAProxyBlocker is a concrete implementation of the Blocker interface that interacts with HAProxy.
@@ -913,6 +914,21 @@ func (b *HAProxyBlocker) SetBackendHealth(addr string, healthy bool, uptime int6
 	health.LastCheck = time.Now()
 }
 
+// SetBackendNeedsResync marks a backend as needing resynchronization.
+func (b *HAProxyBlocker) SetBackendNeedsResync(addr string, needsResync bool) {
+	b.healthMu.RLock()
+	health, ok := b.backendHealth[addr]
+	b.healthMu.RUnlock()
+
+	if !ok {
+		return
+	}
+
+	health.mu.Lock()
+	defer health.mu.Unlock()
+	health.NeedsResync = needsResync
+}
+
 // StartHealthCheck starts the periodic health check goroutine.
 func (b *HAProxyBlocker) StartHealthCheck(interval time.Duration) {
 	if b.IsDryRun {
@@ -964,16 +980,23 @@ func (b *HAProxyBlocker) performHealthChecks() {
 		}
 
 		// Backend is reachable
+		needsResync := false
 		if !wasHealthy {
-			b.P.Log(logging.LevelInfo, "HEALTH_CHECK", "Backend %s recovered and is now healthy", addr)
+			b.P.Log(logging.LevelInfo, "HEALTH_CHECK", "Backend %s recovered and is now healthy (resync needed)", addr)
+			needsResync = true
 		}
 
 		// Check for uptime decrease (restart/reload)
 		if wasHealthy && lastUptime > 0 && uptime < lastUptime {
-			b.P.Log(logging.LevelWarning, "HEALTH_CHECK", "Backend %s restarted/reloaded (uptime: %d -> %d)", addr, lastUptime, uptime)
+			b.P.Log(logging.LevelWarning, "HEALTH_CHECK", "Backend %s restarted/reloaded (uptime: %d -> %d, resync needed)", addr, lastUptime, uptime)
+			needsResync = true
 		}
 
 		b.SetBackendHealth(addr, true, uptime)
+
+		if needsResync {
+			b.SetBackendNeedsResync(addr, true)
+		}
 	}
 }
 
