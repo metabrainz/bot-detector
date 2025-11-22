@@ -74,6 +74,7 @@ The configuration is structured as a top-level map containing settings for the a
 | **dial_timeout** | string | Optional. Timeout for establishing a connection to a blocker socket. Default: `5s`. |
 | **max_retries** | int | Optional. Number of attempts to send a command to a blocker instance. Default: `3`. |
 | **retry_delay** | string | Optional. Duration to wait between retry attempts. Default: `200ms`. |
+| **health_check_interval** | string | Optional. How often to check HAProxy backend health and detect restarts/reloads. When a backend restart or recovery is detected, blocked IPs are automatically resynced. Default: `5s`. |
 | **backends** | object | Backend-specific blocker configurations. See table [`blockers.backends.haproxy`](#blockersbackendshaproxy). |
 
 #### `blockers.backends.haproxy`
@@ -478,6 +479,7 @@ blockers:
   dial_timeout: "5s"
   max_retries: 3
   retry_delay: "200ms"
+  health_check_interval: "5s"  # How often to check HAProxy backend health (default: 5s)
 
   backends:
     haproxy:
