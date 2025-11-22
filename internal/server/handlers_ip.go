@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"reflect"
 	"time"
 
 	"bot-detector/internal/logging"
@@ -304,4 +305,235 @@ func addClusterHintJSON(response *IPStatusResponse, p Provider, ip string) {
 func parseRFC3339(s string) time.Time {
 	t, _ := time.Parse(time.RFC3339, s)
 	return t
+}
+
+// clusterIPLookupHandler returns IP status as JSON for internal cluster queries
+// This endpoint is used by the leader to query follower nodes
+func clusterIPLookupHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ipStr := r.PathValue("ip")
+		if ipStr == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprint(w, `{"error":"IP address required"}`)
+			return
+		}
+
+		// Canonicalize IP
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprint(w, `{"error":"Invalid IP address"}`)
+			return
+		}
+		canonical := ip.String()
+
+		// Search ActivityStore
+		p.GetActivityMutex().RLock()
+		defer p.GetActivityMutex().RUnlock()
+
+		activityStore := p.GetActivityStore()
+
+		// Collect all actors with this IP
+		var actors []*store.ActorActivity
+		for actor, activity := range activityStore {
+			if actor.IPInfo.Address == canonical {
+				actors = append(actors, activity)
+			}
+		}
+
+		// Build response (without node name and cluster hint for internal use)
+		response := buildIPStatusResponse(p, actors, canonical)
+		response.Node = ""        // Leader will add node name
+		response.ClusterHint = "" // Not needed for internal queries
+
+		// Return JSON
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			p.Log(logging.LevelError, "CLUSTER", "Failed to encode JSON response: %v", err)
+		}
+	}
+}
+
+// ClusterIPAggregateResponse is the aggregated IP status across all cluster nodes
+type ClusterIPAggregateResponse struct {
+	ClusterStatus string                 `json:"cluster_status"` // "blocked", "unblocked", "unknown", "mixed"
+	Nodes         []NodeIPStatusResponse `json:"nodes"`
+}
+
+// NodeIPStatusResponse is the IP status for a single node
+type NodeIPStatusResponse struct {
+	Name          string            `json:"name"`
+	Status        string            `json:"status"` // "blocked", "unblocked", "unknown", "error"
+	Error         string            `json:"error,omitempty"`
+	Actors        int               `json:"actors,omitempty"`
+	Chains        map[string]string `json:"chains,omitempty"`
+	EarliestBlock string            `json:"earliest_block,omitempty"`
+	LatestExpiry  string            `json:"latest_expiry,omitempty"`
+	LastSeen      string            `json:"last_seen,omitempty"`
+	LastUnblock   string            `json:"last_unblock,omitempty"`
+	UnblockReason string            `json:"unblock_reason,omitempty"`
+}
+
+// NodeInfo is a minimal representation of cluster node to avoid import cycles
+type NodeInfo struct {
+	Name    string
+	Address string
+}
+
+// clusterIPAggregateHandler queries all nodes and returns aggregated status (leader only)
+func clusterIPAggregateHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Check if leader
+		if p.GetNodeRole() != "leader" {
+			http.Error(w, "Cluster IP aggregation only available on leader nodes", http.StatusNotFound)
+			return
+		}
+
+		// Extract and validate IP
+		ipStr := r.PathValue("ip")
+		if ipStr == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprint(w, `{"error":"IP address required"}`)
+			return
+		}
+
+		// Canonicalize IP
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = fmt.Fprint(w, `{"error":"Invalid IP address"}`)
+			return
+		}
+		canonical := ip.String()
+
+		// Get cluster nodes
+		nodes := extractNodeInfo(p.GetClusterNodes())
+		if len(nodes) == 0 {
+			http.Error(w, "No cluster nodes available", http.StatusInternalServerError)
+			return
+		}
+
+		protocol := p.GetClusterProtocol()
+
+		response := ClusterIPAggregateResponse{
+			Nodes: make([]NodeIPStatusResponse, 0, len(nodes)),
+		}
+
+		// Track overall cluster status
+		hasBlocked := false
+		hasUnblocked := false
+		hasUnknown := false
+
+		for _, node := range nodes {
+			nodeResponse := queryNodeIPStatus(p, node.Name, node.Address, protocol, canonical)
+			response.Nodes = append(response.Nodes, nodeResponse)
+
+			// Track status for cluster-wide determination
+			switch nodeResponse.Status {
+			case "blocked":
+				hasBlocked = true
+			case "unblocked":
+				hasUnblocked = true
+			case "unknown":
+				hasUnknown = true
+			}
+		}
+
+		// Determine cluster-wide status
+		if hasBlocked {
+			if hasUnblocked || hasUnknown {
+				response.ClusterStatus = "mixed"
+			} else {
+				response.ClusterStatus = "blocked"
+			}
+		} else if hasUnblocked {
+			response.ClusterStatus = "unblocked"
+		} else {
+			response.ClusterStatus = "unknown"
+		}
+
+		// Return JSON
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			p.Log(logging.LevelError, "CLUSTER", "Failed to encode cluster IP response: %v", err)
+		}
+	}
+}
+
+// extractNodeInfo extracts node information from interface{} to avoid import cycles
+func extractNodeInfo(nodesInterface interface{}) []NodeInfo {
+	if nodesInterface == nil {
+		return nil
+	}
+
+	// The actual type is []cluster.NodeConfig, but we can't import cluster here
+	// Use reflection to extract Name and Address fields
+	v := reflect.ValueOf(nodesInterface)
+	if v.Kind() != reflect.Slice {
+		return nil
+	}
+
+	nodes := make([]NodeInfo, v.Len())
+	for i := 0; i < v.Len(); i++ {
+		elem := v.Index(i)
+		nodes[i] = NodeInfo{
+			Name:    elem.FieldByName("Name").String(),
+			Address: elem.FieldByName("Address").String(),
+		}
+	}
+
+	return nodes
+}
+
+// queryNodeIPStatus queries a single node for IP status
+func queryNodeIPStatus(p Provider, nodeName, nodeAddr, protocol, ip string) NodeIPStatusResponse {
+	url := fmt.Sprintf("%s://%s/cluster/internal/ip/%s", protocol, nodeAddr, ip)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		p.Log(logging.LevelWarning, "CLUSTER", "Failed to query node %s: %v", nodeName, err)
+		return NodeIPStatusResponse{
+			Name:   nodeName,
+			Status: "error",
+			Error:  err.Error(),
+		}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		p.Log(logging.LevelWarning, "CLUSTER", "Node %s returned status %d", nodeName, resp.StatusCode)
+		return NodeIPStatusResponse{
+			Name:   nodeName,
+			Status: "error",
+			Error:  fmt.Sprintf("HTTP %d", resp.StatusCode),
+		}
+	}
+
+	var status IPStatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		p.Log(logging.LevelWarning, "CLUSTER", "Failed to decode response from node %s: %v", nodeName, err)
+		return NodeIPStatusResponse{
+			Name:   nodeName,
+			Status: "error",
+			Error:  "decode error",
+		}
+	}
+
+	// Convert to NodeIPStatusResponse
+	return NodeIPStatusResponse{
+		Name:          nodeName,
+		Status:        status.Status,
+		Actors:        status.Actors,
+		Chains:        status.Chains,
+		EarliestBlock: status.EarliestBlock,
+		LatestExpiry:  status.LatestExpiry,
+		LastSeen:      status.LastSeen,
+		LastUnblock:   status.LastUnblock,
+		UnblockReason: status.UnblockReason,
+	}
 }
