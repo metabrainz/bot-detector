@@ -39,7 +39,7 @@ The configuration is structured as a top-level map containing settings for the a
 
 | Field | Type | Description |
 | :---- | :---- | :---- |
-| **enabled** | boolean | Optional. If `true`, enables state persistence. Default: `false`. |
+| **enabled** | boolean | Optional. If `false`, explicitly disables persistence even when `--state-dir` is set. When `--state-dir` is provided, persistence is enabled by default. |
 | **compaction_interval** | string | Optional. Interval at which the state journal is compacted. Default: `1h`. |
 
 
@@ -451,7 +451,6 @@ application:
     polling_interval: "5s"
 
   persistence:
-    enabled: false
     compaction_interval: "1h"
 
 # Parser settings
