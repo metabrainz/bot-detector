@@ -73,6 +73,7 @@ func customPanic() {
 // main is the application entry point.
 func main() {
 	defer customPanic()
+
 	params, err := commandline.ParseParameters(os.Args)
 	if err != nil {
 		switch err.Error() {
@@ -105,8 +106,16 @@ func GetConfigFilePath(params *commandline.AppParameters) string {
 // a clean exit, an error for failures, or nil to continue execution.
 func handleStartupFlags(params *commandline.AppParameters) error {
 	if params.ShowVersion {
+		// Get build info from runtime
+		info, ok := debug.ReadBuildInfo()
+		commit := "unknown"
+		buildTime := "unknown"
+		if ok {
+			commit = findSetting(info, "vcs.revision")
+			buildTime = findSetting(info, "vcs.time")
+		}
 		fmt.Printf("bot-detector version %s (commit: %s, built: %s)\n",
-			config.AppVersion, config.GitCommit, config.BuildTime)
+			config.AppVersion, commit, buildTime)
 		return fmt.Errorf("exit") // Signal clean exit
 	}
 
@@ -433,6 +442,17 @@ func execute(params *commandline.AppParameters) error {
 		return err
 	}
 
+	// Log build information (after handling --version and --check)
+	info, ok := debug.ReadBuildInfo()
+	if ok {
+		commit := findSetting(info, "vcs.revision")
+		buildTime := findSetting(info, "vcs.time")
+		dirty := findSetting(info, "vcs.modified")
+
+		log.Printf("[BUILD] Version: %s, Go: %s", config.AppVersion, info.GoVersion)
+		log.Printf("[BUILD] Commit: %s, Time: %s, Dirty: %s", commit, buildTime, dirty)
+	}
+
 	configFilePath := GetConfigFilePath(params)
 
 	// Check if FOLLOW file exists and determine if we need to bootstrap
@@ -572,7 +592,7 @@ func execute(params *commandline.AppParameters) error {
 	p.CheckChainsFunc = func(entry *app.LogEntry) { checker.CheckChains(p, entry) }
 	p.ProcessLogLine = func(line string) { logparser.ProcessLogLineInternal(p, line) }
 
-	app.LogConfigurationSummary(p)
+	app.LogConfigurationSummary(p, nil, nil) // Initial load, no old config
 	app.LogChainDetails(p, p.Chains, "Loaded chains")
 
 	start(p)
