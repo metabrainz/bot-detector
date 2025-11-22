@@ -76,6 +76,16 @@ type BlockersConfig struct {
 	Backends            Backends      `config:"compare"`
 }
 
+type BlockerSettings struct {
+	MaxRetries          int
+	RetryDelay          time.Duration
+	DialTimeout         time.Duration
+	CommandQueueSize    int
+	CommandsPerSecond   int
+	MaxCommandsPerBatch int
+	HealthCheckInterval time.Duration
+}
+
 type Backends struct {
 	HAProxy HAProxyConfig `config:"compare"`
 }
