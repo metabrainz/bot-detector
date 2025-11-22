@@ -134,5 +134,14 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("GET /api/v1/cluster/internal/ip/{ip}", clusterIPLookupHandler(p))
 	}
 
-	return mux
+	// Wrap with logging middleware
+	return loggingMiddleware(p, mux)
+}
+
+// loggingMiddleware logs incoming HTTP requests in debug mode.
+func loggingMiddleware(p Provider, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p.Log(logging.LevelDebug, "SERVER", "Request: %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
+		next.ServeHTTP(w, r)
+	})
 }
