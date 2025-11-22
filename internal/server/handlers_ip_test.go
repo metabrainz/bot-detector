@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -211,3 +212,74 @@ func (m *mockIPProvider) GetNodeStatus() NodeStatus           { return NodeStatu
 func (m *mockIPProvider) GetMetricsSnapshot() MetricsSnapshot { return MetricsSnapshot{} }
 func (m *mockIPProvider) GetAggregatedMetrics() interface{}   { return nil }
 func (m *mockIPProvider) GetClusterNodes() interface{}        { return nil }
+
+func TestAPIIPLookupHandler_JSON(t *testing.T) {
+	now := time.Now()
+	activityStore := make(map[store.Actor]*store.ActorActivity)
+	actor := store.Actor{IPInfo: utils.NewIPInfo("192.168.1.1")}
+	activityStore[actor] = &store.ActorActivity{
+		IsBlocked:    true,
+		BlockedUntil: now.Add(1 * time.Hour),
+		SkipInfo: store.SkipInfo{
+			Type:   utils.SkipTypeBlocked,
+			Source: "TestChain",
+		},
+	}
+
+	p := &mockIPProvider{
+		activityStore: activityStore,
+		activityMutex: &sync.RWMutex{},
+	}
+
+	handler := apiIPLookupHandler(p)
+	req := httptest.NewRequest("GET", "/api/v1/ip/192.168.1.1", nil)
+	req.SetPathValue("ip", "192.168.1.1")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rr.Code)
+	}
+
+	contentType := rr.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("Expected Content-Type application/json, got %s", contentType)
+	}
+
+	var response IPStatusResponse
+	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+		t.Fatalf("Failed to decode JSON: %v", err)
+	}
+
+	if response.Status != "blocked" {
+		t.Errorf("Expected status 'blocked', got '%s'", response.Status)
+	}
+
+	if _, ok := response.Chains["TestChain"]; !ok {
+		t.Errorf("Expected chain 'TestChain' in response")
+	}
+}
+
+func TestAPIIPLookupHandler_InvalidIP(t *testing.T) {
+	p := &mockIPProvider{
+		activityStore: make(map[store.Actor]*store.ActorActivity),
+		activityMutex: &sync.RWMutex{},
+	}
+
+	handler := apiIPLookupHandler(p)
+	req := httptest.NewRequest("GET", "/api/v1/ip/invalid", nil)
+	req.SetPathValue("ip", "invalid")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d", rr.Code)
+	}
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "error") {
+		t.Errorf("Expected error in JSON response, got: %s", body)
+	}
+}
