@@ -159,7 +159,7 @@ frontend fe_main
     acl blocked_1h_ipv6 src_get_gpc0(table_1h_ipv6) gt 0
     acl blocked_5m_ipv4 src_get_gpc0(table_5m_ipv4) gt 0
     acl blocked_5m_ipv6 src_get_gpc0(table_5m_ipv6) gt 0
-    
+
     http-request deny deny_status 429 if blocked_1h_ipv4 or blocked_5m_ipv4 or blocked_1h_ipv6 or blocked_5m_ipv6
 
     default_backend be_servers
@@ -182,47 +182,83 @@ Content-Type: text/plain
 ```
 
 
-## 2\. Bot Detector Configuration (`config.yaml`)
+## 3. Manual HAProxy Stick Table Operations
 
-The bot-detector's YAML configuration file is the **master list** of all targets and should be kept consistent across your cluster. The `blocker_addresses` list specifies every endpoint the bot detector must communicate with.
+You can manually interact with HAProxy stick tables using `socat` for testing or troubleshooting.
+
+### Show all stick tables
+```bash
+echo "show table" | socat stdio /run/haproxy/admin.sock
+```
+
+### Show entries in a specific table
+```bash
+echo "show table table_1h_ipv4" | socat stdio /run/haproxy/admin.sock
+```
+
+### Block an IP (set gpc0=1)
+```bash
+# IPv4
+echo "set table table_1h_ipv4 key 192.168.1.100 data.gpc0 1" | socat stdio /run/haproxy/admin.sock
+
+# IPv6
+echo "set table table_1h_ipv6 key 2001:db8::1 data.gpc0 1" | socat stdio /run/haproxy/admin.sock
+```
+
+### Unblock but keep IP in table (set gpc0=0)
+```bash
+echo "set table table_1h_ipv4 key 192.168.1.100 data.gpc0 0" | socat stdio /run/haproxy/admin.sock
+```
+
+### Remove an IP from table completely
+```bash
+echo "clear table table_1h_ipv4 key 192.168.1.100" | socat stdio /run/haproxy/admin.sock
+```
+
+### Using TCP socket instead of Unix socket
+```bash
+echo "show table table_1h_ipv4" | socat stdio TCP:127.0.0.1:9999
+```
+
+## 4. Bot Detector Configuration (`config.yaml`)
+
+The bot-detector's YAML configuration file is the **master list** of all targets and should be kept consistent across your cluster. The `blockers.backends.haproxy` section specifies every endpoint the bot detector must communicate with.
 
 ```yaml
-# Example config.yaml
-version: "1.0" # This version field is mandatory
-# ... other config ...
+version: "1.0"
 
-# --- Block Duration Mapping ---
-duration_tables:
-    5m: table_5m # Matches the stick-table name in haproxy.cfg without _ipv4/_ipv6 suffix
-    1h: table_1h # Matches the stick-table name in haproxy.cfg without _ipv4/_ipv6 suffix
-default_block_duration: "5m"
+application:
+  log_level: "info"
+  enable_metrics: true
 
-# --- HAProxy Target Addresses ---
-# This list contains ALL HAProxy control endpoints across the cluster.
-# The bot detector handles the connection type (Unix vs. TCP) automatically.
-blocker_addresses:
-  # 1. Local HAProxy (Uses Unix Socket - faster, more secure locally)
-  - /run/haproxy/admin.sock
+parser:
+  timestamp_format: "02/Jan/2006:15:04:05 -0700"
 
-  # 2. Remote HAProxy on rex (Uses TCP/IP)
-  - 10.2.2.60:9999
+checker:
+  actor_cleanup_interval: "1m"
+  actor_state_idle_timeout: "30m"
 
-  # 3. Remote HAProxy on rudi (Uses TCP/IP)
-  - 10.2.2.30:9999
+blockers:
+  default_duration: "5m"
+  commands_per_second: 10
+  command_queue_size: 1000
+  dial_timeout: "5s"
+  max_retries: 3
+  retry_delay: "200ms"
 
-# --- HAProxy Client Settings (Optional) ---
-# These settings control the behavior of the bot-detector when it communicates
-# with the HAProxy instances listed above.
-blocker_max_retries: 3
-blocker_retry_delay: "200ms"
-blocker_dial_timeout: "5s"
-blocker_command_queue_size: 1000
-blocker_commands_per_second: 10
+  backends:
+    haproxy:
+      # All HAProxy control endpoints across the cluster
+      addresses:
+        - "/run/haproxy/admin.sock"  # Local (Unix socket)
+        - "10.2.2.60:9999"            # Remote node 1 (TCP)
+        - "10.2.2.30:9999"            # Remote node 2 (TCP)
 
-# --- Metrics Web Server (Optional) ---
-# If set, the application will serve a live metrics page on this address.
-http_listen_addr: "127.0.0.1:8080"
+      # Maps block durations to HAProxy stick table names
+      duration_tables:
+        "5m": "table_5m"
+        "1h": "table_1h"
 
-
-# ... chains definitions ...
+chains:
+  # ... chain definitions ...
 ```
