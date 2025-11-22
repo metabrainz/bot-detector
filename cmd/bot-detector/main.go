@@ -592,7 +592,7 @@ func execute(params *commandline.AppParameters) error {
 	p.CheckChainsFunc = func(entry *app.LogEntry) { checker.CheckChains(p, entry) }
 	p.ProcessLogLine = func(line string) { logparser.ProcessLogLineInternal(p, line) }
 
-	app.LogConfigurationSummary(p)
+	app.LogConfigurationSummary(p, nil, nil) // Initial load, no old config
 	app.LogChainDetails(p, p.Chains, "Loaded chains")
 
 	start(p)

@@ -49,18 +49,33 @@ func logStructFields(p *Processor, val reflect.Value, typ reflect.Type) {
 // LogConfigurationSummary logs the key-value pairs of the current application configuration.
 // This is useful for visibility on startup and after a configuration reload.
 // Exported so it can be called from main or other packages.
-func LogConfigurationSummary(p *Processor) {
+func LogConfigurationSummary(p *Processor, oldChains []config.BehavioralChain, oldGoodActors []config.GoodActorDef) {
 	p.ConfigMutex.RLock()
 	cfg := p.Config
 	logRegex := p.LogRegex
 	currentLogLevel := logging.GetLogLevel().String()
+	newChains := p.Chains
+	newGoodActors := cfg.GoodActors
 	p.ConfigMutex.RUnlock()
 
 	if p.ConfigReloaded {
 		p.LogFunc(logging.LevelInfo, "CONFIG_RELOAD", "Successfully reloaded main configuration from '%s'", p.ConfigFilePath)
+
+		// Show changes on reload
+		if len(oldChains) != len(newChains) || len(oldGoodActors) != len(newGoodActors) {
+			p.LogFunc(logging.LevelInfo, "CONFIG", "Chains: %d (%+d), Good Actors: %d (%+d), Log Level: %s",
+				len(newChains), len(newChains)-len(oldChains),
+				len(newGoodActors), len(newGoodActors)-len(oldGoodActors),
+				currentLogLevel)
+		} else {
+			p.LogFunc(logging.LevelInfo, "CONFIG", "Chains: %d, Good Actors: %d, Log Level: %s",
+				len(newChains), len(newGoodActors), currentLogLevel)
+		}
 	} else {
 		p.ConfigReloaded = true
 		p.LogFunc(logging.LevelInfo, "CONFIG", "Successfully loaded main configuration from '%s'", p.ConfigFilePath)
+		p.LogFunc(logging.LevelInfo, "CONFIG", "Chains: %d, Good Actors: %d, Log Level: %s",
+			len(newChains), len(newGoodActors), currentLogLevel)
 	}
 
 	p.LogFunc(logging.LevelDebug, "CONFIG", "Loaded configuration:")
@@ -305,7 +320,7 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 		(oldLogRegex != nil) != (loadedCfg.LogFormatRegex != nil)
 
 	if configChanged {
-		LogConfigurationSummary(p)
+		LogConfigurationSummary(p, oldChains, oldConfig.GoodActors)
 	}
 
 	// --- Compare and log file dependency changes ---
