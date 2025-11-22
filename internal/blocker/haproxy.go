@@ -1024,6 +1024,79 @@ func (b *HAProxyBlocker) ResyncBackend(addr string, blockedIPs map[string]BlockI
 	return nil
 }
 
+// ResyncUnblockedIPs re-sends unblock commands (gpc0=0) for good actors to a specific backend.
+// This ensures good actors remain marked as unblocked and skip chain processing.
+func (b *HAProxyBlocker) ResyncUnblockedIPs(addr string, unblockedIPs map[string]string) error {
+	if b.IsDryRun {
+		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would resync %d unblocked IPs to backend %s", len(unblockedIPs), addr)
+		return nil
+	}
+
+	// Clear the flag immediately to prevent duplicate resync triggers
+	b.SetBackendNeedsResync(addr, false)
+
+	if len(unblockedIPs) == 0 {
+		return nil
+	}
+
+	b.P.Log(logging.LevelInfo, "RESYNC", "Starting unblock resync of %d IPs to backend %s", len(unblockedIPs), addr)
+
+	successCount := 0
+	errorCount := 0
+
+	// Get all table names for unblocking
+	baseTables := make(map[string]struct{})
+	for _, baseName := range b.P.GetDurationTables() {
+		baseTables[baseName] = struct{}{}
+	}
+	if fallback := b.P.GetBlockTableNameFallback(); fallback != "" {
+		baseTables[fallback] = struct{}{}
+	}
+
+	for ip := range unblockedIPs {
+		ipInfo := utils.NewIPInfo(ip)
+		if ipInfo.Version == utils.VersionInvalid {
+			b.P.Log(logging.LevelWarning, "RESYNC", "Skipping invalid IP %s during unblock resync", ip)
+			continue
+		}
+
+		var ipSuffix string
+		switch ipInfo.Version {
+		case 4:
+			ipSuffix = "_ipv4"
+		case 6:
+			ipSuffix = "_ipv6"
+		default:
+			errorCount++
+			continue
+		}
+
+		// Unblock in all tables
+		for baseName := range baseTables {
+			tableName := baseName
+			if !strings.HasSuffix(baseName, "_ipv4") && !strings.HasSuffix(baseName, "_ipv6") {
+				tableName += ipSuffix
+			}
+
+			command := fmt.Sprintf("set table %s key %s data.gpc0 0\n", tableName, ipInfo.Address)
+
+			if err := b.Executor(addr, ip, command); err != nil {
+				b.P.Log(logging.LevelError, "RESYNC", "Failed to resync unblock for IP %s to backend %s: %v", ip, addr, err)
+				errorCount++
+			} else {
+				successCount++
+			}
+		}
+	}
+
+	b.P.Log(logging.LevelInfo, "RESYNC", "Unblock resync completed for backend %s: %d succeeded, %d failed", addr, successCount, errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("unblock resync had %d errors", errorCount)
+	}
+	return nil
+}
+
 // BlockInfo holds information about a blocked IP for resync purposes.
 type BlockInfo struct {
 	Duration time.Duration

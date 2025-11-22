@@ -586,25 +586,36 @@ func execute(params *commandline.AppParameters) error {
 
 	// Set up resync callback to handle backend restarts/recoveries
 	haproxyBlocker.ResyncCallback = func(addr string) {
-		// Collect currently blocked IPs from activity store
+		// Collect currently blocked and unblocked IPs from activity store
 		blockedIPs := make(map[string]blocker.BlockInfo)
+		unblockedIPs := make(map[string]string)
 
 		p.ActivityMutex.RLock()
 		for actor, activity := range p.ActivityStore {
 			if activity.IsBlocked && time.Now().Before(activity.BlockedUntil) {
-				// Calculate remaining duration
+				// Blocked IP - calculate remaining duration
 				remaining := time.Until(activity.BlockedUntil)
 				blockedIPs[actor.IPInfo.Address] = blocker.BlockInfo{
 					Duration: remaining,
 					Reason:   "resync",
 				}
+			} else if activity.LastUnblockTime.After(time.Time{}) {
+				// Explicitly unblocked IP (good actor) - needs gpc0=0 to skip chain processing
+				unblockedIPs[actor.IPInfo.Address] = activity.LastUnblockReason
 			}
 		}
 		p.ActivityMutex.RUnlock()
 
-		// Trigger resync
+		// Trigger resync for blocked IPs
 		if err := haproxyBlocker.ResyncBackend(addr, blockedIPs); err != nil {
 			p.LogFunc(logging.LevelError, "RESYNC", "Resync failed for backend %s: %v", addr, err)
+		}
+
+		// Trigger resync for unblocked IPs (good actors)
+		if len(unblockedIPs) > 0 {
+			if err := haproxyBlocker.ResyncUnblockedIPs(addr, unblockedIPs); err != nil {
+				p.LogFunc(logging.LevelError, "RESYNC", "Unblock resync failed for backend %s: %v", addr, err)
+			}
 		}
 	}
 
