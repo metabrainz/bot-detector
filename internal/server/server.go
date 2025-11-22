@@ -13,8 +13,9 @@
 //   - GET /cluster/status  - Node cluster status (role, name, address, leader)
 //   - GET /cluster/metrics - Node metrics snapshot in JSON format
 //   - GET /cluster/metrics/aggregate - Cluster-wide aggregated metrics (leader only)
-//   - GET /cluster/ip/{ip} - IP status aggregated across cluster (leader only)
-//   - GET /cluster/internal/ip/{ip} - Internal endpoint for leader to query followers
+//   - GET /cluster/ip/{ip} - IP status aggregated across cluster (leader only, plain text)
+//   - GET /api/v1/cluster/ip/{ip} - IP status aggregated across cluster (leader only, JSON)
+//   - GET /api/v1/cluster/internal/ip/{ip} - Internal endpoint for leader to query followers
 package server
 
 import (
@@ -48,7 +49,8 @@ func Start(p Provider) {
 	mux.HandleFunc("/cluster/metrics", clusterMetricsHandler(p))
 	mux.HandleFunc("/cluster/metrics/aggregate", clusterMetricsAggregateHandler(p))
 	mux.HandleFunc("GET /cluster/ip/{ip}", clusterIPAggregateHandler(p))
-	mux.HandleFunc("GET /cluster/internal/ip/{ip}", clusterIPLookupHandler(p))
+	mux.HandleFunc("GET /api/v1/cluster/ip/{ip}", apiClusterIPAggregateHandler(p))
+	mux.HandleFunc("GET /api/v1/cluster/internal/ip/{ip}", clusterIPLookupHandler(p))
 
 	server := &http.Server{
 		Addr:    listenAddr,
