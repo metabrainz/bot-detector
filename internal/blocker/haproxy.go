@@ -310,8 +310,17 @@ func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[stri
 
 	var wg sync.WaitGroup
 	errs := make(chan error, len(commandsByAddr))
+	skippedCount := 0
 
 	for addr, commands := range commandsByAddr {
+		// Check if backend is healthy
+		healthy, _, _ := b.GetBackendHealth(addr)
+		if !healthy {
+			skippedCount++
+			b.P.Log(logging.LevelDebug, "SKIP_UNHEALTHY", "Skipping %s command for IP %s on unhealthy backend %s", commandType, ip, addr)
+			continue
+		}
+
 		wg.Add(1)
 
 		go func(a string, cmds []string) {
@@ -340,6 +349,10 @@ func (b *HAProxyBlocker) executeCommandsConcurrently(ip string, targets map[stri
 
 		return fmt.Errorf("%d HAProxy '%s' commands failed for IP %s", numErrs, commandType, ip)
 
+	}
+
+	if skippedCount > 0 && skippedCount == len(commandsByAddr) {
+		b.P.Log(logging.LevelWarning, "ALL_BACKENDS_UNHEALTHY", "All backends are unhealthy. Command for IP %s queued but not executed.", ip)
 	}
 
 	return nil
