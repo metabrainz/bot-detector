@@ -262,3 +262,56 @@ blockers:
 chains:
   # ... chain definitions ...
 ```
+
+## 5. Stick Table Persistence and Automatic Resync
+
+### HAProxy Stick Table Behavior
+
+HAProxy stick tables are **in-memory only** and have different persistence characteristics depending on the operation:
+
+- **On restart**: Stick tables are **always cleared** (all blocked IPs are lost)
+- **On reload**: 
+  - **Without peers**: Stick tables are **cleared** (all blocked IPs are lost)
+  - **With peers**: Stick tables are **preserved** via peer synchronization
+
+### Bot-Detector Automatic Resync
+
+Bot-detector automatically handles stick table loss through **health monitoring and automatic resynchronization**:
+
+1. **Health Monitoring**: Bot-detector checks each HAProxy backend every 5 seconds (configurable via `health_check_interval`)
+
+2. **Detection**: It detects when HAProxy has been restarted or reloaded by monitoring the `Uptime_sec` value from `show info`
+
+3. **Automatic Resync**: When a restart/reload is detected, bot-detector automatically:
+   - Collects all currently blocked IPs from its internal state
+   - Re-sends block commands to the affected backend
+   - Restores the stick tables to their previous state
+
+4. **Recovery Handling**: If a backend becomes unavailable and then recovers, bot-detector:
+   - Detects the recovery
+   - Automatically resyncs all blocked IPs
+   - Ensures no blocks are lost during downtime
+
+### Configuration
+
+The health check interval can be configured in `config.yaml`:
+
+```yaml
+blockers:
+  health_check_interval: "5s"  # How often to check backend health (default: 5s)
+  backends:
+    haproxy:
+      addresses:
+        - "/run/haproxy/admin.sock"
+```
+
+### Observability
+
+Bot-detector provides metrics for monitoring the resync process:
+- `BackendRestarts`: Number of HAProxy restarts/reloads detected
+- `BackendRecoveries`: Number of backend recoveries from unhealthy state
+- `BackendResyncs`: Number of resync operations triggered
+
+These metrics help you monitor the health and stability of your HAProxy backends.
+
+**Note**: While peers help preserve stick tables during reloads, they don't help with restarts. Bot-detector's automatic resync ensures blocked IPs are always restored regardless of how HAProxy is restarted or reloaded.
