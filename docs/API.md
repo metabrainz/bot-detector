@@ -231,3 +231,222 @@ These endpoints are available when cluster mode is enabled. They provide cluster
     *   `200 OK`: Successfully returns aggregated cluster metrics.
     *   `404 Not Found`: This endpoint is only available on leader nodes. Returned when querying a follower node.
     *   `500 Internal Server Error`: If the server fails to aggregate metrics.
+
+---
+
+## IP Lookup Endpoints
+
+These endpoints allow you to query the block/unblock status of specific IP addresses. They provide visibility into which IPs are currently blocked, why they were blocked, and when blocks will expire.
+
+### **`/ip/{ip}`**
+
+*   **Method:** `GET`
+*   **Content-Type:** `text/plain; charset=utf-8`
+*   **Description:** Returns the block/unblock status of an IP address on the local node in human-readable plain text format. The IP address is automatically canonicalized (e.g., `2001:0db8::1` becomes `2001:db8::1`). This endpoint is useful for quick manual queries via curl or browser.
+*   **Parameters:**
+    *   `ip` - IPv4 or IPv6 address (will be canonicalized)
+*   **Response Format (Blocked IP):**
+    ```
+    node: follower-2
+    status: blocked
+    actors: 2
+    chains:
+      - SimpleBlockChain (until: 2025-11-22T02:00:00Z)
+      - API-Abuse-Chain (until: 2025-11-22T01:30:00Z)
+    earliest_block: 2025-11-22T01:00:00Z
+    latest_expiry: 2025-11-22T02:00:00Z
+    note: For cluster-wide view, query leader at http://leader:8080/cluster/ip/192.168.1.1
+    ```
+*   **Response Format (Unblocked IP):**
+    ```
+    node: follower-2
+    status: unblocked
+    last_seen: 2025-11-22T01:00:00Z
+    last_unblock: 2025-11-22T00:30:00Z
+    reason: good-actor:monitoring_agent
+    ```
+*   **Response Format (Unknown IP):**
+    ```
+    node: follower-2
+    status: unknown
+    ```
+*   **Notes:**
+    *   The `actors` field indicates how many IP+UserAgent combinations exist for this IP
+    *   Multiple chains can block the same IP if different behavioral patterns are detected
+    *   The `earliest_block` time is estimated (actual block time - 1 hour) since exact block time is not stored
+    *   If queried on a follower node, a hint is provided to query the leader for cluster-wide view
+*   **Responses:**
+    *   `200 OK`: Successfully returns IP status.
+    *   `400 Bad Request`: Invalid IP address format.
+
+### **`/api/v1/ip/{ip}`**
+
+*   **Method:** `GET`
+*   **Content-Type:** `application/json`
+*   **Description:** Returns the block/unblock status of an IP address on the local node in JSON format. This endpoint is designed for programmatic access and automation scripts.
+*   **Parameters:**
+    *   `ip` - IPv4 or IPv6 address (will be canonicalized)
+*   **Response Format (Blocked IP):**
+    ```json
+    {
+      "node": "follower-2",
+      "status": "blocked",
+      "actors": 2,
+      "chains": {
+        "SimpleBlockChain": "2025-11-22T02:00:00Z",
+        "API-Abuse-Chain": "2025-11-22T01:30:00Z"
+      },
+      "earliest_block": "2025-11-22T01:00:00Z",
+      "latest_expiry": "2025-11-22T02:00:00Z",
+      "cluster_hint": "http://leader:8080/cluster/ip/192.168.1.1"
+    }
+    ```
+*   **Response Format (Unblocked IP):**
+    ```json
+    {
+      "node": "follower-2",
+      "status": "unblocked",
+      "last_seen": "2025-11-22T01:00:00Z",
+      "last_unblock": "2025-11-22T00:30:00Z",
+      "unblock_reason": "good-actor:monitoring_agent"
+    }
+    ```
+*   **Response Format (Unknown IP):**
+    ```json
+    {
+      "node": "follower-2",
+      "status": "unknown"
+    }
+    ```
+*   **Error Response (400 Bad Request):**
+    ```json
+    {
+      "error": "Invalid IP address"
+    }
+    ```
+*   **Notes:**
+    *   All timestamps are in RFC3339 format (ISO 8601)
+    *   IPv6 addresses are canonicalized (e.g., `2001:0db8::1` → `2001:db8::1`)
+    *   The `chains` object maps chain names to their expiry times
+    *   The `cluster_hint` field (on followers) provides the URL to query for cluster-wide status
+*   **Responses:**
+    *   `200 OK`: Successfully returns IP status.
+    *   `400 Bad Request`: Invalid IP address format.
+
+### **`/cluster/ip/{ip}`** (Leader Only)
+
+*   **Method:** `GET`
+*   **Content-Type:** `application/json`
+*   **Description:** Returns aggregated IP status across all cluster nodes. This endpoint queries all nodes in the cluster and provides a comprehensive view of the IP's status across the entire deployment. Only available on leader nodes.
+*   **Parameters:**
+    *   `ip` - IPv4 or IPv6 address (will be canonicalized)
+*   **Response Format:**
+    ```json
+    {
+      "cluster_status": "blocked",
+      "nodes": [
+        {
+          "name": "follower-1",
+          "status": "blocked",
+          "actors": 1,
+          "chains": {
+            "SimpleBlockChain": "2025-11-22T02:00:00Z"
+          },
+          "earliest_block": "2025-11-22T01:00:00Z",
+          "latest_expiry": "2025-11-22T02:00:00Z"
+        },
+        {
+          "name": "follower-2",
+          "status": "blocked",
+          "actors": 2,
+          "chains": {
+            "SimpleBlockChain": "2025-11-22T02:00:05Z",
+            "API-Abuse-Chain": "2025-11-22T01:30:05Z"
+          },
+          "earliest_block": "2025-11-22T01:00:05Z",
+          "latest_expiry": "2025-11-22T02:00:05Z"
+        },
+        {
+          "name": "follower-3",
+          "status": "unblocked",
+          "last_seen": "2025-11-22T00:50:00Z"
+        },
+        {
+          "name": "follower-4",
+          "status": "error",
+          "error": "HTTP 500"
+        }
+      ]
+    }
+    ```
+*   **Cluster Status Values:**
+    *   `"blocked"`: IP is blocked on all nodes that have information about it
+    *   `"unblocked"`: IP is not blocked on any node (but may have been seen)
+    *   `"unknown"`: IP is not known to any node
+    *   `"mixed"`: IP has different statuses across nodes (e.g., blocked on some, unblocked on others)
+*   **Node Status Values:**
+    *   `"blocked"`: IP is currently blocked on this node
+    *   `"unblocked"`: IP is known but not blocked on this node
+    *   `"unknown"`: IP is not known to this node
+    *   `"error"`: Failed to query this node (network error, timeout, etc.)
+*   **Notes:**
+    *   The leader queries all nodes concurrently with a 5-second timeout per node
+    *   Nodes that fail to respond are marked with `"status": "error"` and include an error message
+    *   This endpoint provides the most complete view of an IP's status across the cluster
+*   **Responses:**
+    *   `200 OK`: Successfully returns aggregated IP status.
+    *   `400 Bad Request`: Invalid IP address format.
+    *   `404 Not Found`: This endpoint is only available on leader nodes.
+    *   `500 Internal Server Error`: Cluster configuration not available.
+
+### **`/cluster/internal/ip/{ip}`** (Internal Use)
+
+*   **Method:** `GET`
+*   **Content-Type:** `application/json`
+*   **Description:** Internal endpoint used by the leader to query follower nodes for IP status. This endpoint returns the same information as `/api/v1/ip/{ip}` but without the `node` and `cluster_hint` fields, as these are added by the leader during aggregation. This endpoint is not intended for direct user access.
+*   **Parameters:**
+    *   `ip` - IPv4 or IPv6 address (will be canonicalized)
+*   **Response Format:** Same as `/api/v1/ip/{ip}` but without `node` and `cluster_hint` fields.
+*   **Responses:**
+    *   `200 OK`: Successfully returns IP status.
+    *   `400 Bad Request`: Invalid IP address format.
+
+---
+
+## Usage Examples
+
+### Query IP status on local node (plain text)
+```bash
+curl http://localhost:8080/ip/192.168.1.100
+```
+
+### Query IP status on local node (JSON)
+```bash
+curl http://localhost:8080/api/v1/ip/192.168.1.100
+```
+
+### Query IP status across cluster (leader only)
+```bash
+curl http://leader:8080/cluster/ip/192.168.1.100
+```
+
+### Query IPv6 address (automatically canonicalized)
+```bash
+curl http://localhost:8080/ip/2001:0db8::1
+# Queries for canonical form: 2001:db8::1
+```
+
+### Check if IP is blocked (script example)
+```bash
+#!/bin/bash
+IP="192.168.1.100"
+STATUS=$(curl -s "http://localhost:8080/api/v1/ip/$IP" | jq -r '.status')
+
+if [ "$STATUS" = "blocked" ]; then
+    echo "IP $IP is currently blocked"
+    exit 1
+else
+    echo "IP $IP is not blocked"
+    exit 0
+fi
+```
