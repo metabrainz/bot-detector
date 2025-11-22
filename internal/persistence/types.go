@@ -13,7 +13,7 @@ const (
 
 // PersistenceConfig holds settings for the state persistence layer.
 type PersistenceConfig struct {
-	Enabled            bool          `yaml:"enabled"`
+	Enabled            *bool         `yaml:"enabled"`
 	CompactionInterval time.Duration `yaml:"compaction_interval"`
 }
 

@@ -160,7 +160,8 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		ConfigReloaded:       false,
 
 		// Initialize persistence fields
-		PersistenceEnabled: loadedCfg.Application.Persistence.Enabled,
+		// If --state-dir is set, persistence is enabled by default unless explicitly disabled in config
+		PersistenceEnabled: params.StateDir != "" && (loadedCfg.Application.Persistence.Enabled == nil || *loadedCfg.Application.Persistence.Enabled),
 		CompactionInterval: loadedCfg.Application.Persistence.CompactionInterval,
 		IPStates:           make(map[string]persistence.IPState),
 		ReasonCache:        make(map[string]*string),
@@ -556,7 +557,7 @@ func execute(params *commandline.AppParameters) error {
 	}
 
 	if p.PersistenceEnabled && p.StateDir == "" {
-		return fmt.Errorf("persistence is enabled in config, but no --state-dir was provided")
+		return fmt.Errorf("persistence cannot be enabled without --state-dir")
 	}
 
 	// Determine node identity based on FOLLOW file and cluster configuration

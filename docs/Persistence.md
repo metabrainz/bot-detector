@@ -4,19 +4,27 @@ This document outlines the architecture used by `bot-detector` to reliably persi
 
 ## Enabling Persistence
 
-Persistence is disabled by default. To enable it, you **must** specify a state directory using the `--state-dir` command-line flag. This flag is the sole method for enabling persistence and setting the storage path.
+Persistence is controlled by the `--state-dir` command-line flag. When you specify a state directory, persistence is **automatically enabled** unless explicitly disabled in the configuration.
 
 ```sh
 ./bot-detector --config-dir /etc/bot-detector --state-dir /var/lib/bot-detector/state
 ```
 
-You can optionally control other persistence behaviors, like the compaction interval, from your `config.yaml` file. If `persistence.enabled` is set to `true` in the YAML, the `--state-dir` flag becomes mandatory.
+To disable persistence even when `--state-dir` is provided, set `persistence.enabled: false` in your `config.yaml`:
 
 ```yaml
 # config.yaml
 persistence:
-  enabled: true
-  compaction_interval: "1h" # Optional, defaults to 1 hour
+  enabled: false  # Explicitly disable persistence
+  compaction_interval: "1h"  # Ignored when disabled
+```
+
+You can also configure the compaction interval:
+
+```yaml
+# config.yaml
+persistence:
+  compaction_interval: "1h"  # Optional, defaults to 1 hour
 ```
 
 If a `state_dir` is provided, the application will create the directory if it doesn't exist and manage its state within it.

@@ -18,7 +18,6 @@ import (
 
 	"bot-detector/internal/cluster"
 	"bot-detector/internal/logging"
-	"bot-detector/internal/persistence"
 	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
 
@@ -1235,15 +1234,9 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		return nil, err
 	}
 
-	var persistenceConfig persistence.PersistenceConfig
-	if config.Application.Persistence.Enabled {
-		persistenceConfig = persistence.PersistenceConfig{
-			Enabled:            true,
-			CompactionInterval: config.Application.Persistence.CompactionInterval,
-		}
-		if persistenceConfig.CompactionInterval == 0 {
-			persistenceConfig.CompactionInterval = time.Hour
-		}
+	persistenceConfig := config.Application.Persistence
+	if persistenceConfig.CompactionInterval == 0 {
+		persistenceConfig.CompactionInterval = time.Hour
 	}
 
 	var maxTimeSinceLastHit time.Duration
