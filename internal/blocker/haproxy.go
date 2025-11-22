@@ -63,19 +63,42 @@ type HAProxyProvider interface {
 // CommandExecutor defines the function signature for executing a single backend command.
 type CommandExecutor func(addr, ip, command string) error
 
+// BackendHealth tracks the health state of a single HAProxy backend instance.
+type BackendHealth struct {
+	LastUptime int64
+	Healthy    bool
+	LastCheck  time.Time
+	mu         sync.RWMutex
+}
+
 // HAProxyBlocker is a concrete implementation of the Blocker interface that interacts with HAProxy.
 type HAProxyBlocker struct {
 	P                         HAProxyProvider
 	Executor                  CommandExecutor
 	IsDryRun                  bool
 	ExecuteHAProxyCommandFunc func(addr, command string) (string, error)
+	backendHealth             map[string]*BackendHealth
+	healthMu                  sync.RWMutex
 }
 
 // NewHAProxyBlocker creates a new HAProxyBlocker.
 func NewHAProxyBlocker(p HAProxyProvider, dryRun bool) *HAProxyBlocker {
-	b := &HAProxyBlocker{P: p, IsDryRun: dryRun}
+	b := &HAProxyBlocker{
+		P:             p,
+		IsDryRun:      dryRun,
+		backendHealth: make(map[string]*BackendHealth),
+	}
 	b.Executor = b.executeCommandImpl
 	b.ExecuteHAProxyCommandFunc = b.executeHAProxyCommand // Initialize the function field
+
+	// Initialize health state for all backends
+	for _, addr := range p.GetBlockerAddresses() {
+		b.backendHealth[addr] = &BackendHealth{
+			Healthy:   true,
+			LastCheck: time.Now(),
+		}
+	}
+
 	return b
 }
 
@@ -836,6 +859,39 @@ func (b *HAProxyBlocker) Shutdown() {
 
 	// Nothing to do here.
 
+}
+
+// GetBackendHealth returns the health state for a backend address.
+func (b *HAProxyBlocker) GetBackendHealth(addr string) (healthy bool, lastUptime int64, lastCheck time.Time) {
+	b.healthMu.RLock()
+	defer b.healthMu.RUnlock()
+
+	if health, ok := b.backendHealth[addr]; ok {
+		health.mu.RLock()
+		defer health.mu.RUnlock()
+		return health.Healthy, health.LastUptime, health.LastCheck
+	}
+	return true, 0, time.Time{}
+}
+
+// SetBackendHealth updates the health state for a backend address.
+func (b *HAProxyBlocker) SetBackendHealth(addr string, healthy bool, uptime int64) {
+	b.healthMu.RLock()
+	health, ok := b.backendHealth[addr]
+	b.healthMu.RUnlock()
+
+	if !ok {
+		b.healthMu.Lock()
+		health = &BackendHealth{}
+		b.backendHealth[addr] = health
+		b.healthMu.Unlock()
+	}
+
+	health.mu.Lock()
+	defer health.mu.Unlock()
+	health.Healthy = healthy
+	health.LastUptime = uptime
+	health.LastCheck = time.Now()
 }
 
 // GetHAProxyUptime queries "show info" and returns the Uptime_sec value.
