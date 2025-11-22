@@ -22,6 +22,10 @@ COPY --chown=appuser:appgroup . .
 # Switch to non-root user for the build
 USER appuser
 
+# Clean git working directory to avoid false "dirty" flag
+# Docker COPY changes file timestamps/permissions
+RUN git reset --hard HEAD
+
 # Build the Go application for a static binary
 # Go 1.18+ automatically embeds VCS info when .git directory is present
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
