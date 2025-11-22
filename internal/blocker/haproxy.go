@@ -110,6 +110,23 @@ func NewHAProxyBlocker(p HAProxyProvider, dryRun bool) *HAProxyBlocker {
 	return b
 }
 
+// getTableNameWithSuffix returns the table name with appropriate IP version suffix.
+func getTableNameWithSuffix(baseTableName string, ipVersion utils.IPVersion) string {
+	// Avoid double-suffixing if the user-provided table name already has one
+	if strings.HasSuffix(baseTableName, "_ipv4") || strings.HasSuffix(baseTableName, "_ipv6") {
+		return baseTableName
+	}
+
+	switch ipVersion {
+	case 4:
+		return baseTableName + "_ipv4"
+	case 6:
+		return baseTableName + "_ipv6"
+	default:
+		return baseTableName
+	}
+}
+
 // Block adds an IP to the appropriate HAProxy stick table.
 func (b *HAProxyBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
 	if b.IsDryRun {
@@ -127,18 +144,10 @@ func (b *HAProxyBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reas
 		return nil
 	}
 
-	tableName := baseTableName
-	// Avoid double-suffixing if the user-provided table name already has one.
-	if !strings.HasSuffix(baseTableName, "_ipv4") && !strings.HasSuffix(baseTableName, "_ipv6") {
-		switch ipInfo.Version {
-		case 4:
-			tableName += "_ipv4"
-		case 6:
-			tableName += "_ipv6"
-		default:
-			b.P.Log(logging.LevelError, "SKIP_BLOCK", "cannot block IP %s: invalid IP version", ipInfo.Address)
-			return nil
-		}
+	tableName := getTableNameWithSuffix(baseTableName, ipInfo.Version)
+	if tableName == baseTableName && ipInfo.Version != 4 && ipInfo.Version != 6 {
+		b.P.Log(logging.LevelError, "SKIP_BLOCK", "cannot block IP %s: invalid IP version", ipInfo.Address)
+		return nil
 	}
 
 	command := fmt.Sprintf("set table %s key %s data.gpc0 1\n", tableName, ipInfo.Address)
@@ -158,13 +167,7 @@ func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 		return nil
 	}
 
-	var ipSuffix string
-	switch ipInfo.Version {
-	case 4:
-		ipSuffix = "_ipv4"
-	case 6:
-		ipSuffix = "_ipv6"
-	default:
+	if ipInfo.Version != 4 && ipInfo.Version != 6 {
 		b.P.Log(logging.LevelError, "SKIP_UNBLOCK", "Cannot unblock IP %s: unrecognized IP version", ipInfo.Address)
 		return nil
 	}
@@ -179,10 +182,7 @@ func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 
 	targets := make(map[string]map[string]string)
 	for baseName := range baseTables {
-		tableName := baseName
-		if !strings.HasSuffix(baseName, "_ipv4") && !strings.HasSuffix(baseName, "_ipv6") {
-			tableName += ipSuffix
-		}
+		tableName := getTableNameWithSuffix(baseName, ipInfo.Version)
 		targets[tableName] = make(map[string]string)
 		command := fmt.Sprintf("set table %s key %s data.gpc0 0\n", tableName, ipInfo.Address)
 		for _, addr := range b.P.GetBlockerAddresses() {
@@ -992,17 +992,10 @@ func (b *HAProxyBlocker) ResyncBackend(addr string, blockedIPs map[string]BlockI
 			continue
 		}
 
-		tableName := baseTableName
-		if !strings.HasSuffix(baseTableName, "_ipv4") && !strings.HasSuffix(baseTableName, "_ipv6") {
-			switch ipInfo.Version {
-			case 4:
-				tableName += "_ipv4"
-			case 6:
-				tableName += "_ipv6"
-			default:
-				errorCount++
-				continue
-			}
+		tableName := getTableNameWithSuffix(baseTableName, ipInfo.Version)
+		if tableName == baseTableName && ipInfo.Version != 4 && ipInfo.Version != 6 {
+			errorCount++
+			continue
 		}
 
 		command := fmt.Sprintf("set table %s key %s data.gpc0 1\n", tableName, ipInfo.Address)
@@ -1060,23 +1053,14 @@ func (b *HAProxyBlocker) ResyncUnblockedIPs(addr string, unblockedIPs map[string
 			continue
 		}
 
-		var ipSuffix string
-		switch ipInfo.Version {
-		case 4:
-			ipSuffix = "_ipv4"
-		case 6:
-			ipSuffix = "_ipv6"
-		default:
+		if ipInfo.Version != 4 && ipInfo.Version != 6 {
 			errorCount++
 			continue
 		}
 
 		// Unblock in all tables
 		for baseName := range baseTables {
-			tableName := baseName
-			if !strings.HasSuffix(baseName, "_ipv4") && !strings.HasSuffix(baseName, "_ipv6") {
-				tableName += ipSuffix
-			}
+			tableName := getTableNameWithSuffix(baseName, ipInfo.Version)
 
 			command := fmt.Sprintf("set table %s key %s data.gpc0 0\n", tableName, ipInfo.Address)
 
