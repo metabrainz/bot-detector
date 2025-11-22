@@ -15,7 +15,7 @@ type Provider interface {
 	GetLogRegex() *regexp.Regexp
 }
 
-var defaultLogRegex = regexp.MustCompile(
+var defaultLogFormatRegex = regexp.MustCompile(
 	`^(?P<VHost>\S+) (?P<IP>\S+) (?P<Identity>\S+) (?P<User>\S+) \[(?P<Timestamp>[^\]]+)\] (?:\"(?P<Method>\S+)\s+(?P<Path>.+?)(?:\s+(?P<Protocol>\S+))?\"|\"-\"|-) (?P<StatusCode>\d{1,3}) (?P<Size>\S+) \"(?P<Referrer>[^\"]*)\" \"(?P<UserAgent>[^\"]*)\"$`,
 )
 
@@ -36,7 +36,7 @@ func ParseLogLine(p Provider, line string) (*types.LogEntry, error) {
 
 	regexToUse := p.GetLogRegex()
 	if regexToUse == nil {
-		regexToUse = defaultLogRegex
+		regexToUse = defaultLogFormatRegex
 	}
 
 	matches := regexToUse.FindStringSubmatch(line)
