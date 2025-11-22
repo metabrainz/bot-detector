@@ -710,19 +710,21 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 
 			// Check if the cooldown has passed or if it has never been unblocked.
 			if activity.LastUnblockTime.IsZero() || time.Since(activity.LastUnblockTime) > unblockCooldown {
-				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s. Issuing unblock command.", entry.IPInfo.Address)
+				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s (rule: %s). Issuing unblock command.", entry.IPInfo.Address, goodActorRuleName)
+
+				// Create detailed unblock reason with good actor name
+				unblockReason := p.InternReason("good-actor:" + goodActorRuleName)
 
 				if p.PersistenceEnabled {
 					func() {
 						p.PersistenceMutex.Lock()
 						defer p.PersistenceMutex.Unlock()
 
-						reason := p.InternReason("good-actor-match")
 						event := &persistence.AuditEvent{
 							Timestamp: p.NowFunc(),
 							Event:     persistence.EventTypeUnblock,
 							IP:        entry.IPInfo.Address,
-							Reason:    reason,
+							Reason:    unblockReason,
 						}
 						if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
 							p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write unblock event to journal for %s: %v", entry.IPInfo.Address, err)
@@ -731,7 +733,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 						// Update in-memory state
 						p.IPStates[entry.IPInfo.Address] = persistence.IPState{
 							State:  persistence.BlockStateUnblocked,
-							Reason: reason,
+							Reason: unblockReason,
 						}
 					}()
 				}
@@ -742,10 +744,11 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 					Version: entry.IPInfo.Version,
 				}
 				// The blocker's Unblock method is non-blocking and rate-limited.
-				if err := p.Blocker.Unblock(blockerIPInfo, "good-actor-match"); err != nil {
+				if err := p.Blocker.Unblock(blockerIPInfo, unblockReason); err != nil {
 					p.LogFunc(logging.LevelError, "UNBLOCK_FAIL", "Failed to queue unblock command for %s: %v", entry.IPInfo.Address, err)
 				}
 				activity.LastUnblockTime = time.Now()
+				activity.LastUnblockReason = unblockReason
 			}
 		}
 	}
