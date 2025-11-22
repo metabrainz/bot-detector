@@ -586,25 +586,42 @@ func execute(params *commandline.AppParameters) error {
 
 	// Set up resync callback to handle backend restarts/recoveries
 	haproxyBlocker.ResyncCallback = func(addr string) {
-		// Collect currently blocked and unblocked IPs from activity store
 		blockedIPs := make(map[string]blocker.BlockInfo)
 		unblockedIPs := make(map[string]string)
 
-		p.ActivityMutex.RLock()
-		for actor, activity := range p.ActivityStore {
-			if activity.IsBlocked && time.Now().Before(activity.BlockedUntil) {
-				// Blocked IP - calculate remaining duration
-				remaining := time.Until(activity.BlockedUntil)
-				blockedIPs[actor.IPInfo.Address] = blocker.BlockInfo{
-					Duration: remaining,
-					Reason:   "resync",
+		// Use persistence state if available, otherwise use activity store
+		if p.PersistenceEnabled && len(p.IPStates) > 0 {
+			// Resync from persistence state (more reliable)
+			for ip, state := range p.IPStates {
+				switch state.State {
+				case persistence.BlockStateBlocked:
+					remaining := time.Until(state.ExpireTime)
+					if remaining > 0 {
+						blockedIPs[ip] = blocker.BlockInfo{
+							Duration: remaining,
+							Reason:   state.Reason,
+						}
+					}
+				case persistence.BlockStateUnblocked:
+					unblockedIPs[ip] = state.Reason
 				}
-			} else if activity.LastUnblockTime.After(time.Time{}) {
-				// Explicitly unblocked IP (good actor) - needs gpc0=0 to skip chain processing
-				unblockedIPs[actor.IPInfo.Address] = activity.LastUnblockReason
 			}
+		} else {
+			// Resync from activity store (in-memory only)
+			p.ActivityMutex.RLock()
+			for actor, activity := range p.ActivityStore {
+				if activity.IsBlocked && time.Now().Before(activity.BlockedUntil) {
+					remaining := time.Until(activity.BlockedUntil)
+					blockedIPs[actor.IPInfo.Address] = blocker.BlockInfo{
+						Duration: remaining,
+						Reason:   "resync",
+					}
+				} else if activity.LastUnblockTime.After(time.Time{}) {
+					unblockedIPs[actor.IPInfo.Address] = activity.LastUnblockReason
+				}
+			}
+			p.ActivityMutex.RUnlock()
 		}
-		p.ActivityMutex.RUnlock()
 
 		// Trigger resync for blocked IPs
 		if err := haproxyBlocker.ResyncBackend(addr, blockedIPs); err != nil {
