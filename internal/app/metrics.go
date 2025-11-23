@@ -259,7 +259,7 @@ func logActorStats(logFunc func(logging.LogLevel, string, string, ...interface{}
 		}
 	}
 	if len(goodActorHitsMetrics) > 0 {
-		logFunc(logging.LevelInfo, logTag, "--- Good Actor Hits ---")
+		logFunc(logging.LevelInfo, logTag, "--- Good Actor Matches ---")
 		for _, metric := range goodActorHitsMetrics {
 			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Key, metric.Count)
 		}
