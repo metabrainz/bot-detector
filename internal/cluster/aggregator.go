@@ -67,7 +67,7 @@ func sumInt64Maps(dst, src map[string]int64) {
 // sumProcessingStats adds processing stats from src into dst.
 func sumProcessingStats(dst, src *server.ProcessingStats) {
 	dst.LinesProcessed += src.LinesProcessed
-	dst.ValidHits += src.ValidHits
+	dst.EntriesChecked += src.EntriesChecked
 	dst.ParseErrors += src.ParseErrors
 	dst.ReorderedLines += src.ReorderedLines
 	dst.TimeElapsed += src.TimeElapsed

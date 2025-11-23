@@ -1261,7 +1261,7 @@ func TestLogMetricsSummary(t *testing.T) {
 
 	// 2. Manually set metric values.
 	p.Metrics.LinesProcessed.Store(1000)
-	p.Metrics.ValidHits.Store(500)
+	p.Metrics.EntriesChecked.Store(500)
 	p.Metrics.ParseErrors.Store(10) // 1% of total
 
 	p.Metrics.ReorderedEntries.Store(5)
@@ -1326,7 +1326,7 @@ func TestLogMetricsSummary(t *testing.T) {
 
 	// Check general metrics with percentages
 	assertContains(t, output, "Lines Processed: 1000")
-	assertContains(t, output, "Valid Hits: 500 (50.00%)")
+	assertContains(t, output, "Entries Checked: 500 (50.00%)")
 	assertContains(t, output, "Parse Errors: 10 (1.00%)")
 
 	assertContains(t, output, "Reordered Entries: 5")
@@ -1344,12 +1344,12 @@ func TestLogMetricsSummary(t *testing.T) {
 	assertContains(t, output, "Chains Reset: 10")
 
 	// Check MatchKey hits with percentages
-	assertContains(t, output, "--- Match Key Hits (Total: 400) ---")
+	assertContains(t, output, "--- Match Key Distribution (Total: 400) ---")
 	assertContains(t, output, "- ip: 300 (75.00%)")
 	assertContains(t, output, "- ip_ua: 100 (25.00%)")
 
 	// Check Block Durations
-	assertContains(t, output, "--- Block Durations Triggered ---")
+	assertContains(t, output, "--- Blocks by Duration ---")
 	assertContains(t, output, "- 5m: 5")
 
 	// Check Per-Blocker Commands
@@ -1358,10 +1358,10 @@ func TestLogMetricsSummary(t *testing.T) {
 
 	// Check Per-Chain metrics (sorted by name)
 	assertContains(t, output, "--- Per-Chain Metrics ---")
-	// ChainA: Hits: 50 (10%), Completed: 5 (50%), Resets: 10 (100%)
-	assertContains(t, output, "- ChainA: Hits: 50 (10.00%), Completed: 5 (50.00%), Resets: 10 (20.00%)")
-	// ChainB: Hits: 100 (20%), Completed: 5 (50%), Resets: 0 (0%)
-	assertContains(t, output, "- ChainB: Hits: 100 (20.00%), Completed: 5 (50.00%), Resets: 0 (0.00%)")
+	// ChainA: Matches: 50 (10%), Completed: 5 (50%), Resets: 10 (100%)
+	assertContains(t, output, "- ChainA: Matches: 50 (10.00%), Completed: 5 (50.00%), Resets: 10 (20.00%)")
+	// ChainB: Matches: 100 (20%), Completed: 5 (50%), Resets: 0 (0%)
+	assertContains(t, output, "- ChainB: Matches: 100 (20.00%), Completed: 5 (50.00%), Resets: 0 (0.00%)")
 }
 
 func TestLogMetricsSummary_Filter(t *testing.T) {

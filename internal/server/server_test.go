@@ -107,7 +107,7 @@ func (m *mockProvider) GetMetricsSnapshot() MetricsSnapshot {
 		Timestamp: time.Now(),
 		ProcessingStats: ProcessingStats{
 			LinesProcessed: 100,
-			ValidHits:      10,
+			EntriesChecked: 10,
 		},
 		ActorStats: ActorStats{},
 		ChainStats: ChainStats{},

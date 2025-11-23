@@ -205,7 +205,7 @@ func collectMetricsSummaryData(p *Processor, elapsedTime time.Duration, filterTa
 		Counter *atomic.Int64
 		Show    bool
 	}{
-		{"Valid Hits", &p.Metrics.ValidHits, true},
+		{"Entries Checked", &p.Metrics.EntriesChecked, true},
 		{"Parse Errors", &p.Metrics.ParseErrors, true},
 		{"Good Actors Skipped", &p.Metrics.GoodActorsSkipped, true},
 		{"Reordered Entries", &p.Metrics.ReorderedEntries, true},
@@ -232,7 +232,7 @@ func logGeneralStats(logFunc func(logging.LogLevel, string, string, ...interface
 	logFunc(logging.LevelInfo, logTag, "Log Source: %s", data.LogSource)
 	logFunc(logging.LevelInfo, logTag, "Lines Processed: %d", data.LinesProcessed)
 	for _, metric := range data.GeneralMetrics {
-		if metric.Name == "Valid Hits" || metric.Name == "Parse Errors" || metric.Name == "Reordered Entries" {
+		if metric.Name == "Entries Checked" || metric.Name == "Parse Errors" || metric.Name == "Reordered Entries" {
 			logFunc(logging.LevelInfo, logTag, "%s: %d (%s)", metric.Name, metric.Value, formatPercentage(metric.Value, data.LinesProcessed))
 		}
 	}
@@ -259,7 +259,7 @@ func logActorStats(logFunc func(logging.LogLevel, string, string, ...interface{}
 		}
 	}
 	if len(goodActorHitsMetrics) > 0 {
-		logFunc(logging.LevelInfo, logTag, "--- Good Actor Hits ---")
+		logFunc(logging.LevelInfo, logTag, "--- Good Actor Matches ---")
 		for _, metric := range goodActorHitsMetrics {
 			logFunc(logging.LevelInfo, logTag, "  - %s: %d", metric.Key, metric.Count)
 		}
@@ -279,12 +279,12 @@ func logChainAndActionStats(logFunc func(logging.LogLevel, string, string, ...in
 			logFunc(logging.LevelInfo, logTag, "%s: %d", metric.Name, metric.Value)
 		}
 	}
-	logFunc(logging.LevelInfo, logTag, "--- Match Key Hits (Total: %d) ---", totalMatchKeyHits)
+	logFunc(logging.LevelInfo, logTag, "--- Match Key Distribution (Total: %d) ---", totalMatchKeyHits)
 	for _, metric := range matchKeyHitsMetrics {
 		logFunc(logging.LevelInfo, logTag, "  - %s: %d (%s)", metric.Key, metric.Count, formatPercentage(metric.Count, totalMatchKeyHits))
 	}
 	if len(blockDurationMetrics) > 0 {
-		logFunc(logging.LevelInfo, logTag, "--- Block Durations Triggered ---")
+		logFunc(logging.LevelInfo, logTag, "--- Blocks by Duration ---")
 		sort.Slice(blockDurationMetrics, func(i, j int) bool { return blockDurationMetrics[i].Duration < blockDurationMetrics[j].Duration })
 		for _, metric := range blockDurationMetrics {
 			logFunc(logging.LevelInfo, logTag, "  - %s: %d", utils.FormatDuration(metric.Duration), metric.Count)
@@ -299,7 +299,7 @@ func logChainAndActionStats(logFunc func(logging.LogLevel, string, string, ...in
 }
 
 func logPerChainMetrics(p *Processor, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag string, data *MetricsSummaryData) {
-	validHits := p.Metrics.ValidHits.Load()
+	validHits := p.Metrics.EntriesChecked.Load()
 
 	if len(data.ChainMetrics) > 0 {
 		logFunc(logging.LevelInfo, logTag, "--- Per-Chain Metrics ---")
@@ -308,10 +308,10 @@ func logPerChainMetrics(p *Processor, logFunc func(logging.LogLevel, string, str
 				hitsPctStr := formatPercentage(metric.Hits, validHits)
 				completionsPctStr := formatPercentage(metric.Completions, data.TotalChainsCompleted)
 				resetsPctStr := formatPercentage(metric.Resets, metric.Hits)
-				logFunc(logging.LevelInfo, logTag, "  - %s: Hits: %d (%s), Completed: %d (%s), Resets: %d (%s)",
+				logFunc(logging.LevelInfo, logTag, "  - %s: Matches: %d (%s), Completed: %d (%s), Resets: %d (%s)",
 					metric.Name, metric.Hits, hitsPctStr, metric.Completions, completionsPctStr, metric.Resets, resetsPctStr)
 			} else {
-				logFunc(logging.LevelInfo, logTag, "  - %s: Hits: %d, Completed: %d, Resets: %d",
+				logFunc(logging.LevelInfo, logTag, "  - %s: Matches: %d, Completed: %d, Resets: %d",
 					metric.Name, metric.Hits, metric.Completions, metric.Resets)
 			}
 		}

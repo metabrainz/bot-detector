@@ -96,7 +96,7 @@ These endpoints are available when cluster mode is enabled. They provide cluster
       "timestamp": "2025-11-18T20:30:00Z",
       "processing_stats": {
         "lines_processed": 1000,
-        "valid_hits": 42,
+        "entries_checked": 42,
         "parse_errors": 1,
         "reordered_lines": 2,
         "time_elapsed_seconds": 10.5,
@@ -166,7 +166,7 @@ These endpoints are available when cluster mode is enabled. They provide cluster
         "timestamp": "2025-11-18T20:30:00Z",
         "processing_stats": {
           "lines_processed": 3000,
-          "valid_hits": 126,
+          "entries_checked": 126,
           "parse_errors": 3,
           "reordered_lines": 6,
           "time_elapsed_seconds": 31.5,
@@ -207,7 +207,7 @@ These endpoints are available when cluster mode is enabled. They provide cluster
             "timestamp": "2025-11-18T20:29:55Z",
             "processing_stats": {
               "lines_processed": 1000,
-              "valid_hits": 42
+              "entries_checked": 42
             }
           }
         },
@@ -221,7 +221,7 @@ These endpoints are available when cluster mode is enabled. They provide cluster
             "timestamp": "2025-11-18T20:29:54Z",
             "processing_stats": {
               "lines_processed": 1000,
-              "valid_hits": 42
+              "entries_checked": 42
             }
           }
         },
