@@ -1349,7 +1349,7 @@ func TestLogMetricsSummary(t *testing.T) {
 	assertContains(t, output, "- ip_ua: 100 (25.00%)")
 
 	// Check Block Durations
-	assertContains(t, output, "--- Block Durations Triggered ---")
+	assertContains(t, output, "--- Blocks by Duration ---")
 	assertContains(t, output, "- 5m: 5")
 
 	// Check Per-Blocker Commands

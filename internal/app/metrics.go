@@ -284,7 +284,7 @@ func logChainAndActionStats(logFunc func(logging.LogLevel, string, string, ...in
 		logFunc(logging.LevelInfo, logTag, "  - %s: %d (%s)", metric.Key, metric.Count, formatPercentage(metric.Count, totalMatchKeyHits))
 	}
 	if len(blockDurationMetrics) > 0 {
-		logFunc(logging.LevelInfo, logTag, "--- Block Durations Triggered ---")
+		logFunc(logging.LevelInfo, logTag, "--- Blocks by Duration ---")
 		sort.Slice(blockDurationMetrics, func(i, j int) bool { return blockDurationMetrics[i].Duration < blockDurationMetrics[j].Duration })
 		for _, metric := range blockDurationMetrics {
 			logFunc(logging.LevelInfo, logTag, "  - %s: %d", utils.FormatDuration(metric.Duration), metric.Count)
