@@ -1344,7 +1344,7 @@ func TestLogMetricsSummary(t *testing.T) {
 	assertContains(t, output, "Chains Reset: 10")
 
 	// Check MatchKey hits with percentages
-	assertContains(t, output, "--- Match Key Hits (Total: 400) ---")
+	assertContains(t, output, "--- Match Key Distribution (Total: 400) ---")
 	assertContains(t, output, "- ip: 300 (75.00%)")
 	assertContains(t, output, "- ip_ua: 100 (25.00%)")
 

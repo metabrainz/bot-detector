@@ -279,7 +279,7 @@ func logChainAndActionStats(logFunc func(logging.LogLevel, string, string, ...in
 			logFunc(logging.LevelInfo, logTag, "%s: %d", metric.Name, metric.Value)
 		}
 	}
-	logFunc(logging.LevelInfo, logTag, "--- Match Key Hits (Total: %d) ---", totalMatchKeyHits)
+	logFunc(logging.LevelInfo, logTag, "--- Match Key Distribution (Total: %d) ---", totalMatchKeyHits)
 	for _, metric := range matchKeyHitsMetrics {
 		logFunc(logging.LevelInfo, logTag, "  - %s: %d (%s)", metric.Key, metric.Count, formatPercentage(metric.Count, totalMatchKeyHits))
 	}
