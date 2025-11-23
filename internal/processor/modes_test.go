@@ -1358,10 +1358,10 @@ func TestLogMetricsSummary(t *testing.T) {
 
 	// Check Per-Chain metrics (sorted by name)
 	assertContains(t, output, "--- Per-Chain Metrics ---")
-	// ChainA: Hits: 50 (10%), Completed: 5 (50%), Resets: 10 (100%)
-	assertContains(t, output, "- ChainA: Hits: 50 (10.00%), Completed: 5 (50.00%), Resets: 10 (20.00%)")
-	// ChainB: Hits: 100 (20%), Completed: 5 (50%), Resets: 0 (0%)
-	assertContains(t, output, "- ChainB: Hits: 100 (20.00%), Completed: 5 (50.00%), Resets: 0 (0.00%)")
+	// ChainA: Matches: 50 (10%), Completed: 5 (50%), Resets: 10 (100%)
+	assertContains(t, output, "- ChainA: Matches: 50 (10.00%), Completed: 5 (50.00%), Resets: 10 (20.00%)")
+	// ChainB: Matches: 100 (20%), Completed: 5 (50%), Resets: 0 (0%)
+	assertContains(t, output, "- ChainB: Matches: 100 (20.00%), Completed: 5 (50.00%), Resets: 0 (0.00%)")
 }
 
 func TestLogMetricsSummary_Filter(t *testing.T) {

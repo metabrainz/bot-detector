@@ -308,10 +308,10 @@ func logPerChainMetrics(p *Processor, logFunc func(logging.LogLevel, string, str
 				hitsPctStr := formatPercentage(metric.Hits, validHits)
 				completionsPctStr := formatPercentage(metric.Completions, data.TotalChainsCompleted)
 				resetsPctStr := formatPercentage(metric.Resets, metric.Hits)
-				logFunc(logging.LevelInfo, logTag, "  - %s: Hits: %d (%s), Completed: %d (%s), Resets: %d (%s)",
+				logFunc(logging.LevelInfo, logTag, "  - %s: Matches: %d (%s), Completed: %d (%s), Resets: %d (%s)",
 					metric.Name, metric.Hits, hitsPctStr, metric.Completions, completionsPctStr, metric.Resets, resetsPctStr)
 			} else {
-				logFunc(logging.LevelInfo, logTag, "  - %s: Hits: %d, Completed: %d, Resets: %d",
+				logFunc(logging.LevelInfo, logTag, "  - %s: Matches: %d, Completed: %d, Resets: %d",
 					metric.Name, metric.Hits, metric.Completions, metric.Resets)
 			}
 		}
