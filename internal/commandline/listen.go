@@ -3,6 +3,7 @@ package commandline
 import (
 	"fmt"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -95,6 +96,7 @@ func ParseListenFlag(flag string) (*ListenConfig, error) {
 	for role := range roleMap {
 		config.Roles = append(config.Roles, role)
 	}
+	sort.Strings(config.Roles)
 
 	return config, nil
 }
