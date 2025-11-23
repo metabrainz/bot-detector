@@ -1261,7 +1261,7 @@ func TestLogMetricsSummary(t *testing.T) {
 
 	// 2. Manually set metric values.
 	p.Metrics.LinesProcessed.Store(1000)
-	p.Metrics.ValidHits.Store(500)
+	p.Metrics.EntriesChecked.Store(500)
 	p.Metrics.ParseErrors.Store(10) // 1% of total
 
 	p.Metrics.ReorderedEntries.Store(5)
@@ -1326,7 +1326,7 @@ func TestLogMetricsSummary(t *testing.T) {
 
 	// Check general metrics with percentages
 	assertContains(t, output, "Lines Processed: 1000")
-	assertContains(t, output, "Valid Hits: 500 (50.00%)")
+	assertContains(t, output, "Entries Checked: 500 (50.00%)")
 	assertContains(t, output, "Parse Errors: 10 (1.00%)")
 
 	assertContains(t, output, "Reordered Entries: 5")

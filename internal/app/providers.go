@@ -90,7 +90,7 @@ func (p *Processor) GetMetricsSnapshot() server.MetricsSnapshot {
 		Timestamp: time.Now(),
 		ProcessingStats: server.ProcessingStats{
 			LinesProcessed: linesProcessed,
-			ValidHits:      p.Metrics.ValidHits.Load(),
+			EntriesChecked: p.Metrics.EntriesChecked.Load(),
 			ParseErrors:    p.Metrics.ParseErrors.Load(),
 			ReorderedLines: p.Metrics.ReorderedEntries.Load(),
 			TimeElapsed:    elapsed,

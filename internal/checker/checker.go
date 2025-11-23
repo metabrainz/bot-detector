@@ -616,9 +616,9 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 	// --- The original logic of the function remains, but without the lock/defer unlock ---
 
 	// If we've reached this point, the line was successfully parsed.
-	// This is a "valid hit" that will be processed against the chains.
+	// This is an entry that will be checked against the chains.
 	if p.EnableMetrics {
-		p.Metrics.ValidHits.Add(1)
+		p.Metrics.EntriesChecked.Add(1)
 	}
 
 	// A set to keep track of activities that have been processed for this entry.

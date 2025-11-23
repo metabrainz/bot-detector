@@ -101,14 +101,14 @@ func TestSumInt64Maps(t *testing.T) {
 func TestSumProcessingStats(t *testing.T) {
 	dst := &server.ProcessingStats{
 		LinesProcessed: 100,
-		ValidHits:      50,
+		EntriesChecked: 50,
 		ParseErrors:    5,
 		ReorderedLines: 10,
 		TimeElapsed:    10.0,
 	}
 	src := &server.ProcessingStats{
 		LinesProcessed: 200,
-		ValidHits:      75,
+		EntriesChecked: 75,
 		ParseErrors:    3,
 		ReorderedLines: 15,
 		TimeElapsed:    20.0,
@@ -119,8 +119,8 @@ func TestSumProcessingStats(t *testing.T) {
 	if dst.LinesProcessed != 300 {
 		t.Errorf("Expected LinesProcessed=300, got %d", dst.LinesProcessed)
 	}
-	if dst.ValidHits != 125 {
-		t.Errorf("Expected ValidHits=125, got %d", dst.ValidHits)
+	if dst.EntriesChecked != 125 {
+		t.Errorf("Expected EntriesChecked=125, got %d", dst.EntriesChecked)
 	}
 	if dst.ParseErrors != 8 {
 		t.Errorf("Expected ParseErrors=8, got %d", dst.ParseErrors)
@@ -232,7 +232,7 @@ func TestAggregateMetrics_AllHealthy(t *testing.T) {
 				Timestamp: now,
 				ProcessingStats: server.ProcessingStats{
 					LinesProcessed: 100,
-					ValidHits:      50,
+					EntriesChecked: 50,
 					TimeElapsed:    10.0,
 				},
 				ActorStats: server.ActorStats{
@@ -255,7 +255,7 @@ func TestAggregateMetrics_AllHealthy(t *testing.T) {
 				Timestamp: now,
 				ProcessingStats: server.ProcessingStats{
 					LinesProcessed: 200,
-					ValidHits:      75,
+					EntriesChecked: 75,
 					TimeElapsed:    20.0,
 				},
 				ActorStats: server.ActorStats{
@@ -292,8 +292,8 @@ func TestAggregateMetrics_AllHealthy(t *testing.T) {
 	if result.Aggregated.ProcessingStats.LinesProcessed != 300 {
 		t.Errorf("Expected aggregated LinesProcessed=300, got %d", result.Aggregated.ProcessingStats.LinesProcessed)
 	}
-	if result.Aggregated.ProcessingStats.ValidHits != 125 {
-		t.Errorf("Expected aggregated ValidHits=125, got %d", result.Aggregated.ProcessingStats.ValidHits)
+	if result.Aggregated.ProcessingStats.EntriesChecked != 125 {
+		t.Errorf("Expected aggregated EntriesChecked=125, got %d", result.Aggregated.ProcessingStats.EntriesChecked)
 	}
 	if result.Aggregated.ActorStats.GoodActorsSkipped != 25 {
 		t.Errorf("Expected aggregated GoodActorsSkipped=25, got %d", result.Aggregated.ActorStats.GoodActorsSkipped)

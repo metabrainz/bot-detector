@@ -70,7 +70,7 @@ type MetricsSnapshot struct {
 // ProcessingStats contains general log processing statistics.
 type ProcessingStats struct {
 	LinesProcessed int64   `json:"lines_processed"`
-	ValidHits      int64   `json:"valid_hits"`
+	EntriesChecked int64   `json:"entries_checked"`
 	ParseErrors    int64   `json:"parse_errors"`
 	ReorderedLines int64   `json:"reordered_lines"`
 	TimeElapsed    float64 `json:"time_elapsed_seconds"`
@@ -108,7 +108,7 @@ type ChainMetric struct {
 //	  "timestamp": "2025-01-15T10:30:00Z",
 //	  "processing_stats": {
 //	    "lines_processed": 1000,
-//	    "valid_hits": 42,
+//	    "entries_checked": 42,
 //	    ...
 //	  },
 //	  ...

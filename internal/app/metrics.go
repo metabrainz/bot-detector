@@ -205,7 +205,7 @@ func collectMetricsSummaryData(p *Processor, elapsedTime time.Duration, filterTa
 		Counter *atomic.Int64
 		Show    bool
 	}{
-		{"Valid Hits", &p.Metrics.ValidHits, true},
+		{"Entries Checked", &p.Metrics.EntriesChecked, true},
 		{"Parse Errors", &p.Metrics.ParseErrors, true},
 		{"Good Actors Skipped", &p.Metrics.GoodActorsSkipped, true},
 		{"Reordered Entries", &p.Metrics.ReorderedEntries, true},
@@ -232,7 +232,7 @@ func logGeneralStats(logFunc func(logging.LogLevel, string, string, ...interface
 	logFunc(logging.LevelInfo, logTag, "Log Source: %s", data.LogSource)
 	logFunc(logging.LevelInfo, logTag, "Lines Processed: %d", data.LinesProcessed)
 	for _, metric := range data.GeneralMetrics {
-		if metric.Name == "Valid Hits" || metric.Name == "Parse Errors" || metric.Name == "Reordered Entries" {
+		if metric.Name == "Entries Checked" || metric.Name == "Parse Errors" || metric.Name == "Reordered Entries" {
 			logFunc(logging.LevelInfo, logTag, "%s: %d (%s)", metric.Name, metric.Value, formatPercentage(metric.Value, data.LinesProcessed))
 		}
 	}
@@ -299,7 +299,7 @@ func logChainAndActionStats(logFunc func(logging.LogLevel, string, string, ...in
 }
 
 func logPerChainMetrics(p *Processor, logFunc func(logging.LogLevel, string, string, ...interface{}), logTag string, data *MetricsSummaryData) {
-	validHits := p.Metrics.ValidHits.Load()
+	validHits := p.Metrics.EntriesChecked.Load()
 
 	if len(data.ChainMetrics) > 0 {
 		logFunc(logging.LevelInfo, logTag, "--- Per-Chain Metrics ---")

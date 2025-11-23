@@ -55,7 +55,7 @@ func TestMetricsCollector_SuccessfulCollection(t *testing.T) {
 		Timestamp: time.Now(),
 		ProcessingStats: server.ProcessingStats{
 			LinesProcessed: 100,
-			ValidHits:      50,
+			EntriesChecked: 50,
 		},
 		ActorStats: server.ActorStats{
 			GoodActorsSkipped: 5,
