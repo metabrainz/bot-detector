@@ -137,6 +137,7 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("/cluster/metrics", clusterMetricsHandler(p))
 		mux.HandleFunc("/cluster/metrics/aggregate", clusterMetricsAggregateHandler(p))
 		mux.HandleFunc("GET /cluster/ip/{ip}", clusterIPAggregateHandler(p))
+		mux.HandleFunc("DELETE /cluster/ip/{ip}", clusterRemoveIPHandler(p))
 		mux.HandleFunc("GET /api/v1/cluster/ip/{ip}", apiClusterIPAggregateHandler(p))
 		mux.HandleFunc("GET /api/v1/cluster/internal/ip/{ip}", clusterIPLookupHandler(p))
 	}

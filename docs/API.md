@@ -492,6 +492,51 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `400 Bad Request`: Invalid IP address format.
     *   `404 Not Found`: This endpoint is only available on leader nodes.
 
+### `/cluster/ip/{ip}` (DELETE, Leader Only)
+
+*   **Method:** `DELETE`
+*   **Content-Type:** `text/plain; charset=utf-8`
+*   **Description:** Removes an IP address from all cluster nodes where it is found. This endpoint queries all nodes to check if the IP exists, then sends DELETE requests to each node where the IP is present. Only available on leader nodes.
+*   **Parameters:**
+    *   `ip` - IPv4 or IPv6 address (will be canonicalized)
+*   **Response Format (Success):**
+    ```
+    IP 192.168.1.100 removal results:
+    Removed from: node-1, node-2
+    Not found on: node-3
+    ```
+*   **Response Format (Not Found):**
+    ```
+    IP 192.168.1.100 not found on any node
+    ```
+*   **Response Format (Partial Success with Errors):**
+    ```
+    IP 192.168.1.100 removal results:
+    Removed from: node-1
+    Not found on: node-2
+    Errors: node-3: connection refused
+    ```
+*   **Error Response (400 Bad Request):**
+    ```
+    Invalid IP address
+    ```
+*   **Error Response (404 Not Found):**
+    ```
+    Cluster IP removal only available on leader nodes
+    ```
+*   **Notes:**
+    *   The IP address is canonicalized before processing (e.g., `2001:0db8::1` → `2001:db8::1`)
+    *   The leader queries each node with a 5-second timeout to check IP status
+    *   DELETE requests are sent only to nodes where the IP exists
+    *   Returns 200 OK if removed from at least one node, even if some nodes had errors
+    *   Returns 404 if IP not found on any node and no errors occurred
+    *   Each node removal is logged independently
+    *   The operation is performed sequentially across all nodes
+*   **Responses:**
+    *   `200 OK`: Successfully removed from at least one node (may include errors for other nodes).
+    *   `400 Bad Request`: Invalid IP address format.
+    *   `404 Not Found`: Either this is not a leader node, or IP not found on any node.
+
 ### `/api/v1/cluster/internal/ip/{ip}` (Internal Use)
 
 *   **Method:** `GET`
@@ -525,6 +570,11 @@ curl -X DELETE http://localhost:8080/ip/192.168.1.100
 ### Remove IPv6 address
 ```bash
 curl -X DELETE http://localhost:8080/ip/2001:db8::1
+```
+
+### Remove IP from all cluster nodes (leader only)
+```bash
+curl -X DELETE http://leader:8080/cluster/ip/192.168.1.100
 ```
 
 ### Query IP status across cluster (leader only)

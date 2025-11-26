@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"strings"
 	"time"
 
 	"bot-detector/internal/logging"
@@ -373,6 +374,109 @@ func removeIPHandler(p Provider) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, "IP %s removed successfully\n", canonical)
+	}
+}
+
+// clusterRemoveIPHandler removes an IP from all cluster nodes where it's blocked (leader only)
+func clusterRemoveIPHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Check if leader
+		if p.GetNodeRole() != "leader" {
+			http.Error(w, "Cluster IP removal only available on leader nodes", http.StatusNotFound)
+			return
+		}
+
+		// Extract and validate IP
+		ipStr := r.PathValue("ip")
+		if ipStr == "" {
+			http.Error(w, "IP address required", http.StatusBadRequest)
+			return
+		}
+
+		// Canonicalize IP
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			return
+		}
+		canonical := ip.String()
+
+		// Query all nodes to find where IP is blocked
+		nodes := extractNodeInfo(p.GetClusterNodes())
+		protocol := p.GetClusterProtocol()
+
+		var removedFrom []string
+		var notFound []string
+		var errors []string
+
+		for _, node := range nodes {
+			// Check if IP exists on this node
+			statusURL := fmt.Sprintf("%s://%s/api/v1/ip/%s", protocol, node.Address, canonical)
+			client := &http.Client{Timeout: 5 * time.Second}
+			resp, err := client.Get(statusURL)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("%s: %v", node.Name, err))
+				continue
+			}
+
+			var status IPStatusResponse
+			if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+				_ = resp.Body.Close()
+				errors = append(errors, fmt.Sprintf("%s: decode error", node.Name))
+				continue
+			}
+			_ = resp.Body.Close()
+
+			// If IP not found on this node, skip
+			if status.Status == "unknown" {
+				notFound = append(notFound, node.Name)
+				continue
+			}
+
+			// Remove IP from this node
+			removeURL := fmt.Sprintf("%s://%s/ip/%s", protocol, node.Address, canonical)
+			req, err := http.NewRequest("DELETE", removeURL, nil)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("%s: %v", node.Name, err))
+				continue
+			}
+
+			resp, err = client.Do(req)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("%s: %v", node.Name, err))
+				continue
+			}
+			_ = resp.Body.Close()
+
+			if resp.StatusCode == http.StatusOK {
+				removedFrom = append(removedFrom, node.Name)
+			} else {
+				errors = append(errors, fmt.Sprintf("%s: HTTP %d", node.Name, resp.StatusCode))
+			}
+		}
+
+		// Build response
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+
+		if len(removedFrom) == 0 && len(errors) == 0 {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprintf(w, "IP %s not found on any node\n", canonical)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "IP %s removal results:\n", canonical)
+		if len(removedFrom) > 0 {
+			_, _ = fmt.Fprintf(w, "Removed from: %s\n", strings.Join(removedFrom, ", "))
+		}
+		if len(notFound) > 0 {
+			_, _ = fmt.Fprintf(w, "Not found on: %s\n", strings.Join(notFound, ", "))
+		}
+		if len(errors) > 0 {
+			_, _ = fmt.Fprintf(w, "Errors: %s\n", strings.Join(errors, "; "))
+		}
+
+		p.Log(logging.LevelInfo, "CLUSTER", "IP %s removed from nodes: %v", canonical, removedFrom)
 	}
 }
 
