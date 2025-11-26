@@ -528,22 +528,15 @@ func (m *mockBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 	return m.unblockError
 }
 
-func TestRemoveIPHandler_Success(t *testing.T) {
+func TestUnblockIPHandler_Success(t *testing.T) {
 	blocker := &mockBlocker{}
-	activityStore := make(map[store.Actor]*store.ActorActivity)
-	actor := store.Actor{IPInfo: utils.NewIPInfo("192.168.1.1")}
-	activityStore[actor] = &store.ActorActivity{
-		IsBlocked:    true,
-		BlockedUntil: time.Now().Add(1 * time.Hour),
-	}
-
 	p := &mockIPProvider{
-		activityStore: activityStore,
+		activityStore: make(map[store.Actor]*store.ActorActivity),
 		activityMutex: &sync.RWMutex{},
 		blocker:       blocker,
 	}
 
-	handler := removeIPHandler(p)
+	handler := unblockIPHandler(p)
 	req := httptest.NewRequest("DELETE", "/ip/192.168.1.1", nil)
 	req.SetPathValue("ip", "192.168.1.1")
 	rr := httptest.NewRecorder()
@@ -562,23 +555,23 @@ func TestRemoveIPHandler_Success(t *testing.T) {
 		t.Errorf("Expected IP 192.168.1.1, got %s", blocker.unblockIP)
 	}
 
-	if blocker.unblockReason != "manual removal via API" {
-		t.Errorf("Expected reason 'manual removal via API', got %s", blocker.unblockReason)
+	if blocker.unblockReason != "manual unblock via API" {
+		t.Errorf("Expected reason 'manual unblock via API', got %s", blocker.unblockReason)
 	}
 
 	body := rr.Body.String()
-	if !strings.Contains(body, "removed successfully") {
+	if !strings.Contains(body, "unblocked successfully") {
 		t.Errorf("Expected success message, got: %s", body)
 	}
 }
 
-func TestRemoveIPHandler_InvalidIP(t *testing.T) {
+func TestUnblockIPHandler_InvalidIP(t *testing.T) {
 	p := &mockIPProvider{
 		activityStore: make(map[store.Actor]*store.ActorActivity),
 		activityMutex: &sync.RWMutex{},
 	}
 
-	handler := removeIPHandler(p)
+	handler := unblockIPHandler(p)
 	req := httptest.NewRequest("DELETE", "/ip/not-an-ip", nil)
 	req.SetPathValue("ip", "not-an-ip")
 	rr := httptest.NewRecorder()
@@ -590,22 +583,15 @@ func TestRemoveIPHandler_InvalidIP(t *testing.T) {
 	}
 }
 
-func TestRemoveIPHandler_IPv6(t *testing.T) {
+func TestUnblockIPHandler_IPv6(t *testing.T) {
 	blocker := &mockBlocker{}
-	activityStore := make(map[store.Actor]*store.ActorActivity)
-	actor := store.Actor{IPInfo: utils.NewIPInfo("2001:db8::1")}
-	activityStore[actor] = &store.ActorActivity{
-		IsBlocked:    true,
-		BlockedUntil: time.Now().Add(1 * time.Hour),
-	}
-
 	p := &mockIPProvider{
-		activityStore: activityStore,
+		activityStore: make(map[store.Actor]*store.ActorActivity),
 		activityMutex: &sync.RWMutex{},
 		blocker:       blocker,
 	}
 
-	handler := removeIPHandler(p)
+	handler := unblockIPHandler(p)
 	req := httptest.NewRequest("DELETE", "/ip/2001:db8::1", nil)
 	req.SetPathValue("ip", "2001:db8::1")
 	rr := httptest.NewRecorder()
@@ -621,7 +607,7 @@ func TestRemoveIPHandler_IPv6(t *testing.T) {
 	}
 }
 
-func TestRemoveIPHandler_NoBlocker(t *testing.T) {
+func TestUnblockIPHandler_NoBlocker(t *testing.T) {
 	activityStore := make(map[store.Actor]*store.ActorActivity)
 	actor := store.Actor{IPInfo: utils.NewIPInfo("192.168.1.1")}
 	activityStore[actor] = &store.ActorActivity{
@@ -635,7 +621,7 @@ func TestRemoveIPHandler_NoBlocker(t *testing.T) {
 		blocker:       nil,
 	}
 
-	handler := removeIPHandler(p)
+	handler := unblockIPHandler(p)
 	req := httptest.NewRequest("DELETE", "/ip/192.168.1.1", nil)
 	req.SetPathValue("ip", "192.168.1.1")
 	rr := httptest.NewRecorder()
@@ -644,29 +630,5 @@ func TestRemoveIPHandler_NoBlocker(t *testing.T) {
 
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("Expected status 503, got %d", rr.Code)
-	}
-}
-
-func TestRemoveIPHandler_NotFound(t *testing.T) {
-	blocker := &mockBlocker{}
-	p := &mockIPProvider{
-		activityStore: make(map[store.Actor]*store.ActorActivity),
-		activityMutex: &sync.RWMutex{},
-		blocker:       blocker,
-	}
-
-	handler := removeIPHandler(p)
-	req := httptest.NewRequest("DELETE", "/ip/192.168.1.1", nil)
-	req.SetPathValue("ip", "192.168.1.1")
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("Expected status 404, got %d", rr.Code)
-	}
-
-	if blocker.unblockCalled {
-		t.Error("Expected Unblock not to be called for unknown IP")
 	}
 }

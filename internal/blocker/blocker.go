@@ -11,6 +11,7 @@ import (
 type Blocker interface {
 	Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error
 	Unblock(ipInfo utils.IPInfo, reason string) error
+	IsIPBlocked(ipInfo utils.IPInfo) (bool, error)
 	DumpBackends() ([]string, error)
 	CompareHAProxyBackends(expTolerance time.Duration) ([]SyncDiscrepancy, error)
 	GetCurrentState() (map[string]int, error)
@@ -104,6 +105,11 @@ func (b *RateLimitedBlocker) BlockDirect(ipInfo utils.IPInfo, duration time.Dura
 // This is intended for bulk operations like state restoration.
 func (b *RateLimitedBlocker) UnblockDirect(ipInfo utils.IPInfo, reason string) error {
 	return b.WrappedBlocker.Unblock(ipInfo, reason)
+}
+
+// IsIPBlocked checks if an IP is currently blocked in the backend.
+func (b *RateLimitedBlocker) IsIPBlocked(ipInfo utils.IPInfo) (bool, error) {
+	return b.WrappedBlocker.IsIPBlocked(ipInfo)
 }
 
 // DumpBackends retrieves all currently blocked IPs from the wrapped blocker.

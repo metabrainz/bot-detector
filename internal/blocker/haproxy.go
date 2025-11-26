@@ -127,6 +127,18 @@ func getTableNameWithSuffix(baseTableName string, ipVersion utils.IPVersion) str
 	}
 }
 
+// getIPVersionSuffix returns the suffix for a given IP version.
+func getIPVersionSuffix(ipVersion utils.IPVersion) string {
+	switch ipVersion {
+	case 4:
+		return "_ipv4"
+	case 6:
+		return "_ipv6"
+	default:
+		return ""
+	}
+}
+
 // makeBlockCommand creates a HAProxy command to block an IP (set gpc0=1).
 func makeBlockCommand(tableName, ip string) string {
 	return fmt.Sprintf("set table %s key %s data.gpc0 1\n", tableName, ip)
@@ -201,6 +213,56 @@ func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 	}
 
 	return b.executeCommandsConcurrently(ipInfo.Address, targets, "unblock")
+}
+
+// IsIPBlocked checks if an IP is currently blocked in any HAProxy table.
+// It only queries tables matching the IP version for efficiency.
+// Returns true only if the IP has gpc0 > 0 (actually blocked).
+func (b *HAProxyBlocker) IsIPBlocked(ipInfo utils.IPInfo) (bool, error) {
+	if b.IsDryRun {
+		return false, nil
+	}
+
+	if ipInfo.Version != 4 && ipInfo.Version != 6 {
+		return false, fmt.Errorf("unrecognized IP version for %s", ipInfo.Address)
+	}
+
+	addresses := b.P.GetBlockerAddresses()
+	if len(addresses) == 0 {
+		return false, nil
+	}
+
+	// Check first available backend
+	addr := addresses[0]
+
+	// Get all table names
+	tableNames, err := b.getHAProxyTableNames(addr)
+	if err != nil {
+		return false, fmt.Errorf("failed to get table names: %w", err)
+	}
+
+	// Filter tables by IP version suffix
+	suffix := getIPVersionSuffix(ipInfo.Version)
+	for _, tableName := range tableNames {
+		if !strings.HasSuffix(tableName, suffix) {
+			continue
+		}
+
+		// Get all IPs in this table
+		entries, err := b.getHAProxyAllIPsInTable(addr, tableName)
+		if err != nil {
+			continue
+		}
+
+		// Check if our IP is blocked (gpc0 > 0)
+		for _, entry := range entries {
+			if entry.IP == ipInfo.Address && entry.Gpc0 > 0 {
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
 }
 
 // executeCommandImpl connects to a single HAProxy instance and executes a command.

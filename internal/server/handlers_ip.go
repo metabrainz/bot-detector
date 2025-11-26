@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"reflect"
-	"strings"
 	"time"
 
 	"bot-detector/internal/logging"
@@ -33,8 +32,6 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 
 		// Search ActivityStore
 		p.GetActivityMutex().RLock()
-		defer p.GetActivityMutex().RUnlock()
-
 		activityStore := p.GetActivityStore()
 
 		// Collect all actors with this IP
@@ -42,6 +39,21 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 		for actor, activity := range activityStore {
 			if actor.IPInfo.Address == canonical {
 				actors = append(actors, activity)
+			}
+		}
+		p.GetActivityMutex().RUnlock()
+
+		// Check HAProxy tables
+		var inBackend bool
+		blockerInterface := p.GetBlocker()
+		if blockerInterface != nil {
+			if b, ok := blockerInterface.(interface {
+				IsIPBlocked(ipInfo utils.IPInfo) (bool, error)
+			}); ok {
+				ipInfo := utils.NewIPInfo(canonical)
+				if blocked, err := b.IsIPBlocked(ipInfo); err == nil {
+					inBackend = blocked
+				}
 			}
 		}
 
@@ -53,15 +65,29 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 			_, _ = fmt.Fprintf(w, "node: %s\n", nodeName)
 		}
 
-		if len(actors) == 0 {
+		if len(actors) == 0 && !inBackend {
 			_, _ = fmt.Fprint(w, "status: unknown\n")
 			addFollowerHint(w, p, canonical)
 			return
 		}
 
-		// Aggregate status
+		// If in HAProxy but not in activity store, show as blocked
+		if inBackend && len(actors) == 0 {
+			_, _ = fmt.Fprint(w, "status: blocked\n")
+			_, _ = fmt.Fprint(w, "source: backend\n")
+			addFollowerHint(w, p, canonical)
+			return
+		}
+
+		// Aggregate status from activity store
 		status := aggregateActorStatus(actors)
 		_, _ = fmt.Fprint(w, status)
+
+		// Add HAProxy status if different
+		if inBackend {
+			_, _ = fmt.Fprint(w, "backend: present\n")
+		}
+
 		addFollowerHint(w, p, canonical)
 	}
 }
@@ -164,6 +190,7 @@ type IPStatusResponse struct {
 	LastSeen      string            `json:"last_seen,omitempty"`      // RFC3339
 	LastUnblock   string            `json:"last_unblock,omitempty"`   // RFC3339
 	UnblockReason string            `json:"unblock_reason,omitempty"`
+	Backend       string            `json:"backend,omitempty"`      // "present" if in HAProxy tables
 	ClusterHint   string            `json:"cluster_hint,omitempty"` // URL to cluster endpoint
 }
 
@@ -190,8 +217,6 @@ func apiIPLookupHandler(p Provider) http.HandlerFunc {
 
 		// Search ActivityStore
 		p.GetActivityMutex().RLock()
-		defer p.GetActivityMutex().RUnlock()
-
 		activityStore := p.GetActivityStore()
 
 		// Collect all actors with this IP
@@ -201,9 +226,24 @@ func apiIPLookupHandler(p Provider) http.HandlerFunc {
 				actors = append(actors, activity)
 			}
 		}
+		p.GetActivityMutex().RUnlock()
+
+		// Check HAProxy tables
+		var inBackend bool
+		blockerInterface := p.GetBlocker()
+		if blockerInterface != nil {
+			if b, ok := blockerInterface.(interface {
+				IsIPBlocked(ipInfo utils.IPInfo) (bool, error)
+			}); ok {
+				ipInfo := utils.NewIPInfo(canonical)
+				if blocked, err := b.IsIPBlocked(ipInfo); err == nil {
+					inBackend = blocked
+				}
+			}
+		}
 
 		// Build response
-		response := buildIPStatusResponse(p, actors, canonical)
+		response := buildIPStatusResponse(p, actors, canonical, inBackend)
 
 		// Return JSON
 		w.Header().Set("Content-Type", "application/json")
@@ -214,13 +254,21 @@ func apiIPLookupHandler(p Provider) http.HandlerFunc {
 }
 
 // buildIPStatusResponse creates JSON response from actor activities
-func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string) IPStatusResponse {
+func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string, inBackend bool) IPStatusResponse {
 	response := IPStatusResponse{
 		Node: p.GetNodeName(),
 	}
 
-	if len(actors) == 0 {
+	if len(actors) == 0 && !inBackend {
 		response.Status = "unknown"
+		addClusterHintJSON(&response, p, ip)
+		return response
+	}
+
+	// If in HAProxy but not in activity store
+	if inBackend && len(actors) == 0 {
+		response.Status = "blocked"
+		response.Backend = "present"
 		addClusterHintJSON(&response, p, ip)
 		return response
 	}
@@ -269,6 +317,10 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string)
 		if !latestExpiry.IsZero() {
 			response.LatestExpiry = latestExpiry.Format(time.RFC3339)
 		}
+
+		if inBackend {
+			response.Backend = "present"
+		}
 	} else {
 		// Not blocked - find most recent activity
 		var mostRecent *store.ActorActivity
@@ -285,6 +337,10 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string)
 		if !mostRecent.LastUnblockTime.IsZero() {
 			response.LastUnblock = mostRecent.LastUnblockTime.Format(time.RFC3339)
 			response.UnblockReason = mostRecent.LastUnblockReason
+		}
+
+		if inBackend {
+			response.Backend = "present"
 		}
 	}
 
@@ -309,8 +365,8 @@ func parseRFC3339(s string) time.Time {
 	return t
 }
 
-// removeIPHandler removes an IP from HAProxy tables
-func removeIPHandler(p Provider) http.HandlerFunc {
+// unblockIPHandler unblocks an IP by setting gpc0=0 in all HAProxy instances
+func unblockIPHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
 		if ipStr == "" {
@@ -325,23 +381,6 @@ func removeIPHandler(p Provider) http.HandlerFunc {
 			return
 		}
 		canonical := ip.String()
-
-		// Check if IP exists in ActivityStore
-		p.GetActivityMutex().RLock()
-		activityStore := p.GetActivityStore()
-		var found bool
-		for actor := range activityStore {
-			if actor.IPInfo.Address == canonical {
-				found = true
-				break
-			}
-		}
-		p.GetActivityMutex().RUnlock()
-
-		if !found {
-			http.Error(w, "IP not found", http.StatusNotFound)
-			return
-		}
 
 		// Get blocker
 		blockerInterface := p.GetBlocker()
@@ -363,120 +402,17 @@ func removeIPHandler(p Provider) http.HandlerFunc {
 		ipInfo := utils.NewIPInfo(canonical)
 
 		// Unblock the IP
-		if err := b.Unblock(ipInfo, "manual removal via API"); err != nil {
-			p.Log(logging.LevelError, "API", "Failed to remove IP %s: %v", canonical, err)
-			http.Error(w, "Failed to remove IP", http.StatusInternalServerError)
+		if err := b.Unblock(ipInfo, "manual unblock via API"); err != nil {
+			p.Log(logging.LevelError, "API", "Failed to unblock IP %s: %v", canonical, err)
+			http.Error(w, "Failed to unblock IP", http.StatusInternalServerError)
 			return
 		}
 
-		p.Log(logging.LevelInfo, "API", "IP %s removed from HAProxy tables", canonical)
+		p.Log(logging.LevelInfo, "API", "IP %s unblocked (gpc0=0 set in all instances)", canonical)
 
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(w, "IP %s removed successfully\n", canonical)
-	}
-}
-
-// clusterRemoveIPHandler removes an IP from all cluster nodes where it's blocked (leader only)
-func clusterRemoveIPHandler(p Provider) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Check if leader
-		if p.GetNodeRole() != "leader" {
-			http.Error(w, "Cluster IP removal only available on leader nodes", http.StatusNotFound)
-			return
-		}
-
-		// Extract and validate IP
-		ipStr := r.PathValue("ip")
-		if ipStr == "" {
-			http.Error(w, "IP address required", http.StatusBadRequest)
-			return
-		}
-
-		// Canonicalize IP
-		ip := net.ParseIP(ipStr)
-		if ip == nil {
-			http.Error(w, "Invalid IP address", http.StatusBadRequest)
-			return
-		}
-		canonical := ip.String()
-
-		// Query all nodes to find where IP is blocked
-		nodes := extractNodeInfo(p.GetClusterNodes())
-		protocol := p.GetClusterProtocol()
-
-		var removedFrom []string
-		var notFound []string
-		var errors []string
-
-		for _, node := range nodes {
-			// Check if IP exists on this node
-			statusURL := fmt.Sprintf("%s://%s/api/v1/ip/%s", protocol, node.Address, canonical)
-			client := &http.Client{Timeout: 5 * time.Second}
-			resp, err := client.Get(statusURL)
-			if err != nil {
-				errors = append(errors, fmt.Sprintf("%s: %v", node.Name, err))
-				continue
-			}
-
-			var status IPStatusResponse
-			if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-				_ = resp.Body.Close()
-				errors = append(errors, fmt.Sprintf("%s: decode error", node.Name))
-				continue
-			}
-			_ = resp.Body.Close()
-
-			// If IP not found on this node, skip
-			if status.Status == "unknown" {
-				notFound = append(notFound, node.Name)
-				continue
-			}
-
-			// Remove IP from this node
-			removeURL := fmt.Sprintf("%s://%s/ip/%s", protocol, node.Address, canonical)
-			req, err := http.NewRequest("DELETE", removeURL, nil)
-			if err != nil {
-				errors = append(errors, fmt.Sprintf("%s: %v", node.Name, err))
-				continue
-			}
-
-			resp, err = client.Do(req)
-			if err != nil {
-				errors = append(errors, fmt.Sprintf("%s: %v", node.Name, err))
-				continue
-			}
-			_ = resp.Body.Close()
-
-			if resp.StatusCode == http.StatusOK {
-				removedFrom = append(removedFrom, node.Name)
-			} else {
-				errors = append(errors, fmt.Sprintf("%s: HTTP %d", node.Name, resp.StatusCode))
-			}
-		}
-
-		// Build response
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-
-		if len(removedFrom) == 0 && len(errors) == 0 {
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = fmt.Fprintf(w, "IP %s not found on any node\n", canonical)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(w, "IP %s removal results:\n", canonical)
-		if len(removedFrom) > 0 {
-			_, _ = fmt.Fprintf(w, "Removed from: %s\n", strings.Join(removedFrom, ", "))
-		}
-		if len(notFound) > 0 {
-			_, _ = fmt.Fprintf(w, "Not found on: %s\n", strings.Join(notFound, ", "))
-		}
-		if len(errors) > 0 {
-			_, _ = fmt.Fprintf(w, "Errors: %s\n", strings.Join(errors, "; "))
-		}
-
-		p.Log(logging.LevelInfo, "CLUSTER", "IP %s removed from nodes: %v", canonical, removedFrom)
+		_, _ = fmt.Fprintf(w, "IP %s unblocked successfully\n", canonical)
 	}
 }
 
@@ -504,8 +440,6 @@ func clusterIPLookupHandler(p Provider) http.HandlerFunc {
 
 		// Search ActivityStore
 		p.GetActivityMutex().RLock()
-		defer p.GetActivityMutex().RUnlock()
-
 		activityStore := p.GetActivityStore()
 
 		// Collect all actors with this IP
@@ -515,9 +449,24 @@ func clusterIPLookupHandler(p Provider) http.HandlerFunc {
 				actors = append(actors, activity)
 			}
 		}
+		p.GetActivityMutex().RUnlock()
+
+		// Check HAProxy tables
+		var inBackend bool
+		blockerInterface := p.GetBlocker()
+		if blockerInterface != nil {
+			if b, ok := blockerInterface.(interface {
+				IsIPBlocked(ipInfo utils.IPInfo) (bool, error)
+			}); ok {
+				ipInfo := utils.NewIPInfo(canonical)
+				if blocked, err := b.IsIPBlocked(ipInfo); err == nil {
+					inBackend = blocked
+				}
+			}
+		}
 
 		// Build response (without node name and cluster hint for internal use)
-		response := buildIPStatusResponse(p, actors, canonical)
+		response := buildIPStatusResponse(p, actors, canonical, inBackend)
 		response.Node = ""        // Leader will add node name
 		response.ClusterHint = "" // Not needed for internal queries
 

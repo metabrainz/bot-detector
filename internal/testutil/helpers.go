@@ -66,6 +66,11 @@ func (m *MockBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 	return args.Error(0)
 }
 
+func (m *MockBlocker) IsIPBlocked(ipInfo utils.IPInfo) (bool, error) {
+	args := m.Called(ipInfo)
+	return args.Bool(0), args.Error(1)
+}
+
 func (m *MockBlocker) DumpBackends() ([]string, error) {
 	if m.ListBlockedFunc != nil {
 		return m.ListBlockedFunc()

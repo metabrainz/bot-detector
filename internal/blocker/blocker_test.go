@@ -31,6 +31,15 @@ func (m *mockWrappedBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 	return nil
 }
 
+func (m *mockWrappedBlocker) IsIPBlocked(ipInfo utils.IPInfo) (bool, error) {
+	for _, ip := range m.blockedIPs {
+		if ip == ipInfo.Address {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (m *mockWrappedBlocker) DumpBackends() ([]string, error) {
 	m.dumpBackendsCount.Add(1)
 	return m.blockedIPs, nil

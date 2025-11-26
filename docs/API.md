@@ -254,7 +254,7 @@ These endpoints allow you to query the block/unblock status of specific IP addre
 
 *   **Method:** `GET`
 *   **Content-Type:** `text/plain; charset=utf-8`
-*   **Description:** Returns the block/unblock status of an IP address on the local node in human-readable plain text format. The IP address is automatically canonicalized (e.g., `2001:0db8::1` becomes `2001:db8::1`). This endpoint is useful for quick manual queries via curl or browser.
+*   **Description:** Returns the block/unblock status of an IP address on the local node in human-readable plain text format. The IP address is automatically canonicalized (e.g., `2001:0db8::1` becomes `2001:db8::1`). This endpoint checks both the activity store (behavioral chain state) and the actual blocker backend tables to provide accurate status.
 *   **Parameters:**
     *   `ip` - IPv4 or IPv6 address (will be canonicalized)
 *   **Response Format (Blocked IP):**
@@ -267,7 +267,14 @@ These endpoints allow you to query the block/unblock status of specific IP addre
       - API-Abuse-Chain (until: 2025-11-22T01:30:00Z)
     earliest_block: 2025-11-22T01:00:00Z
     latest_expiry: 2025-11-22T02:00:00Z
+    backend: present
     note: For cluster-wide view, query leader at http://leader:8080/cluster/ip/192.168.1.1
+    ```
+*   **Response Format (Blocked in HAProxy only):**
+    ```
+    node: follower-2
+    status: blocked
+    source: backend
     ```
 *   **Response Format (Unblocked IP):**
     ```
@@ -287,6 +294,8 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   Multiple chains can block the same IP if different behavioral patterns are detected
     *   The `earliest_block` time is estimated (actual block time - 1 hour) since exact block time is not stored
     *   If queried on a follower node, a hint is provided to query the leader for cluster-wide view
+    *   The `backend: present` field indicates the IP is in blocker backend tables
+    *   IPs may appear in blocker backends but not in activity store (e.g., manually added or persisted from previous runs)
 *   **Responses:**
     *   `200 OK`: Successfully returns IP status.
     *   `400 Bad Request`: Invalid IP address format.
@@ -345,24 +354,20 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `200 OK`: Successfully returns IP status.
     *   `400 Bad Request`: Invalid IP address format.
 
-### `/ip/{ip}` (DELETE)
+### `/block/{ip}` (DELETE)
 
 *   **Method:** `DELETE`
 *   **Content-Type:** `text/plain; charset=utf-8`
-*   **Description:** Removes an IP address from HAProxy stick tables. This endpoint sends an unblock command to the configured blocker backend, effectively removing the IP from all blocking tables. The command is queued and processed at the configured rate limit (`blocker_commands_per_second`).
+*   **Description:** Unblocks an IP address by setting gpc0=0 in all HAProxy stick tables. This is for emergency unblocking - it sets gpc0=0 across all duration tables where the IP exists. The command is queued and processed at the configured rate limit (`blocker_commands_per_second`).
 *   **Parameters:**
     *   `ip` - IPv4 or IPv6 address (will be canonicalized)
 *   **Response Format (Success):**
     ```
-    IP 192.168.1.100 removed successfully
+    IP 192.168.1.100 unblocked successfully
     ```
 *   **Error Response (400 Bad Request):**
     ```
     Invalid IP address
-    ```
-*   **Error Response (404 Not Found):**
-    ```
-    IP not found
     ```
 *   **Error Response (503 Service Unavailable):**
     ```
@@ -370,19 +375,20 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     ```
 *   **Error Response (500 Internal Server Error):**
     ```
-    Failed to remove IP
+    Failed to unblock IP
     ```
 *   **Notes:**
     *   The IP address is canonicalized before processing (e.g., `2001:0db8::1` → `2001:db8::1`)
-    *   The IP must exist in the activity store to be removed (returns 404 if not found)
+    *   Sets gpc0=0 in all configured HAProxy instances across all duration tables
+    *   The unblock command is always sent, regardless of whether the IP exists in the activity store
     *   The unblock command is queued and executed asynchronously by the blocker worker
     *   If the command queue is full, the command may be dropped (check logs for warnings)
-    *   The operation is logged with reason "manual removal via API"
-    *   This endpoint only affects the local node; in cluster mode, you must call it on each node
+    *   The operation is logged with reason "manual unblock via API"
+    *   Works across all HAProxy instances regardless of cluster configuration
+    *   Use this for emergency unblocking when behavioral detection has false positives
 *   **Responses:**
     *   `200 OK`: Successfully queued the unblock command.
     *   `400 Bad Request`: Invalid IP address format.
-    *   `404 Not Found`: IP address not found in activity store.
     *   `500 Internal Server Error`: Failed to queue the unblock command.
     *   `503 Service Unavailable`: Blocker is not available (e.g., dry-run mode).
 
@@ -492,51 +498,6 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `400 Bad Request`: Invalid IP address format.
     *   `404 Not Found`: This endpoint is only available on leader nodes.
 
-### `/cluster/ip/{ip}` (DELETE, Leader Only)
-
-*   **Method:** `DELETE`
-*   **Content-Type:** `text/plain; charset=utf-8`
-*   **Description:** Removes an IP address from all cluster nodes where it is found. This endpoint queries all nodes to check if the IP exists, then sends DELETE requests to each node where the IP is present. Only available on leader nodes.
-*   **Parameters:**
-    *   `ip` - IPv4 or IPv6 address (will be canonicalized)
-*   **Response Format (Success):**
-    ```
-    IP 192.168.1.100 removal results:
-    Removed from: node-1, node-2
-    Not found on: node-3
-    ```
-*   **Response Format (Not Found):**
-    ```
-    IP 192.168.1.100 not found on any node
-    ```
-*   **Response Format (Partial Success with Errors):**
-    ```
-    IP 192.168.1.100 removal results:
-    Removed from: node-1
-    Not found on: node-2
-    Errors: node-3: connection refused
-    ```
-*   **Error Response (400 Bad Request):**
-    ```
-    Invalid IP address
-    ```
-*   **Error Response (404 Not Found):**
-    ```
-    Cluster IP removal only available on leader nodes
-    ```
-*   **Notes:**
-    *   The IP address is canonicalized before processing (e.g., `2001:0db8::1` → `2001:db8::1`)
-    *   The leader queries each node with a 5-second timeout to check IP status
-    *   DELETE requests are sent only to nodes where the IP exists
-    *   Returns 200 OK if removed from at least one node, even if some nodes had errors
-    *   Returns 404 if IP not found on any node and no errors occurred
-    *   Each node removal is logged independently
-    *   The operation is performed sequentially across all nodes
-*   **Responses:**
-    *   `200 OK`: Successfully removed from at least one node (may include errors for other nodes).
-    *   `400 Bad Request`: Invalid IP address format.
-    *   `404 Not Found`: Either this is not a leader node, or IP not found on any node.
-
 ### `/api/v1/cluster/internal/ip/{ip}` (Internal Use)
 
 *   **Method:** `GET`
@@ -562,19 +523,14 @@ curl http://localhost:8080/ip/192.168.1.100
 curl http://localhost:8080/api/v1/ip/192.168.1.100
 ```
 
-### Remove IP from HAProxy tables
+### Unblock an IP (emergency)
 ```bash
-curl -X DELETE http://localhost:8080/ip/192.168.1.100
+curl -X DELETE http://localhost:8080/block/192.168.1.100
 ```
 
-### Remove IPv6 address
+### Unblock IPv6 address
 ```bash
-curl -X DELETE http://localhost:8080/ip/2001:db8::1
-```
-
-### Remove IP from all cluster nodes (leader only)
-```bash
-curl -X DELETE http://leader:8080/cluster/ip/192.168.1.100
+curl -X DELETE http://localhost:8080/block/2001:db8::1
 ```
 
 ### Query IP status across cluster (leader only)
@@ -610,8 +566,8 @@ IP="192.168.1.100"
 STATUS=$(curl -s "http://localhost:8080/api/v1/ip/$IP" | jq -r '.status')
 
 if [ "$STATUS" = "blocked" ]; then
-    echo "IP $IP is blocked, removing..."
-    curl -X DELETE "http://localhost:8080/ip/$IP"
+    echo "IP $IP is blocked, unblocking..."
+    curl -X DELETE "http://localhost:8080/block/$IP"
 else
     echo "IP $IP is not blocked"
 fi
