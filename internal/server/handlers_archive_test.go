@@ -50,6 +50,7 @@ func (m *MockProvider) GetNodeRole() string                                    {
 func (m *MockProvider) GetNodeLeaderAddress() string                           { return "" }
 func (m *MockProvider) GetClusterNodes() interface{}                           { return nil }
 func (m *MockProvider) GetClusterProtocol() string                             { return "http" }
+func (m *MockProvider) GetBlocker() interface{}                                { return nil }
 
 func TestArchiveHandler_StableETag(t *testing.T) {
 	// Common setup

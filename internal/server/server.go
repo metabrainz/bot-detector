@@ -127,6 +127,7 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("/config", configHandler(p))
 		mux.HandleFunc("/config/archive", archiveHandler(p))
 		mux.HandleFunc("GET /ip/{ip}", ipLookupHandler(p))
+		mux.HandleFunc("DELETE /ip/{ip}", removeIPHandler(p))
 		mux.HandleFunc("GET /api/v1/ip/{ip}", apiIPLookupHandler(p))
 	}
 

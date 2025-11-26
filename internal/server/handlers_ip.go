@@ -10,6 +10,7 @@ import (
 
 	"bot-detector/internal/logging"
 	"bot-detector/internal/store"
+	"bot-detector/internal/utils"
 )
 
 // ipLookupHandler returns local IP status in plain text
@@ -305,6 +306,74 @@ func addClusterHintJSON(response *IPStatusResponse, p Provider, ip string) {
 func parseRFC3339(s string) time.Time {
 	t, _ := time.Parse(time.RFC3339, s)
 	return t
+}
+
+// removeIPHandler removes an IP from HAProxy tables
+func removeIPHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ipStr := r.PathValue("ip")
+		if ipStr == "" {
+			http.Error(w, "IP address required", http.StatusBadRequest)
+			return
+		}
+
+		// Canonicalize IP
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			return
+		}
+		canonical := ip.String()
+
+		// Check if IP exists in ActivityStore
+		p.GetActivityMutex().RLock()
+		activityStore := p.GetActivityStore()
+		var found bool
+		for actor := range activityStore {
+			if actor.IPInfo.Address == canonical {
+				found = true
+				break
+			}
+		}
+		p.GetActivityMutex().RUnlock()
+
+		if !found {
+			http.Error(w, "IP not found", http.StatusNotFound)
+			return
+		}
+
+		// Get blocker
+		blockerInterface := p.GetBlocker()
+		if blockerInterface == nil {
+			http.Error(w, "Blocker not available", http.StatusServiceUnavailable)
+			return
+		}
+
+		// Type assert to blocker.Blocker
+		b, ok := blockerInterface.(interface {
+			Unblock(ipInfo utils.IPInfo, reason string) error
+		})
+		if !ok {
+			http.Error(w, "Blocker interface error", http.StatusInternalServerError)
+			return
+		}
+
+		// Create IPInfo using helper
+		ipInfo := utils.NewIPInfo(canonical)
+
+		// Unblock the IP
+		if err := b.Unblock(ipInfo, "manual removal via API"); err != nil {
+			p.Log(logging.LevelError, "API", "Failed to remove IP %s: %v", canonical, err)
+			http.Error(w, "Failed to remove IP", http.StatusInternalServerError)
+			return
+		}
+
+		p.Log(logging.LevelInfo, "API", "IP %s removed from HAProxy tables", canonical)
+
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "IP %s removed successfully\n", canonical)
+	}
 }
 
 // clusterIPLookupHandler returns IP status as JSON for internal cluster queries

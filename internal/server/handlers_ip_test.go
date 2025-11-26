@@ -170,6 +170,7 @@ type mockIPProvider struct {
 	nodeName      string
 	nodeRole      string
 	leaderAddr    string
+	blocker       interface{}
 }
 
 func (m *mockIPProvider) GetActivityStore() map[store.Actor]*store.ActorActivity {
@@ -194,6 +195,10 @@ func (m *mockIPProvider) GetNodeLeaderAddress() string {
 
 func (m *mockIPProvider) GetClusterProtocol() string {
 	return "http"
+}
+
+func (m *mockIPProvider) GetBlocker() interface{} {
+	return m.blocker
 }
 
 // Stub implementations for other Provider methods
@@ -506,4 +511,162 @@ func TestExtractNodeInfo(t *testing.T) {
 	// Test with empty slice would require creating actual cluster.NodeConfig instances
 	// which would create an import cycle. This is tested implicitly through the
 	// cluster aggregation handler tests.
+}
+
+// mockBlocker implements the Unblock interface for testing
+type mockBlocker struct {
+	unblockCalled bool
+	unblockIP     string
+	unblockReason string
+	unblockError  error
+}
+
+func (m *mockBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
+	m.unblockCalled = true
+	m.unblockIP = ipInfo.Address
+	m.unblockReason = reason
+	return m.unblockError
+}
+
+func TestRemoveIPHandler_Success(t *testing.T) {
+	blocker := &mockBlocker{}
+	activityStore := make(map[store.Actor]*store.ActorActivity)
+	actor := store.Actor{IPInfo: utils.NewIPInfo("192.168.1.1")}
+	activityStore[actor] = &store.ActorActivity{
+		IsBlocked:    true,
+		BlockedUntil: time.Now().Add(1 * time.Hour),
+	}
+
+	p := &mockIPProvider{
+		activityStore: activityStore,
+		activityMutex: &sync.RWMutex{},
+		blocker:       blocker,
+	}
+
+	handler := removeIPHandler(p)
+	req := httptest.NewRequest("DELETE", "/ip/192.168.1.1", nil)
+	req.SetPathValue("ip", "192.168.1.1")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rr.Code)
+	}
+
+	if !blocker.unblockCalled {
+		t.Error("Expected Unblock to be called")
+	}
+
+	if blocker.unblockIP != "192.168.1.1" {
+		t.Errorf("Expected IP 192.168.1.1, got %s", blocker.unblockIP)
+	}
+
+	if blocker.unblockReason != "manual removal via API" {
+		t.Errorf("Expected reason 'manual removal via API', got %s", blocker.unblockReason)
+	}
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "removed successfully") {
+		t.Errorf("Expected success message, got: %s", body)
+	}
+}
+
+func TestRemoveIPHandler_InvalidIP(t *testing.T) {
+	p := &mockIPProvider{
+		activityStore: make(map[store.Actor]*store.ActorActivity),
+		activityMutex: &sync.RWMutex{},
+	}
+
+	handler := removeIPHandler(p)
+	req := httptest.NewRequest("DELETE", "/ip/not-an-ip", nil)
+	req.SetPathValue("ip", "not-an-ip")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected status 400, got %d", rr.Code)
+	}
+}
+
+func TestRemoveIPHandler_IPv6(t *testing.T) {
+	blocker := &mockBlocker{}
+	activityStore := make(map[store.Actor]*store.ActorActivity)
+	actor := store.Actor{IPInfo: utils.NewIPInfo("2001:db8::1")}
+	activityStore[actor] = &store.ActorActivity{
+		IsBlocked:    true,
+		BlockedUntil: time.Now().Add(1 * time.Hour),
+	}
+
+	p := &mockIPProvider{
+		activityStore: activityStore,
+		activityMutex: &sync.RWMutex{},
+		blocker:       blocker,
+	}
+
+	handler := removeIPHandler(p)
+	req := httptest.NewRequest("DELETE", "/ip/2001:db8::1", nil)
+	req.SetPathValue("ip", "2001:db8::1")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rr.Code)
+	}
+
+	if blocker.unblockIP != "2001:db8::1" {
+		t.Errorf("Expected canonical IPv6 2001:db8::1, got %s", blocker.unblockIP)
+	}
+}
+
+func TestRemoveIPHandler_NoBlocker(t *testing.T) {
+	activityStore := make(map[store.Actor]*store.ActorActivity)
+	actor := store.Actor{IPInfo: utils.NewIPInfo("192.168.1.1")}
+	activityStore[actor] = &store.ActorActivity{
+		IsBlocked:    true,
+		BlockedUntil: time.Now().Add(1 * time.Hour),
+	}
+
+	p := &mockIPProvider{
+		activityStore: activityStore,
+		activityMutex: &sync.RWMutex{},
+		blocker:       nil,
+	}
+
+	handler := removeIPHandler(p)
+	req := httptest.NewRequest("DELETE", "/ip/192.168.1.1", nil)
+	req.SetPathValue("ip", "192.168.1.1")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("Expected status 503, got %d", rr.Code)
+	}
+}
+
+func TestRemoveIPHandler_NotFound(t *testing.T) {
+	blocker := &mockBlocker{}
+	p := &mockIPProvider{
+		activityStore: make(map[store.Actor]*store.ActorActivity),
+		activityMutex: &sync.RWMutex{},
+		blocker:       blocker,
+	}
+
+	handler := removeIPHandler(p)
+	req := httptest.NewRequest("DELETE", "/ip/192.168.1.1", nil)
+	req.SetPathValue("ip", "192.168.1.1")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("Expected status 404, got %d", rr.Code)
+	}
+
+	if blocker.unblockCalled {
+		t.Error("Expected Unblock not to be called for unknown IP")
+	}
 }

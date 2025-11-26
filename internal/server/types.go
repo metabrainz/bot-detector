@@ -78,4 +78,7 @@ type Provider interface {
 
 	// GetClusterProtocol returns cluster protocol ("http" or "https").
 	GetClusterProtocol() string
+
+	// GetBlocker returns the blocker instance for IP removal operations.
+	GetBlocker() interface{}
 }

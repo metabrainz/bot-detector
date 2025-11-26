@@ -146,6 +146,10 @@ func (m *mockProvider) GetClusterProtocol() string {
 	return "http"
 }
 
+func (m *mockProvider) GetBlocker() interface{} {
+	return nil
+}
+
 // TestServer_StartAndShutdown verifies the full lifecycle of the stats server.
 func TestServer_StartAndShutdown(t *testing.T) {
 	// --- Setup ---

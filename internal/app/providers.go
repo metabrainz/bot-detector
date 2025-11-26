@@ -277,6 +277,10 @@ func (p *Processor) GetClusterProtocol() string {
 	return p.Cluster.Protocol
 }
 
+func (p *Processor) GetBlocker() interface{} {
+	return p.Blocker
+}
+
 func (p *Processor) GetTestSignals() *store.TestSignals {
 	if p.TestSignals == nil {
 		return nil
