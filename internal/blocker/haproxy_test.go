@@ -834,3 +834,67 @@ func TestHAProxyBlocker_IsIPBlocked_DirectKeyLookup(t *testing.T) {
 		})
 	}
 }
+
+func TestHAProxyBlocker_GetIPDetails(t *testing.T) {
+	tests := []struct {
+		name          string
+		ip            string
+		tableResponse string
+		keyResponse   string
+		expectCount   int
+		expectGpc0    int
+	}{
+		{
+			name:          "blocked IP in table",
+			ip:            "1.1.1.1",
+			tableResponse: "# table: table_1h_ipv4\n",
+			keyResponse:   "# table: table_1h_ipv4, type: ip, size:100000, used:1\n0x1: key=1.1.1.1 use=0 exp=3600000 gpc0=1",
+			expectCount:   1,
+			expectGpc0:    1,
+		},
+		{
+			name:          "unblocked IP in table",
+			ip:            "2.2.2.2",
+			tableResponse: "# table: table_1h_ipv4\n",
+			keyResponse:   "# table: table_1h_ipv4, type: ip, size:100000, used:1\n0x2: key=2.2.2.2 use=0 exp=1800000 gpc0=0",
+			expectCount:   1,
+			expectGpc0:    0,
+		},
+		{
+			name:          "IP not found",
+			ip:            "3.3.3.3",
+			tableResponse: "# table: table_1h_ipv4\n",
+			keyResponse:   "# table: table_1h_ipv4, type: ip, size:100000, used:0\n",
+			expectCount:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockProvider := newMockHAProxyProvider()
+			b := blocker.NewHAProxyBlocker(mockProvider, false)
+
+			b.ExecuteHAProxyCommandFunc = func(addr, command string) (string, error) {
+				if strings.Contains(command, "key") {
+					return tt.keyResponse, nil
+				}
+				return tt.tableResponse, nil
+			}
+
+			ipInfo := utils.NewIPInfo(tt.ip)
+			details, err := b.GetIPDetails(ipInfo)
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if len(details) != tt.expectCount {
+				t.Errorf("Expected %d details, got %d", tt.expectCount, len(details))
+			}
+
+			if tt.expectCount > 0 && details[0].Gpc0 != tt.expectGpc0 {
+				t.Errorf("Expected gpc0=%d, got %d", tt.expectGpc0, details[0].Gpc0)
+			}
+		})
+	}
+}

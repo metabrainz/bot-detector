@@ -629,3 +629,61 @@ func TestUnblockIPHandler_NoBlocker(t *testing.T) {
 		t.Errorf("Expected status 503, got %d", rr.Code)
 	}
 }
+
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration time.Duration
+		expected string
+	}{
+		{
+			name:     "zero duration",
+			duration: 0,
+			expected: "0s",
+		},
+		{
+			name:     "only seconds",
+			duration: 45 * time.Second,
+			expected: "45s",
+		},
+		{
+			name:     "minutes and seconds",
+			duration: 3*time.Minute + 30*time.Second,
+			expected: "3m 30s",
+		},
+		{
+			name:     "hours, minutes, seconds",
+			duration: 2*time.Hour + 15*time.Minute + 45*time.Second,
+			expected: "2h 15m 45s",
+		},
+		{
+			name:     "days and hours",
+			duration: 3*24*time.Hour + 5*time.Hour,
+			expected: "3d 5h",
+		},
+		{
+			name:     "weeks, days, hours, minutes, seconds",
+			duration: 2*7*24*time.Hour + 3*24*time.Hour + 4*time.Hour + 30*time.Minute + 15*time.Second,
+			expected: "2w 3d 4h 30m 15s",
+		},
+		{
+			name:     "exactly one week",
+			duration: 7 * 24 * time.Hour,
+			expected: "1w",
+		},
+		{
+			name:     "one hour exactly",
+			duration: time.Hour,
+			expected: "1h",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatDuration(tt.duration)
+			if result != tt.expected {
+				t.Errorf("Expected %q, got %q", tt.expected, result)
+			}
+		})
+	}
+}
