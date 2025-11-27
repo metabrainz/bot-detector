@@ -223,6 +223,60 @@ type IPClearInfo struct {
 	ExpMillis int64
 }
 
+// GetIPDetails returns detailed information about an IP across all tables and backends.
+// Returns a slice of IPClearInfo describing where the IP is found.
+func (b *HAProxyBlocker) GetIPDetails(ipInfo utils.IPInfo) ([]IPClearInfo, error) {
+	if b.IsDryRun {
+		return nil, nil
+	}
+
+	if ipInfo.Version != 4 && ipInfo.Version != 6 {
+		return nil, nil
+	}
+
+	addresses := b.P.GetBlockerAddresses()
+	if len(addresses) == 0 {
+		return nil, nil
+	}
+
+	// Get all table names from first backend
+	tableNames, err := b.getHAProxyTableNames(addresses[0])
+	if err != nil {
+		return nil, fmt.Errorf("failed to get table names: %w", err)
+	}
+
+	// Filter tables by IP version
+	suffix := getIPVersionSuffix(ipInfo.Version)
+	var relevantTables []string
+	for _, tableName := range tableNames {
+		if strings.HasSuffix(tableName, suffix) {
+			relevantTables = append(relevantTables, tableName)
+		}
+	}
+
+	if len(relevantTables) == 0 {
+		return nil, nil
+	}
+
+	// Collect information about where the IP exists
+	var foundInfo []IPClearInfo
+	for _, addr := range addresses {
+		for _, tableName := range relevantTables {
+			entry, _ := b.getHAProxyIPInTable(addr, tableName, ipInfo.Address)
+			if entry != nil {
+				foundInfo = append(foundInfo, IPClearInfo{
+					TableName: tableName,
+					Backend:   addr,
+					Gpc0:      entry.Gpc0,
+					ExpMillis: entry.Exp,
+				})
+			}
+		}
+	}
+
+	return foundInfo, nil
+}
+
 // ClearIP removes an IP from all HAProxy stick tables on all backends and verifies removal.
 // Returns a slice of IPClearInfo describing where the IP was found before clearing.
 func (b *HAProxyBlocker) ClearIP(ipInfo utils.IPInfo) ([]IPClearInfo, error) {

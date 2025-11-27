@@ -44,16 +44,16 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 		}
 		p.GetActivityMutex().RUnlock()
 
-		// Check HAProxy tables
-		var inBackend bool
+		// Check HAProxy tables for detailed information
+		var backendInfo []interface{}
 		blockerInterface := p.GetBlocker()
 		if blockerInterface != nil {
 			if b, ok := blockerInterface.(interface {
-				IsIPBlocked(ipInfo utils.IPInfo) (bool, error)
+				GetIPDetails(ipInfo utils.IPInfo) ([]interface{}, error)
 			}); ok {
 				ipInfo := utils.NewIPInfo(canonical)
-				if blocked, err := b.IsIPBlocked(ipInfo); err == nil {
-					inBackend = blocked
+				if details, err := b.GetIPDetails(ipInfo); err == nil {
+					backendInfo = details
 				}
 			}
 		}
@@ -66,16 +66,17 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 			_, _ = fmt.Fprintf(w, "node: %s\n", nodeName)
 		}
 
-		if len(actors) == 0 && !inBackend {
+		if len(actors) == 0 && len(backendInfo) == 0 {
 			_, _ = fmt.Fprint(w, "status: unknown\n")
 			addFollowerHint(w, p, canonical)
 			return
 		}
 
-		// If in HAProxy but not in activity store, show as blocked
-		if inBackend && len(actors) == 0 {
+		// If in HAProxy but not in activity store, show backend details
+		if len(backendInfo) > 0 && len(actors) == 0 {
 			_, _ = fmt.Fprint(w, "status: blocked\n")
 			_, _ = fmt.Fprint(w, "source: backend\n")
+			formatBackendInfo(w, backendInfo, p.GetDurationTables())
 			addFollowerHint(w, p, canonical)
 			return
 		}
@@ -84,12 +85,51 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 		status := aggregateActorStatus(actors)
 		_, _ = fmt.Fprint(w, status)
 
-		// Add HAProxy status if different
-		if inBackend {
-			_, _ = fmt.Fprint(w, "backend: present\n")
+		// Add HAProxy details if present
+		if len(backendInfo) > 0 {
+			_, _ = fmt.Fprint(w, "backend_tables:\n")
+			formatBackendInfo(w, backendInfo, p.GetDurationTables())
 		}
 
 		addFollowerHint(w, p, canonical)
+	}
+}
+
+// formatBackendInfo formats HAProxy table information for display
+func formatBackendInfo(w http.ResponseWriter, backendInfo []interface{}, durationTables map[time.Duration]string) {
+	for _, info := range backendInfo {
+		infoVal := reflect.ValueOf(info)
+		tableName := infoVal.FieldByName("TableName").String()
+		backend := infoVal.FieldByName("Backend").String()
+		gpc0 := int(infoVal.FieldByName("Gpc0").Int())
+		expMillis := infoVal.FieldByName("ExpMillis").Int()
+
+		status := "unblocked"
+		if gpc0 > 0 {
+			status = "blocked"
+		}
+
+		expSec := expMillis / 1000
+		expiresDuration := time.Duration(expSec) * time.Second
+
+		// Find table duration
+		var tableDuration time.Duration
+		for dur, baseTableName := range durationTables {
+			if strings.HasPrefix(tableName, baseTableName) {
+				tableDuration = dur
+				break
+			}
+		}
+
+		if tableDuration > 0 {
+			elapsedSec := tableDuration.Seconds() - float64(expSec)
+			addedAt := time.Now().Add(-time.Duration(elapsedSec) * time.Second)
+			_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, duration: %v, expires in: %s, added: %s)\n",
+				tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format("2006-01-02 15:04:05"))
+		} else {
+			_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %s)\n",
+				tableName, backend, status, formatDuration(expiresDuration))
+		}
 	}
 }
 
@@ -649,6 +689,52 @@ func clusterIPAggregateHandler(p Provider) http.HandlerFunc {
 			}
 			if node.UnblockReason != "" {
 				_, _ = fmt.Fprintf(w, "    reason: %s\n", node.UnblockReason)
+			}
+		}
+
+		// Add backend table details from leader node
+		blockerInterface := p.GetBlocker()
+		if blockerInterface != nil {
+			if b, ok := blockerInterface.(interface {
+				GetIPDetails(ipInfo utils.IPInfo) ([]interface{}, error)
+			}); ok {
+				ipInfo := utils.NewIPInfo(canonical)
+				if details, err := b.GetIPDetails(ipInfo); err == nil && len(details) > 0 {
+					_, _ = fmt.Fprint(w, "backend_tables:\n")
+					for _, info := range details {
+						infoVal := reflect.ValueOf(info)
+						tableName := infoVal.FieldByName("TableName").String()
+						backend := infoVal.FieldByName("Backend").String()
+						gpc0 := int(infoVal.FieldByName("Gpc0").Int())
+						expMillis := infoVal.FieldByName("ExpMillis").Int()
+
+						status := "unblocked"
+						if gpc0 > 0 {
+							status = "blocked"
+						}
+
+						expSec := expMillis / 1000
+						expiresDuration := time.Duration(expSec) * time.Second
+
+						var tableDuration time.Duration
+						for dur, baseTableName := range p.GetDurationTables() {
+							if strings.HasPrefix(tableName, baseTableName) {
+								tableDuration = dur
+								break
+							}
+						}
+
+						if tableDuration > 0 {
+							elapsedSec := tableDuration.Seconds() - float64(expSec)
+							addedAt := time.Now().Add(-time.Duration(elapsedSec) * time.Second)
+							_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, duration: %v, expires in: %s, added: %s)\n",
+								tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format("2006-01-02 15:04:05"))
+						} else {
+							_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %s)\n",
+								tableName, backend, status, formatDuration(expiresDuration))
+						}
+					}
+				}
 			}
 		}
 	}
