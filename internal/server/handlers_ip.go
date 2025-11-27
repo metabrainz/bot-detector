@@ -54,19 +54,26 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 			if getDetailsMethod.IsValid() {
 				ipInfo := utils.NewIPInfo(canonical)
 				results := getDetailsMethod.Call([]reflect.Value{reflect.ValueOf(ipInfo)})
+				p.Log(logging.LevelInfo, "IP_LOOKUP", "GetIPDetails called for %s, results: %d", canonical, len(results))
 				if len(results) == 2 && results[1].IsNil() { // No error
 					// Convert result to []interface{}
 					detailsVal := results[0]
+					p.Log(logging.LevelInfo, "IP_LOOKUP", "Details value kind: %v, len: %d", detailsVal.Kind(), detailsVal.Len())
 					if detailsVal.Kind() == reflect.Slice {
 						for i := 0; i < detailsVal.Len(); i++ {
 							backendInfo = append(backendInfo, detailsVal.Index(i).Interface())
 						}
 					}
+					p.Log(logging.LevelInfo, "IP_LOOKUP", "Backend info collected: %d entries", len(backendInfo))
 				} else if len(results) == 2 && !results[1].IsNil() {
 					err := results[1].Interface().(error)
-					p.Log(logging.LevelDebug, "IP_LOOKUP", "Failed to get backend details for %s: %v", canonical, err)
+					p.Log(logging.LevelInfo, "IP_LOOKUP", "Failed to get backend details for %s: %v", canonical, err)
 				}
+			} else {
+				p.Log(logging.LevelInfo, "IP_LOOKUP", "GetIPDetails method not found on blocker")
 			}
+		} else {
+			p.Log(logging.LevelInfo, "IP_LOOKUP", "Blocker interface is nil")
 		}
 
 		// Format response
