@@ -3,6 +3,7 @@ package blocker
 import (
 	"bot-detector/internal/logging"
 	"bot-detector/internal/utils" // Import utils for IPInfo
+	"reflect"
 	"sync"
 	"time"
 )
@@ -110,6 +111,37 @@ func (b *RateLimitedBlocker) UnblockDirect(ipInfo utils.IPInfo, reason string) e
 // IsIPBlocked checks if an IP is currently blocked in the backend.
 func (b *RateLimitedBlocker) IsIPBlocked(ipInfo utils.IPInfo) (bool, error) {
 	return b.WrappedBlocker.IsIPBlocked(ipInfo)
+}
+
+// GetIPDetails returns detailed information about an IP across all tables and backends.
+func (b *RateLimitedBlocker) GetIPDetails(ipInfo utils.IPInfo) ([]interface{}, error) {
+	// Use reflection to call GetIPDetails on the wrapped blocker if it exists
+	wrappedVal := reflect.ValueOf(b.WrappedBlocker)
+	method := wrappedVal.MethodByName("GetIPDetails")
+	if !method.IsValid() {
+		return nil, nil
+	}
+
+	results := method.Call([]reflect.Value{reflect.ValueOf(ipInfo)})
+	if len(results) != 2 {
+		return nil, nil
+	}
+
+	// Check for error
+	if !results[1].IsNil() {
+		return nil, results[1].Interface().(error)
+	}
+
+	// Convert result slice to []interface{}
+	var details []interface{}
+	detailsVal := results[0]
+	if detailsVal.Kind() == reflect.Slice {
+		for i := 0; i < detailsVal.Len(); i++ {
+			details = append(details, detailsVal.Index(i).Interface())
+		}
+	}
+
+	return details, nil
 }
 
 // DumpBackends retrieves all currently blocked IPs from the wrapped blocker.
