@@ -48,13 +48,22 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 		var backendInfo []interface{}
 		blockerInterface := p.GetBlocker()
 		if blockerInterface != nil {
-			if b, ok := blockerInterface.(interface {
-				GetIPDetails(ipInfo utils.IPInfo) ([]interface{}, error)
-			}); ok {
+			// Try to get detailed IP information from HAProxy
+			// We use reflection to avoid import cycles with the blocker package
+			getDetailsMethod := reflect.ValueOf(blockerInterface).MethodByName("GetIPDetails")
+			if getDetailsMethod.IsValid() {
 				ipInfo := utils.NewIPInfo(canonical)
-				if details, err := b.GetIPDetails(ipInfo); err == nil {
-					backendInfo = details
-				} else {
+				results := getDetailsMethod.Call([]reflect.Value{reflect.ValueOf(ipInfo)})
+				if len(results) == 2 && results[1].IsNil() { // No error
+					// Convert result to []interface{}
+					detailsVal := results[0]
+					if detailsVal.Kind() == reflect.Slice {
+						for i := 0; i < detailsVal.Len(); i++ {
+							backendInfo = append(backendInfo, detailsVal.Index(i).Interface())
+						}
+					}
+				} else if len(results) == 2 && !results[1].IsNil() {
+					err := results[1].Interface().(error)
 					p.Log(logging.LevelDebug, "IP_LOOKUP", "Failed to get backend details for %s: %v", canonical, err)
 				}
 			}
@@ -697,47 +706,52 @@ func clusterIPAggregateHandler(p Provider) http.HandlerFunc {
 		// Add backend table details from leader node
 		blockerInterface := p.GetBlocker()
 		if blockerInterface != nil {
-			if b, ok := blockerInterface.(interface {
-				GetIPDetails(ipInfo utils.IPInfo) ([]interface{}, error)
-			}); ok {
+			getDetailsMethod := reflect.ValueOf(blockerInterface).MethodByName("GetIPDetails")
+			if getDetailsMethod.IsValid() {
 				ipInfo := utils.NewIPInfo(canonical)
-				if details, err := b.GetIPDetails(ipInfo); err == nil && len(details) > 0 {
-					_, _ = fmt.Fprint(w, "backend_tables:\n")
-					for _, info := range details {
-						infoVal := reflect.ValueOf(info)
-						tableName := infoVal.FieldByName("TableName").String()
-						backend := infoVal.FieldByName("Backend").String()
-						gpc0 := int(infoVal.FieldByName("Gpc0").Int())
-						expMillis := infoVal.FieldByName("ExpMillis").Int()
+				results := getDetailsMethod.Call([]reflect.Value{reflect.ValueOf(ipInfo)})
+				if len(results) == 2 && results[1].IsNil() {
+					detailsVal := results[0]
+					if detailsVal.Kind() == reflect.Slice && detailsVal.Len() > 0 {
+						_, _ = fmt.Fprint(w, "backend_tables:\n")
+						for i := 0; i < detailsVal.Len(); i++ {
+							info := detailsVal.Index(i).Interface()
+							infoVal := reflect.ValueOf(info)
+							tableName := infoVal.FieldByName("TableName").String()
+							backend := infoVal.FieldByName("Backend").String()
+							gpc0 := int(infoVal.FieldByName("Gpc0").Int())
+							expMillis := infoVal.FieldByName("ExpMillis").Int()
 
-						status := "unblocked"
-						if gpc0 > 0 {
-							status = "blocked"
-						}
+							status := "unblocked"
+							if gpc0 > 0 {
+								status = "blocked"
+							}
 
-						expSec := expMillis / 1000
-						expiresDuration := time.Duration(expSec) * time.Second
+							expSec := expMillis / 1000
+							expiresDuration := time.Duration(expSec) * time.Second
 
-						var tableDuration time.Duration
-						for dur, baseTableName := range p.GetDurationTables() {
-							if strings.HasPrefix(tableName, baseTableName) {
-								tableDuration = dur
-								break
+							var tableDuration time.Duration
+							for dur, baseTableName := range p.GetDurationTables() {
+								if strings.HasPrefix(tableName, baseTableName) {
+									tableDuration = dur
+									break
+								}
+							}
+
+							if tableDuration > 0 {
+								elapsedSec := tableDuration.Seconds() - float64(expSec)
+								addedAt := time.Now().Add(-time.Duration(elapsedSec) * time.Second)
+								_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, duration: %v, expires in: %s, added: %s)\n",
+									tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format("2006-01-02 15:04:05"))
+							} else {
+								_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %s)\n",
+									tableName, backend, status, formatDuration(expiresDuration))
 							}
 						}
-
-						if tableDuration > 0 {
-							elapsedSec := tableDuration.Seconds() - float64(expSec)
-							addedAt := time.Now().Add(-time.Duration(elapsedSec) * time.Second)
-							_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, duration: %v, expires in: %s, added: %s)\n",
-								tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format("2006-01-02 15:04:05"))
-						} else {
-							_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %s)\n",
-								tableName, backend, status, formatDuration(expiresDuration))
-						}
+					} else if len(results) == 2 && !results[1].IsNil() {
+						err := results[1].Interface().(error)
+						p.Log(logging.LevelDebug, "CLUSTER_IP", "Failed to get backend details for %s: %v", canonical, err)
 					}
-				} else if err != nil {
-					p.Log(logging.LevelDebug, "CLUSTER_IP", "Failed to get backend details for %s: %v", canonical, err)
 				}
 			}
 		}
