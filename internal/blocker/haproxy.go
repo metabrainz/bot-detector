@@ -248,17 +248,14 @@ func (b *HAProxyBlocker) IsIPBlocked(ipInfo utils.IPInfo) (bool, error) {
 			continue
 		}
 
-		// Get all IPs in this table
-		entries, err := b.getHAProxyAllIPsInTable(addr, tableName)
+		// Query specific IP key directly
+		entry, err := b.getHAProxyIPInTable(addr, tableName, ipInfo.Address)
 		if err != nil {
 			continue
 		}
 
-		// Check if our IP is blocked (gpc0 > 0)
-		for _, entry := range entries {
-			if entry.IP == ipInfo.Address && entry.Gpc0 > 0 {
-				return true, nil
-			}
+		if entry != nil && entry.Gpc0 > 0 {
+			return true, nil
 		}
 	}
 
@@ -1288,6 +1285,57 @@ func (b *HAProxyBlocker) getHAProxyTableNames(addr string) ([]string, error) {
 		}
 	}
 	return tableNames, scanner.Err()
+}
+
+// getHAProxyIPInTable queries a specific IP key in a table using direct key lookup.
+func (b *HAProxyBlocker) getHAProxyIPInTable(addr, tableName, ip string) (*HAProxyTableEntry, error) {
+	command := fmt.Sprintf("show table %s key %s\n", tableName, ip)
+	response, err := b.ExecuteHAProxyCommandFunc(addr, command)
+	if err != nil {
+		return nil, err
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(response))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.Contains(line, "key=") {
+			continue
+		}
+
+		var ipParsed, expStr, gpc0Str string
+		matches := haProxyTableEntryRegex.FindAllStringSubmatch(line, -1)
+		for _, match := range matches {
+			if len(match) > 1 {
+				if ipParsed == "" && match[haProxyTableEntryRegex.SubexpIndex("ip")] != "" {
+					ipParsed = match[haProxyTableEntryRegex.SubexpIndex("ip")]
+				}
+				if expStr == "" && match[haProxyTableEntryRegex.SubexpIndex("exp")] != "" {
+					expStr = match[haProxyTableEntryRegex.SubexpIndex("exp")]
+				}
+				if gpc0Str == "" && match[haProxyTableEntryRegex.SubexpIndex("gpc0")] != "" {
+					gpc0Str = match[haProxyTableEntryRegex.SubexpIndex("gpc0")]
+				}
+			}
+		}
+
+		if ipParsed != "" && expStr != "" && gpc0Str != "" {
+			exp, parseErr := utils.ParseInt64(expStr)
+			if parseErr != nil {
+				return nil, fmt.Errorf("failed to parse exp value '%s': %w", expStr, parseErr)
+			}
+			gpc0, parseErr := utils.ParseInt(gpc0Str)
+			if parseErr != nil {
+				return nil, fmt.Errorf("failed to parse gpc0 value '%s': %w", gpc0Str, parseErr)
+			}
+			return &HAProxyTableEntry{
+				IP:      ipParsed,
+				Exp:     exp,
+				Gpc0:    gpc0,
+				RawLine: line,
+			}, nil
+		}
+	}
+	return nil, scanner.Err()
 }
 
 // getHAProxyAllIPsInTable executes "show table <name>" and parses the response to get all IPs, regardless of gpc0 status.
