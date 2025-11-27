@@ -437,6 +437,7 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 			}
 
 			expSec := expMillis / 1000
+			expiresDuration := time.Duration(expSec) * time.Second
 
 			// Find table duration by matching table name
 			var tableDuration time.Duration
@@ -450,17 +451,54 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 			if tableDuration > 0 {
 				// Calculate when it was added: now - (duration - expires)
 				elapsedSec := tableDuration.Seconds() - float64(expSec)
-				addedAgo := time.Duration(elapsedSec) * time.Second
-				_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, duration: %v, expires in: %ds, added: %v ago)\n",
-					tableName, backend, status, tableDuration, expSec, addedAgo.Round(time.Second))
+				addedAt := time.Now().Add(-time.Duration(elapsedSec) * time.Second)
+				_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, duration: %v, expires in: %s, added: %s)\n",
+					tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format("2006-01-02 15:04:05"))
 			} else {
-				_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %ds)\n",
-					tableName, backend, status, expSec)
+				_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %s)\n",
+					tableName, backend, status, formatDuration(expiresDuration))
 			}
 		}
 
 		p.Log(logging.LevelInfo, "API", "IP %s cleared from %d table entries", canonical, len(foundInfo))
 	}
+}
+
+// formatDuration formats a duration in human-readable format (weeks, days, hours, minutes, seconds)
+func formatDuration(d time.Duration) string {
+	if d == 0 {
+		return "0s"
+	}
+
+	seconds := int64(d.Seconds())
+
+	weeks := seconds / 604800
+	seconds %= 604800
+	days := seconds / 86400
+	seconds %= 86400
+	hours := seconds / 3600
+	seconds %= 3600
+	minutes := seconds / 60
+	seconds %= 60
+
+	var parts []string
+	if weeks > 0 {
+		parts = append(parts, fmt.Sprintf("%dw", weeks))
+	}
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", days))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if minutes > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", minutes))
+	}
+	if seconds > 0 || len(parts) == 0 {
+		parts = append(parts, fmt.Sprintf("%ds", seconds))
+	}
+
+	return strings.Join(parts, " ")
 }
 
 // clusterIPLookupHandler returns IP status as JSON for internal cluster queries
