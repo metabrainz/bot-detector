@@ -54,6 +54,8 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 				ipInfo := utils.NewIPInfo(canonical)
 				if details, err := b.GetIPDetails(ipInfo); err == nil {
 					backendInfo = details
+				} else {
+					p.Log(logging.LevelDebug, "IP_LOOKUP", "Failed to get backend details for %s: %v", canonical, err)
 				}
 			}
 		}
@@ -734,6 +736,8 @@ func clusterIPAggregateHandler(p Provider) http.HandlerFunc {
 								tableName, backend, status, formatDuration(expiresDuration))
 						}
 					}
+				} else if err != nil {
+					p.Log(logging.LevelDebug, "CLUSTER_IP", "Failed to get backend details for %s: %v", canonical, err)
 				}
 			}
 		}
