@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"strings"
 	"time"
 
 	"bot-detector/internal/logging"
@@ -418,6 +419,9 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 			return
 		}
 
+		// Get duration tables for calculating when IP was added
+		durationTables := p.GetDurationTables()
+
 		_, _ = fmt.Fprintf(w, "IP %s found and cleared from:\n", canonical)
 		for _, info := range foundInfo {
 			// Use reflection to access fields since we can't import blocker package
@@ -433,7 +437,26 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 			}
 
 			expSec := expMillis / 1000
-			_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %ds)\n", tableName, backend, status, expSec)
+
+			// Find table duration by matching table name
+			var tableDuration time.Duration
+			for dur, baseTableName := range durationTables {
+				if strings.HasPrefix(tableName, baseTableName) {
+					tableDuration = dur
+					break
+				}
+			}
+
+			if tableDuration > 0 {
+				// Calculate when it was added: now - (duration - expires)
+				elapsedSec := tableDuration.Seconds() - float64(expSec)
+				addedAgo := time.Duration(elapsedSec) * time.Second
+				_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, duration: %v, expires in: %ds, added: %v ago)\n",
+					tableName, backend, status, tableDuration, expSec, addedAgo.Round(time.Second))
+			} else {
+				_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %ds)\n",
+					tableName, backend, status, expSec)
+			}
 		}
 
 		p.Log(logging.LevelInfo, "API", "IP %s cleared from %d table entries", canonical, len(foundInfo))

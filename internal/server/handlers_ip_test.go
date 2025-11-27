@@ -201,6 +201,13 @@ func (m *mockIPProvider) GetBlocker() interface{} {
 	return m.blocker
 }
 
+func (m *mockIPProvider) GetDurationTables() map[time.Duration]string {
+	return map[time.Duration]string{
+		1 * time.Hour:    "one_hour_blocks",
+		30 * time.Minute: "thirty_min_blocks",
+	}
+}
+
 // Stub implementations for other Provider methods
 func (m *mockIPProvider) GetListenConfigs() interface{}                                           { return []*struct{}{} }
 func (m *mockIPProvider) GetShutdownChannel() chan os.Signal                                      { return nil }

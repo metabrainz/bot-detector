@@ -150,6 +150,10 @@ func (m *mockProvider) GetBlocker() interface{} {
 	return nil
 }
 
+func (m *mockProvider) GetDurationTables() map[time.Duration]string {
+	return nil
+}
+
 // TestServer_StartAndShutdown verifies the full lifecycle of the stats server.
 func TestServer_StartAndShutdown(t *testing.T) {
 	// --- Setup ---

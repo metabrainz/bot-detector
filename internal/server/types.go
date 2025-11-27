@@ -81,4 +81,7 @@ type Provider interface {
 
 	// GetBlocker returns the blocker instance for IP removal operations.
 	GetBlocker() interface{}
+
+	// GetDurationTables returns the configured duration-to-table mappings.
+	GetDurationTables() map[time.Duration]string
 }
