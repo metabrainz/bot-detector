@@ -215,6 +215,99 @@ func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 	return b.executeCommandsConcurrently(ipInfo.Address, targets, "unblock")
 }
 
+// IPClearInfo contains information about an IP found in HAProxy tables before clearing
+type IPClearInfo struct {
+	TableName string
+	Backend   string
+	Gpc0      int
+	ExpMillis int64
+}
+
+// ClearIP removes an IP from all HAProxy stick tables on all backends and verifies removal.
+// Returns a slice of IPClearInfo describing where the IP was found before clearing.
+func (b *HAProxyBlocker) ClearIP(ipInfo utils.IPInfo) ([]IPClearInfo, error) {
+	if b.IsDryRun {
+		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would clear IP %s from all tables.", ipInfo.Address)
+		return nil, nil
+	}
+
+	if ipInfo.Version != 4 && ipInfo.Version != 6 {
+		b.P.Log(logging.LevelError, "SKIP_CLEAR", "Cannot clear IP %s: unrecognized IP version", ipInfo.Address)
+		return nil, nil
+	}
+
+	addresses := b.P.GetBlockerAddresses()
+	if len(addresses) == 0 {
+		return nil, nil
+	}
+
+	// Get all table names from first backend
+	tableNames, err := b.getHAProxyTableNames(addresses[0])
+	if err != nil {
+		return nil, fmt.Errorf("failed to get table names: %w", err)
+	}
+
+	// Filter tables by IP version
+	suffix := getIPVersionSuffix(ipInfo.Version)
+	var relevantTables []string
+	for _, tableName := range tableNames {
+		if strings.HasSuffix(tableName, suffix) {
+			relevantTables = append(relevantTables, tableName)
+		}
+	}
+
+	if len(relevantTables) == 0 {
+		return nil, nil
+	}
+
+	// First, collect information about where the IP exists
+	var foundInfo []IPClearInfo
+	for _, addr := range addresses {
+		for _, tableName := range relevantTables {
+			entry, _ := b.getHAProxyIPInTable(addr, tableName, ipInfo.Address)
+			if entry != nil {
+				foundInfo = append(foundInfo, IPClearInfo{
+					TableName: tableName,
+					Backend:   addr,
+					Gpc0:      entry.Gpc0,
+					ExpMillis: entry.Exp,
+				})
+			}
+		}
+	}
+
+	// If IP not found anywhere, return early
+	if len(foundInfo) == 0 {
+		return nil, nil
+	}
+
+	// Clear IP from all relevant tables on all backends
+	targets := make(map[string]map[string]string)
+	for _, tableName := range relevantTables {
+		targets[tableName] = make(map[string]string)
+		command := fmt.Sprintf("clear table %s key %s\n", tableName, ipInfo.Address)
+		for _, addr := range addresses {
+			targets[tableName][addr] = command
+		}
+	}
+
+	if err := b.executeCommandsConcurrently(ipInfo.Address, targets, "clear"); err != nil {
+		return foundInfo, err
+	}
+
+	// Verify removal on all backends
+	for _, addr := range addresses {
+		for _, tableName := range relevantTables {
+			entry, _ := b.getHAProxyIPInTable(addr, tableName, ipInfo.Address)
+			if entry != nil {
+				return foundInfo, fmt.Errorf("verification failed: IP %s still present in table %s on backend %s", ipInfo.Address, tableName, addr)
+			}
+		}
+	}
+
+	return foundInfo, nil
+}
+
 // IsIPBlocked checks if an IP is currently blocked in any HAProxy table.
 // It only queries tables matching the IP version for efficiency.
 // Returns true only if the IP has gpc0 > 0 (actually blocked).

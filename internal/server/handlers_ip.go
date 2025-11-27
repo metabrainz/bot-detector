@@ -365,7 +365,7 @@ func parseRFC3339(s string) time.Time {
 	return t
 }
 
-// unblockIPHandler unblocks an IP by setting gpc0=0 in all HAProxy instances
+// unblockIPHandler unblocks an IP by removing it from all HAProxy tables on all backends
 func unblockIPHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
@@ -389,9 +389,9 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 			return
 		}
 
-		// Type assert to blocker.Blocker
+		// Type assert to blocker with ClearIP method
 		b, ok := blockerInterface.(interface {
-			Unblock(ipInfo utils.IPInfo, reason string) error
+			ClearIP(ipInfo utils.IPInfo) ([]interface{}, error)
 		})
 		if !ok {
 			http.Error(w, "Blocker interface error", http.StatusInternalServerError)
@@ -401,18 +401,42 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 		// Create IPInfo using helper
 		ipInfo := utils.NewIPInfo(canonical)
 
-		// Unblock the IP
-		if err := b.Unblock(ipInfo, "manual unblock via API"); err != nil {
-			p.Log(logging.LevelError, "API", "Failed to unblock IP %s: %v", canonical, err)
-			http.Error(w, "Failed to unblock IP", http.StatusInternalServerError)
+		// Clear the IP from all tables
+		foundInfo, err := b.ClearIP(ipInfo)
+		if err != nil {
+			p.Log(logging.LevelError, "API", "Failed to clear IP %s: %v", canonical, err)
+			http.Error(w, fmt.Sprintf("Failed to clear IP: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		p.Log(logging.LevelInfo, "API", "IP %s unblocked (gpc0=0 set in all instances)", canonical)
-
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(w, "IP %s unblocked successfully\n", canonical)
+
+		if len(foundInfo) == 0 {
+			_, _ = fmt.Fprintf(w, "IP %s not found in any tables\n", canonical)
+			p.Log(logging.LevelInfo, "API", "IP %s not found in any tables", canonical)
+			return
+		}
+
+		_, _ = fmt.Fprintf(w, "IP %s found and cleared from:\n", canonical)
+		for _, info := range foundInfo {
+			// Use reflection to access fields since we can't import blocker package
+			infoVal := reflect.ValueOf(info)
+			tableName := infoVal.FieldByName("TableName").String()
+			backend := infoVal.FieldByName("Backend").String()
+			gpc0 := int(infoVal.FieldByName("Gpc0").Int())
+			expMillis := infoVal.FieldByName("ExpMillis").Int()
+
+			status := "unblocked"
+			if gpc0 > 0 {
+				status = "blocked"
+			}
+
+			expSec := expMillis / 1000
+			_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %ds)\n", tableName, backend, status, expSec)
+		}
+
+		p.Log(logging.LevelInfo, "API", "IP %s cleared from %d table entries", canonical, len(foundInfo))
 	}
 }
 

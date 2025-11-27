@@ -513,19 +513,18 @@ func TestExtractNodeInfo(t *testing.T) {
 	// cluster aggregation handler tests.
 }
 
-// mockBlocker implements the Unblock interface for testing
+// mockBlocker implements the ClearIP interface for testing
 type mockBlocker struct {
-	unblockCalled bool
-	unblockIP     string
-	unblockReason string
-	unblockError  error
+	clearCalled bool
+	clearIP     string
+	clearError  error
+	clearResult []interface{}
 }
 
-func (m *mockBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
-	m.unblockCalled = true
-	m.unblockIP = ipInfo.Address
-	m.unblockReason = reason
-	return m.unblockError
+func (m *mockBlocker) ClearIP(ipInfo utils.IPInfo) ([]interface{}, error) {
+	m.clearCalled = true
+	m.clearIP = ipInfo.Address
+	return m.clearResult, m.clearError
 }
 
 func TestUnblockIPHandler_Success(t *testing.T) {
@@ -547,21 +546,12 @@ func TestUnblockIPHandler_Success(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", rr.Code)
 	}
 
-	if !blocker.unblockCalled {
-		t.Error("Expected Unblock to be called")
+	if !blocker.clearCalled {
+		t.Error("Expected ClearIP to be called")
 	}
 
-	if blocker.unblockIP != "192.168.1.1" {
-		t.Errorf("Expected IP 192.168.1.1, got %s", blocker.unblockIP)
-	}
-
-	if blocker.unblockReason != "manual unblock via API" {
-		t.Errorf("Expected reason 'manual unblock via API', got %s", blocker.unblockReason)
-	}
-
-	body := rr.Body.String()
-	if !strings.Contains(body, "unblocked successfully") {
-		t.Errorf("Expected success message, got: %s", body)
+	if blocker.clearIP != "192.168.1.1" {
+		t.Errorf("Expected IP 192.168.1.1, got %s", blocker.clearIP)
 	}
 }
 
@@ -602,8 +592,8 @@ func TestUnblockIPHandler_IPv6(t *testing.T) {
 		t.Errorf("Expected status 200, got %d", rr.Code)
 	}
 
-	if blocker.unblockIP != "2001:db8::1" {
-		t.Errorf("Expected canonical IPv6 2001:db8::1, got %s", blocker.unblockIP)
+	if blocker.clearIP != "2001:db8::1" {
+		t.Errorf("Expected canonical IPv6 2001:db8::1, got %s", blocker.clearIP)
 	}
 }
 
