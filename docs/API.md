@@ -250,67 +250,108 @@ These endpoints are available when cluster mode is enabled. They provide cluster
 
 These endpoints allow you to query the block/unblock status of specific IP addresses. They provide visibility into which IPs are currently blocked, why they were blocked, and when blocks will expire.
 
-### `/ip/{ip}`
+### `/ip/{ip}` (Cluster-Aware)
 
 *   **Method:** `GET`
 *   **Content-Type:** `text/plain; charset=utf-8`
-*   **Description:** Returns the block/unblock status of an IP address on the local node in human-readable plain text format. The IP address is automatically canonicalized (e.g., `2001:0db8::1` becomes `2001:db8::1`). This endpoint checks both the activity store (behavioral chain state) and the actual blocker backend tables to provide accurate status.
+*   **Description:** Returns the block/unblock status of an IP address. This endpoint is cluster-aware and automatically provides the appropriate view based on deployment:
+    *   **Follower nodes:** Forward the request to the leader and return cluster-wide aggregated status
+    *   **Leader nodes:** Query all nodes and return cluster-wide aggregated status
+    *   **Standalone nodes:** Return local node status only
+    
+    The IP address is automatically canonicalized (e.g., `2001:0db8::1` becomes `2001:db8::1`).
 *   **Parameters:**
     *   `ip` - IPv4 or IPv6 address (will be canonicalized)
-*   **Response Format (Blocked IP):**
+*   **Response Format (Cluster - Blocked):**
     ```
-    node: follower-2
+    cluster_status: blocked
+    nodes:
+      - name: node-1
+        status: blocked
+        actors: 2
+        chains:
+          - SimpleBlockChain (until: 2025-11-22T02:00:00Z)
+        persistence: blocked
+        persistence_expires: 2025-11-22T02:00:00Z
+      - name: node-2
+        status: unknown
+    backend_tables:
+      - thirty_min_blocks_v4 on /var/run/haproxy/admin.sock (status: blocked, duration: 30m, expires in: 15m, added: 2025-11-28 10:30:00)
+    ```
+*   **Response Format (Standalone - Blocked):**
+    ```
+    node: standalone
     status: blocked
     actors: 2
     chains:
       - SimpleBlockChain (until: 2025-11-22T02:00:00Z)
-      - API-Abuse-Chain (until: 2025-11-22T01:30:00Z)
-    earliest_block: 2025-11-22T01:00:00Z
-    latest_expiry: 2025-11-22T02:00:00Z
-    backend: present
-    note: For cluster-wide view, query leader at http://leader:8080/cluster/ip/192.168.1.1
-    ```
-*   **Response Format (Blocked in HAProxy only):**
-    ```
-    node: follower-2
-    status: blocked
-    source: backend
-    ```
-*   **Response Format (Unblocked IP):**
-    ```
-    node: follower-2
-    status: unblocked
-    last_seen: 2025-11-22T01:00:00Z
-    last_unblock: 2025-11-22T00:30:00Z
-    reason: good-actor:monitoring_agent
+    persistence: blocked
+    persistence_expires: 2025-11-22T02:00:00Z
+    backend_tables:
+      - thirty_min_blocks_v4 on /var/run/haproxy/admin.sock (status: blocked, duration: 30m, expires in: 15m)
     ```
 *   **Response Format (Unknown IP):**
     ```
-    node: follower-2
-    status: unknown
+    cluster_status: unknown
+    nodes:
+      - name: node-1
+        status: unknown
+      - name: node-2
+        status: unknown
     ```
+*   **Cluster Status Values:**
+    *   `"blocked"`: IP is blocked on all nodes that have information about it
+    *   `"unblocked"`: IP is not blocked on any node
+    *   `"unknown"`: IP is not known to any node
+    *   `"mixed"`: IP has different statuses across nodes
 *   **Notes:**
+    *   Followers automatically get cluster-wide view by forwarding to leader
+    *   Leader queries all nodes concurrently (5-second timeout per node)
+    *   Provides complete picture of IP status across entire deployment
+    *   Shows persistence state from each node
     *   The `actors` field indicates how many IP+UserAgent combinations exist for this IP
     *   Multiple chains can block the same IP if different behavioral patterns are detected
-    *   The `earliest_block` time is estimated (actual block time - 1 hour) since exact block time is not stored
-    *   If queried on a follower node, a hint is provided to query the leader for cluster-wide view
-    *   The `backend: present` field indicates the IP is in blocker backend tables
-    *   IPs may appear in blocker backends but not in activity store (e.g., manually added or persisted from previous runs)
 *   **Responses:**
     *   `200 OK`: Successfully returns IP status.
     *   `400 Bad Request`: Invalid IP address format.
+    *   `502 Bad Gateway`: (Follower only) Failed to contact leader.
 
-### `/api/v1/ip/{ip}`
+### `/api/v1/ip/{ip}` (Cluster-Aware)
 
 *   **Method:** `GET`
 *   **Content-Type:** `application/json`
-*   **Description:** Returns the block/unblock status of an IP address on the local node in JSON format. This endpoint is designed for programmatic access and automation scripts.
+*   **Description:** Returns the block/unblock status of an IP address in JSON format. This endpoint is cluster-aware and designed for programmatic access:
+    *   **Follower nodes:** Forward the request to the leader and return cluster-wide aggregated status
+    *   **Leader nodes:** Query all nodes and return cluster-wide aggregated status
+    *   **Standalone nodes:** Return local node status only
 *   **Parameters:**
     *   `ip` - IPv4 or IPv6 address (will be canonicalized)
-*   **Response Format (Blocked IP):**
+*   **Response Format (Cluster - Blocked):**
     ```json
     {
-      "node": "follower-2",
+      "cluster_status": "blocked",
+      "nodes": [
+        {
+          "name": "node-1",
+          "status": "blocked",
+          "actors": 2,
+          "chains": {
+            "SimpleBlockChain": "2025-11-22T02:00:00Z"
+          },
+          "persistence": "blocked",
+          "persistence_expires": "2025-11-22T02:00:00Z"
+        },
+        {
+          "name": "node-2",
+          "status": "unknown"
+        }
+      ]
+    }
+    ```
+*   **Response Format (Standalone - Blocked IP):**
+    ```json
+    {
+      "node": "standalone",
       "status": "blocked",
       "actors": 2,
       "chains": {
@@ -319,13 +360,14 @@ These endpoints allow you to query the block/unblock status of specific IP addre
       },
       "earliest_block": "2025-11-22T01:00:00Z",
       "latest_expiry": "2025-11-22T02:00:00Z",
-      "cluster_hint": "http://leader:8080/cluster/ip/192.168.1.1"
+      "persistence": "blocked",
+      "persistence_expires": "2025-11-22T02:00:00Z"
     }
     ```
-*   **Response Format (Unblocked IP):**
+*   **Response Format (Standalone - Unblocked IP):**
     ```json
     {
-      "node": "follower-2",
+      "node": "standalone",
       "status": "unblocked",
       "last_seen": "2025-11-22T01:00:00Z",
       "last_unblock": "2025-11-22T00:30:00Z",
@@ -335,8 +377,27 @@ These endpoints allow you to query the block/unblock status of specific IP addre
 *   **Response Format (Unknown IP):**
     ```json
     {
-      "node": "follower-2",
-      "status": "unknown"
+      "cluster_status": "unknown",
+      "nodes": [
+        {
+          "name": "node-1",
+          "status": "unknown"
+        }
+      ]
+    }
+    ```
+*   **Notes:**
+    *   All timestamps are in RFC3339 format (ISO 8601)
+    *   IPv6 addresses are canonicalized (e.g., `2001:0db8::1` → `2001:db8::1`)
+    *   Followers automatically get cluster-wide view by forwarding to leader
+    *   Leader queries all nodes concurrently (5-second timeout per node)
+    *   Standalone nodes return local `IPStatusResponse` format
+    *   Cluster nodes return `ClusterIPAggregateResponse` format
+*   **Responses:**
+    *   `200 OK`: Successfully returns IP status.
+    *   `400 Bad Request`: Invalid IP address format.
+    *   `502 Bad Gateway`: (Follower only) Failed to contact leader.
+
     }
     ```
 *   **Error Response (400 Bad Request):**
@@ -410,112 +471,6 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
     *   `503 Service Unavailable`: Blocker is not available (e.g., dry-run mode).
 
-### `/cluster/ip/{ip}` (Leader Only)
-
-*   **Method:** `GET`
-*   **Content-Type:** `text/plain; charset=utf-8`
-*   **Description:** Returns aggregated IP status across all cluster nodes in human-readable plain text format. This endpoint queries all nodes in the cluster and provides a comprehensive view of the IP's status across the entire deployment. Only available on leader nodes.
-*   **Parameters:**
-    *   `ip` - IPv4 or IPv6 address (will be canonicalized)
-*   **Response Format:**
-    ```
-    cluster_status: blocked
-    nodes:
-      - name: follower-1
-        status: blocked
-        actors: 1
-        chains:
-          - SimpleBlockChain (until: 2025-11-22T02:00:00Z)
-        earliest_block: 2025-11-22T01:00:00Z
-        latest_expiry: 2025-11-22T02:00:00Z
-      - name: follower-2
-        status: blocked
-        actors: 2
-        chains:
-          - SimpleBlockChain (until: 2025-11-22T02:00:05Z)
-          - API-Abuse-Chain (until: 2025-11-22T01:30:05Z)
-        earliest_block: 2025-11-22T01:00:05Z
-        latest_expiry: 2025-11-22T02:00:05Z
-      - name: follower-3
-        status: unblocked
-        last_seen: 2025-11-22T00:50:00Z
-      - name: follower-4
-        status: error
-        error: HTTP 500
-    ```
-*   **Cluster Status Values:**
-    *   `"blocked"`: IP is blocked on all nodes that have information about it
-    *   `"unblocked"`: IP is not blocked on any node (but may have been seen)
-    *   `"unknown"`: IP is not known to any node
-    *   `"mixed"`: IP has different statuses across nodes (e.g., blocked on some, unblocked on others)
-*   **Node Status Values:**
-    *   `"blocked"`: IP is currently blocked on this node
-    *   `"unblocked"`: IP is known but not blocked on this node
-    *   `"unknown"`: IP is not known to this node
-    *   `"error"`: Failed to query this node (network error, timeout, etc.)
-*   **Notes:**
-    *   The leader queries all nodes concurrently with a 5-second timeout per node
-    *   Nodes that fail to respond are marked with `"status": "error"` and include an error message
-    *   This endpoint provides the most complete view of an IP's status across the cluster
-*   **Responses:**
-    *   `200 OK`: Successfully returns aggregated IP status.
-    *   `400 Bad Request`: Invalid IP address format.
-    *   `404 Not Found`: This endpoint is only available on leader nodes.
-
-### `/api/v1/cluster/ip/{ip}` (Leader Only)
-
-*   **Method:** `GET`
-*   **Content-Type:** `application/json`
-*   **Description:** Returns aggregated IP status across all cluster nodes in JSON format. This is the JSON version of `/cluster/ip/{ip}`, designed for programmatic access. Only available on leader nodes.
-*   **Parameters:**
-    *   `ip` - IPv4 or IPv6 address (will be canonicalized)
-*   **Response Format:**
-    ```json
-    {
-      "cluster_status": "blocked",
-      "nodes": [
-        {
-          "name": "follower-1",
-          "status": "blocked",
-          "actors": 1,
-          "chains": {
-            "SimpleBlockChain": "2025-11-22T02:00:00Z"
-          },
-          "earliest_block": "2025-11-22T01:00:00Z",
-          "latest_expiry": "2025-11-22T02:00:00Z"
-        },
-        {
-          "name": "follower-2",
-          "status": "blocked",
-          "actors": 2,
-          "chains": {
-            "SimpleBlockChain": "2025-11-22T02:00:05Z",
-            "API-Abuse-Chain": "2025-11-22T01:30:05Z"
-          },
-          "earliest_block": "2025-11-22T01:00:05Z",
-          "latest_expiry": "2025-11-22T02:00:05Z"
-        },
-        {
-          "name": "follower-3",
-          "status": "unblocked",
-          "last_seen": "2025-11-22T00:50:00Z"
-        },
-        {
-          "name": "follower-4",
-          "status": "error",
-          "error": "HTTP 500"
-        }
-      ]
-    }
-    ```
-*   **Cluster Status Values:** Same as `/cluster/ip/{ip}`
-*   **Node Status Values:** Same as `/cluster/ip/{ip}`
-*   **Notes:** Same as `/cluster/ip/{ip}`
-*   **Responses:**
-    *   `200 OK`: Successfully returns aggregated IP status.
-    *   `400 Bad Request`: Invalid IP address format.
-    *   `404 Not Found`: This endpoint is only available on leader nodes.
-
 ### `/api/v1/cluster/internal/ip/{ip}` (Internal Use)
 
 *   **Method:** `GET`
@@ -531,13 +486,15 @@ These endpoints allow you to query the block/unblock status of specific IP addre
 
 ## Usage Examples
 
-### Query IP status on local node (plain text)
+### Query IP status (cluster-aware)
 ```bash
+# Works on any node - automatically provides cluster-wide view in cluster mode
 curl http://localhost:8080/ip/192.168.1.100
 ```
 
-### Query IP status on local node (JSON)
+### Query IP status JSON (cluster-aware)
 ```bash
+# Returns cluster aggregation on leader/follower, local view on standalone
 curl http://localhost:8080/api/v1/ip/192.168.1.100
 ```
 
@@ -549,11 +506,6 @@ curl -X DELETE http://localhost:8080/ip/192.168.1.100/clear
 ### Clear IPv6 address
 ```bash
 curl -X DELETE http://localhost:8080/ip/2001:db8::1/clear
-```
-
-### Query IP status across cluster (leader only)
-```bash
-curl http://leader:8080/cluster/ip/192.168.1.100
 ```
 
 ### Query IPv6 address (automatically canonicalized)
