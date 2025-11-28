@@ -319,6 +319,17 @@ func (p *Processor) GetDurationTables() map[time.Duration]string {
 	return p.Config.Blockers.Backends.HAProxy.DurationTables
 }
 
+// GetPersistenceState returns the persistence state for an IP (if exists).
+func (p *Processor) GetPersistenceState(ip string) (interface{}, bool) {
+	if !p.PersistenceEnabled {
+		return nil, false
+	}
+	p.PersistenceMutex.Lock()
+	defer p.PersistenceMutex.Unlock()
+	state, exists := p.IPStates[ip]
+	return state, exists
+}
+
 func (p *Processor) GetBlockTableNameFallback() string {
 	return p.Config.Blockers.Backends.HAProxy.TableNameFallback
 }

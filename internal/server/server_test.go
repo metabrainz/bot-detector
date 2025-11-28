@@ -154,6 +154,10 @@ func (m *mockProvider) GetDurationTables() map[time.Duration]string {
 	return nil
 }
 
+func (m *mockProvider) GetPersistenceState(ip string) (interface{}, bool) {
+	return nil, false
+}
+
 // TestServer_StartAndShutdown verifies the full lifecycle of the stats server.
 func TestServer_StartAndShutdown(t *testing.T) {
 	// --- Setup ---

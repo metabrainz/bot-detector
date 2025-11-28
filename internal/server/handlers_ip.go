@@ -85,8 +85,12 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 			_, _ = fmt.Fprintf(w, "node: %s\n", nodeName)
 		}
 
+		// Check persistence state
+		persistState, hasPersist := p.GetPersistenceState(canonical)
+
 		if len(actors) == 0 && len(backendInfo) == 0 {
 			_, _ = fmt.Fprint(w, "status: unknown\n")
+			formatPersistenceState(w, persistState, hasPersist)
 			addFollowerHint(w, p, canonical)
 			return
 		}
@@ -96,6 +100,7 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 			_, _ = fmt.Fprint(w, "status: blocked\n")
 			_, _ = fmt.Fprint(w, "source: backend\n")
 			formatBackendInfo(w, backendInfo, p.GetDurationTables())
+			formatPersistenceState(w, persistState, hasPersist)
 			addFollowerHint(w, p, canonical)
 			return
 		}
@@ -110,6 +115,7 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 			formatBackendInfo(w, backendInfo, p.GetDurationTables())
 		}
 
+		formatPersistenceState(w, persistState, hasPersist)
 		addFollowerHint(w, p, canonical)
 	}
 }
@@ -149,6 +155,25 @@ func formatBackendInfo(w http.ResponseWriter, backendInfo []interface{}, duratio
 			_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %s)\n",
 				tableName, backend, status, formatDuration(expiresDuration))
 		}
+	}
+}
+
+// formatPersistenceState displays persistence state information if available
+func formatPersistenceState(w http.ResponseWriter, persistState interface{}, hasPersist bool) {
+	if !hasPersist {
+		return
+	}
+	stateVal := reflect.ValueOf(persistState)
+	state := stateVal.FieldByName("State").String()
+	expireTime := stateVal.FieldByName("ExpireTime").Interface().(time.Time)
+	reason := stateVal.FieldByName("Reason").String()
+
+	_, _ = fmt.Fprintf(w, "persistence: %s\n", state)
+	if !expireTime.IsZero() {
+		_, _ = fmt.Fprintf(w, "persistence_expires: %s\n", expireTime.Format(time.RFC3339))
+	}
+	if reason != "" {
+		_, _ = fmt.Fprintf(w, "persistence_reason: %s\n", reason)
 	}
 }
 
@@ -241,17 +266,20 @@ func addFollowerHint(w http.ResponseWriter, p Provider, ip string) {
 
 // IPStatusResponse is the JSON response for IP status queries
 type IPStatusResponse struct {
-	Node          string            `json:"node,omitempty"`
-	Status        string            `json:"status"` // "blocked", "unblocked", "unknown"
-	Actors        int               `json:"actors,omitempty"`
-	Chains        map[string]string `json:"chains,omitempty"`         // chain -> expiry time (RFC3339)
-	EarliestBlock string            `json:"earliest_block,omitempty"` // RFC3339
-	LatestExpiry  string            `json:"latest_expiry,omitempty"`  // RFC3339
-	LastSeen      string            `json:"last_seen,omitempty"`      // RFC3339
-	LastUnblock   string            `json:"last_unblock,omitempty"`   // RFC3339
-	UnblockReason string            `json:"unblock_reason,omitempty"`
-	Backend       string            `json:"backend,omitempty"`      // "present" if in HAProxy tables
-	ClusterHint   string            `json:"cluster_hint,omitempty"` // URL to cluster endpoint
+	Node               string            `json:"node,omitempty"`
+	Status             string            `json:"status"` // "blocked", "unblocked", "unknown"
+	Actors             int               `json:"actors,omitempty"`
+	Chains             map[string]string `json:"chains,omitempty"`         // chain -> expiry time (RFC3339)
+	EarliestBlock      string            `json:"earliest_block,omitempty"` // RFC3339
+	LatestExpiry       string            `json:"latest_expiry,omitempty"`  // RFC3339
+	LastSeen           string            `json:"last_seen,omitempty"`      // RFC3339
+	LastUnblock        string            `json:"last_unblock,omitempty"`   // RFC3339
+	UnblockReason      string            `json:"unblock_reason,omitempty"`
+	Backend            string            `json:"backend,omitempty"`      // "present" if in HAProxy tables
+	ClusterHint        string            `json:"cluster_hint,omitempty"` // URL to cluster endpoint
+	Persistence        string            `json:"persistence,omitempty"`  // "blocked" or "unblocked"
+	PersistenceExpires string            `json:"persistence_expires,omitempty"`
+	PersistenceReason  string            `json:"persistence_reason,omitempty"`
 }
 
 // apiIPLookupHandler returns local IP status as JSON
@@ -317,6 +345,20 @@ func apiIPLookupHandler(p Provider) http.HandlerFunc {
 func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string, inBackend bool) IPStatusResponse {
 	response := IPStatusResponse{
 		Node: p.GetNodeName(),
+	}
+
+	// Check persistence state
+	if persistState, hasPersist := p.GetPersistenceState(ip); hasPersist {
+		stateVal := reflect.ValueOf(persistState)
+		response.Persistence = stateVal.FieldByName("State").String()
+		expireTime := stateVal.FieldByName("ExpireTime").Interface().(time.Time)
+		if !expireTime.IsZero() {
+			response.PersistenceExpires = expireTime.Format(time.RFC3339)
+		}
+		reason := stateVal.FieldByName("Reason").String()
+		if reason != "" {
+			response.PersistenceReason = reason
+		}
 	}
 
 	if len(actors) == 0 && !inBackend {
@@ -628,16 +670,19 @@ type ClusterIPAggregateResponse struct {
 
 // NodeIPStatusResponse is the IP status for a single node
 type NodeIPStatusResponse struct {
-	Name          string            `json:"name"`
-	Status        string            `json:"status"` // "blocked", "unblocked", "unknown", "error"
-	Error         string            `json:"error,omitempty"`
-	Actors        int               `json:"actors,omitempty"`
-	Chains        map[string]string `json:"chains,omitempty"`
-	EarliestBlock string            `json:"earliest_block,omitempty"`
-	LatestExpiry  string            `json:"latest_expiry,omitempty"`
-	LastSeen      string            `json:"last_seen,omitempty"`
-	LastUnblock   string            `json:"last_unblock,omitempty"`
-	UnblockReason string            `json:"unblock_reason,omitempty"`
+	Name               string            `json:"name"`
+	Status             string            `json:"status"` // "blocked", "unblocked", "unknown", "error"
+	Error              string            `json:"error,omitempty"`
+	Actors             int               `json:"actors,omitempty"`
+	Chains             map[string]string `json:"chains,omitempty"`
+	EarliestBlock      string            `json:"earliest_block,omitempty"`
+	LatestExpiry       string            `json:"latest_expiry,omitempty"`
+	LastSeen           string            `json:"last_seen,omitempty"`
+	LastUnblock        string            `json:"last_unblock,omitempty"`
+	UnblockReason      string            `json:"unblock_reason,omitempty"`
+	Persistence        string            `json:"persistence,omitempty"`
+	PersistenceExpires string            `json:"persistence_expires,omitempty"`
+	PersistenceReason  string            `json:"persistence_reason,omitempty"`
 }
 
 // NodeInfo is a minimal representation of cluster node to avoid import cycles
@@ -706,6 +751,15 @@ func clusterIPAggregateHandler(p Provider) http.HandlerFunc {
 			}
 			if node.UnblockReason != "" {
 				_, _ = fmt.Fprintf(w, "    reason: %s\n", node.UnblockReason)
+			}
+			if node.Persistence != "" {
+				_, _ = fmt.Fprintf(w, "    persistence: %s\n", node.Persistence)
+			}
+			if node.PersistenceExpires != "" {
+				_, _ = fmt.Fprintf(w, "    persistence_expires: %s\n", node.PersistenceExpires)
+			}
+			if node.PersistenceReason != "" {
+				_, _ = fmt.Fprintf(w, "    persistence_reason: %s\n", node.PersistenceReason)
 			}
 		}
 

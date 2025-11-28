@@ -221,10 +221,11 @@ func (m *mockIPProvider) GenerateStepsMetricsReport() string { return "" }
 func (m *mockIPProvider) GetMarshalledConfig() ([]byte, time.Time, error) {
 	return nil, time.Time{}, nil
 }
-func (m *mockIPProvider) GetNodeStatus() NodeStatus           { return NodeStatus{} }
-func (m *mockIPProvider) GetMetricsSnapshot() MetricsSnapshot { return MetricsSnapshot{} }
-func (m *mockIPProvider) GetAggregatedMetrics() interface{}   { return nil }
-func (m *mockIPProvider) GetClusterNodes() interface{}        { return nil }
+func (m *mockIPProvider) GetNodeStatus() NodeStatus                         { return NodeStatus{} }
+func (m *mockIPProvider) GetMetricsSnapshot() MetricsSnapshot               { return MetricsSnapshot{} }
+func (m *mockIPProvider) GetAggregatedMetrics() interface{}                 { return nil }
+func (m *mockIPProvider) GetClusterNodes() interface{}                      { return nil }
+func (m *mockIPProvider) GetPersistenceState(ip string) (interface{}, bool) { return nil, false }
 
 func TestAPIIPLookupHandler_JSON(t *testing.T) {
 	now := time.Now()

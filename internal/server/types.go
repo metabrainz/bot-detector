@@ -84,4 +84,7 @@ type Provider interface {
 
 	// GetDurationTables returns the configured duration-to-table mappings.
 	GetDurationTables() map[time.Duration]string
+
+	// GetPersistenceState returns the persistence state for an IP (if exists).
+	GetPersistenceState(ip string) (interface{}, bool)
 }
