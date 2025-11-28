@@ -3,6 +3,7 @@ package app
 import (
 	"bot-detector/internal/cluster"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/persistence"
 	"bot-detector/internal/server"
 	"bot-detector/internal/store"
 	"bot-detector/internal/types"
@@ -328,6 +329,39 @@ func (p *Processor) GetPersistenceState(ip string) (interface{}, bool) {
 	defer p.PersistenceMutex.Unlock()
 	state, exists := p.IPStates[ip]
 	return state, exists
+}
+
+// RemoveFromPersistence removes an IP from persistence state and writes unblock event to journal.
+func (p *Processor) RemoveFromPersistence(ip string) error {
+	if !p.PersistenceEnabled {
+		return nil
+	}
+
+	p.PersistenceMutex.Lock()
+	defer p.PersistenceMutex.Unlock()
+
+	// Check if IP exists in persistence
+	if _, exists := p.IPStates[ip]; !exists {
+		return nil // Not in persistence, nothing to do
+	}
+
+	// Remove from IPStates map
+	delete(p.IPStates, ip)
+
+	// Write unblock event to journal
+	if p.JournalHandle != nil {
+		event := &persistence.AuditEvent{
+			Timestamp: time.Now(),
+			Event:     persistence.EventTypeUnblock,
+			IP:        ip,
+			Reason:    "manual_clear",
+		}
+		if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
+			return fmt.Errorf("failed to write unblock event to journal: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (p *Processor) GetBlockTableNameFallback() string {

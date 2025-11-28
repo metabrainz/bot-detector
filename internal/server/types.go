@@ -87,4 +87,7 @@ type Provider interface {
 
 	// GetPersistenceState returns the persistence state for an IP (if exists).
 	GetPersistenceState(ip string) (interface{}, bool)
+
+	// RemoveFromPersistence removes an IP from persistence state and writes unblock event to journal.
+	RemoveFromPersistence(ip string) error
 }

@@ -53,6 +53,7 @@ func (m *MockProvider) GetClusterProtocol() string                             {
 func (m *MockProvider) GetBlocker() interface{}                                { return nil }
 func (m *MockProvider) GetDurationTables() map[time.Duration]string            { return nil }
 func (m *MockProvider) GetPersistenceState(ip string) (interface{}, bool)      { return nil, false }
+func (m *MockProvider) RemoveFromPersistence(ip string) error                  { return nil }
 
 func TestArchiveHandler_StableETag(t *testing.T) {
 	// Common setup

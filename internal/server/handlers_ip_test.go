@@ -226,6 +226,7 @@ func (m *mockIPProvider) GetMetricsSnapshot() MetricsSnapshot               { re
 func (m *mockIPProvider) GetAggregatedMetrics() interface{}                 { return nil }
 func (m *mockIPProvider) GetClusterNodes() interface{}                      { return nil }
 func (m *mockIPProvider) GetPersistenceState(ip string) (interface{}, bool) { return nil, false }
+func (m *mockIPProvider) RemoveFromPersistence(ip string) error             { return nil }
 
 func TestAPIIPLookupHandler_JSON(t *testing.T) {
 	now := time.Now()

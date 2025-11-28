@@ -158,6 +158,10 @@ func (m *mockProvider) GetPersistenceState(ip string) (interface{}, bool) {
 	return nil, false
 }
 
+func (m *mockProvider) RemoveFromPersistence(ip string) error {
+	return nil
+}
+
 // TestServer_StartAndShutdown verifies the full lifecycle of the stats server.
 func TestServer_StartAndShutdown(t *testing.T) {
 	// --- Setup ---
