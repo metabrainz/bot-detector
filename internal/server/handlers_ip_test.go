@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/store"
 	"bot-detector/internal/types"
@@ -532,6 +533,33 @@ func (m *mockBlocker) ClearIP(ipInfo utils.IPInfo) ([]interface{}, error) {
 	m.clearCalled = true
 	m.clearIP = ipInfo.Address
 	return m.clearResult, m.clearError
+}
+
+func (m *mockBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reason string) error {
+	return nil
+}
+
+func (m *mockBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
+	return nil
+}
+
+func (m *mockBlocker) IsIPBlocked(ipInfo utils.IPInfo) (bool, error) {
+	return false, nil
+}
+
+func (m *mockBlocker) DumpBackends() ([]string, error) {
+	return nil, nil
+}
+
+func (m *mockBlocker) CompareHAProxyBackends(expTolerance time.Duration) ([]blocker.SyncDiscrepancy, error) {
+	return nil, nil
+}
+
+func (m *mockBlocker) GetCurrentState() (map[string]int, error) {
+	return nil, nil
+}
+
+func (m *mockBlocker) Shutdown() {
 }
 
 func TestUnblockIPHandler_Success(t *testing.T) {

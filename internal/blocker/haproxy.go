@@ -279,7 +279,7 @@ func (b *HAProxyBlocker) GetIPDetails(ipInfo utils.IPInfo) ([]IPClearInfo, error
 
 // ClearIP removes an IP from all HAProxy stick tables on all backends and verifies removal.
 // Returns a slice of IPClearInfo describing where the IP was found before clearing.
-func (b *HAProxyBlocker) ClearIP(ipInfo utils.IPInfo) ([]IPClearInfo, error) {
+func (b *HAProxyBlocker) ClearIP(ipInfo utils.IPInfo) ([]interface{}, error) {
 	if b.IsDryRun {
 		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would clear IP %s from all tables.", ipInfo.Address)
 		return nil, nil
@@ -346,7 +346,11 @@ func (b *HAProxyBlocker) ClearIP(ipInfo utils.IPInfo) ([]IPClearInfo, error) {
 	}
 
 	if err := b.executeCommandsConcurrently(ipInfo.Address, targets, "clear"); err != nil {
-		return foundInfo, err
+		result := make([]interface{}, len(foundInfo))
+		for i, info := range foundInfo {
+			result[i] = info
+		}
+		return result, err
 	}
 
 	// Verify removal on all backends
@@ -354,12 +358,20 @@ func (b *HAProxyBlocker) ClearIP(ipInfo utils.IPInfo) ([]IPClearInfo, error) {
 		for _, tableName := range relevantTables {
 			entry, _ := b.getHAProxyIPInTable(addr, tableName, ipInfo.Address)
 			if entry != nil {
-				return foundInfo, fmt.Errorf("verification failed: IP %s still present in table %s on backend %s", ipInfo.Address, tableName, addr)
+				result := make([]interface{}, len(foundInfo))
+				for i, info := range foundInfo {
+					result[i] = info
+				}
+				return result, fmt.Errorf("verification failed: IP %s still present in table %s on backend %s", ipInfo.Address, tableName, addr)
 			}
 		}
 	}
 
-	return foundInfo, nil
+	result := make([]interface{}, len(foundInfo))
+	for i, info := range foundInfo {
+		result[i] = info
+	}
+	return result, nil
 }
 
 // IsIPBlocked checks if an IP is currently blocked in any HAProxy table.

@@ -53,6 +53,10 @@ func (m *mockWrappedBlocker) GetCurrentState() (map[string]int, error) {
 	return make(map[string]int), nil
 }
 
+func (m *mockWrappedBlocker) ClearIP(ipInfo utils.IPInfo) ([]interface{}, error) {
+	return nil, nil
+}
+
 func (m *mockWrappedBlocker) Shutdown() {
 	// No-op for mock
 }

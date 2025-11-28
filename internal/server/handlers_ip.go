@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
@@ -448,10 +449,8 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 			return
 		}
 
-		// Type assert to blocker with ClearIP method
-		b, ok := blockerInterface.(interface {
-			ClearIP(ipInfo utils.IPInfo) ([]interface{}, error)
-		})
+		// Type assert to blocker.Blocker interface
+		blocker, ok := blockerInterface.(blocker.Blocker)
 		if !ok {
 			http.Error(w, "Blocker interface error", http.StatusInternalServerError)
 			return
@@ -461,7 +460,7 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 		ipInfo := utils.NewIPInfo(canonical)
 
 		// Clear the IP from all tables
-		foundInfo, err := b.ClearIP(ipInfo)
+		foundInfo, err := blocker.ClearIP(ipInfo)
 		if err != nil {
 			p.Log(logging.LevelError, "API", "Failed to clear IP %s: %v", canonical, err)
 			http.Error(w, fmt.Sprintf("Failed to clear IP: %v", err), http.StatusInternalServerError)
