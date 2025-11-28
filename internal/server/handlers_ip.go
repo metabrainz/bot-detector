@@ -487,26 +487,11 @@ func clearIPHandler(p Provider) http.HandlerFunc {
 
 		// If follower, forward to leader
 		if p.GetNodeRole() == "follower" {
-			leaderAddr := p.GetNodeLeaderAddress()
-			if leaderAddr == "" {
-				http.Error(w, "Leader address not configured", http.StatusServiceUnavailable)
-				return
-			}
-			protocol := p.GetClusterProtocol()
-			leaderURL := fmt.Sprintf("%s://%s/ip/%s/clear", protocol, leaderAddr, canonical)
-
-			client := &http.Client{Timeout: 10 * time.Second}
-			req, err := http.NewRequest("DELETE", leaderURL, nil)
-			if err != nil {
-				p.Log(logging.LevelError, "API", "Failed to create request to leader: %v", err)
-				http.Error(w, "Failed to forward to leader", http.StatusInternalServerError)
-				return
-			}
-
-			resp, err := client.Do(req)
+			path := fmt.Sprintf("/ip/%s/clear", canonical)
+			resp, err := forwardToLeader(p, "DELETE", path, nil)
 			if err != nil {
 				p.Log(logging.LevelError, "API", "Failed to forward clear request to leader: %v", err)
-				http.Error(w, fmt.Sprintf("Failed to contact leader: %v", err), http.StatusBadGateway)
+				http.Error(w, err.Error(), http.StatusBadGateway)
 				return
 			}
 			defer func() { _ = resp.Body.Close() }()
@@ -1076,6 +1061,36 @@ func internalClearIPHandler(p Provider) http.HandlerFunc {
 
 // broadcastClearToFollowers sends clear request to all follower nodes
 func broadcastClearToFollowers(p Provider, ip string) {
+	path := fmt.Sprintf("/api/v1/cluster/internal/ip/%s/clear", ip)
+	broadcastToFollowers(p, "DELETE", path, nil)
+}
+
+// forwardToLeader forwards an HTTP request to the leader node and returns the response
+func forwardToLeader(p Provider, method, path string, body io.Reader) (*http.Response, error) {
+	leaderAddr := p.GetNodeLeaderAddress()
+	if leaderAddr == "" {
+		return nil, fmt.Errorf("leader address not configured")
+	}
+
+	protocol := p.GetClusterProtocol()
+	url := fmt.Sprintf("%s://%s%s", protocol, leaderAddr, path)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to contact leader: %w", err)
+	}
+
+	return resp, nil
+}
+
+// broadcastToFollowers sends an HTTP request to all follower nodes asynchronously
+func broadcastToFollowers(p Provider, method, path string, body io.Reader) {
 	nodes := extractNodeInfo(p.GetClusterNodes())
 	if nodes == nil {
 		return
@@ -1089,26 +1104,28 @@ func broadcastClearToFollowers(p Provider, ip string) {
 			continue // Skip self
 		}
 
-		url := fmt.Sprintf("%s://%s/api/v1/cluster/internal/ip/%s/clear", protocol, node.Address, ip)
-		client := &http.Client{Timeout: 5 * time.Second}
+		go func(nodeName, nodeAddr string) {
+			url := fmt.Sprintf("%s://%s%s", protocol, nodeAddr, path)
+			client := &http.Client{Timeout: 5 * time.Second}
 
-		req, err := http.NewRequest("DELETE", url, nil)
-		if err != nil {
-			p.Log(logging.LevelWarning, "CLUSTER_CLEAR", "Failed to create request for node %s: %v", node.Name, err)
-			continue
-		}
+			req, err := http.NewRequest(method, url, body)
+			if err != nil {
+				p.Log(logging.LevelWarning, "CLUSTER_BROADCAST", "Failed to create request for node %s: %v", nodeName, err)
+				return
+			}
 
-		resp, err := client.Do(req)
-		if err != nil {
-			p.Log(logging.LevelWarning, "CLUSTER_CLEAR", "Failed to clear IP %s on node %s: %v", ip, node.Name, err)
-			continue
-		}
-		_ = resp.Body.Close()
+			resp, err := client.Do(req)
+			if err != nil {
+				p.Log(logging.LevelWarning, "CLUSTER_BROADCAST", "Failed to send %s %s to node %s: %v", method, path, nodeName, err)
+				return
+			}
+			_ = resp.Body.Close()
 
-		if resp.StatusCode != http.StatusOK {
-			p.Log(logging.LevelWarning, "CLUSTER_CLEAR", "Node %s returned status %d for IP %s", node.Name, resp.StatusCode, ip)
-		} else {
-			p.Log(logging.LevelDebug, "CLUSTER_CLEAR", "Successfully cleared IP %s on node %s", ip, node.Name)
-		}
+			if resp.StatusCode != http.StatusOK {
+				p.Log(logging.LevelWarning, "CLUSTER_BROADCAST", "Node %s returned status %d for %s %s", nodeName, resp.StatusCode, method, path)
+			} else {
+				p.Log(logging.LevelDebug, "CLUSTER_BROADCAST", "Successfully sent %s %s to node %s", method, path, nodeName)
+			}
+		}(node.Name, node.Address)
 	}
 }
