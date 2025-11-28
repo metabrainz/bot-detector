@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -166,12 +167,14 @@ func TestIPLookupHandler_IPv6Canonical(t *testing.T) {
 
 // mockIPProvider implements Provider interface for IP lookup tests
 type mockIPProvider struct {
-	activityStore map[store.Actor]*store.ActorActivity
-	activityMutex *sync.RWMutex
-	nodeName      string
-	nodeRole      string
-	leaderAddr    string
-	blocker       interface{}
+	activityStore   map[store.Actor]*store.ActorActivity
+	activityMutex   *sync.RWMutex
+	nodeName        string
+	nodeRole        string
+	leaderAddr      string
+	blocker         interface{}
+	clusterNodes    interface{}
+	clusterProtocol string
 }
 
 func (m *mockIPProvider) GetActivityStore() map[store.Actor]*store.ActorActivity {
@@ -195,7 +198,14 @@ func (m *mockIPProvider) GetNodeLeaderAddress() string {
 }
 
 func (m *mockIPProvider) GetClusterProtocol() string {
+	if m.clusterProtocol != "" {
+		return m.clusterProtocol
+	}
 	return "http"
+}
+
+func (m *mockIPProvider) GetClusterNodes() interface{} {
+	return m.clusterNodes
 }
 
 func (m *mockIPProvider) GetBlocker() interface{} {
@@ -224,7 +234,6 @@ func (m *mockIPProvider) GetMarshalledConfig() ([]byte, time.Time, error) {
 func (m *mockIPProvider) GetNodeStatus() NodeStatus                         { return NodeStatus{} }
 func (m *mockIPProvider) GetMetricsSnapshot() MetricsSnapshot               { return MetricsSnapshot{} }
 func (m *mockIPProvider) GetAggregatedMetrics() interface{}                 { return nil }
-func (m *mockIPProvider) GetClusterNodes() interface{}                      { return nil }
 func (m *mockIPProvider) GetPersistenceState(ip string) (interface{}, bool) { return nil, false }
 func (m *mockIPProvider) RemoveFromPersistence(ip string) error             { return nil }
 
@@ -715,5 +724,158 @@ func TestFormatDuration(t *testing.T) {
 				t.Errorf("Expected %q, got %q", tt.expected, result)
 			}
 		})
+	}
+}
+
+// TestForwardToLeader tests the forwardToLeader helper function
+func TestForwardToLeader(t *testing.T) {
+	// Setup test server to act as leader
+	leaderResponse := "leader response"
+	leaderServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "DELETE" {
+			t.Errorf("Expected DELETE, got %s", r.Method)
+		}
+		if r.URL.Path != "/test/path" {
+			t.Errorf("Expected /test/path, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(leaderResponse))
+	}))
+	defer leaderServer.Close()
+
+	provider := &mockIPProvider{
+		nodeRole:        "follower",
+		leaderAddr:      leaderServer.URL[7:], // Remove http://
+		clusterProtocol: "http",
+	}
+
+	resp, err := forwardToLeader(provider, "DELETE", "/test/path", nil)
+	if err != nil {
+		t.Fatalf("forwardToLeader failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != leaderResponse {
+		t.Errorf("Expected %q, got %q", leaderResponse, string(body))
+	}
+}
+
+// TestForwardToLeader_NoLeader tests error handling when leader is not configured
+func TestForwardToLeader_NoLeader(t *testing.T) {
+	provider := &mockIPProvider{
+		nodeRole:        "follower",
+		leaderAddr:      "",
+		clusterProtocol: "http",
+	}
+
+	_, err := forwardToLeader(provider, "DELETE", "/test/path", nil)
+	if err == nil {
+		t.Fatal("Expected error when leader address is empty")
+	}
+	if !strings.Contains(err.Error(), "leader address not configured") {
+		t.Errorf("Expected 'leader address not configured' error, got: %v", err)
+	}
+}
+
+// TestBroadcastToFollowers tests the broadcastToFollowers helper function
+func TestBroadcastToFollowers(t *testing.T) {
+	receivedRequests := make(map[string]int)
+	var mu sync.Mutex
+
+	// Setup test servers to act as followers
+	follower1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		receivedRequests["follower1"]++
+		mu.Unlock()
+		if r.Method != "POST" {
+			t.Errorf("Expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/test/broadcast" {
+			t.Errorf("Expected /test/broadcast, got %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer follower1.Close()
+
+	follower2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		receivedRequests["follower2"]++
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer follower2.Close()
+
+	// Mock cluster nodes
+	nodes := []struct {
+		Name    string
+		Address string
+	}{
+		{Name: "leader", Address: "localhost:8080"},
+		{Name: "follower1", Address: follower1.URL[7:]},
+		{Name: "follower2", Address: follower2.URL[7:]},
+	}
+
+	provider := &mockIPProvider{
+		nodeName:        "leader",
+		clusterNodes:    nodes,
+		clusterProtocol: "http",
+	}
+
+	broadcastToFollowers(provider, "POST", "/test/broadcast", nil)
+
+	// Wait for async broadcasts to complete
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if receivedRequests["follower1"] != 1 {
+		t.Errorf("Expected follower1 to receive 1 request, got %d", receivedRequests["follower1"])
+	}
+	if receivedRequests["follower2"] != 1 {
+		t.Errorf("Expected follower2 to receive 1 request, got %d", receivedRequests["follower2"])
+	}
+}
+
+// TestBroadcastToFollowers_SkipsSelf tests that broadcast skips the current node
+func TestBroadcastToFollowers_SkipsSelf(t *testing.T) {
+	receivedRequests := 0
+	var mu sync.Mutex
+
+	selfServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		receivedRequests++
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer selfServer.Close()
+
+	nodes := []struct {
+		Name    string
+		Address string
+	}{
+		{Name: "node1", Address: selfServer.URL[7:]},
+	}
+
+	provider := &mockIPProvider{
+		nodeName:        "node1",
+		clusterNodes:    nodes,
+		clusterProtocol: "http",
+	}
+
+	broadcastToFollowers(provider, "POST", "/test", nil)
+
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if receivedRequests != 0 {
+		t.Errorf("Expected node to skip itself, but received %d requests", receivedRequests)
 	}
 }
