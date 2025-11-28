@@ -400,12 +400,29 @@ func TestIPLookupHandler_FollowerForwarding(t *testing.T) {
 	}
 }
 
-func TestAPIIPLookupHandler_FollowerHint(t *testing.T) {
+func TestAPIIPLookupHandler_FollowerForwarding(t *testing.T) {
+	// Setup mock leader server
+	leaderResponse := ClusterIPAggregateResponse{
+		ClusterStatus: "unknown",
+		Nodes: []NodeIPStatusResponse{
+			{Name: "leader", Status: "unknown"},
+		},
+	}
+	leaderServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ip/192.168.1.1" {
+			t.Errorf("Expected /api/v1/ip/192.168.1.1, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(leaderResponse)
+	}))
+	defer leaderServer.Close()
+
 	p := &mockIPProvider{
-		activityStore: make(map[store.Actor]*store.ActorActivity),
-		activityMutex: &sync.RWMutex{},
-		nodeRole:      "follower",
-		leaderAddr:    "leader.example.com:8080",
+		activityStore:   make(map[store.Actor]*store.ActorActivity),
+		activityMutex:   &sync.RWMutex{},
+		nodeRole:        "follower",
+		leaderAddr:      leaderServer.URL[7:], // Remove http://
+		clusterProtocol: "http",
 	}
 
 	handler := apiIPLookupHandler(p)
@@ -415,16 +432,17 @@ func TestAPIIPLookupHandler_FollowerHint(t *testing.T) {
 
 	handler.ServeHTTP(rr, req)
 
-	var response IPStatusResponse
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rr.Code)
+	}
+
+	var response ClusterIPAggregateResponse
 	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
 		t.Fatalf("Failed to decode JSON: %v", err)
 	}
 
-	if response.ClusterHint == "" {
-		t.Errorf("Expected cluster hint in JSON response")
-	}
-	if !strings.Contains(response.ClusterHint, "leader.example.com:8080") {
-		t.Errorf("Expected leader address in cluster hint, got: %s", response.ClusterHint)
+	if response.ClusterStatus != "unknown" {
+		t.Errorf("Expected cluster_status unknown, got %s", response.ClusterStatus)
 	}
 }
 
@@ -482,12 +500,9 @@ func TestClusterIPLookupHandler_Internal(t *testing.T) {
 		t.Fatalf("Failed to decode JSON: %v", err)
 	}
 
-	// Internal endpoint should not include node name or cluster hint
+	// Internal endpoint should not include node name
 	if response.Node != "" {
 		t.Errorf("Expected empty node name in internal response, got: %s", response.Node)
-	}
-	if response.ClusterHint != "" {
-		t.Errorf("Expected empty cluster hint in internal response, got: %s", response.ClusterHint)
 	}
 	if response.Status != "blocked" {
 		t.Errorf("Expected status 'blocked', got '%s'", response.Status)

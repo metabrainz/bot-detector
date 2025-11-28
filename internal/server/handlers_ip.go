@@ -394,14 +394,13 @@ type IPStatusResponse struct {
 	LastSeen           string            `json:"last_seen,omitempty"`      // RFC3339
 	LastUnblock        string            `json:"last_unblock,omitempty"`   // RFC3339
 	UnblockReason      string            `json:"unblock_reason,omitempty"`
-	Backend            string            `json:"backend,omitempty"`      // "present" if in HAProxy tables
-	ClusterHint        string            `json:"cluster_hint,omitempty"` // URL to cluster endpoint
-	Persistence        string            `json:"persistence,omitempty"`  // "blocked" or "unblocked"
+	Backend            string            `json:"backend,omitempty"` // "present" if in HAProxy tables
+	Persistence        string            `json:"persistence,omitempty"`
 	PersistenceExpires string            `json:"persistence_expires,omitempty"`
 	PersistenceReason  string            `json:"persistence_reason,omitempty"`
 }
 
-// apiIPLookupHandler returns local IP status as JSON
+// apiIPLookupHandler returns IP status as JSON (cluster-aware)
 func apiIPLookupHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
@@ -422,6 +421,38 @@ func apiIPLookupHandler(p Provider) http.HandlerFunc {
 		}
 		canonical := ip.String()
 
+		// If follower, forward to leader for cluster-wide view
+		if p.GetNodeRole() == "follower" {
+			path := fmt.Sprintf("/api/v1/ip/%s", canonical)
+			resp, err := forwardToLeader(p, "GET", path, nil)
+			if err != nil {
+				p.Log(logging.LevelError, "API", "Failed to forward to leader: %v", err)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = fmt.Fprintf(w, `{"error":"Failed to contact leader: %s"}`, err.Error())
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			// Copy response from leader
+			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+
+		// Leader or standalone: return cluster-wide or local view
+		if p.GetNodeRole() == "leader" {
+			// Return cluster-wide aggregated view
+			response := queryAllNodes(p, canonical)
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(response); err != nil {
+				p.Log(logging.LevelError, "API", "Failed to encode JSON response: %v", err)
+			}
+			return
+		}
+
+		// Standalone: return local view
 		// Search ActivityStore
 		p.GetActivityMutex().RLock()
 		activityStore := p.GetActivityStore()
@@ -482,7 +513,6 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 
 	if len(actors) == 0 && !inBackend {
 		response.Status = "unknown"
-		addClusterHintJSON(&response, p, ip)
 		return response
 	}
 
@@ -490,7 +520,6 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 	if inBackend && len(actors) == 0 {
 		response.Status = "blocked"
 		response.Backend = "present"
-		addClusterHintJSON(&response, p, ip)
 		return response
 	}
 
@@ -565,19 +594,7 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 		}
 	}
 
-	addClusterHintJSON(&response, p, ip)
 	return response
-}
-
-// addClusterHintJSON adds cluster endpoint hint for followers
-func addClusterHintJSON(response *IPStatusResponse, p Provider, ip string) {
-	if p.GetNodeRole() == "follower" {
-		leaderAddr := p.GetNodeLeaderAddress()
-		if leaderAddr != "" {
-			protocol := p.GetClusterProtocol()
-			response.ClusterHint = fmt.Sprintf("%s://%s/cluster/ip/%s", protocol, leaderAddr, ip)
-		}
-	}
 }
 
 // parseRFC3339 is a helper to parse RFC3339 time strings
@@ -797,10 +814,9 @@ func clusterIPLookupHandler(p Provider) http.HandlerFunc {
 			}
 		}
 
-		// Build response (without node name and cluster hint for internal use)
+		// Build response (without node name for internal use)
 		response := buildIPStatusResponse(p, actors, canonical, inBackend)
-		response.Node = ""        // Leader will add node name
-		response.ClusterHint = "" // Not needed for internal queries
+		response.Node = "" // Leader will add node name
 
 		// Return JSON
 		w.Header().Set("Content-Type", "application/json")
