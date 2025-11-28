@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"reflect"
@@ -484,7 +485,40 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 		}
 		canonical := ip.String()
 
-		// Get blocker
+		// If follower, forward to leader
+		if p.GetNodeRole() == "follower" {
+			leaderAddr := p.GetNodeLeaderAddress()
+			if leaderAddr == "" {
+				http.Error(w, "Leader address not configured", http.StatusServiceUnavailable)
+				return
+			}
+			protocol := p.GetClusterProtocol()
+			leaderURL := fmt.Sprintf("%s://%s/ip/%s/clear", protocol, leaderAddr, canonical)
+
+			client := &http.Client{Timeout: 10 * time.Second}
+			req, err := http.NewRequest("DELETE", leaderURL, nil)
+			if err != nil {
+				p.Log(logging.LevelError, "API", "Failed to create request to leader: %v", err)
+				http.Error(w, "Failed to forward to leader", http.StatusInternalServerError)
+				return
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				p.Log(logging.LevelError, "API", "Failed to forward clear request to leader: %v", err)
+				http.Error(w, fmt.Sprintf("Failed to contact leader: %v", err), http.StatusBadGateway)
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			// Copy response from leader
+			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+
+		// Leader: clear locally and broadcast to followers
 		blockerInterface := p.GetBlocker()
 		if blockerInterface == nil {
 			http.Error(w, "Blocker not available", http.StatusServiceUnavailable)
