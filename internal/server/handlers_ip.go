@@ -468,8 +468,8 @@ func parseRFC3339(s string) time.Time {
 	return t
 }
 
-// unblockIPHandler unblocks an IP by removing it from all HAProxy tables on all backends
-func unblockIPHandler(p Provider) http.HandlerFunc {
+// clearIPHandler unblocks an IP by removing it from all HAProxy tables on all backends
+func clearIPHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
 		if ipStr == "" {

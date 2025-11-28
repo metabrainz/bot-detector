@@ -572,7 +572,7 @@ func TestUnblockIPHandler_Success(t *testing.T) {
 		blocker:       blocker,
 	}
 
-	handler := unblockIPHandler(p)
+	handler := clearIPHandler(p)
 	req := httptest.NewRequest("DELETE", "/ip/192.168.1.1", nil)
 	req.SetPathValue("ip", "192.168.1.1")
 	rr := httptest.NewRecorder()
@@ -598,7 +598,7 @@ func TestUnblockIPHandler_InvalidIP(t *testing.T) {
 		activityMutex: &sync.RWMutex{},
 	}
 
-	handler := unblockIPHandler(p)
+	handler := clearIPHandler(p)
 	req := httptest.NewRequest("DELETE", "/ip/not-an-ip", nil)
 	req.SetPathValue("ip", "not-an-ip")
 	rr := httptest.NewRecorder()
@@ -618,7 +618,7 @@ func TestUnblockIPHandler_IPv6(t *testing.T) {
 		blocker:       blocker,
 	}
 
-	handler := unblockIPHandler(p)
+	handler := clearIPHandler(p)
 	req := httptest.NewRequest("DELETE", "/ip/2001:db8::1", nil)
 	req.SetPathValue("ip", "2001:db8::1")
 	rr := httptest.NewRecorder()
@@ -648,7 +648,7 @@ func TestUnblockIPHandler_NoBlocker(t *testing.T) {
 		blocker:       nil,
 	}
 
-	handler := unblockIPHandler(p)
+	handler := clearIPHandler(p)
 	req := httptest.NewRequest("DELETE", "/ip/192.168.1.1", nil)
 	req.SetPathValue("ip", "192.168.1.1")
 	rr := httptest.NewRecorder()
