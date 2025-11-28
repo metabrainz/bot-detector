@@ -509,6 +509,12 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 			return
 		}
 
+		// Remove from persistence state
+		if err := p.RemoveFromPersistence(canonical); err != nil {
+			p.Log(logging.LevelError, "API", "Failed to remove IP %s from persistence: %v", canonical, err)
+			// Don't fail the request, just log the error
+		}
+
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 
