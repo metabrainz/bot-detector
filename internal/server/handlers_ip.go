@@ -549,6 +549,11 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 			// Don't fail the request, just log the error
 		}
 
+		// Broadcast to followers (async)
+		if p.GetNodeRole() == "leader" {
+			go broadcastClearToFollowers(p, canonical)
+		}
+
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 
@@ -1066,5 +1071,44 @@ func internalClearIPHandler(p Provider) http.HandlerFunc {
 
 		p.Log(logging.LevelInfo, "CLUSTER_CLEAR", "IP %s cleared from local node", canonical)
 		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// broadcastClearToFollowers sends clear request to all follower nodes
+func broadcastClearToFollowers(p Provider, ip string) {
+	nodes := extractNodeInfo(p.GetClusterNodes())
+	if nodes == nil {
+		return
+	}
+
+	protocol := p.GetClusterProtocol()
+	nodeName := p.GetNodeName()
+
+	for _, node := range nodes {
+		if node.Name == nodeName {
+			continue // Skip self
+		}
+
+		url := fmt.Sprintf("%s://%s/api/v1/cluster/internal/ip/%s/clear", protocol, node.Address, ip)
+		client := &http.Client{Timeout: 5 * time.Second}
+
+		req, err := http.NewRequest("DELETE", url, nil)
+		if err != nil {
+			p.Log(logging.LevelWarning, "CLUSTER_CLEAR", "Failed to create request for node %s: %v", node.Name, err)
+			continue
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			p.Log(logging.LevelWarning, "CLUSTER_CLEAR", "Failed to clear IP %s on node %s: %v", ip, node.Name, err)
+			continue
+		}
+		_ = resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			p.Log(logging.LevelWarning, "CLUSTER_CLEAR", "Node %s returned status %d for IP %s", node.Name, resp.StatusCode, ip)
+		} else {
+			p.Log(logging.LevelDebug, "CLUSTER_CLEAR", "Successfully cleared IP %s on node %s", ip, node.Name)
+		}
 	}
 }
