@@ -981,3 +981,56 @@ func queryNodeIPStatus(p Provider, nodeName, nodeAddr, protocol, ip string) Node
 		UnblockReason: status.UnblockReason,
 	}
 }
+
+// internalClearIPHandler is the internal cluster endpoint for clearing IPs
+// Called by leader to clear IP on follower nodes
+func internalClearIPHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ipStr := r.PathValue("ip")
+		if ipStr == "" {
+			http.Error(w, "IP address required", http.StatusBadRequest)
+			return
+		}
+
+		// Canonicalize IP
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			return
+		}
+		canonical := ip.String()
+
+		// Get blocker
+		blockerInterface := p.GetBlocker()
+		if blockerInterface == nil {
+			http.Error(w, "Blocker not available", http.StatusServiceUnavailable)
+			return
+		}
+
+		// Type assert to blocker.Blocker interface
+		blocker, ok := blockerInterface.(blocker.Blocker)
+		if !ok {
+			http.Error(w, "Blocker interface error", http.StatusInternalServerError)
+			return
+		}
+
+		// Create IPInfo using helper
+		ipInfo := utils.NewIPInfo(canonical)
+
+		// Clear from local HAProxy
+		_, err := blocker.ClearIP(ipInfo)
+		if err != nil {
+			p.Log(logging.LevelError, "CLUSTER_CLEAR", "Failed to clear IP %s: %v", canonical, err)
+			http.Error(w, fmt.Sprintf("Failed to clear IP: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Remove from local persistence
+		if err := p.RemoveFromPersistence(canonical); err != nil {
+			p.Log(logging.LevelError, "CLUSTER_CLEAR", "Failed to remove IP %s from persistence: %v", canonical, err)
+		}
+
+		p.Log(logging.LevelInfo, "CLUSTER_CLEAR", "IP %s cleared from local node", canonical)
+		w.WriteHeader(http.StatusOK)
+	}
+}
