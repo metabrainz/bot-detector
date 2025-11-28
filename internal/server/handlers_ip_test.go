@@ -363,12 +363,24 @@ func TestIPLookupHandler_MultipleActors(t *testing.T) {
 	}
 }
 
-func TestIPLookupHandler_FollowerHint(t *testing.T) {
+func TestIPLookupHandler_FollowerForwarding(t *testing.T) {
+	// Setup mock leader server
+	leaderResponse := "cluster_status: unknown\nnodes:\n  - name: leader\n    status: unknown\n"
+	leaderServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/ip/192.168.1.1" {
+			t.Errorf("Expected /ip/192.168.1.1, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte(leaderResponse))
+	}))
+	defer leaderServer.Close()
+
 	p := &mockIPProvider{
-		activityStore: make(map[store.Actor]*store.ActorActivity),
-		activityMutex: &sync.RWMutex{},
-		nodeRole:      "follower",
-		leaderAddr:    "leader.example.com:8080",
+		activityStore:   make(map[store.Actor]*store.ActorActivity),
+		activityMutex:   &sync.RWMutex{},
+		nodeRole:        "follower",
+		leaderAddr:      leaderServer.URL[7:], // Remove http://
+		clusterProtocol: "http",
 	}
 
 	handler := ipLookupHandler(p)
@@ -378,12 +390,13 @@ func TestIPLookupHandler_FollowerHint(t *testing.T) {
 
 	handler.ServeHTTP(rr, req)
 
-	body := rr.Body.String()
-	if !strings.Contains(body, "note: For cluster-wide view") {
-		t.Errorf("Expected follower hint, got: %s", body)
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rr.Code)
 	}
-	if !strings.Contains(body, "leader.example.com:8080") {
-		t.Errorf("Expected leader address in hint, got: %s", body)
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "cluster_status") {
+		t.Errorf("Expected cluster response from leader, got: %s", body)
 	}
 }
 

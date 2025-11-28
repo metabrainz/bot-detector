@@ -16,7 +16,7 @@ import (
 	"bot-detector/internal/utils"
 )
 
-// ipLookupHandler returns local IP status in plain text
+// ipLookupHandler returns IP status in plain text (cluster-aware)
 func ipLookupHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
@@ -33,91 +33,220 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 		}
 		canonical := ip.String()
 
-		// Search ActivityStore
-		p.GetActivityMutex().RLock()
-		activityStore := p.GetActivityStore()
-
-		// Collect all actors with this IP
-		var actors []*store.ActorActivity
-		for actor, activity := range activityStore {
-			if actor.IPInfo.Address == canonical {
-				actors = append(actors, activity)
+		// If follower, forward to leader for cluster-wide view
+		if p.GetNodeRole() == "follower" {
+			path := fmt.Sprintf("/ip/%s", canonical)
+			resp, err := forwardToLeader(p, "GET", path, nil)
+			if err != nil {
+				p.Log(logging.LevelError, "IP_LOOKUP", "Failed to forward to leader: %v", err)
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
 			}
-		}
-		p.GetActivityMutex().RUnlock()
+			defer func() { _ = resp.Body.Close() }()
 
-		// Check HAProxy tables for detailed information
-		var backendInfo []interface{}
-		blockerInterface := p.GetBlocker()
-		if blockerInterface != nil {
-			// Try to get detailed IP information from HAProxy
-			// We use reflection to avoid import cycles with the blocker package
-			getDetailsMethod := reflect.ValueOf(blockerInterface).MethodByName("GetIPDetails")
-			if getDetailsMethod.IsValid() {
-				ipInfo := utils.NewIPInfo(canonical)
-				results := getDetailsMethod.Call([]reflect.Value{reflect.ValueOf(ipInfo)})
-				p.Log(logging.LevelInfo, "IP_LOOKUP", "GetIPDetails called for %s, results: %d", canonical, len(results))
-				if len(results) == 2 && results[1].IsNil() { // No error
-					// Convert result to []interface{}
-					detailsVal := results[0]
-					p.Log(logging.LevelInfo, "IP_LOOKUP", "Details value kind: %v, len: %d", detailsVal.Kind(), detailsVal.Len())
-					if detailsVal.Kind() == reflect.Slice {
-						for i := 0; i < detailsVal.Len(); i++ {
-							backendInfo = append(backendInfo, detailsVal.Index(i).Interface())
-						}
+			// Copy response from leader
+			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+
+		// Leader or standalone: return cluster-wide or local view
+		if p.GetNodeRole() == "leader" {
+			// Return cluster-wide aggregated view
+			renderClusterIPStatus(w, p, canonical)
+			return
+		}
+
+		// Standalone: return local view
+		renderLocalIPStatus(w, p, canonical)
+	}
+}
+
+// renderLocalIPStatus renders local node IP status in plain text
+func renderLocalIPStatus(w http.ResponseWriter, p Provider, canonical string) {
+	// Search ActivityStore
+	p.GetActivityMutex().RLock()
+	activityStore := p.GetActivityStore()
+
+	// Collect all actors with this IP
+	var actors []*store.ActorActivity
+	for actor, activity := range activityStore {
+		if actor.IPInfo.Address == canonical {
+			actors = append(actors, activity)
+		}
+	}
+	p.GetActivityMutex().RUnlock()
+
+	// Check HAProxy tables for detailed information
+	var backendInfo []interface{}
+	blockerInterface := p.GetBlocker()
+	if blockerInterface != nil {
+		// Try to get detailed IP information from HAProxy
+		// We use reflection to avoid import cycles with the blocker package
+		getDetailsMethod := reflect.ValueOf(blockerInterface).MethodByName("GetIPDetails")
+		if getDetailsMethod.IsValid() {
+			ipInfo := utils.NewIPInfo(canonical)
+			results := getDetailsMethod.Call([]reflect.Value{reflect.ValueOf(ipInfo)})
+			p.Log(logging.LevelInfo, "IP_LOOKUP", "GetIPDetails called for %s, results: %d", canonical, len(results))
+			if len(results) == 2 && results[1].IsNil() { // No error
+				// Convert result to []interface{}
+				detailsVal := results[0]
+				p.Log(logging.LevelInfo, "IP_LOOKUP", "Details value kind: %v, len: %d", detailsVal.Kind(), detailsVal.Len())
+				if detailsVal.Kind() == reflect.Slice {
+					for i := 0; i < detailsVal.Len(); i++ {
+						backendInfo = append(backendInfo, detailsVal.Index(i).Interface())
 					}
-					p.Log(logging.LevelInfo, "IP_LOOKUP", "Backend info collected: %d entries", len(backendInfo))
-				} else if len(results) == 2 && !results[1].IsNil() {
-					err := results[1].Interface().(error)
-					p.Log(logging.LevelInfo, "IP_LOOKUP", "Failed to get backend details for %s: %v", canonical, err)
 				}
-			} else {
-				p.Log(logging.LevelInfo, "IP_LOOKUP", "GetIPDetails method not found on blocker")
+				p.Log(logging.LevelInfo, "IP_LOOKUP", "Backend info collected: %d entries", len(backendInfo))
+			} else if len(results) == 2 && !results[1].IsNil() {
+				err := results[1].Interface().(error)
+				p.Log(logging.LevelInfo, "IP_LOOKUP", "Failed to get backend details for %s: %v", canonical, err)
 			}
 		} else {
-			p.Log(logging.LevelInfo, "IP_LOOKUP", "Blocker interface is nil")
+			p.Log(logging.LevelInfo, "IP_LOOKUP", "GetIPDetails method not found on blocker")
 		}
+	} else {
+		p.Log(logging.LevelInfo, "IP_LOOKUP", "Blocker interface is nil")
+	}
 
-		// Format response
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	// Format response
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-		nodeName := p.GetNodeName()
-		if nodeName != "" {
-			_, _ = fmt.Fprintf(w, "node: %s\n", nodeName)
-		}
+	nodeName := p.GetNodeName()
+	if nodeName != "" {
+		_, _ = fmt.Fprintf(w, "node: %s\n", nodeName)
+	}
 
-		// Check persistence state
-		persistState, hasPersist := p.GetPersistenceState(canonical)
+	// Check persistence state
+	persistState, hasPersist := p.GetPersistenceState(canonical)
 
-		if len(actors) == 0 && len(backendInfo) == 0 {
-			_, _ = fmt.Fprint(w, "status: unknown\n")
-			formatPersistenceState(w, persistState, hasPersist)
-			addFollowerHint(w, p, canonical)
-			return
-		}
-
-		// If in HAProxy but not in activity store, show backend details
-		if len(backendInfo) > 0 && len(actors) == 0 {
-			_, _ = fmt.Fprint(w, "status: blocked\n")
-			_, _ = fmt.Fprint(w, "source: backend\n")
-			formatBackendInfo(w, backendInfo, p.GetDurationTables())
-			formatPersistenceState(w, persistState, hasPersist)
-			addFollowerHint(w, p, canonical)
-			return
-		}
-
-		// Aggregate status from activity store
-		status := aggregateActorStatus(actors)
-		_, _ = fmt.Fprint(w, status)
-
-		// Add HAProxy details if present
-		if len(backendInfo) > 0 {
-			_, _ = fmt.Fprint(w, "backend_tables:\n")
-			formatBackendInfo(w, backendInfo, p.GetDurationTables())
-		}
-
+	if len(actors) == 0 && len(backendInfo) == 0 {
+		_, _ = fmt.Fprint(w, "status: unknown\n")
 		formatPersistenceState(w, persistState, hasPersist)
-		addFollowerHint(w, p, canonical)
+		return
+	}
+
+	// If in HAProxy but not in activity store, show backend details
+	if len(backendInfo) > 0 && len(actors) == 0 {
+		_, _ = fmt.Fprint(w, "status: blocked\n")
+		_, _ = fmt.Fprint(w, "source: backend\n")
+		formatBackendInfo(w, backendInfo, p.GetDurationTables())
+		formatPersistenceState(w, persistState, hasPersist)
+		return
+	}
+
+	// Aggregate status from activity store
+	status := aggregateActorStatus(actors)
+	_, _ = fmt.Fprint(w, status)
+
+	// Add HAProxy details if present
+	if len(backendInfo) > 0 {
+		_, _ = fmt.Fprint(w, "backend_tables:\n")
+		formatBackendInfo(w, backendInfo, p.GetDurationTables())
+	}
+
+	formatPersistenceState(w, persistState, hasPersist)
+}
+
+// renderClusterIPStatus renders cluster-wide aggregated IP status in plain text
+func renderClusterIPStatus(w http.ResponseWriter, p Provider, canonical string) {
+	// Get cluster nodes and query them
+	response := queryAllNodes(p, canonical)
+
+	// Format as plain text
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = fmt.Fprintf(w, "cluster_status: %s\n", response.ClusterStatus)
+	_, _ = fmt.Fprint(w, "nodes:\n")
+	for _, node := range response.Nodes {
+		_, _ = fmt.Fprintf(w, "  - name: %s\n", node.Name)
+		_, _ = fmt.Fprintf(w, "    status: %s\n", node.Status)
+		if node.Error != "" {
+			_, _ = fmt.Fprintf(w, "    error: %s\n", node.Error)
+		}
+		if node.Actors > 0 {
+			_, _ = fmt.Fprintf(w, "    actors: %d\n", node.Actors)
+		}
+		if len(node.Chains) > 0 {
+			_, _ = fmt.Fprint(w, "    chains:\n")
+			for chain, expiry := range node.Chains {
+				_, _ = fmt.Fprintf(w, "      - %s (until: %s)\n", chain, expiry)
+			}
+		}
+		if node.EarliestBlock != "" {
+			_, _ = fmt.Fprintf(w, "    earliest_block: %s\n", node.EarliestBlock)
+		}
+		if node.LatestExpiry != "" {
+			_, _ = fmt.Fprintf(w, "    latest_expiry: %s\n", node.LatestExpiry)
+		}
+		if node.LastSeen != "" {
+			_, _ = fmt.Fprintf(w, "    last_seen: %s\n", node.LastSeen)
+		}
+		if node.LastUnblock != "" {
+			_, _ = fmt.Fprintf(w, "    last_unblock: %s\n", node.LastUnblock)
+		}
+		if node.UnblockReason != "" {
+			_, _ = fmt.Fprintf(w, "    reason: %s\n", node.UnblockReason)
+		}
+		if node.Persistence != "" {
+			_, _ = fmt.Fprintf(w, "    persistence: %s\n", node.Persistence)
+		}
+		if node.PersistenceExpires != "" {
+			_, _ = fmt.Fprintf(w, "    persistence_expires: %s\n", node.PersistenceExpires)
+		}
+		if node.PersistenceReason != "" {
+			_, _ = fmt.Fprintf(w, "    persistence_reason: %s\n", node.PersistenceReason)
+		}
+	}
+
+	// Add backend table details from leader node
+	blockerInterface := p.GetBlocker()
+	if blockerInterface != nil {
+		getDetailsMethod := reflect.ValueOf(blockerInterface).MethodByName("GetIPDetails")
+		if getDetailsMethod.IsValid() {
+			ipInfo := utils.NewIPInfo(canonical)
+			results := getDetailsMethod.Call([]reflect.Value{reflect.ValueOf(ipInfo)})
+			if len(results) == 2 && results[1].IsNil() {
+				detailsVal := results[0]
+				if detailsVal.Kind() == reflect.Slice && detailsVal.Len() > 0 {
+					_, _ = fmt.Fprint(w, "backend_tables:\n")
+					for i := 0; i < detailsVal.Len(); i++ {
+						info := detailsVal.Index(i).Interface()
+						infoVal := reflect.ValueOf(info)
+						tableName := infoVal.FieldByName("TableName").String()
+						backend := infoVal.FieldByName("Backend").String()
+						gpc0 := int(infoVal.FieldByName("Gpc0").Int())
+						expMillis := infoVal.FieldByName("ExpMillis").Int()
+
+						status := "unblocked"
+						if gpc0 > 0 {
+							status = "blocked"
+						}
+
+						expSec := expMillis / 1000
+						expiresDuration := time.Duration(expSec) * time.Second
+
+						var tableDuration time.Duration
+						for dur, baseTableName := range p.GetDurationTables() {
+							if strings.HasPrefix(tableName, baseTableName) {
+								tableDuration = dur
+								break
+							}
+						}
+
+						if tableDuration > 0 {
+							elapsedSec := tableDuration.Seconds() - float64(expSec)
+							addedAt := time.Now().Add(-time.Duration(elapsedSec) * time.Second)
+							_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, duration: %v, expires in: %s, added: %s)\n",
+								tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format("2006-01-02 15:04:05"))
+						} else {
+							_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %s)\n",
+								tableName, backend, status, formatDuration(expiresDuration))
+						}
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -254,17 +383,6 @@ func aggregateActorStatus(actors []*store.ActorActivity) string {
 }
 
 // addFollowerHint adds a note about cluster endpoint if this is a follower
-func addFollowerHint(w http.ResponseWriter, p Provider, ip string) {
-	if p.GetNodeRole() == "follower" {
-		leaderAddr := p.GetNodeLeaderAddress()
-		if leaderAddr != "" {
-			protocol := p.GetClusterProtocol()
-			_, _ = fmt.Fprintf(w, "note: For cluster-wide view, query leader at %s://%s/cluster/ip/%s\n",
-				protocol, leaderAddr, ip)
-		}
-	}
-}
-
 // IPStatusResponse is the JSON response for IP status queries
 type IPStatusResponse struct {
 	Node               string            `json:"node,omitempty"`
