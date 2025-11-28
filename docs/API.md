@@ -354,20 +354,30 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `200 OK`: Successfully returns IP status.
     *   `400 Bad Request`: Invalid IP address format.
 
-### `/block/{ip}` (DELETE)
+### `/ip/{ip}/clear` (DELETE)
 
 *   **Method:** `DELETE`
 *   **Content-Type:** `text/plain; charset=utf-8`
-*   **Description:** Unblocks an IP address by setting gpc0=0 in all HAProxy stick tables. This is for emergency unblocking - it sets gpc0=0 across all duration tables where the IP exists. The command is queued and processed at the configured rate limit (`blocker_commands_per_second`).
+*   **Description:** Clears an IP address from all state: HAProxy stick tables, activity store, and persistence (journal/snapshot). This is a cluster-aware operation - if called on a follower, the request is forwarded to the leader, which then broadcasts the clear command to all nodes. Each node independently clears the IP from its local HAProxy tables and persistence state. An unblock event is written to the journal with reason "manual_clear".
 *   **Parameters:**
     *   `ip` - IPv4 or IPv6 address (will be canonicalized)
-*   **Response Format (Success):**
+*   **Response Format (Success - IP found):**
     ```
-    IP 192.168.1.100 unblocked successfully
+    IP 192.168.1.100 found and cleared from:
+      - thirty_min_blocks_v4 on /var/run/haproxy/admin.sock (status: blocked, duration: 30m, expires in: 15m, added: 2025-11-28 10:30:00)
+      - one_hour_blocks_v4 on /var/run/haproxy/admin.sock (status: blocked, duration: 1h, expires in: 45m, added: 2025-11-28 10:00:00)
+    ```
+*   **Response Format (Success - IP not found):**
+    ```
+    IP 192.168.1.100 not found in any tables
     ```
 *   **Error Response (400 Bad Request):**
     ```
     Invalid IP address
+    ```
+*   **Error Response (502 Bad Gateway - Follower only):**
+    ```
+    Failed to contact leader: connection refused
     ```
 *   **Error Response (503 Service Unavailable):**
     ```
@@ -375,21 +385,29 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     ```
 *   **Error Response (500 Internal Server Error):**
     ```
-    Failed to unblock IP
+    Failed to clear IP: <error details>
     ```
+*   **Cluster Behavior:**
+    *   **Follower nodes:** Forward the request to the leader and return the leader's response
+    *   **Leader node:** Clear locally, then broadcast to all followers asynchronously
+    *   **Standalone node:** Clear locally only
+*   **What gets cleared:**
+    *   All HAProxy stick table entries for the IP (across all duration tables)
+    *   IP from persistence state (`IPStates` map)
+    *   Unblock event written to journal with reason "manual_clear"
 *   **Notes:**
     *   The IP address is canonicalized before processing (e.g., `2001:0db8::1` → `2001:db8::1`)
-    *   Sets gpc0=0 in all configured HAProxy instances across all duration tables
-    *   The unblock command is always sent, regardless of whether the IP exists in the activity store
-    *   The unblock command is queued and executed asynchronously by the blocker worker
-    *   If the command queue is full, the command may be dropped (check logs for warnings)
-    *   The operation is logged with reason "manual unblock via API"
-    *   Works across all HAProxy instances regardless of cluster configuration
-    *   Use this for emergency unblocking when behavioral detection has false positives
+    *   Clears from all configured HAProxy instances and all duration tables
+    *   Works for both blocked and unblocked IPs (clears all state regardless of status)
+    *   The operation is logged on each node that processes it
+    *   Broadcast to followers is asynchronous (fire-and-forget) - leader doesn't wait for follower responses
+    *   If a follower is unreachable during broadcast, it's logged but doesn't fail the request
+    *   Use this when you want to completely remove an IP from the system (e.g., false positive, testing)
 *   **Responses:**
-    *   `200 OK`: Successfully queued the unblock command.
+    *   `200 OK`: Successfully cleared the IP (or IP not found).
     *   `400 Bad Request`: Invalid IP address format.
-    *   `500 Internal Server Error`: Failed to queue the unblock command.
+    *   `500 Internal Server Error`: Failed to clear the IP from HAProxy or persistence.
+    *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
     *   `503 Service Unavailable`: Blocker is not available (e.g., dry-run mode).
 
 ### `/cluster/ip/{ip}` (Leader Only)
@@ -523,14 +541,14 @@ curl http://localhost:8080/ip/192.168.1.100
 curl http://localhost:8080/api/v1/ip/192.168.1.100
 ```
 
-### Unblock an IP (emergency)
+### Clear an IP from all state (cluster-aware)
 ```bash
-curl -X DELETE http://localhost:8080/block/192.168.1.100
+curl -X DELETE http://localhost:8080/ip/192.168.1.100/clear
 ```
 
-### Unblock IPv6 address
+### Clear IPv6 address
 ```bash
-curl -X DELETE http://localhost:8080/block/2001:db8::1
+curl -X DELETE http://localhost:8080/ip/2001:db8::1/clear
 ```
 
 ### Query IP status across cluster (leader only)
@@ -559,16 +577,33 @@ else
 fi
 ```
 
-### Unblock IP if blocked (script example)
+### Clear IP if blocked (script example)
 ```bash
 #!/bin/bash
 IP="192.168.1.100"
 STATUS=$(curl -s "http://localhost:8080/api/v1/ip/$IP" | jq -r '.status')
 
 if [ "$STATUS" = "blocked" ]; then
-    echo "IP $IP is blocked, unblocking..."
-    curl -X DELETE "http://localhost:8080/block/$IP"
+    echo "IP $IP is blocked, clearing..."
+    curl -X DELETE "http://localhost:8080/ip/$IP/clear"
 else
     echo "IP $IP is not blocked"
 fi
 ```
+
+### Check persistence state (script example)
+```bash
+#!/bin/bash
+IP="192.168.1.100"
+RESPONSE=$(curl -s "http://localhost:8080/api/v1/ip/$IP")
+PERSISTENCE=$(echo "$RESPONSE" | jq -r '.persistence // "none"')
+
+if [ "$PERSISTENCE" != "none" ]; then
+    echo "IP $IP is in persistence state: $PERSISTENCE"
+    EXPIRES=$(echo "$RESPONSE" | jq -r '.persistence_expires // "unknown"')
+    echo "Expires: $EXPIRES"
+else
+    echo "IP $IP is not in persistence"
+fi
+```
+
