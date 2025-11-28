@@ -8,14 +8,14 @@
 //   - GET /stats/steps     - Plain-text step execution counts
 //   - GET /config          - Raw YAML configuration
 //   - GET /config/archive  - Tar.gz archive of config + dependencies
-//   - GET /ip/{ip}         - IP block/unblock status (local node, plain text)
-//   - GET /api/v1/ip/{ip}  - IP block/unblock status (local node, JSON)
+//   - GET /ip/{ip}         - IP status (cluster-aware: aggregated on cluster, local on standalone)
+//   - GET /api/v1/ip/{ip}  - IP status (cluster-aware, JSON)
+//   - DELETE /ip/{ip}/clear - Clear IP from all state (cluster-aware)
 //   - GET /cluster/status  - Node cluster status (role, name, address, leader)
 //   - GET /cluster/metrics - Node metrics snapshot in JSON format
 //   - GET /cluster/metrics/aggregate - Cluster-wide aggregated metrics (leader only)
-//   - GET /cluster/ip/{ip} - IP status aggregated across cluster (leader only, plain text)
-//   - GET /api/v1/cluster/ip/{ip} - IP status aggregated across cluster (leader only, JSON)
 //   - GET /api/v1/cluster/internal/ip/{ip} - Internal endpoint for leader to query followers
+//   - DELETE /api/v1/cluster/internal/ip/{ip}/clear - Internal endpoint for leader to broadcast clear
 package server
 
 import (
@@ -136,8 +136,6 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("/cluster/status", clusterStatusHandler(p))
 		mux.HandleFunc("/cluster/metrics", clusterMetricsHandler(p))
 		mux.HandleFunc("/cluster/metrics/aggregate", clusterMetricsAggregateHandler(p))
-		mux.HandleFunc("GET /cluster/ip/{ip}", clusterIPAggregateHandler(p))
-		mux.HandleFunc("GET /api/v1/cluster/ip/{ip}", apiClusterIPAggregateHandler(p))
 		mux.HandleFunc("GET /api/v1/cluster/internal/ip/{ip}", clusterIPLookupHandler(p))
 		mux.HandleFunc("DELETE /api/v1/cluster/internal/ip/{ip}/clear", internalClearIPHandler(p))
 	}

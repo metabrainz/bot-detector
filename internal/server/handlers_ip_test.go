@@ -446,25 +446,6 @@ func TestAPIIPLookupHandler_FollowerForwarding(t *testing.T) {
 	}
 }
 
-func TestClusterIPAggregateHandler_NotLeader(t *testing.T) {
-	p := &mockIPProvider{
-		activityStore: make(map[store.Actor]*store.ActorActivity),
-		activityMutex: &sync.RWMutex{},
-		nodeRole:      "follower",
-	}
-
-	handler := clusterIPAggregateHandler(p)
-	req := httptest.NewRequest("GET", "/cluster/ip/192.168.1.1", nil)
-	req.SetPathValue("ip", "192.168.1.1")
-	rr := httptest.NewRecorder()
-
-	handler.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("Expected status 404 on follower, got %d", rr.Code)
-	}
-}
-
 func TestClusterIPLookupHandler_Internal(t *testing.T) {
 	now := time.Now()
 	activityStore := make(map[store.Actor]*store.ActorActivity)
