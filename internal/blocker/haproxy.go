@@ -353,17 +353,39 @@ func (b *HAProxyBlocker) ClearIP(ipInfo utils.IPInfo) ([]interface{}, error) {
 		return result, err
 	}
 
-	// Verify removal on all backends
-	for _, addr := range addresses {
-		for _, tableName := range relevantTables {
-			entry, _ := b.getHAProxyIPInTable(addr, tableName, ipInfo.Address)
-			if entry != nil {
-				result := make([]interface{}, len(foundInfo))
-				for i, info := range foundInfo {
-					result[i] = info
+	// Verify removal with retries
+	maxRetries := 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		time.Sleep(100 * time.Millisecond)
+
+		stillPresent := false
+		var failAddr, failTable string
+
+		for _, addr := range addresses {
+			for _, tableName := range relevantTables {
+				entry, _ := b.getHAProxyIPInTable(addr, tableName, ipInfo.Address)
+				if entry != nil {
+					stillPresent = true
+					failAddr = addr
+					failTable = tableName
+					break
 				}
-				return result, fmt.Errorf("verification failed: IP %s still present in table %s on backend %s", ipInfo.Address, tableName, addr)
 			}
+			if stillPresent {
+				break
+			}
+		}
+
+		if !stillPresent {
+			break
+		}
+
+		if attempt == maxRetries-1 {
+			result := make([]interface{}, len(foundInfo))
+			for i, info := range foundInfo {
+				result[i] = info
+			}
+			return result, fmt.Errorf("verification failed after %d attempts: IP %s still present in table %s on backend %s", maxRetries, ipInfo.Address, failTable, failAddr)
 		}
 	}
 

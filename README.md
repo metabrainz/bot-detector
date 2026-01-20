@@ -45,7 +45,7 @@ go mod tidy
 3. **Build the Executable:**
 
 ```sh
-go build -o bot-detector .
+go build -o bot-detector ./cmd/bot-detector
 ```
 
 This will produce a single executable named `bot-detector`.

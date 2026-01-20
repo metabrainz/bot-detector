@@ -669,6 +669,9 @@ func clearIPHandler(p Provider) http.HandlerFunc {
 			// Don't fail the request, just log the error
 		}
 
+		// Clear from ActivityStore (in-memory chain progress)
+		clearIPFromActivityStore(p, canonical)
+
 		// Broadcast to followers (async)
 		if p.GetNodeRole() == "leader" {
 			go broadcastClearToFollowers(p, canonical)
@@ -992,37 +995,18 @@ func internalClearIPHandler(p Provider) http.HandlerFunc {
 		}
 		canonical := ip.String()
 
-		// Get blocker
-		blockerInterface := p.GetBlocker()
-		if blockerInterface == nil {
-			http.Error(w, "Blocker not available", http.StatusServiceUnavailable)
-			return
-		}
-
-		// Type assert to blocker.Blocker interface
-		blocker, ok := blockerInterface.(blocker.Blocker)
-		if !ok {
-			http.Error(w, "Blocker interface error", http.StatusInternalServerError)
-			return
-		}
-
-		// Create IPInfo using helper
-		ipInfo := utils.NewIPInfo(canonical)
-
-		// Clear from local HAProxy
-		_, err := blocker.ClearIP(ipInfo)
-		if err != nil {
-			p.Log(logging.LevelError, "CLUSTER_CLEAR", "Failed to clear IP %s: %v", canonical, err)
-			http.Error(w, fmt.Sprintf("Failed to clear IP: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		// Remove from local persistence
+		// Followers only clear local persistence state
+		// HAProxy instances are shared and already cleared by the leader
 		if err := p.RemoveFromPersistence(canonical); err != nil {
 			p.Log(logging.LevelError, "CLUSTER_CLEAR", "Failed to remove IP %s from persistence: %v", canonical, err)
+			http.Error(w, fmt.Sprintf("Failed to remove from persistence: %v", err), http.StatusInternalServerError)
+			return
 		}
 
-		p.Log(logging.LevelInfo, "CLUSTER_CLEAR", "IP %s cleared from local node", canonical)
+		// Clear from ActivityStore (in-memory chain progress)
+		clearIPFromActivityStore(p, canonical)
+
+		p.Log(logging.LevelInfo, "CLUSTER_CLEAR", "IP %s cleared from local persistence", canonical)
 		w.WriteHeader(http.StatusOK)
 	}
 }
@@ -1031,6 +1015,19 @@ func internalClearIPHandler(p Provider) http.HandlerFunc {
 func broadcastClearToFollowers(p Provider, ip string) {
 	path := fmt.Sprintf("/api/v1/cluster/internal/ip/%s/clear", ip)
 	broadcastToFollowers(p, "DELETE", path, nil)
+}
+
+// clearIPFromActivityStore removes all actors with the given IP from ActivityStore
+func clearIPFromActivityStore(p Provider, ip string) {
+	p.GetActivityMutex().Lock()
+	defer p.GetActivityMutex().Unlock()
+
+	activityStore := p.GetActivityStore()
+	for actor := range activityStore {
+		if actor.IPInfo.Address == ip {
+			delete(activityStore, actor)
+		}
+	}
 }
 
 // forwardToLeader forwards an HTTP request to the leader node and returns the response
