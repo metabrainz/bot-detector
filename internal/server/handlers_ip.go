@@ -992,37 +992,15 @@ func internalClearIPHandler(p Provider) http.HandlerFunc {
 		}
 		canonical := ip.String()
 
-		// Get blocker
-		blockerInterface := p.GetBlocker()
-		if blockerInterface == nil {
-			http.Error(w, "Blocker not available", http.StatusServiceUnavailable)
-			return
-		}
-
-		// Type assert to blocker.Blocker interface
-		blocker, ok := blockerInterface.(blocker.Blocker)
-		if !ok {
-			http.Error(w, "Blocker interface error", http.StatusInternalServerError)
-			return
-		}
-
-		// Create IPInfo using helper
-		ipInfo := utils.NewIPInfo(canonical)
-
-		// Clear from local HAProxy
-		_, err := blocker.ClearIP(ipInfo)
-		if err != nil {
-			p.Log(logging.LevelError, "CLUSTER_CLEAR", "Failed to clear IP %s: %v", canonical, err)
-			http.Error(w, fmt.Sprintf("Failed to clear IP: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		// Remove from local persistence
+		// Followers only clear local persistence state
+		// HAProxy instances are shared and already cleared by the leader
 		if err := p.RemoveFromPersistence(canonical); err != nil {
 			p.Log(logging.LevelError, "CLUSTER_CLEAR", "Failed to remove IP %s from persistence: %v", canonical, err)
+			http.Error(w, fmt.Sprintf("Failed to remove from persistence: %v", err), http.StatusInternalServerError)
+			return
 		}
 
-		p.Log(logging.LevelInfo, "CLUSTER_CLEAR", "IP %s cleared from local node", canonical)
+		p.Log(logging.LevelInfo, "CLUSTER_CLEAR", "IP %s cleared from local persistence", canonical)
 		w.WriteHeader(http.StatusOK)
 	}
 }
