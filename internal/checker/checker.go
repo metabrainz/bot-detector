@@ -240,8 +240,10 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 	// }
 
 	// Determine website context for logging
-	websiteName := ""
-	if len(p.Websites) > 0 && entry.VHost != "" {
+	// In multi-website mode, use the website from the log entry (set by tailer)
+	websiteName := entry.Website
+	if websiteName == "" && len(p.Websites) > 0 && entry.VHost != "" {
+		// Fallback: lookup by vhost (for backward compat or if Website not set)
 		if ws, ok := p.VHostToWebsite[entry.VHost]; ok {
 			websiteName = ws
 		} else if p.CatchAllWebsite != "" {

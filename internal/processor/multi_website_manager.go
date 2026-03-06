@@ -82,6 +82,11 @@ func (m *MultiWebsiteTailerManager) startTailerLocked(website config.WebsiteConf
 			m.p.LogFunc(logging.LevelInfo, "MULTI_TAIL", "Starting tailer for website '%s' on %s", tailer.Name, tailer.LogPath)
 		}
 
+		// Set current website for this tailer
+		m.p.LogPathMutex.Lock()
+		m.p.CurrentWebsite = tailer.Name
+		m.p.LogPathMutex.Unlock()
+
 		// Create a combined signal channel that listens to both global signal and tailer-specific stop
 		combinedSignal := make(chan os.Signal, 1)
 		go func() {

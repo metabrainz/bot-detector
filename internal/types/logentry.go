@@ -43,6 +43,7 @@ type LogEntry struct {
 	Size       int
 	UserAgent  string
 	VHost      string
+	Website    string // Website name (set by tailer in multi-website mode)
 
 	// fieldCache stores extracted field values to avoid redundant GetMatchValue calls.
 	// Key: canonical field name (e.g., "Path", "UserAgent")

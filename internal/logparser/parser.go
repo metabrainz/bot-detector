@@ -46,6 +46,13 @@ func ProcessLogLineInternal(p *app.Processor, line string) {
 		VHost:      parsedEntry.VHost,
 	}
 
+	// Set website from tailer context (multi-website mode)
+	if len(p.Websites) > 0 {
+		p.LogPathMutex.Lock()
+		entry.Website = p.CurrentWebsite
+		p.LogPathMutex.Unlock()
+	}
+
 	// 3. If not blocked, process the log line through all behavioral chains
 	p.CheckChainsFunc(entry)
 }

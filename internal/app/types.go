@@ -113,6 +113,7 @@ type Processor struct {
 	WebsiteChains    map[string][]int       // website name -> chain indices
 	GlobalChains     []int                  // indices of chains that apply to all websites
 	LogPathMutex     sync.Mutex             // Protects LogPath in multi-website mode
+	CurrentWebsite   string                 // Current website being processed (set by tailer in multi-website mode)
 	UnknownVHosts    map[string]bool        // Track unknown vhosts to avoid log spam
 	UnknownVHostsMux sync.Mutex             // Protects UnknownVHosts map
 	WebsiteTailerMgr interface{}            // Multi-website tailer manager (type is *processor.MultiWebsiteTailerManager, using interface{} to avoid import cycle)
