@@ -1,0 +1,94 @@
+version: "1.0"
+
+# Multi-website configuration for testing
+websites:
+  - name: "main_site"
+    vhosts: ["www.example.com", "example.com"]
+    log_path: "testdata/multiwebsite/main.log"
+  
+  - name: "api_site"
+    vhosts: ["api.example.com"]
+    log_path: "testdata/multiwebsite/api.log"
+  
+  - name: "admin_site"
+    vhosts: ["admin.example.com"]
+    log_path: "testdata/multiwebsite/admin.log"
+
+application:
+  log_level: "info"
+  enable_metrics: false
+
+parser:
+  line_ending: "lf"
+
+checker:
+  unblock_on_good_actor: false
+  actor_cleanup_interval: "1m"
+  actor_state_idle_timeout: "30m"
+
+blockers:
+  default_duration: "30m"
+  backends:
+    haproxy:
+      addresses: []  # Empty for dry-run
+
+chains:
+  # Global chain - applies to ALL websites
+  - name: "Global-Aggressive-Scanner"
+    action: "block"
+    block_duration: "1h"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          method: "HEAD"
+          statuscode: 403
+      - max_delay: "2s"
+        field_matches:
+          method: "GET"
+          statuscode: 403
+
+  # Main website specific chain
+  - name: "Main-Login-Abuse"
+    action: "block"
+    block_duration: "30m"
+    match_key: "ip_ua"
+    websites: ["main_site"]
+    steps:
+      - field_matches:
+          path: "/login"
+          statuscode: "4XX"
+        repeated: 5
+
+  # API website specific chain
+  - name: "API-Rate-Limit"
+    action: "block"
+    block_duration: "15m"
+    match_key: "ip"
+    websites: ["api_site"]
+    steps:
+      - field_matches:
+          path: "regex:^/api/"
+          statuscode: 429
+        repeated: 3
+
+  # Admin website specific chain
+  - name: "Admin-Unauthorized-Access"
+    action: "block"
+    block_duration: "24h"
+    match_key: "ip"
+    websites: ["admin_site"]
+    steps:
+      - field_matches:
+          path: "regex:^/admin/"
+          statuscode: [401, 403]
+
+  # Shared chain - applies to main and api
+  - name: "Shared-SQL-Injection-Attempt"
+    action: "block"
+    block_duration: "2h"
+    match_key: "ip"
+    websites: ["main_site", "api_site"]
+    steps:
+      - field_matches:
+          path: "regex:(?i)(union|select|insert|update|delete|drop|exec)"
+          statuscode: "4XX"

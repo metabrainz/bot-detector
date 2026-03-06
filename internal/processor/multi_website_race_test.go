@@ -53,8 +53,8 @@ site.com 10.0.0.2 - - [01/Jan/2026:12:00:01 +0000] "GET /test HTTP/1.1" 200 100 
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
-		DryRun:  true,
-		NowFunc: time.Now,
+		DryRun:   true,
+		NowFunc:  time.Now,
 		SignalCh: make(chan os.Signal, 1),
 		Websites: []config.WebsiteConfig{
 			{Name: "site1", VHosts: []string{"site1.com"}, LogPath: logs[0]},
@@ -144,8 +144,8 @@ func TestMultiWebsite_LogPathMutex(t *testing.T) {
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
-		DryRun:  true,
-		NowFunc: time.Now,
+		DryRun:   true,
+		NowFunc:  time.Now,
 		SignalCh: make(chan os.Signal, 1),
 		Websites: []config.WebsiteConfig{
 			{Name: "site1", VHosts: []string{"site1.com"}, LogPath: log1},
@@ -222,13 +222,13 @@ func TestMultiWebsite_UnknownVHostsConcurrency(t *testing.T) {
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
-		DryRun:        true,
-		NowFunc:       time.Now,
-		SignalCh:      make(chan os.Signal, 1),
-		Websites:      websites,
+		DryRun:         true,
+		NowFunc:        time.Now,
+		SignalCh:       make(chan os.Signal, 1),
+		Websites:       websites,
 		VHostToWebsite: vhostMap,
-		UnknownVHosts: make(map[string]bool),
-		ExitOnEOF:     true,
+		UnknownVHosts:  make(map[string]bool),
+		ExitOnEOF:      true,
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
@@ -237,7 +237,7 @@ func TestMultiWebsite_UnknownVHostsConcurrency(t *testing.T) {
 	p.ProcessLogLine = func(line string) {
 		// Extract vhost (first field)
 		var vhost string
-		fmt.Sscanf(line, "%s", &vhost)
+		_, _ = fmt.Sscanf(line, "%s", &vhost)
 
 		// Check if vhost is known
 		if _, known := p.VHostToWebsite[vhost]; !known {

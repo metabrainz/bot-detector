@@ -69,8 +69,8 @@ admin.example.com 10.0.2.2 - - [01/Jan/2026:12:00:01 +0000] "GET /admin HTTP/1.1
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
-		DryRun:  true,
-		NowFunc: time.Now,
+		DryRun:   true,
+		NowFunc:  time.Now,
 		SignalCh: make(chan os.Signal, 1),
 		Websites: []config.WebsiteConfig{
 			{Name: "main", VHosts: []string{"www.example.com"}, LogPath: mainLog},
@@ -199,8 +199,8 @@ func TestMultiLogTailer_SignalShutdown(t *testing.T) {
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
-		DryRun:  true,
-		NowFunc: time.Now,
+		DryRun:   true,
+		NowFunc:  time.Now,
 		SignalCh: make(chan os.Signal, 1),
 		Websites: []config.WebsiteConfig{
 			{Name: "site1", VHosts: []string{"site1.com"}, LogPath: log1},
@@ -253,13 +253,13 @@ func TestMultiLogTailer_ConcurrentWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create log1: %v", err)
 	}
-	f1.Close()
+	_ = f1.Close()
 
 	f2, err := os.Create(log2)
 	if err != nil {
 		t.Fatalf("Failed to create log2: %v", err)
 	}
-	f2.Close()
+	_ = f2.Close()
 
 	var linesProcessed int32
 
@@ -279,8 +279,8 @@ func TestMultiLogTailer_ConcurrentWrites(t *testing.T) {
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
-		DryRun:  true,
-		NowFunc: time.Now,
+		DryRun:   true,
+		NowFunc:  time.Now,
 		SignalCh: make(chan os.Signal, 1),
 		Websites: []config.WebsiteConfig{
 			{Name: "site1", VHosts: []string{"site1.com"}, LogPath: log1},
@@ -321,9 +321,9 @@ func TestMultiLogTailer_ConcurrentWrites(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		f, _ := os.OpenFile(log1, os.O_APPEND|os.O_WRONLY, 0644)
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		for i := 0; i < 5; i++ {
-			fmt.Fprintf(f, "site1.com 10.0.0.%d - - [01/Jan/2026:12:00:00 +0000] \"GET /test HTTP/1.1\" 200 100 \"-\" \"Bot\"\n", i)
+			_, _ = fmt.Fprintf(f, "site1.com 10.0.0.%d - - [01/Jan/2026:12:00:00 +0000] \"GET /test HTTP/1.1\" 200 100 \"-\" \"Bot\"\n", i)
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
@@ -331,9 +331,9 @@ func TestMultiLogTailer_ConcurrentWrites(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		f, _ := os.OpenFile(log2, os.O_APPEND|os.O_WRONLY, 0644)
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		for i := 0; i < 5; i++ {
-			fmt.Fprintf(f, "site2.com 10.0.1.%d - - [01/Jan/2026:12:00:00 +0000] \"GET /test HTTP/1.1\" 200 100 \"-\" \"Bot\"\n", i)
+			_, _ = fmt.Fprintf(f, "site2.com 10.0.1.%d - - [01/Jan/2026:12:00:00 +0000] \"GET /test HTTP/1.1\" 200 100 \"-\" \"Bot\"\n", i)
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
