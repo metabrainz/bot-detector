@@ -980,6 +980,9 @@ func start(p *app.Processor) {
 		// Main log tailing loop - choose based on mode
 		if processor.IsMultiWebsiteMode(p) {
 			// Multi-website mode: tail multiple log files concurrently
+			if p.LogPath != "" {
+				p.LogFunc(logging.LevelWarning, "SETUP", "--log-path flag ignored: multi-website mode is enabled. Log paths are defined per-website in config.")
+			}
 			p.LogFunc(logging.LevelInfo, "SETUP", "Starting multi-website mode with %d websites", len(p.Websites))
 			processor.MultiLogTailer(p, p.SignalCh)
 		} else {

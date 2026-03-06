@@ -310,7 +310,7 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	// The LastModTime is already set correctly in newAppConfig, no need to update here.
 	p.LogRegex = loadedCfg.LogFormatRegex
 	p.EnableMetrics = loadedCfg.Application.EnableMetrics // Set the processor's EnableMetrics field
-	
+
 	// Update website configuration (if changed)
 	oldWebsitesCount := len(p.Websites)
 	p.Websites = loadedCfg.Websites
@@ -322,12 +322,12 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 		p.WebsiteChains = nil
 		p.GlobalChains = nil
 	}
-	
+
 	InitializeMetrics(p, loadedCfg)
 
 	logging.SetLogLevel(loadedCfg.Application.LogLevel)
 	p.ConfigMutex.Unlock()
-	
+
 	// Update website tailers if in multi-website mode
 	if p.WebsiteTailerMgr != nil {
 		// Type assert to the manager (we know the type but use interface{} to avoid import cycle)

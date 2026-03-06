@@ -402,13 +402,13 @@ func FlushGivenEntries(p *app.Processor, entries []*app.LogEntry) {
 // logDryRunCompletion handles logging for completed chains in dry-run mode.
 func logDryRunCompletion(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry, websiteName string) {
 	onMatchSuffix := getOnMatchSuffix(chain)
-	
+
 	// Build website context string
 	websiteContext := ""
 	if websiteName != "" {
 		websiteContext = fmt.Sprintf(" on website '%s' (vhost: %s)", websiteName, entry.VHost)
 	}
-	
+
 	switch chain.Action {
 	case "block":
 		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s%s. Blocking for %v (DryRun)%s",

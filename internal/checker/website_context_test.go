@@ -67,13 +67,13 @@ func TestChainCompletion_WebsiteContext(t *testing.T) {
 			var logMutex sync.Mutex
 
 			p := &app.Processor{
-				ActivityMutex: &sync.RWMutex{},
-				ActivityStore: make(map[store.Actor]*store.ActorActivity),
-				ConfigMutex:   &sync.RWMutex{},
-				Metrics:       metrics.NewMetrics(),
-				EnableMetrics: true,
-				DryRun:        true,
-				Websites:      tt.websites,
+				ActivityMutex:  &sync.RWMutex{},
+				ActivityStore:  make(map[store.Actor]*store.ActorActivity),
+				ConfigMutex:    &sync.RWMutex{},
+				Metrics:        metrics.NewMetrics(),
+				EnableMetrics:  true,
+				DryRun:         true,
+				Websites:       tt.websites,
 				VHostToWebsite: tt.vhostMap,
 				ReasonCache:    make(map[string]*string),
 				LogFunc: func(level logging.LogLevel, tag string, format string, v ...interface{}) {

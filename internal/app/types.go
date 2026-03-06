@@ -107,14 +107,14 @@ type Processor struct {
 	MetricsCollector  *cluster.MetricsCollector // Metrics collector (only set for leaders)
 
 	// Multi-website support
-	Websites           []config.WebsiteConfig // Website configurations (empty = legacy single-website mode)
-	VHostToWebsite     map[string]string      // vhost -> website name mapping
-	WebsiteChains      map[string][]int       // website name -> chain indices
-	GlobalChains       []int                  // indices of chains that apply to all websites
-	LogPathMutex       sync.Mutex             // Protects LogPath in multi-website mode
-	UnknownVHosts      map[string]bool        // Track unknown vhosts to avoid log spam
-	UnknownVHostsMux   sync.Mutex             // Protects UnknownVHosts map
-	WebsiteTailerMgr   interface{}            // Multi-website tailer manager (type is *processor.MultiWebsiteTailerManager, using interface{} to avoid import cycle)
+	Websites         []config.WebsiteConfig // Website configurations (empty = legacy single-website mode)
+	VHostToWebsite   map[string]string      // vhost -> website name mapping
+	WebsiteChains    map[string][]int       // website name -> chain indices
+	GlobalChains     []int                  // indices of chains that apply to all websites
+	LogPathMutex     sync.Mutex             // Protects LogPath in multi-website mode
+	UnknownVHosts    map[string]bool        // Track unknown vhosts to avoid log spam
+	UnknownVHostsMux sync.Mutex             // Protects UnknownVHosts map
+	WebsiteTailerMgr interface{}            // Multi-website tailer manager (type is *processor.MultiWebsiteTailerManager, using interface{} to avoid import cycle)
 }
 
 // GetTimestampFormat returns the timestamp format from the config.

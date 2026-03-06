@@ -10,12 +10,12 @@ import (
 
 // WebsiteTailer manages a single website's log tailer with its own stop channel
 type WebsiteTailer struct {
-	Name     string
-	LogPath  string
-	StopCh   chan struct{}
-	DoneCh   chan struct{}
-	Running  bool
-	mu       sync.Mutex
+	Name    string
+	LogPath string
+	StopCh  chan struct{}
+	DoneCh  chan struct{}
+	Running bool
+	mu      sync.Mutex
 }
 
 // MultiWebsiteTailerManager manages dynamic starting/stopping of website tailers

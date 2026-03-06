@@ -11,13 +11,13 @@ import (
 // This version uses the dynamic manager to support runtime website changes.
 func MultiLogTailer(p *app.Processor, signalCh <-chan os.Signal) {
 	manager := NewMultiWebsiteTailerManager(p, signalCh)
-	
+
 	// Store manager in processor for config reload access
 	p.WebsiteTailerMgr = manager
-	
+
 	// Start initial tailers
 	manager.Start()
-	
+
 	// Wait for all tailers to finish (blocks until shutdown)
 	manager.Wait()
 }
