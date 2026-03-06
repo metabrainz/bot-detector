@@ -174,11 +174,11 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		NodeLeaderAddress: "",
 
 		// Initialize multi-website fields
-		Websites:         loadedCfg.Websites,
-		VHostToWebsite:   make(map[string]string),
-		WebsiteChains:    make(map[string][]int),
-		GlobalChains:     []int{},
-		UnknownVHosts:    make(map[string]bool),
+		Websites:       loadedCfg.Websites,
+		VHostToWebsite: make(map[string]string),
+		WebsiteChains:  make(map[string][]int),
+		GlobalChains:   []int{},
+		UnknownVHosts:  make(map[string]bool),
 	}
 }
 

@@ -15,11 +15,11 @@ func MultiLogTailer(p *app.Processor, signalCh <-chan os.Signal) {
 
 	for _, website := range p.Websites {
 		wg.Add(1)
-		
+
 		// Capture values for goroutine closure
 		websiteName := website.Name
 		logPath := website.LogPath
-		
+
 		go func() {
 			defer wg.Done()
 
@@ -45,14 +45,14 @@ func liveLogTailerWithPath(p *app.Processor, logPath string, signalCh <-chan os.
 	originalLogPath := p.LogPath
 	p.LogPath = logPath
 	p.LogPathMutex.Unlock()
-	
+
 	// Ensure we restore the original value
 	defer func() {
 		p.LogPathMutex.Lock()
 		p.LogPath = originalLogPath
 		p.LogPathMutex.Unlock()
 	}()
-	
+
 	LiveLogTailer(p, signalCh, readySignal)
 }
 

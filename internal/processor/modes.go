@@ -51,7 +51,7 @@ func NewTailer(p *app.Processor, seekToEnd bool) (*Tailer, error) {
 	p.LogPathMutex.Lock()
 	logPath := p.LogPath
 	p.LogPathMutex.Unlock()
-	
+
 	t := &Tailer{
 		path:   logPath,
 		logger: p.LogFunc,
@@ -459,7 +459,7 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 	p.LogPathMutex.Lock()
 	logPath := p.LogPath
 	p.LogPathMutex.Unlock()
-	
+
 	var (
 		firstRun = true // Flag to control initial seek behavior.
 		shutdown = false
