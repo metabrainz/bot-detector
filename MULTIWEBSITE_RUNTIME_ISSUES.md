@@ -1,124 +1,145 @@
-# Multi-Website Runtime Configuration Issues
+# Multi-Website Runtime Configuration
 
-## Issues Discovered
+## Features Implemented
 
-### 1. Config Reload Doesn't Update Website Configuration
-**Problem:** When config is reloaded, the following fields are NOT updated:
-- `p.Websites`
-- `p.VHostToWebsite`
-- `p.WebsiteChains`
-- `p.GlobalChains`
+### 1. Dynamic Website Configuration Updates ✅
 
-**Impact:** 
-- Adding/removing/modifying websites requires a restart
-- VHost changes won't be recognized
-- Chain-to-website mappings become stale
+**Status:** IMPLEMENTED - No restart required
 
-**Location:** `internal/app/configmanager.go` - `ReloadConfig()` function
+Website configuration is now fully dynamic:
+- **Adding websites:** New tailers start automatically on config reload
+- **Removing websites:** Tailers stop gracefully on config reload  
+- **Modifying website vhosts:** VHost mappings update immediately
+- **Modifying website log paths:** Tailers restart automatically with new path
+- **Modifying chain-to-website mappings:** Updates immediately on reload
 
-### 2. No Website Context in Chain Completion Logs
-**Problem:** When a chain completes, the log shows:
+**Implementation:** `internal/processor/multi_website_manager.go`
+
+The `MultiWebsiteTailerManager` manages website tailers dynamically:
+- Each website has its own goroutine and stop channel
+- Config reload triggers `UpdateWebsites()` which:
+  - Stops tailers for removed websites
+  - Starts tailers for new websites
+  - Restarts tailers if log path changed
+  - Keeps existing tailers running if unchanged
+
+### 2. Website Context in Chain Completion Logs ✅
+
+**Status:** IMPLEMENTED
+
+Chain completion logs now include website context:
+
+**Before:**
 ```
 BLOCK! Chain: API-Rate-Limit completed by IP 10.0.0.1. Blocking for 15m
 ```
 
-But doesn't show WHICH website triggered it.
-
-**Impact:**
-- Hard to find the triggering log line in the correct log file
-- Difficult to debug website-specific chains
-- No way to correlate blocks with specific websites
-
-**Location:** `internal/checker/checker.go` - `handleChainCompletion()` function
-
-### 3. Multi-Website Mode Can't Be Changed at Runtime
-**Problem:** Switching from single-website to multi-website mode (or vice versa) requires:
-- Stopping the application
-- Changing config
-- Restarting
-
-**Impact:**
-- No graceful migration path
-- Downtime required for mode changes
-
-**Location:** `cmd/bot-detector/main.go` - mode is determined at startup only
-
-## Proposed Solutions
-
-### Solution 1: Update Website Configuration on Reload
-
-Add to `ReloadConfig()` in `internal/app/configmanager.go`:
-
-```go
-// Update website configuration
-p.Websites = loadedCfg.Websites
-if len(p.Websites) > 0 {
-    p.VHostToWebsite = BuildVHostMap(p.Websites)
-    p.WebsiteChains, p.GlobalChains = CategorizeChains(p.Chains)
-    p.LogFunc(logging.LevelInfo, "CONFIG", "Updated multi-website configuration: %d websites, %d global chains",
-        len(p.Websites), len(p.GlobalChains))
-} else {
-    p.VHostToWebsite = nil
-    p.WebsiteChains = nil
-    p.GlobalChains = nil
-}
+**After:**
+```
+BLOCK! Chain: API-Rate-Limit completed by IP 10.0.0.1 on website 'api' (vhost: api.example.com). Blocking for 15m
 ```
 
-**Limitation:** This won't restart/stop tailers for added/removed websites. Multi-website mode requires restart.
+**Implementation:** `internal/checker/checker.go`
 
-### Solution 2: Add Website Context to Chain Completion Logs
+Benefits:
+- Easy to find triggering log line in correct log file
+- Clear correlation between blocks and websites
+- Better debugging for website-specific chains
 
-Modify `handleChainCompletion()` to include website name:
+## Configuration Reload Behavior
 
-```go
-// Determine website from vhost
-websiteName := ""
-if len(p.Websites) > 0 {
-    if ws, ok := p.VHostToWebsite[entry.VHost]; ok {
-        websiteName = ws
-    }
-}
+### What Updates Without Restart
+- ✅ Adding/removing websites
+- ✅ Modifying website vhosts
+- ✅ Modifying website log paths
+- ✅ Modifying chain-to-website mappings
+- ✅ All other configuration (chains, good actors, etc.)
 
-// Log with website context
-if websiteName != "" {
-    p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s on website '%s' (vhost: %s). Blocking for %v%s",
-        chain.Name, entry.IPInfo.Address, websiteName, entry.VHost, chain.BlockDuration, getOnMatchSuffix(chain))
-} else {
-    p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v%s",
-        chain.Name, entry.IPInfo.Address, chain.BlockDuration, getOnMatchSuffix(chain))
-}
+### Architecture
+
+```
+Config Reload
+    ↓
+ReloadConfig() in configmanager.go
+    ↓
+Updates p.Websites, p.VHostToWebsite, p.WebsiteChains
+    ↓
+Calls manager.UpdateWebsites()
+    ↓
+Manager compares old vs new websites
+    ↓
+├─ Stop removed website tailers
+├─ Start new website tailers  
+└─ Restart tailers with changed log paths
 ```
 
-### Solution 3: Document Limitation
+## Example Scenarios
 
-Add to documentation that multi-website mode changes require restart:
+### Adding a Website
 
-```markdown
-## Configuration Reload Limitations
-
-### Multi-Website Mode
-- **Adding/removing websites:** Requires application restart
-- **Modifying website vhosts:** Requires application restart  
-- **Modifying website log paths:** Requires application restart
-- **Modifying chain-to-website mappings:** Updated on reload (no restart needed)
-
-### Rationale
-Multi-website mode spawns separate goroutines for each website's log tailer.
-Dynamically starting/stopping these tailers during runtime would add significant
-complexity and potential race conditions.
-
-### Workaround
-Use `--exit-on-eof` flag for testing website configuration changes without
-affecting production.
+1. Edit `config.yaml`, add new website:
+```yaml
+websites:
+  - name: "new_site"
+    vhosts: ["new.example.com"]
+    log_path: "/var/log/haproxy/new.log"
 ```
 
-## Recommendation
+2. Config reload triggers (file watcher or SIGHUP)
 
-Implement Solutions 1 and 2 immediately (low risk, high value).
-Solution 3 is documentation-only (accept the limitation).
+3. Log output:
+```
+[CONFIG] Updated multi-website tailers: 3 websites, 2 global chains
+[MULTI_TAIL] Starting tailer for new website 'new_site'
+[TAIL] Starting log tailer on /var/log/haproxy/new.log...
+```
 
-Dynamic tailer management (full solution 3) should be deferred as it requires:
-- Tailer lifecycle management
-- Graceful tailer shutdown
-- State cleanup for removed websites
-- Significant testing
+4. New website is immediately active - no restart needed!
+
+### Removing a Website
+
+1. Edit `config.yaml`, remove website
+
+2. Config reload triggers
+
+3. Log output:
+```
+[MULTI_TAIL] Stopping tailer for removed website 'old_site'
+[MULTI_TAIL] Tailer stopped for website 'old_site'
+[CONFIG] Updated multi-website tailers: 2 websites, 2 global chains
+```
+
+4. Tailer stops gracefully - no restart needed!
+
+### Changing Log Path
+
+1. Edit `config.yaml`, change log_path for existing website
+
+2. Config reload triggers
+
+3. Log output:
+```
+[MULTI_TAIL] Log path changed for website 'api', restarting tailer
+[MULTI_TAIL] Tailer stopped for website 'api'
+[MULTI_TAIL] Starting tailer for website 'api' on /var/log/haproxy/api_new.log
+```
+
+4. Tailer restarts with new path - no restart needed!
+
+## Testing
+
+Comprehensive tests in `internal/processor/multi_website_manager_test.go`:
+- `TestMultiWebsiteTailerManager_DynamicAdd` - Adding websites at runtime
+- `TestMultiWebsiteTailerManager_DynamicRemove` - Removing websites at runtime
+- `TestMultiWebsiteTailerManager_LogPathChange` - Changing log paths at runtime
+
+All tests pass ✅
+
+## Design Principles Maintained
+
+✅ **No restart required** - Core bot-detector principle maintained  
+✅ **Graceful degradation** - Failed tailers don't affect others  
+✅ **Thread-safe** - All operations protected by mutexes  
+✅ **Observable** - All changes logged clearly  
+✅ **Testable** - Comprehensive test coverage
+

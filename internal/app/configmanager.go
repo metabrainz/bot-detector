@@ -328,8 +328,16 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	logging.SetLogLevel(loadedCfg.Application.LogLevel)
 	p.ConfigMutex.Unlock()
 	
-	// Log website configuration changes
-	if len(p.Websites) != oldWebsitesCount {
+	// Update website tailers if in multi-website mode
+	if p.WebsiteTailerMgr != nil {
+		// Type assert to the manager (we know the type but use interface{} to avoid import cycle)
+		if mgr, ok := p.WebsiteTailerMgr.(interface{ UpdateWebsites([]config.WebsiteConfig) }); ok {
+			mgr.UpdateWebsites(p.Websites)
+			p.LogFunc(logging.LevelInfo, "CONFIG", "Updated multi-website tailers: %d websites, %d global chains",
+				len(p.Websites), len(p.GlobalChains))
+		}
+	} else if len(p.Websites) != oldWebsitesCount {
+		// Not using dynamic manager (shouldn't happen in production)
 		if len(p.Websites) > 0 && oldWebsitesCount == 0 {
 			p.LogFunc(logging.LevelWarning, "CONFIG", "Multi-website mode enabled in config, but requires application restart to take effect")
 		} else if len(p.Websites) == 0 && oldWebsitesCount > 0 {
@@ -338,9 +346,9 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 			p.LogFunc(logging.LevelWarning, "CONFIG", "Website count changed from %d to %d - requires application restart to take effect", oldWebsitesCount, len(p.Websites))
 		}
 	} else if len(p.Websites) > 0 {
-		// Same number of websites - check if vhosts or chains changed
-		p.LogFunc(logging.LevelInfo, "CONFIG", "Updated multi-website configuration: %d websites, %d global chains, %d website-specific chains",
-			len(p.Websites), len(p.GlobalChains), len(p.WebsiteChains))
+		// Same number of websites - vhosts or chains may have changed
+		p.LogFunc(logging.LevelInfo, "CONFIG", "Updated multi-website configuration: %d websites, %d global chains",
+			len(p.Websites), len(p.GlobalChains))
 	}
 
 	// --- Compare and log general config changes ---
