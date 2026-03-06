@@ -105,6 +105,12 @@ type Processor struct {
 	NodeAddress       string                    // Node address from cluster config (empty if not configured)
 	NodeLeaderAddress string                    // Leader address (only set for followers)
 	MetricsCollector  *cluster.MetricsCollector // Metrics collector (only set for leaders)
+
+	// Multi-website support
+	Websites       []config.WebsiteConfig // Website configurations (empty = legacy single-website mode)
+	VHostToWebsite map[string]string      // vhost -> website name mapping
+	WebsiteChains  map[string][]int       // website name -> chain indices
+	GlobalChains   []int                  // indices of chains that apply to all websites
 }
 
 // GetTimestampFormat returns the timestamp format from the config.
