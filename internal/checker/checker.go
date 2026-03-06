@@ -800,8 +800,9 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 
 						// Update in-memory state
 						p.IPStates[entry.IPInfo.Address] = persistence.IPState{
-							State:  persistence.BlockStateUnblocked,
-							Reason: unblockReason,
+							State:      persistence.BlockStateUnblocked,
+							ExpireTime: p.NowFunc(), // Set to now so retention period starts from unblock time
+							Reason:     unblockReason,
 						}
 					}()
 				}
