@@ -977,17 +977,23 @@ func start(p *app.Processor) {
 			}
 		}
 
-		// Main log tailing loop - choose based on mode
+		// Main log tailing loop - always use dynamic manager for seamless config reload
 		if processor.IsMultiWebsiteMode(p) {
 			// Multi-website mode: tail multiple log files concurrently
 			if p.LogPath != "" {
 				p.LogFunc(logging.LevelWarning, "SETUP", "--log-path flag ignored: multi-website mode is enabled. Log paths are defined per-website in config.")
 			}
 			p.LogFunc(logging.LevelInfo, "SETUP", "Starting multi-website mode with %d websites", len(p.Websites))
-			processor.MultiLogTailer(p, p.SignalCh)
 		} else {
-			// Legacy single-website mode: tail single log file
-			processor.LiveLogTailer(p, p.SignalCh, nil)
+			// Single-website mode: use dynamic manager with synthetic website config
+			// This allows seamless transition to multi-website mode on config reload
+			p.Websites = []config.WebsiteConfig{{
+				Name:    "default",
+				LogPath: p.LogPath,
+				VHosts:  []string{},
+			}}
+			p.LogFunc(logging.LevelInfo, "SETUP", "Starting single-website mode on %s", p.LogPath)
 		}
+		processor.MultiLogTailer(p, p.SignalCh)
 	}
 }

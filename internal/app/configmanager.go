@@ -332,26 +332,18 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	if p.WebsiteTailerMgr != nil {
 		// Type assert to the manager (we know the type but use interface{} to avoid import cycle)
 		if mgr, ok := p.WebsiteTailerMgr.(interface{ UpdateWebsites([]config.WebsiteConfig) }); ok {
-			mgr.UpdateWebsites(p.Websites)
-			p.LogFunc(logging.LevelInfo, "CONFIG", "Updated multi-website tailers: %d websites, %d global chains",
-				len(p.Websites), len(p.GlobalChains))
-		}
-	} else if len(p.Websites) != oldWebsitesCount {
-		// Not using dynamic manager (shouldn't happen in production)
-		if len(p.Websites) > 0 && oldWebsitesCount == 0 {
-			if p.LogPath != "" {
+			// Check if transitioning from single to multi-website mode
+			if len(p.Websites) > 0 && oldWebsitesCount == 0 && p.LogPath != "" {
 				p.LogFunc(logging.LevelWarning, "CONFIG", "--log-path flag ignored: multi-website mode is enabled. Log paths are defined per-website in config.")
 			}
-			p.LogFunc(logging.LevelWarning, "CONFIG", "Multi-website mode enabled in config, but requires application restart to take effect")
-		} else if len(p.Websites) == 0 && oldWebsitesCount > 0 {
-			p.LogFunc(logging.LevelWarning, "CONFIG", "Multi-website mode disabled in config, but requires application restart to take effect")
-		} else {
-			p.LogFunc(logging.LevelWarning, "CONFIG", "Website count changed from %d to %d - requires application restart to take effect", oldWebsitesCount, len(p.Websites))
+			mgr.UpdateWebsites(p.Websites)
+			if len(p.Websites) > 0 {
+				p.LogFunc(logging.LevelInfo, "CONFIG", "Updated multi-website tailers: %d websites, %d global chains",
+					len(p.Websites), len(p.GlobalChains))
+			} else {
+				p.LogFunc(logging.LevelInfo, "CONFIG", "Switched to single-website mode")
+			}
 		}
-	} else if len(p.Websites) > 0 {
-		// Same number of websites - vhosts or chains may have changed
-		p.LogFunc(logging.LevelInfo, "CONFIG", "Updated multi-website configuration: %d websites, %d global chains",
-			len(p.Websites), len(p.GlobalChains))
 	}
 
 	// --- Compare and log general config changes ---
