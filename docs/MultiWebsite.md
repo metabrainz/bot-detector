@@ -57,8 +57,8 @@ chains:
 
 **`root_dir` (optional):** Base directory for relative log paths.
 
-- **Not specified:** Defaults to config file's directory
-- **Relative path:** Resolved relative to config directory (e.g., `root_dir: logs` → `/etc/bot-detector/logs`)
+- **Not specified:** Defaults to current working directory (consistent with `--log-path` behavior)
+- **Relative path:** Resolved relative to working directory (e.g., `root_dir: logs` → `/path/to/workdir/logs`)
 - **Absolute path:** Used as-is (e.g., `root_dir: /var/log/haproxy`)
 
 **`log_path` behavior:**

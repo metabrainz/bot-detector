@@ -6,6 +6,12 @@ import (
 )
 
 func TestResolveWebsiteLogPaths(t *testing.T) {
+	// Get current working directory for tests
+	cwd, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatalf("failed to get working directory: %v", err)
+	}
+
 	tests := []struct {
 		name           string
 		websites       []WebsiteConfig
@@ -21,14 +27,14 @@ func TestResolveWebsiteLogPaths(t *testing.T) {
 			expected:       []WebsiteConfig{},
 		},
 		{
-			name: "no root_dir - defaults to config dir",
+			name: "no root_dir - defaults to working dir",
 			websites: []WebsiteConfig{
 				{Name: "main", LogPath: "logs/main.log"},
 			},
 			rootDir:        "",
 			configFilePath: "/etc/bot-detector/config.yaml",
 			expected: []WebsiteConfig{
-				{Name: "main", LogPath: "/etc/bot-detector/logs/main.log"},
+				{Name: "main", LogPath: filepath.Join(cwd, "logs/main.log")},
 			},
 		},
 		{
@@ -52,7 +58,7 @@ func TestResolveWebsiteLogPaths(t *testing.T) {
 			rootDir:        "logs",
 			configFilePath: "/etc/bot-detector/config.yaml",
 			expected: []WebsiteConfig{
-				{Name: "main", LogPath: "/etc/bot-detector/logs/main.log"},
+				{Name: "main", LogPath: filepath.Join(cwd, "logs/main.log")},
 			},
 		},
 		{

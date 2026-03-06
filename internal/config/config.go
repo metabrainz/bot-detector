@@ -1168,12 +1168,19 @@ func resolveWebsiteLogPaths(websites []WebsiteConfig, rootDir, configFilePath st
 	// Determine the base directory for relative paths
 	baseDir := rootDir
 	if baseDir == "" {
-		// Default to config file's directory
-		baseDir = filepath.Dir(configFilePath)
+		// Default to current working directory (consistent with --log-path behavior)
+		var err error
+		baseDir, err = os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get working directory: %w", err)
+		}
 	} else if !filepath.IsAbs(baseDir) {
-		// root_dir itself is relative, make it relative to config dir
-		configDir := filepath.Dir(configFilePath)
-		baseDir = filepath.Join(configDir, baseDir)
+		// root_dir itself is relative, make it relative to working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get working directory: %w", err)
+		}
+		baseDir = filepath.Join(cwd, baseDir)
 	}
 
 	// Resolve each website's log path
