@@ -133,6 +133,10 @@ func renderLocalIPStatus(w http.ResponseWriter, p Provider, canonical string) {
 		_, _ = fmt.Fprint(w, "source: backend\n")
 		formatBackendInfo(w, backendInfo, p.GetDurationTables())
 		formatPersistenceState(w, persistState, hasPersist)
+		// If no persistence reason available, add note
+		if !hasPersist || reflect.ValueOf(persistState).FieldByName("Reason").String() == "" {
+			_, _ = fmt.Fprint(w, "note: Block reason unavailable (enable persistence to track reasons across restarts)\n")
+		}
 		return
 	}
 
@@ -520,6 +524,7 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 	if inBackend && len(actors) == 0 {
 		response.Status = "blocked"
 		response.Backend = "present"
+		// Note: PersistenceReason already set above if available
 		return response
 	}
 
