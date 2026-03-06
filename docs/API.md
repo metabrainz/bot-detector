@@ -36,6 +36,46 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
 *   **Content-Type:** `text/plain; charset=utf-8`
 *   **Description:** Provides a plain text list of all behavioral chain steps and the number of times each has been executed. This is useful for debugging chain performance and identifying which rules are matching most frequently. The list is sorted by execution count in descending order.
 
+### `/stats/websites`
+
+*   **Method:** `GET`
+*   **Content-Type:** `text/plain; charset=utf-8`
+*   **Description:** Displays multi-website statistics including configured websites, their vhosts, log paths, chain assignments, and a list of unknown vhosts encountered in logs. This endpoint is particularly useful for:
+    *   Verifying multi-website configuration
+    *   Identifying misconfigured or missing vhosts
+    *   Troubleshooting log entries that are being skipped
+*   **Response (Multi-Website Mode):**
+    ```
+    === Multi-Website Statistics ===
+    
+    Total Websites: 2
+    Global Chains: 1
+    Website-Specific Chains: 2
+    
+    --- Configured Websites ---
+      main:
+        VHosts: www.example.com, example.com
+        Log Path: /var/log/haproxy/main.log
+        Chains: 1
+      api:
+        VHosts: api.example.com
+        Log Path: /var/log/haproxy/api.log
+        Chains: 1
+    
+    --- Unknown VHosts ---
+      Total: 1
+      VHosts:
+        - unknown.example.com
+    
+      Note: Unknown vhosts are logged once and their entries are skipped.
+      To fix: Add the vhost to a website's 'vhosts' list in config.yaml
+    ```
+*   **Response (Single-Website Mode):**
+    ```
+    Multi-website mode is not enabled.
+    To enable, add a 'websites' section to your config.yaml
+    ```
+
 ### `/config`
 
 *   **Method:** `GET`
