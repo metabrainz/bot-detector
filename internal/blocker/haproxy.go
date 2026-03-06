@@ -354,9 +354,11 @@ func (b *HAProxyBlocker) ClearIP(ipInfo utils.IPInfo) ([]interface{}, error) {
 	}
 
 	// Verify removal with retries
-	maxRetries := 3
+	maxRetries := b.P.GetBlockerMaxRetries()
+	retryDelay := b.P.GetBlockerRetryDelay()
+
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(retryDelay)
 
 		stillPresent := false
 		var failAddr, failTable string
