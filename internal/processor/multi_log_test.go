@@ -8,9 +8,9 @@ import (
 
 func TestIsMultiWebsiteMode(t *testing.T) {
 	tests := []struct {
-		name      string
-		websites  []config.WebsiteConfig
-		expected  bool
+		name     string
+		websites []config.WebsiteConfig
+		expected bool
 	}{
 		{
 			name:     "no websites - legacy mode",

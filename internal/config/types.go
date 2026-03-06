@@ -112,9 +112,9 @@ type LoadedConfig struct {
 }
 
 type WebsiteConfig struct {
-	Name     string   `yaml:"name"`
-	VHosts   []string `yaml:"vhosts"`
-	LogPath  string   `yaml:"log_path"`
+	Name    string   `yaml:"name"`
+	VHosts  []string `yaml:"vhosts"`
+	LogPath string   `yaml:"log_path"`
 }
 
 type TopLevelConfig struct {

@@ -8,9 +8,9 @@ import (
 
 func TestBuildVHostMap(t *testing.T) {
 	tests := []struct {
-		name      string
-		websites  []config.WebsiteConfig
-		expected  map[string]string
+		name     string
+		websites []config.WebsiteConfig
+		expected map[string]string
 	}{
 		{
 			name:     "empty websites",

@@ -52,14 +52,14 @@ func TestWebsiteChainFiltering_Logic(t *testing.T) {
 	// This tests the algorithm without needing full processor setup
 
 	tests := []struct {
-		name              string
-		hasWebsites       bool
-		vhost             string
-		vhostMap          map[string]string
-		globalChains      []int
-		websiteChains     map[string][]int
-		expectedIndices   []int
-		description       string
+		name            string
+		hasWebsites     bool
+		vhost           string
+		vhostMap        map[string]string
+		globalChains    []int
+		websiteChains   map[string][]int
+		expectedIndices []int
+		description     string
 	}{
 		{
 			name:            "legacy mode - no websites",
@@ -69,10 +69,10 @@ func TestWebsiteChainFiltering_Logic(t *testing.T) {
 			description:     "In legacy mode, all chains should be processed",
 		},
 		{
-			name:        "multi-website - known vhost",
-			hasWebsites: true,
-			vhost:       "www.example.com",
-			vhostMap:    map[string]string{"www.example.com": "main"},
+			name:         "multi-website - known vhost",
+			hasWebsites:  true,
+			vhost:        "www.example.com",
+			vhostMap:     map[string]string{"www.example.com": "main"},
 			globalChains: []int{0},
 			websiteChains: map[string][]int{
 				"main": {1, 2},
@@ -82,10 +82,10 @@ func TestWebsiteChainFiltering_Logic(t *testing.T) {
 			description:     "Known vhost should get global + website-specific chains",
 		},
 		{
-			name:        "multi-website - unknown vhost",
-			hasWebsites: true,
-			vhost:       "unknown.example.com",
-			vhostMap:    map[string]string{"www.example.com": "main"},
+			name:         "multi-website - unknown vhost",
+			hasWebsites:  true,
+			vhost:        "unknown.example.com",
+			vhostMap:     map[string]string{"www.example.com": "main"},
 			globalChains: []int{0, 4},
 			websiteChains: map[string][]int{
 				"main": {1, 2},
@@ -94,10 +94,10 @@ func TestWebsiteChainFiltering_Logic(t *testing.T) {
 			description:     "Unknown vhost should only get global chains",
 		},
 		{
-			name:        "multi-website - empty vhost",
-			hasWebsites: true,
-			vhost:       "",
-			vhostMap:    map[string]string{"www.example.com": "main"},
+			name:         "multi-website - empty vhost",
+			hasWebsites:  true,
+			vhost:        "",
+			vhostMap:     map[string]string{"www.example.com": "main"},
 			globalChains: []int{0},
 			websiteChains: map[string][]int{
 				"main": {1},

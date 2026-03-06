@@ -16,22 +16,25 @@ func MultiLogTailer(p *app.Processor, signalCh <-chan os.Signal) {
 
 	for _, website := range p.Websites {
 		wg.Add(1)
-		go func(ws config.WebsiteConfig) {
+		go func(ws config.WebsiteConfig, proc *app.Processor) {
 			defer wg.Done()
 
-			// Create a sub-processor context with this website's log path
-			// We share everything except the LogPath
-			subP := *p
-			subP.LogPath = ws.LogPath
+			// Override the log path for this website
+			// We don't copy the processor to avoid copying mutexes
+			originalLogPath := proc.LogPath
+			proc.LogPath = ws.LogPath
 
-			p.LogFunc(logging.LevelInfo, "MULTI_TAIL", "Starting tailer for website '%s' on %s", ws.Name, ws.LogPath)
+			proc.LogFunc(logging.LevelInfo, "MULTI_TAIL", "Starting tailer for website '%s' on %s", ws.Name, ws.LogPath)
 
 			// Tail this website's log file
 			// Pass nil for readySignal since we don't need per-website ready signals
-			LiveLogTailer(&subP, signalCh, nil)
+			LiveLogTailer(proc, signalCh, nil)
 
-			p.LogFunc(logging.LevelInfo, "MULTI_TAIL", "Tailer stopped for website '%s'", ws.Name)
-		}(website)
+			// Restore original log path (though this doesn't matter much at shutdown)
+			proc.LogPath = originalLogPath
+
+			proc.LogFunc(logging.LevelInfo, "MULTI_TAIL", "Tailer stopped for website '%s'", ws.Name)
+		}(website, p)
 	}
 
 	// Wait for all tailers to finish
