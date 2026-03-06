@@ -172,3 +172,7 @@ func TestArchiveHandler_StableETag(t *testing.T) {
 		t.Errorf("ETag should have changed when config content changed, but it remained the same: %s", etag1)
 	}
 }
+
+func (m *MockProvider) GenerateWebsiteStatsReport() string {
+	return ""
+}

@@ -453,3 +453,62 @@ func (p *Processor) GenerateStepsMetricsReport() string {
 	}
 	return report.String()
 }
+
+// GenerateWebsiteStatsReport creates a report of multi-website statistics.
+func (p *Processor) GenerateWebsiteStatsReport() string {
+	var report strings.Builder
+	
+	// Check if multi-website mode is enabled
+	if len(p.Websites) == 0 {
+		report.WriteString("Multi-website mode is not enabled.\n")
+		report.WriteString("To enable, add a 'websites' section to your config.yaml\n")
+		return report.String()
+	}
+
+	report.WriteString("=== Multi-Website Statistics ===\n\n")
+	
+	// Website configuration
+	report.WriteString(fmt.Sprintf("Total Websites: %d\n", len(p.Websites)))
+	report.WriteString(fmt.Sprintf("Global Chains: %d\n", len(p.GlobalChains)))
+	report.WriteString(fmt.Sprintf("Website-Specific Chains: %d\n\n", len(p.WebsiteChains)))
+	
+	// List configured websites
+	report.WriteString("--- Configured Websites ---\n")
+	for _, website := range p.Websites {
+		report.WriteString(fmt.Sprintf("  %s:\n", utils.ForHTML(website.Name)))
+		report.WriteString(fmt.Sprintf("    VHosts: %s\n", utils.ForHTML(strings.Join(website.VHosts, ", "))))
+		report.WriteString(fmt.Sprintf("    Log Path: %s\n", utils.ForHTML(website.LogPath)))
+		
+		// Show chains for this website
+		if chainIndices, ok := p.WebsiteChains[website.Name]; ok {
+			report.WriteString(fmt.Sprintf("    Chains: %d\n", len(chainIndices)))
+		} else {
+			report.WriteString("    Chains: 0\n")
+		}
+	}
+	
+	// Unknown vhosts section
+	p.UnknownVHostsMux.Lock()
+	unknownCount := len(p.UnknownVHosts)
+	var unknownVHosts []string
+	for vhost := range p.UnknownVHosts {
+		unknownVHosts = append(unknownVHosts, vhost)
+	}
+	p.UnknownVHostsMux.Unlock()
+	
+	report.WriteString("\n--- Unknown VHosts ---\n")
+	if unknownCount == 0 {
+		report.WriteString("  None (all vhosts are recognized)\n")
+	} else {
+		sort.Strings(unknownVHosts)
+		report.WriteString(fmt.Sprintf("  Total: %d\n", unknownCount))
+		report.WriteString("  VHosts:\n")
+		for _, vhost := range unknownVHosts {
+			report.WriteString(fmt.Sprintf("    - %s\n", utils.ForHTML(vhost)))
+		}
+		report.WriteString("\n  Note: Unknown vhosts are logged once and their entries are skipped.\n")
+		report.WriteString("  To fix: Add the vhost to a website's 'vhosts' list in config.yaml\n")
+	}
+	
+	return report.String()
+}

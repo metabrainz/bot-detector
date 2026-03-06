@@ -6,6 +6,7 @@
 //   - GET /                - Plain-text metrics dashboard
 //   - GET /stats           - Plain-text metrics dashboard (alias)
 //   - GET /stats/steps     - Plain-text step execution counts
+//   - GET /stats/websites  - Multi-website statistics and unknown vhosts
 //   - GET /config          - Raw YAML configuration
 //   - GET /config/archive  - Tar.gz archive of config + dependencies
 //   - GET /ip/{ip}         - IP status (cluster-aware: aggregated on cluster, local on standalone)
@@ -120,6 +121,7 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("/", rootHandler(p))
 		mux.HandleFunc("/stats", rootHandler(p))
 		mux.HandleFunc("/stats/steps", stepsHandler(p))
+		mux.HandleFunc("/stats/websites", websitesHandler(p))
 	}
 
 	// API endpoints (role=api)

@@ -44,6 +44,9 @@ type Provider interface {
 	// GenerateStepsMetricsReport generates a plain-text step execution metrics report.
 	GenerateStepsMetricsReport() string
 
+	// GenerateWebsiteStatsReport generates a plain-text multi-website statistics report.
+	GenerateWebsiteStatsReport() string
+
 	// GetMarshalledConfig retrieves the raw YAML configuration bytes and its modification time.
 	GetMarshalledConfig() ([]byte, time.Time, error)
 

@@ -888,3 +888,7 @@ func TestBroadcastToFollowers_SkipsSelf(t *testing.T) {
 		t.Errorf("Expected node to skip itself, but received %d requests", receivedRequests)
 	}
 }
+
+func (m *mockIPProvider) GenerateWebsiteStatsReport() string {
+	return ""
+}

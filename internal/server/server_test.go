@@ -383,3 +383,7 @@ func TestServer_Disabled(t *testing.T) {
 		t.Errorf("Expected disabled server log message, but got: %v", mockProvider.logs)
 	}
 }
+
+func (m *mockProvider) GenerateWebsiteStatsReport() string {
+	return ""
+}
