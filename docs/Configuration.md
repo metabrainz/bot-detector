@@ -11,6 +11,7 @@ The configuration is structured as a top-level map containing settings for the a
 | Field | Type | Description |
 | :---- | :---- | :---- |
 | **version** | string | The configuration version. Must match a supported version (e.g., "1.0"). |
+| **websites** | list of objects | Optional. Multi-website configuration. See table [`websites`](#websites). If omitted, operates in legacy single-website mode. |
 | **application** | object | General application settings. See table [`application`](#application). |
 | **parser** | object | Settings related to parsing log lines. See table [`parser`](#parser). |
 | **checker** | object | Settings that control the behavior of the chain checker and state management. See table [`checker`](#checker). |
@@ -18,6 +19,30 @@ The configuration is structured as a top-level map containing settings for the a
 | **cluster** | object | Optional. Cluster configuration for multi-node deployments. See table [`cluster`](#cluster). |
 | **good_actors** | list of objects | Optional. A list of trusted actors to skip from all processing. See table [`good_actors`](#good_actors). |
 | **chains** | list of objects | The list of behavioral chains to be loaded. See table [`chains`](#chains). |
+
+### `websites`
+
+**New in multi-website mode.** Defines multiple websites to monitor, each with its own log file. If this section is present, the `--log-path` command-line flag is ignored.
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
+| **name** | string | Required. Unique identifier for this website (e.g., "main_site", "api_site"). |
+| **vhosts** | list of strings | Required. List of virtual host names that identify this website in log entries (e.g., ["www.example.com", "example.com"]). Must be unique across all websites. |
+| **log_path** | string | Required. Path to the log file for this website (e.g., "/var/log/haproxy/main.log"). |
+
+**Example:**
+```yaml
+websites:
+  - name: "main_site"
+    vhosts: ["www.example.com", "example.com"]
+    log_path: "/var/log/haproxy/main.log"
+  
+  - name: "api_site"
+    vhosts: ["api.example.com"]
+    log_path: "/var/log/haproxy/api.log"
+```
+
+**Backward Compatibility:** If the `websites` section is omitted, bot-detector operates in legacy single-website mode and requires the `--log-path` command-line flag.
 
 ### `application`
 
@@ -136,6 +161,7 @@ Chains are processed in the order they are defined. Each chain definition must i
 | **block_duration** | string | No | The duration for which the IP should be blocked if `action` is `block`. Format: Go duration string (e.g., `5m`, `1h`, `30m`, `1h30m`). If not specified, uses `blockers.default_duration`. |
 | **match_key** | string | Yes | The key used to track activity. Determines if behavior is tracked per IP, per IP version, or per unique client (IP + User-Agent). See [`match_key` values](#match_key-values) below. |
 | **on_match** | string | No | If set to `stop`, no further chains will be processed for the current log entry after this chain completes. |
+| **websites** | list of strings | No | **Multi-website mode only.** List of website names (from `websites` section) where this chain applies. If omitted or empty, the chain applies to all websites (global chain). Example: `["main_site", "api_site"]`. |
 | **steps** | list of objects | Yes | The sequential list of steps that define the malicious pattern. See table [`chains[].steps[].fields`](#chainsstepsfields). |
 
 ##### Chain Processing Order
@@ -143,6 +169,41 @@ Chains are processed in the order they are defined. Each chain definition must i
 Chains are processed for each log entry in the order they are defined in the `chains` array. Place more specific or higher-priority chains before more general ones.
 
 When a chain with `on_match: "stop"` is completed, the application immediately stops evaluating subsequent chains for that log entry. For example, you might place a very specific, high-confidence "block" chain first, followed by more general "log-only" chains.
+
+##### Multi-Website Chain Filtering
+
+**In multi-website mode** (when `websites` section is present in config), chains are filtered based on the vhost of each log entry:
+
+1. **Global chains** (no `websites` field or empty list) are processed for all log entries from all websites
+2. **Website-specific chains** (with `websites: ["site1", "site2"]`) are only processed for log entries matching those websites' vhosts
+3. **Unknown vhosts** (not defined in any website's `vhosts` list) only process global chains, and a warning is logged
+
+**Example:**
+```yaml
+chains:
+  # Global chain - applies to ALL websites
+  - name: "Global-Scanner"
+    action: "block"
+    match_key: "ip"
+    # No 'websites' field = applies globally
+    steps: [...]
+  
+  # Website-specific chain
+  - name: "API-Rate-Limit"
+    action: "block"
+    match_key: "ip"
+    websites: ["api_site"]  # Only for api_site
+    steps: [...]
+  
+  # Shared chain - applies to multiple websites
+  - name: "Shared-SQL-Injection"
+    action: "block"
+    match_key: "ip"
+    websites: ["main_site", "api_site"]  # Both sites
+    steps: [...]
+```
+
+**In legacy single-website mode** (no `websites` section), all chains are processed for all log entries, and the `websites` field in chains is ignored.
 
 ##### `match_key` Values
 

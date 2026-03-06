@@ -1,0 +1,135 @@
+version: "1.0"
+
+# Multi-website configuration
+websites:
+  - name: "main_site"
+    vhosts: ["www.example.com", "example.com"]
+    log_path: "/var/log/haproxy/main.log"
+  
+  - name: "api_site"
+    vhosts: ["api.example.com"]
+    log_path: "/var/log/haproxy/api.log"
+  
+  - name: "admin_site"
+    vhosts: ["admin.example.com"]
+    log_path: "/var/log/haproxy/admin.log"
+
+application:
+  log_level: "info"
+  enable_metrics: true
+  config:
+    polling_interval: "5s"
+
+parser:
+  line_ending: "lf"
+  out_of_order_tolerance: "5s"
+
+checker:
+  unblock_on_good_actor: false
+  unblock_cooldown: "5m"
+  actor_cleanup_interval: "1m"
+  actor_state_idle_timeout: "30m"
+
+blockers:
+  default_duration: "30m"
+  commands_per_second: 100
+  command_queue_size: 10000
+  max_commands_per_batch: 500
+  dial_timeout: "5s"
+  max_retries: 3
+  retry_delay: "200ms"
+  health_check_interval: "5s"
+  backends:
+    haproxy:
+      addresses:
+        - "/var/run/haproxy/admin.sock"
+      duration_tables:
+        "30m": "thirty_min_blocks"
+        "1h": "one_hour_blocks"
+        "24h": "one_day_blocks"
+
+# Good actors - apply to all websites by default
+good_actors:
+  - name: "internal_network"
+    ip: "cidr:10.0.0.0/8"
+  
+  - name: "monitoring_service"
+    useragent: "regex:(?i)HealthCheck"
+  
+  # Website-specific good actor
+  - name: "admin_internal"
+    ip: "cidr:192.168.1.0/24"
+    # This would need to be implemented if we want per-website good actors
+    # For now, all good actors apply globally
+
+chains:
+  # Global chain - applies to ALL websites
+  - name: "Global-Aggressive-Scanner"
+    action: "block"
+    block_duration: "1h"
+    match_key: "ip"
+    # No 'websites' field = applies to all websites
+    steps:
+      - field_matches:
+          method: "HEAD"
+          statuscode: 403
+      - max_delay: "2s"
+        field_matches:
+          method: "GET"
+          statuscode: 403
+
+  # Main website specific chain
+  - name: "Main-Login-Abuse"
+    action: "block"
+    block_duration: "30m"
+    match_key: "ip_ua"
+    websites: ["main_site"]  # Only applies to main_site
+    steps:
+      - field_matches:
+          path: "/login"
+          statuscode: "4XX"
+        repeated: 5
+
+  # API website specific chain
+  - name: "API-Rate-Limit"
+    action: "block"
+    block_duration: "15m"
+    match_key: "ip"
+    websites: ["api_site"]  # Only applies to api_site
+    steps:
+      - field_matches:
+          path: "regex:^/api/"
+          statuscode: 429
+        repeated: 3
+
+  # Admin website specific chain - stricter rules
+  - name: "Admin-Unauthorized-Access"
+    action: "block"
+    block_duration: "24h"
+    match_key: "ip"
+    websites: ["admin_site"]  # Only applies to admin_site
+    steps:
+      - field_matches:
+          path: "regex:^/admin/"
+          statuscode: [401, 403]
+
+  # Shared chain - applies to multiple websites
+  - name: "Shared-SQL-Injection-Attempt"
+    action: "block"
+    block_duration: "2h"
+    match_key: "ip"
+    websites: ["main_site", "api_site"]  # Applies to both main and api
+    steps:
+      - field_matches:
+          path: "regex:(?i)(union|select|insert|update|delete|drop|exec)"
+          statuscode: "4XX"
+
+  # Another global chain
+  - name: "Global-Sleepy-Bot"
+    action: "log"
+    match_key: "ip"
+    # No 'websites' field = applies to all websites
+    steps:
+      - min_time_since_last_hit: "20m"
+        field_matches:
+          path: "regex:^/(wp-login|xmlrpc)"
