@@ -339,6 +339,9 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	} else if len(p.Websites) != oldWebsitesCount {
 		// Not using dynamic manager (shouldn't happen in production)
 		if len(p.Websites) > 0 && oldWebsitesCount == 0 {
+			if p.LogPath != "" {
+				p.LogFunc(logging.LevelWarning, "CONFIG", "--log-path flag ignored: multi-website mode is enabled. Log paths are defined per-website in config.")
+			}
 			p.LogFunc(logging.LevelWarning, "CONFIG", "Multi-website mode enabled in config, but requires application restart to take effect")
 		} else if len(p.Websites) == 0 && oldWebsitesCount > 0 {
 			p.LogFunc(logging.LevelWarning, "CONFIG", "Multi-website mode disabled in config, but requires application restart to take effect")
