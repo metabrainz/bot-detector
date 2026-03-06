@@ -5,6 +5,7 @@ import (
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -67,7 +68,19 @@ func (m *MultiWebsiteTailerManager) startTailerLocked(website config.WebsiteConf
 		defer m.wg.Done()
 		defer close(tailer.DoneCh)
 
-		m.p.LogFunc(logging.LevelInfo, "MULTI_TAIL", "Starting tailer for website '%s' on %s", tailer.Name, tailer.LogPath)
+		// Resolve to absolute path for clarity
+		absPath := tailer.LogPath
+		if !filepath.IsAbs(absPath) {
+			if abs, err := filepath.Abs(absPath); err == nil {
+				absPath = abs
+			}
+		}
+
+		if absPath != tailer.LogPath {
+			m.p.LogFunc(logging.LevelInfo, "MULTI_TAIL", "Starting tailer for website '%s' on %s (resolved to %s)", tailer.Name, tailer.LogPath, absPath)
+		} else {
+			m.p.LogFunc(logging.LevelInfo, "MULTI_TAIL", "Starting tailer for website '%s' on %s", tailer.Name, tailer.LogPath)
+		}
 
 		// Create a combined signal channel that listens to both global signal and tailer-specific stop
 		combinedSignal := make(chan os.Signal, 1)
