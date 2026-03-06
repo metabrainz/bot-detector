@@ -45,10 +45,11 @@ func GetActor(chain *config.BehavioralChain, entry *app.LogEntry) store.Actor {
 		useUA = true
 	}
 
+	actor := store.Actor{IPInfo: entry.IPInfo, VHost: entry.VHost}
 	if useUA {
-		return store.Actor{IPInfo: entry.IPInfo, UA: entry.UserAgent}
+		actor.UA = entry.UserAgent
 	}
-	return store.Actor{IPInfo: entry.IPInfo}
+	return actor
 }
 
 // GetMatchValue retrieves the field value from a LogEntry based on the field name.
