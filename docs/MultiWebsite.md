@@ -11,14 +11,22 @@ Add a `websites` section to your `config.yaml`:
 ```yaml
 version: "1.0"
 
+# Optional: Base directory for relative log paths
+# If not specified, defaults to the config file's directory
+root_dir: "/var/log/haproxy"
+
 websites:
   - name: "main"
     vhosts: ["www.example.com", "example.com"]
-    log_path: "/var/log/haproxy/main.log"
+    log_path: "main.log"  # Relative to root_dir → /var/log/haproxy/main.log
   
   - name: "api"
     vhosts: ["api.example.com"]
-    log_path: "/var/log/haproxy/api.log"
+    log_path: "api/access.log"  # Relative to root_dir → /var/log/haproxy/api/access.log
+  
+  - name: "special"
+    vhosts: ["special.example.com"]
+    log_path: "/custom/location/special.log"  # Absolute path, not affected by root_dir
 
 chains:
   # Global chain - applies to ALL websites
@@ -43,6 +51,24 @@ chains:
     match_key: "ip"
     websites: ["main", "api"]  # Applies to both
     steps: [...]
+```
+
+### Log Path Resolution
+
+**`root_dir` (optional):** Base directory for relative log paths.
+
+- **Not specified:** Defaults to config file's directory
+- **Relative path:** Resolved relative to config directory (e.g., `root_dir: logs` → `/etc/bot-detector/logs`)
+- **Absolute path:** Used as-is (e.g., `root_dir: /var/log/haproxy`)
+
+**`log_path` behavior:**
+
+- **Relative path:** Resolved relative to `root_dir` (e.g., `main.log` → `/var/log/haproxy/main.log`)
+- **Absolute path:** Used as-is, ignores `root_dir` (e.g., `/custom/path/log.log`)
+
+**Startup logs show resolved paths:**
+```
+[INFO] MULTI_TAIL: Starting tailer for website 'main' on main.log (resolved to /var/log/haproxy/main.log)
 ```
 
 ### Running
