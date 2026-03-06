@@ -1307,6 +1307,9 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	if persistenceConfig.CompactionInterval == 0 {
 		persistenceConfig.CompactionInterval = time.Hour
 	}
+	if persistenceConfig.RetentionPeriod == 0 {
+		persistenceConfig.RetentionPeriod = 7 * 24 * time.Hour // 1 week default
+	}
 
 	var maxTimeSinceLastHit time.Duration
 	for _, chain := range newChains {

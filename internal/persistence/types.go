@@ -15,6 +15,7 @@ const (
 type PersistenceConfig struct {
 	Enabled            *bool         `yaml:"enabled"`
 	CompactionInterval time.Duration `yaml:"compaction_interval"`
+	RetentionPeriod    time.Duration `yaml:"retention_period"` // How long to keep unblocked entries
 }
 
 // EventType defines the type of an audit event.

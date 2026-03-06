@@ -767,7 +767,7 @@ func runCompaction(p *app.Processor) {
 	now := p.NowFunc()
 	expiredBlocks := 0
 	cleanedUnblocked := 0
-	gracePeriod := 24 * time.Hour // Keep unblocked entries for 24h for reason tracking
+	retentionPeriod := p.Config.Application.Persistence.RetentionPeriod
 
 	for ip, state := range p.IPStates {
 		if state.State == persistence.BlockStateBlocked && !now.Before(state.ExpireTime) {
@@ -778,8 +778,8 @@ func runCompaction(p *app.Processor) {
 				Reason:     state.Reason,
 			}
 			expiredBlocks++
-		} else if state.State == persistence.BlockStateUnblocked && now.After(state.ExpireTime.Add(gracePeriod)) {
-			// Remove old unblocked entries after grace period
+		} else if state.State == persistence.BlockStateUnblocked && now.After(state.ExpireTime.Add(retentionPeriod)) {
+			// Remove old unblocked entries after retention period
 			delete(p.IPStates, ip)
 			cleanedUnblocked++
 		}
