@@ -222,13 +222,14 @@ func TestMultiWebsite_UnknownVHostsConcurrency(t *testing.T) {
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
-		DryRun:         true,
-		NowFunc:        time.Now,
-		SignalCh:       make(chan os.Signal, 1),
-		Websites:       websites,
-		VHostToWebsite: vhostMap,
-		UnknownVHosts:  make(map[string]bool),
-		ExitOnEOF:      true,
+		DryRun:          true,
+		NowFunc:         time.Now,
+		SignalCh:        make(chan os.Signal, 1),
+		Websites:        websites,
+		VHostToWebsite:  vhostMap,
+		CatchAllWebsite: "", // No catch-all website
+		UnknownVHosts:   make(map[string]bool),
+		ExitOnEOF:       true,
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)

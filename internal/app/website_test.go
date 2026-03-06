@@ -54,7 +54,7 @@ func TestBuildVHostMap(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := BuildVHostMap(tt.websites)
+			result, _ := BuildVHostMap(tt.websites)
 			if !reflect.DeepEqual(result, tt.expected) {
 				t.Errorf("BuildVHostMap() = %v, want %v", result, tt.expected)
 			}

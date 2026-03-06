@@ -315,10 +315,11 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	oldWebsitesCount := len(p.Websites)
 	p.Websites = loadedCfg.Websites
 	if len(p.Websites) > 0 {
-		p.VHostToWebsite = BuildVHostMap(p.Websites)
+		p.VHostToWebsite, p.CatchAllWebsite = BuildVHostMap(p.Websites)
 		p.WebsiteChains, p.GlobalChains = CategorizeChains(p.Chains)
 	} else {
 		p.VHostToWebsite = nil
+		p.CatchAllWebsite = ""
 		p.WebsiteChains = nil
 		p.GlobalChains = nil
 	}

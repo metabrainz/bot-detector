@@ -109,6 +109,7 @@ type Processor struct {
 	// Multi-website support
 	Websites         []config.WebsiteConfig // Website configurations (empty = legacy single-website mode)
 	VHostToWebsite   map[string]string      // vhost -> website name mapping
+	CatchAllWebsite  string                 // website name for entries with unmatched vhosts (empty if none)
 	WebsiteChains    map[string][]int       // website name -> chain indices
 	GlobalChains     []int                  // indices of chains that apply to all websites
 	LogPathMutex     sync.Mutex             // Protects LogPath in multi-website mode

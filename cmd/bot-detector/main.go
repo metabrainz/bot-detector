@@ -604,7 +604,7 @@ func execute(params *commandline.AppParameters) error {
 
 	// Initialize multi-website support if configured
 	if len(p.Websites) > 0 {
-		p.VHostToWebsite = app.BuildVHostMap(p.Websites)
+		p.VHostToWebsite, p.CatchAllWebsite = app.BuildVHostMap(p.Websites)
 		p.WebsiteChains, p.GlobalChains = app.CategorizeChains(p.Chains)
 		p.LogFunc(logging.LevelInfo, "SETUP", "Multi-website mode: %d websites, %d global chains",
 			len(p.Websites), len(p.GlobalChains))
@@ -985,12 +985,12 @@ func start(p *app.Processor) {
 			}
 			p.LogFunc(logging.LevelInfo, "SETUP", "Starting multi-website mode with %d websites", len(p.Websites))
 		} else {
-			// Single-website mode: use dynamic manager with synthetic website config
+			// Single-website mode: create a catch-all website from --log-path
 			// This allows seamless transition to multi-website mode on config reload
 			p.Websites = []config.WebsiteConfig{{
-				Name:    "default",
+				Name:    p.LogPath, // Use log path as website name
 				LogPath: p.LogPath,
-				VHosts:  []string{},
+				VHosts:  []string{}, // Empty = catch-all
 			}}
 			p.LogFunc(logging.LevelInfo, "SETUP", "Starting single-website mode on %s", p.LogPath)
 		}

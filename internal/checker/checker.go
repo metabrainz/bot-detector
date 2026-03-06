@@ -243,6 +243,8 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 	if len(p.Websites) > 0 && entry.VHost != "" {
 		if ws, ok := p.VHostToWebsite[entry.VHost]; ok {
 			websiteName = ws
+		} else if p.CatchAllWebsite != "" {
+			websiteName = p.CatchAllWebsite
 		}
 	}
 
@@ -667,8 +669,13 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 			if siteChains, ok := p.WebsiteChains[websiteName]; ok {
 				chainIndices = append(chainIndices, siteChains...)
 			}
+		} else if p.CatchAllWebsite != "" {
+			// No vhost match, but we have a catch-all website
+			if siteChains, ok := p.WebsiteChains[p.CatchAllWebsite]; ok {
+				chainIndices = append(chainIndices, siteChains...)
+			}
 		} else if entry.VHost != "" {
-			// Unknown vhost - log warning once per vhost
+			// Unknown vhost and no catch-all - log warning once per vhost
 			p.UnknownVHostsMux.Lock()
 			if !p.UnknownVHosts[entry.VHost] {
 				p.LogFunc(logging.LevelWarning, "UNKNOWN_VHOST",

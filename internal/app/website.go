@@ -5,14 +5,20 @@ import (
 )
 
 // BuildVHostMap creates a mapping from vhost to website name.
-func BuildVHostMap(websites []config.WebsiteConfig) map[string]string {
+// Also returns the name of the catch-all website (one with empty VHosts list), if any.
+func BuildVHostMap(websites []config.WebsiteConfig) (map[string]string, string) {
 	m := make(map[string]string)
+	catchAll := ""
 	for _, ws := range websites {
-		for _, vhost := range ws.VHosts {
-			m[vhost] = ws.Name
+		if len(ws.VHosts) == 0 {
+			catchAll = ws.Name // Website with no vhosts = catch-all
+		} else {
+			for _, vhost := range ws.VHosts {
+				m[vhost] = ws.Name
+			}
 		}
 	}
-	return m
+	return m, catchAll
 }
 
 // CategorizeChains separates chains into website-specific and global chains.
