@@ -1159,6 +1159,35 @@ func parseBlockerSettings(config *TopLevelConfig) (*BlockerSettings, error) {
 }
 
 // validateWebsites validates the websites configuration.
+// resolveWebsiteLogPaths resolves relative log paths using root_dir
+func resolveWebsiteLogPaths(websites []WebsiteConfig, rootDir, configFilePath string) ([]WebsiteConfig, error) {
+	if len(websites) == 0 {
+		return websites, nil
+	}
+
+	// Determine the base directory for relative paths
+	baseDir := rootDir
+	if baseDir == "" {
+		// Default to config file's directory
+		baseDir = filepath.Dir(configFilePath)
+	} else if !filepath.IsAbs(baseDir) {
+		// root_dir itself is relative, make it relative to config dir
+		configDir := filepath.Dir(configFilePath)
+		baseDir = filepath.Join(configDir, baseDir)
+	}
+
+	// Resolve each website's log path
+	resolved := make([]WebsiteConfig, len(websites))
+	for i, website := range websites {
+		resolved[i] = website
+		if website.LogPath != "" && !filepath.IsAbs(website.LogPath) {
+			resolved[i].LogPath = filepath.Join(baseDir, website.LogPath)
+		}
+	}
+
+	return resolved, nil
+}
+
 func validateWebsites(websites []WebsiteConfig, chains []BehavioralChain) error {
 	if len(websites) == 0 {
 		return nil // No websites configured, skip validation
@@ -1328,6 +1357,12 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		return nil, err
 	}
 
+	// Resolve relative log paths for websites
+	resolvedWebsites, err := resolveWebsiteLogPaths(config.Websites, config.RootDir, opts.ConfigFilePath)
+	if err != nil {
+		return nil, err
+	}
+
 	var defaultBlockDuration time.Duration
 	if config.Blockers.DefaultDuration != "" {
 		defaultBlockDuration, _ = utils.ParseDuration(config.Blockers.DefaultDuration)
@@ -1371,7 +1406,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 			},
 		},
 		Cluster:          clusterConfig,
-		Websites:         config.Websites,
+		Websites:         resolvedWebsites,
 		GoodActors:       newGoodActors,
 		Chains:           newChains,
 		FileDependencies: newFileDependencies,

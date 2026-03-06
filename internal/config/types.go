@@ -120,6 +120,7 @@ type WebsiteConfig struct {
 type TopLevelConfig struct {
 	Version     string                   `yaml:"version"`
 	Websites    []WebsiteConfig          `yaml:"websites"` // Optional: multi-website support
+	RootDir     string                   `yaml:"root_dir"` // Optional: root directory for relative log paths (defaults to config dir)
 	Application ApplicationConfigYAML    `yaml:"application"`
 	Parser      ParserConfigYAML         `yaml:"parser"`
 	Checker     CheckerConfigYAML        `yaml:"checker"`
