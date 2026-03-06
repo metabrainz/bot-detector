@@ -1206,23 +1206,22 @@ func validateWebsites(websites []WebsiteConfig, chains []BehavioralChain) error 
 		}
 		names[ws.Name] = true
 
-		if len(ws.VHosts) == 0 {
-			return fmt.Errorf("website '%s' must have at least one vhost", ws.Name)
+		// Empty vhosts list is allowed (catch-all website)
+		// If vhosts are specified, validate them
+		if len(ws.VHosts) > 0 {
+			for _, vh := range ws.VHosts {
+				if vh == "" {
+					return fmt.Errorf("website '%s' has an empty vhost", ws.Name)
+				}
+				if existing, ok := vhosts[vh]; ok {
+					return fmt.Errorf("vhost '%s' defined in both '%s' and '%s'", vh, existing, ws.Name)
+				}
+				vhosts[vh] = ws.Name
+			}
 		}
 
 		if ws.LogPath == "" {
 			return fmt.Errorf("website '%s' must have a log_path", ws.Name)
-		}
-
-		// Check for duplicate vhosts across websites
-		for _, vh := range ws.VHosts {
-			if vh == "" {
-				return fmt.Errorf("website '%s' has an empty vhost", ws.Name)
-			}
-			if existing, ok := vhosts[vh]; ok {
-				return fmt.Errorf("vhost '%s' defined in both '%s' and '%s'", vh, existing, ws.Name)
-			}
-			vhosts[vh] = ws.Name
 		}
 	}
 

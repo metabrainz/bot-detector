@@ -78,13 +78,14 @@ func TestValidateWebsites_EmptyName(t *testing.T) {
 }
 
 func TestValidateWebsites_EmptyVHosts(t *testing.T) {
+	// Empty vhosts is now allowed (catch-all website)
 	websites := []WebsiteConfig{
 		{Name: "main", VHosts: []string{}, LogPath: "/var/log/main.log"},
 	}
 
 	err := validateWebsites(websites, []BehavioralChain{})
-	if err == nil {
-		t.Error("Expected error for empty vhosts")
+	if err != nil {
+		t.Errorf("Empty vhosts should be allowed (catch-all website), got error: %v", err)
 	}
 }
 
