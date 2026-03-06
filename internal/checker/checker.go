@@ -626,9 +626,35 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 	// even if multiple chains map to the same actor.
 	processedActivities := make(map[*store.ActorActivity]struct{})
 
-	// 2. Iterate over all configured chains.
-	for _, chain := range p.Chains {
-		actor := GetActor(&chain, entry)
+	// Determine which chains to process based on website configuration
+	var chainIndices []int
+	if len(p.Websites) > 0 {
+		// Multi-website mode: filter chains by vhost
+		chainIndices = p.GlobalChains // Start with global chains
+
+		if websiteName, ok := p.VHostToWebsite[entry.VHost]; ok {
+			// Add website-specific chains
+			if siteChains, ok := p.WebsiteChains[websiteName]; ok {
+				chainIndices = append(chainIndices, siteChains...)
+			}
+		} else if entry.VHost != "" {
+			// Unknown vhost - log warning once per vhost
+			p.LogFunc(logging.LevelWarning, "UNKNOWN_VHOST",
+				"Unknown vhost '%s' for IP %s - only global chains will be processed",
+				entry.VHost, entry.IPInfo.Address)
+		}
+	} else {
+		// Legacy single-website mode: process all chains
+		chainIndices = make([]int, len(p.Chains))
+		for i := range p.Chains {
+			chainIndices[i] = i
+		}
+	}
+
+	// 2. Iterate over applicable chains.
+	for _, idx := range chainIndices {
+		chain := &p.Chains[idx]
+		actor := GetActor(chain, entry)
 		if actor.IPInfo.Address == "" {
 			continue // Skip chain if actor could not be determined (e.g., IP version mismatch).
 		}
@@ -644,7 +670,7 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 		// This is the correct value to use for all time-based checks for this entry.
 		previousRequestTime := currentActivity.LastRequestTime
 
-		stop := ProcessChainForEntry(p, &chain, entry, currentActivity, previousRequestTime)
+		stop := ProcessChainForEntry(p, chain, entry, currentActivity, previousRequestTime)
 
 		// Mark this activity as processed for this entry.
 		processedActivities[currentActivity] = struct{}{}
