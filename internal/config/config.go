@@ -960,6 +960,7 @@ func parseChains(config *TopLevelConfig, fileDeps map[string]*types.FileDependen
 			UsesDefaultBlockDuration: usesDefault,
 			MatchKey:                 yamlChain.MatchKey,
 			OnMatch:                  yamlChain.OnMatch,
+			Websites:                 yamlChain.Websites,
 			StepsYAML:                yamlChain.Steps,
 			MetricsCounter:           new(atomic.Int64),
 			MetricsResetCounter:      new(atomic.Int64),
@@ -1157,6 +1158,57 @@ func parseBlockerSettings(config *TopLevelConfig) (*BlockerSettings, error) {
 	}, nil
 }
 
+// validateWebsites validates the websites configuration.
+func validateWebsites(websites []WebsiteConfig, chains []BehavioralChain) error {
+	if len(websites) == 0 {
+		return nil // No websites configured, skip validation
+	}
+
+	// Check unique website names
+	names := make(map[string]bool)
+	vhosts := make(map[string]string)
+
+	for _, ws := range websites {
+		if ws.Name == "" {
+			return fmt.Errorf("website name cannot be empty")
+		}
+		if names[ws.Name] {
+			return fmt.Errorf("duplicate website name: %s", ws.Name)
+		}
+		names[ws.Name] = true
+
+		if len(ws.VHosts) == 0 {
+			return fmt.Errorf("website '%s' must have at least one vhost", ws.Name)
+		}
+
+		if ws.LogPath == "" {
+			return fmt.Errorf("website '%s' must have a log_path", ws.Name)
+		}
+
+		// Check for duplicate vhosts across websites
+		for _, vh := range ws.VHosts {
+			if vh == "" {
+				return fmt.Errorf("website '%s' has an empty vhost", ws.Name)
+			}
+			if existing, ok := vhosts[vh]; ok {
+				return fmt.Errorf("vhost '%s' defined in both '%s' and '%s'", vh, existing, ws.Name)
+			}
+			vhosts[vh] = ws.Name
+		}
+	}
+
+	// Validate chain website references
+	for _, chain := range chains {
+		for _, ws := range chain.Websites {
+			if !names[ws] {
+				return fmt.Errorf("chain '%s' references unknown website: %s", chain.Name, ws)
+			}
+		}
+	}
+
+	return nil
+}
+
 // LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
 func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	depGraph, err := buildDependencyGraph(opts.ConfigFilePath)
@@ -1268,6 +1320,11 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		return nil, err
 	}
 
+	// Validate websites configuration
+	if err := validateWebsites(config.Websites, newChains); err != nil {
+		return nil, err
+	}
+
 	var defaultBlockDuration time.Duration
 	if config.Blockers.DefaultDuration != "" {
 		defaultBlockDuration, _ = utils.ParseDuration(config.Blockers.DefaultDuration)
@@ -1311,6 +1368,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 			},
 		},
 		Cluster:          clusterConfig,
+		Websites:         config.Websites,
 		GoodActors:       newGoodActors,
 		Chains:           newChains,
 		FileDependencies: newFileDependencies,

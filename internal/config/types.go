@@ -102,6 +102,7 @@ type LoadedConfig struct {
 	Checker          CheckerConfig
 	Blockers         BlockersConfig
 	Cluster          *cluster.ClusterConfig // Cluster configuration (optional)
+	Websites         []WebsiteConfig        // Optional: multi-website configuration
 	GoodActors       []GoodActorDef         `config:"compare"`
 	Chains           []BehavioralChain      // Not compared here
 	FileDependencies map[string]*types.FileDependency
@@ -110,8 +111,15 @@ type LoadedConfig struct {
 	YAMLContent      []byte
 }
 
+type WebsiteConfig struct {
+	Name     string   `yaml:"name"`
+	VHosts   []string `yaml:"vhosts"`
+	LogPath  string   `yaml:"log_path"`
+}
+
 type TopLevelConfig struct {
 	Version     string                   `yaml:"version"`
+	Websites    []WebsiteConfig          `yaml:"websites"` // Optional: multi-website support
 	Application ApplicationConfigYAML    `yaml:"application"`
 	Parser      ParserConfigYAML         `yaml:"parser"`
 	Checker     CheckerConfigYAML        `yaml:"checker"`
@@ -197,6 +205,7 @@ type BehavioralChainYAML struct {
 	BlockDuration string        `yaml:"block_duration"`
 	MatchKey      string        `yaml:"match_key"`
 	OnMatch       string        `yaml:"on_match"`
+	Websites      []string      `yaml:"websites"` // Optional: restrict chain to specific websites
 	Steps         []StepDefYAML `yaml:"steps"`
 }
 
@@ -221,6 +230,7 @@ type BehavioralChain struct {
 	UsesDefaultBlockDuration bool          // True if the chain is using the global default_block_duration.
 	MatchKey                 string        // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
 	OnMatch                  string        // "stop" to halt processing of other chains on match.
+	Websites                 []string      // Optional: restrict chain to specific websites (empty = global)
 	StepsYAML                []StepDefYAML // Store original YAML for accurate comparison
 	Steps                    []StepDef
 	MetricsHitsCounter       *atomic.Int64 // Counter for hits on this specific chain.
