@@ -766,16 +766,22 @@ func runCompaction(p *app.Processor) {
 	// Filter out expired entries in-place
 	now := p.NowFunc()
 	expiredBlocks := 0
+	cleanedUnblocked := 0
+	gracePeriod := 24 * time.Hour // Keep unblocked entries for 24h for reason tracking
 
 	for ip, state := range p.IPStates {
 		if state.State == persistence.BlockStateBlocked && !now.Before(state.ExpireTime) {
-			// Keep expired blocks but mark as unblocked (preserves reason for status queries)
+			// Convert expired blocks to unblocked (preserves reason temporarily)
 			p.IPStates[ip] = persistence.IPState{
 				State:      persistence.BlockStateUnblocked,
 				ExpireTime: state.ExpireTime,
 				Reason:     state.Reason,
 			}
 			expiredBlocks++
+		} else if state.State == persistence.BlockStateUnblocked && now.After(state.ExpireTime.Add(gracePeriod)) {
+			// Remove old unblocked entries after grace period
+			delete(p.IPStates, ip)
+			cleanedUnblocked++
 		}
 	}
 
@@ -811,11 +817,11 @@ func runCompaction(p *app.Processor) {
 
 	// Log snapshot write details
 	if fileInfo, err := os.Stat(snapshotPath); err == nil {
-		p.LogFunc(logging.LevelInfo, "COMPACTION", "Snapshot written (size=%d bytes, entries=%d blocked + %d unblocked, expired=%d)",
-			fileInfo.Size(), blockedCount, unblockedCount, expiredBlocks)
+		p.LogFunc(logging.LevelInfo, "COMPACTION", "Snapshot written (size=%d bytes, entries=%d blocked + %d unblocked, expired=%d, cleaned=%d)",
+			fileInfo.Size(), blockedCount, unblockedCount, expiredBlocks, cleanedUnblocked)
 	} else {
-		p.LogFunc(logging.LevelInfo, "COMPACTION", "Snapshot written (entries=%d blocked + %d unblocked, expired=%d)",
-			blockedCount, unblockedCount, expiredBlocks)
+		p.LogFunc(logging.LevelInfo, "COMPACTION", "Snapshot written (entries=%d blocked + %d unblocked, expired=%d, cleaned=%d)",
+			blockedCount, unblockedCount, expiredBlocks, cleanedUnblocked)
 	}
 
 	// Truncate and re-open journal
