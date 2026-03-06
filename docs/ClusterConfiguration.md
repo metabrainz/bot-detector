@@ -362,6 +362,37 @@ Per-Instance Metrics:
 
 ## Implementation Notes
 
+### Multi-Website Mode in Clusters
+
+When using multi-website mode in a cluster setup:
+
+- **Configuration sync**: The `websites` section (including log paths) is synchronized from leader to followers via `/config/archive`
+- **Independent log processing**: Each node processes its own log files independently. All nodes should have access to the same log file paths defined in the `websites` section
+- **Log file availability**: If a log file path doesn't exist on a follower node, the tailer will log an error and retry. This is expected behavior if nodes have different log file layouts
+- **Typical setup**: In most cluster deployments, all nodes monitor the same HAProxy instances and have identical log file paths (e.g., via NFS or local copies)
+- **Chain execution**: All nodes execute the same behavioral chains independently. Duplicate block commands to HAProxy are handled gracefully (HAProxy updates existing stick-table entries)
+
+**Example cluster with multi-website:**
+```yaml
+# config.yaml (synced to all nodes)
+websites:
+  - name: "main"
+    vhosts: ["www.example.com"]
+    log_path: "/var/log/haproxy/main.log"  # Must exist on all nodes
+  - name: "api"
+    vhosts: ["api.example.com"]
+    log_path: "/var/log/haproxy/api.log"   # Must exist on all nodes
+
+cluster:
+  nodes:
+    - name: "leader"
+      address: "node-1:8080"
+    - name: "follower-1"
+      address: "node-2:8080"
+```
+
+**Note**: If your cluster nodes have different log file paths (e.g., different HAProxy instances), you should run separate bot-detector instances rather than using cluster mode.
+
 ### State Management
 - Each instance maintains its own persistence (state snapshots + journal)
 - State is NOT shared between instances
