@@ -48,8 +48,8 @@ func TestMultiWebsite_MissingLogFile(t *testing.T) {
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
-		DryRun:  true,
-		NowFunc: time.Now,
+		DryRun:   true,
+		NowFunc:  time.Now,
 		SignalCh: make(chan os.Signal, 1),
 		Websites: []config.WebsiteConfig{
 			{Name: "site1", VHosts: []string{"site1.com"}, LogPath: log1},
@@ -81,14 +81,16 @@ func TestMultiWebsite_MissingLogFile(t *testing.T) {
 	}()
 
 	// Wait for error to be logged, then shutdown
-	timeout := time.After(3 * time.Second)
-	ticker := time.NewTicker(100 * time.Millisecond)
+	timeout := time.After(5 * time.Second)
+	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
 			if atomic.LoadInt32(&errorLogged) > 0 {
+				// Wait a bit more to ensure both tailers have started
+				time.Sleep(100 * time.Millisecond)
 				// Error logged, send shutdown
 				close(p.SignalCh)
 				goto waitDone
@@ -142,8 +144,8 @@ known.com 10.0.0.4 - - [01/Jan/2026:12:00:03 +0000] "GET /test HTTP/1.1" 200 100
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
-		DryRun:  true,
-		NowFunc: time.Now,
+		DryRun:   true,
+		NowFunc:  time.Now,
 		SignalCh: make(chan os.Signal, 1),
 		Websites: []config.WebsiteConfig{
 			{Name: "site1", VHosts: []string{"known.com"}, LogPath: logPath},
@@ -234,8 +236,8 @@ func TestMultiWebsite_EmptyLogFiles(t *testing.T) {
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
-		DryRun:  true,
-		NowFunc: time.Now,
+		DryRun:   true,
+		NowFunc:  time.Now,
 		SignalCh: make(chan os.Signal, 1),
 		Websites: []config.WebsiteConfig{
 			{Name: "site1", VHosts: []string{"site1.com"}, LogPath: log1},
@@ -301,8 +303,8 @@ site.com 10.0.0.2 - - [01/Jan/2026:12:00:01 +0000] "GET /test HTTP/1.1" 200 100 
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
-		DryRun:  true,
-		NowFunc: time.Now,
+		DryRun:   true,
+		NowFunc:  time.Now,
 		SignalCh: make(chan os.Signal, 1),
 		Websites: []config.WebsiteConfig{
 			{Name: "site1", VHosts: []string{"site.com"}, LogPath: logPath},

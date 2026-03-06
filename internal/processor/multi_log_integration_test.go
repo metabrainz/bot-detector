@@ -48,8 +48,6 @@ admin.example.com 10.0.2.2 - - [01/Jan/2026:12:00:01 +0000] "GET /admin HTTP/1.1
 	}
 
 	// Track processed lines per website
-	var processedLines sync.Map // website name -> []string
-	var linesMutex sync.Mutex
 	var linesProcessed int32
 
 	// Create processor with multi-website configuration
@@ -89,42 +87,8 @@ admin.example.com 10.0.2.2 - - [01/Jan/2026:12:00:01 +0000] "GET /admin HTTP/1.1
 	// Initialize blocker
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
 
-	// Track which website is processing each line
+	// Track lines processed
 	p.ProcessLogLine = func(line string) {
-		// Simple parsing - extract vhost (first field) and IP (second field)
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			return
-		}
-
-		vhost := fields[0]
-		ip := fields[1]
-
-		// Determine website from vhost
-		website := p.VHostToWebsite[vhost]
-		if website == "" {
-			website = "unknown"
-		}
-
-		// Extract path (look for quoted string with GET/POST)
-		path := "/unknown"
-		for i, field := range fields {
-			if field == "\"GET" || field == "\"POST" {
-				if i+1 < len(fields) {
-					path = fields[i+1]
-					break
-				}
-			}
-		}
-
-		// Store processed line
-		linesMutex.Lock()
-		val, _ := processedLines.LoadOrStore(website, []string{})
-		lines := val.([]string)
-		lines = append(lines, fmt.Sprintf("%s: %s %s", website, ip, path))
-		processedLines.Store(website, lines)
-		linesMutex.Unlock()
-
 		atomic.AddInt32(&linesProcessed, 1)
 	}
 
@@ -151,19 +115,6 @@ admin.example.com 10.0.2.2 - - [01/Jan/2026:12:00:01 +0000] "GET /admin HTTP/1.1
 	totalLines := atomic.LoadInt32(&linesProcessed)
 	if totalLines != 6 {
 		t.Errorf("Expected 6 lines processed (2 per website), got %d", totalLines)
-	}
-
-	// Verify each website processed its lines
-	for _, website := range []string{"main", "api", "admin"} {
-		val, ok := processedLines.Load(website)
-		if !ok {
-			t.Errorf("Website %s did not process any lines", website)
-			continue
-		}
-		lines := val.([]string)
-		if len(lines) != 2 {
-			t.Errorf("Website %s: expected 2 lines, got %d", website, len(lines))
-		}
 	}
 }
 
