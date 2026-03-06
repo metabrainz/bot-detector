@@ -238,15 +238,35 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 	// 	logLevel = logging.LevelDebug
 	// }
 
+	// Determine website context for logging
+	websiteName := ""
+	if len(p.Websites) > 0 && entry.VHost != "" {
+		if ws, ok := p.VHostToWebsite[entry.VHost]; ok {
+			websiteName = ws
+		}
+	}
+
 	if p.DryRun {
-		logDryRunCompletion(p, chain, entry)
+		logDryRunCompletion(p, chain, entry, websiteName)
 	} else {
-		// In live mode, log the action taken.
+		// In live mode, log the action taken with website context.
 		switch chain.Action {
 		case "block":
-			p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v%s", chain.Name, entry.IPInfo.Address, chain.BlockDuration, getOnMatchSuffix(chain))
+			if websiteName != "" {
+				p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s on website '%s' (vhost: %s). Blocking for %v%s",
+					chain.Name, entry.IPInfo.Address, websiteName, entry.VHost, chain.BlockDuration, getOnMatchSuffix(chain))
+			} else {
+				p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v%s",
+					chain.Name, entry.IPInfo.Address, chain.BlockDuration, getOnMatchSuffix(chain))
+			}
 		case "log":
-			p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s. Action set to 'log'%s", chain.Name, entry.IPInfo.Address, getOnMatchSuffix(chain))
+			if websiteName != "" {
+				p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s on website '%s' (vhost: %s). Action set to 'log'%s",
+					chain.Name, entry.IPInfo.Address, websiteName, entry.VHost, getOnMatchSuffix(chain))
+			} else {
+				p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s. Action set to 'log'%s",
+					chain.Name, entry.IPInfo.Address, getOnMatchSuffix(chain))
+			}
 		}
 	}
 
@@ -380,15 +400,25 @@ func FlushGivenEntries(p *app.Processor, entries []*app.LogEntry) {
 // in chronological order, respecting the out-of-order tolerance.
 
 // logDryRunCompletion handles logging for completed chains in dry-run mode.
-func logDryRunCompletion(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry) {
+func logDryRunCompletion(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry, websiteName string) {
 	onMatchSuffix := getOnMatchSuffix(chain)
+	
+	// Build website context string
+	websiteContext := ""
+	if websiteName != "" {
+		websiteContext = fmt.Sprintf(" on website '%s' (vhost: %s)", websiteName, entry.VHost)
+	}
+	
 	switch chain.Action {
 	case "block":
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Blocking for %v (DryRun)%s", chain.Name, entry.IPInfo.Address, chain.BlockDuration, onMatchSuffix)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s%s. Blocking for %v (DryRun)%s",
+			chain.Name, entry.IPInfo.Address, websiteContext, chain.BlockDuration, onMatchSuffix)
 	case "log":
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s. Action set to 'log' (DryRun)%s", chain.Name, entry.IPInfo.Address, onMatchSuffix)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s%s. Action set to 'log' (DryRun)%s",
+			chain.Name, entry.IPInfo.Address, websiteContext, onMatchSuffix)
 	default:
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s. Unrecognized action '%s' (DryRun)%s", chain.Name, entry.IPInfo.Address, chain.Action, onMatchSuffix)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s%s. Unrecognized action '%s' (DryRun)%s",
+			chain.Name, entry.IPInfo.Address, websiteContext, chain.Action, onMatchSuffix)
 	}
 }
 

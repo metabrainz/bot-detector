@@ -310,10 +310,38 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	// The LastModTime is already set correctly in newAppConfig, no need to update here.
 	p.LogRegex = loadedCfg.LogFormatRegex
 	p.EnableMetrics = loadedCfg.Application.EnableMetrics // Set the processor's EnableMetrics field
+	
+	// Update website configuration (if changed)
+	oldWebsitesCount := len(p.Websites)
+	p.Websites = loadedCfg.Websites
+	if len(p.Websites) > 0 {
+		p.VHostToWebsite = BuildVHostMap(p.Websites)
+		p.WebsiteChains, p.GlobalChains = CategorizeChains(p.Chains)
+	} else {
+		p.VHostToWebsite = nil
+		p.WebsiteChains = nil
+		p.GlobalChains = nil
+	}
+	
 	InitializeMetrics(p, loadedCfg)
 
 	logging.SetLogLevel(loadedCfg.Application.LogLevel)
 	p.ConfigMutex.Unlock()
+	
+	// Log website configuration changes
+	if len(p.Websites) != oldWebsitesCount {
+		if len(p.Websites) > 0 && oldWebsitesCount == 0 {
+			p.LogFunc(logging.LevelWarning, "CONFIG", "Multi-website mode enabled in config, but requires application restart to take effect")
+		} else if len(p.Websites) == 0 && oldWebsitesCount > 0 {
+			p.LogFunc(logging.LevelWarning, "CONFIG", "Multi-website mode disabled in config, but requires application restart to take effect")
+		} else {
+			p.LogFunc(logging.LevelWarning, "CONFIG", "Website count changed from %d to %d - requires application restart to take effect", oldWebsitesCount, len(p.Websites))
+		}
+	} else if len(p.Websites) > 0 {
+		// Same number of websites - check if vhosts or chains changed
+		p.LogFunc(logging.LevelInfo, "CONFIG", "Updated multi-website configuration: %d websites, %d global chains, %d website-specific chains",
+			len(p.Websites), len(p.GlobalChains), len(p.WebsiteChains))
+	}
 
 	// --- Compare and log general config changes ---
 	configChanged := config.CompareConfigs(*oldConfig, *loadedCfg) ||
