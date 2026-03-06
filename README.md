@@ -222,6 +222,7 @@ graph TD;
 ### Configuration and Setup
 
 - [Configuration.md](docs/Configuration.md) - Complete configuration reference including all YAML options, matcher syntax, and examples
+- [MultiWebsite.md](docs/MultiWebsite.md) - Multi-website mode setup and configuration
 - [HaproxySetup.md](docs/HaproxySetup.md) - HAProxy configuration guide for stick tables, ACLs, and runtime API setup
 
 ### Deployment
