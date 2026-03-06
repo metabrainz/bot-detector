@@ -172,6 +172,12 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		NodeName:          "",
 		NodeAddress:       "",
 		NodeLeaderAddress: "",
+
+		// Initialize multi-website fields
+		Websites:       loadedCfg.Websites,
+		VHostToWebsite: make(map[string]string),
+		WebsiteChains:  make(map[string][]int),
+		GlobalChains:   []int{},
 	}
 }
 
@@ -535,6 +541,19 @@ func execute(params *commandline.AppParameters) error {
 		return fmt.Errorf("cluster configuration is present but has no nodes. Either add nodes to cluster.nodes in config.yaml or set BOT_DETECTOR_NODES environment variable")
 	}
 
+	// Runtime validation: multi-website mode vs --log-path flag
+	if len(loadedCfg.Websites) > 0 {
+		if params.LogPath != "" {
+			logging.LogOutput(logging.LevelWarning, "CONFIG",
+				"--log-path flag is ignored in multi-website mode. Log paths are defined in config.yaml")
+		}
+	} else {
+		// Legacy single-website mode requires --log-path
+		if params.LogPath == "" && !params.DryRun {
+			return fmt.Errorf("--log-path is required in single-website mode (no 'websites' section in config)")
+		}
+	}
+
 	logging.SetLogLevel(loadedCfg.Application.LogLevel)
 
 	appConfig := &config.AppConfig{
@@ -581,6 +600,14 @@ func execute(params *commandline.AppParameters) error {
 	p.StartTime = p.NowFunc()
 	p.SignalOooBufferFlush = func() { checker.DoSignalOooBufferFlush(p) }
 	app.InitializeMetrics(p, loadedCfg)
+
+	// Initialize multi-website support if configured
+	if len(p.Websites) > 0 {
+		p.VHostToWebsite = app.BuildVHostMap(p.Websites)
+		p.WebsiteChains, p.GlobalChains = app.CategorizeChains(p.Chains)
+		p.LogFunc(logging.LevelInfo, "SETUP", "Multi-website mode: %d websites, %d global chains",
+			len(p.Websites), len(p.GlobalChains))
+	}
 
 	haproxyBlocker := blocker.NewHAProxyBlocker(p, p.DryRun)
 
@@ -949,7 +976,14 @@ func start(p *app.Processor) {
 			}
 		}
 
-		// LiveLogTailer is the blocking main loop
-		processor.LiveLogTailer(p, p.SignalCh, nil) // Pass the processor's channel to the tailer
+		// Main log tailing loop - choose based on mode
+		if processor.IsMultiWebsiteMode(p) {
+			// Multi-website mode: tail multiple log files concurrently
+			p.LogFunc(logging.LevelInfo, "SETUP", "Starting multi-website mode with %d websites", len(p.Websites))
+			processor.MultiLogTailer(p, p.SignalCh)
+		} else {
+			// Legacy single-website mode: tail single log file
+			processor.LiveLogTailer(p, p.SignalCh, nil)
+		}
 	}
 }
