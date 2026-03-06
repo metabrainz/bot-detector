@@ -639,9 +639,14 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 			}
 		} else if entry.VHost != "" {
 			// Unknown vhost - log warning once per vhost
-			p.LogFunc(logging.LevelWarning, "UNKNOWN_VHOST",
-				"Unknown vhost '%s' for IP %s - only global chains will be processed",
-				entry.VHost, entry.IPInfo.Address)
+			p.UnknownVHostsMux.Lock()
+			if !p.UnknownVHosts[entry.VHost] {
+				p.LogFunc(logging.LevelWarning, "UNKNOWN_VHOST",
+					"Unknown vhost '%s' for IP %s - only global chains will be processed",
+					entry.VHost, entry.IPInfo.Address)
+				p.UnknownVHosts[entry.VHost] = true
+			}
+			p.UnknownVHostsMux.Unlock()
 		}
 	} else {
 		// Legacy single-website mode: process all chains

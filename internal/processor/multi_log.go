@@ -2,7 +2,6 @@ package processor
 
 import (
 	"bot-detector/internal/app"
-	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"os"
 	"sync"
@@ -16,30 +15,45 @@ func MultiLogTailer(p *app.Processor, signalCh <-chan os.Signal) {
 
 	for _, website := range p.Websites {
 		wg.Add(1)
-		go func(ws config.WebsiteConfig, proc *app.Processor) {
+		
+		// Capture values for goroutine closure
+		websiteName := website.Name
+		logPath := website.LogPath
+		
+		go func() {
 			defer wg.Done()
 
-			// Override the log path for this website
-			// We don't copy the processor to avoid copying mutexes
-			originalLogPath := proc.LogPath
-			proc.LogPath = ws.LogPath
+			p.LogFunc(logging.LevelInfo, "MULTI_TAIL", "Starting tailer for website '%s' on %s", websiteName, logPath)
 
-			proc.LogFunc(logging.LevelInfo, "MULTI_TAIL", "Starting tailer for website '%s' on %s", ws.Name, ws.LogPath)
+			// Use liveLogTailerWithPath to avoid race on p.LogPath
+			liveLogTailerWithPath(p, logPath, signalCh, nil)
 
-			// Tail this website's log file
-			// Pass nil for readySignal since we don't need per-website ready signals
-			LiveLogTailer(proc, signalCh, nil)
-
-			// Restore original log path (though this doesn't matter much at shutdown)
-			proc.LogPath = originalLogPath
-
-			proc.LogFunc(logging.LevelInfo, "MULTI_TAIL", "Tailer stopped for website '%s'", ws.Name)
-		}(website, p)
+			p.LogFunc(logging.LevelInfo, "MULTI_TAIL", "Tailer stopped for website '%s'", websiteName)
+		}()
 	}
 
 	// Wait for all tailers to finish
 	wg.Wait()
 	p.LogFunc(logging.LevelInfo, "MULTI_TAIL", "All website tailers stopped")
+}
+
+// liveLogTailerWithPath is like LiveLogTailer but accepts logPath as a parameter
+// to avoid race conditions when multiple goroutines tail different files.
+func liveLogTailerWithPath(p *app.Processor, logPath string, signalCh <-chan os.Signal, readySignal chan<- struct{}) {
+	// Safely set LogPath for this goroutine's use
+	p.LogPathMutex.Lock()
+	originalLogPath := p.LogPath
+	p.LogPath = logPath
+	p.LogPathMutex.Unlock()
+	
+	// Ensure we restore the original value
+	defer func() {
+		p.LogPathMutex.Lock()
+		p.LogPath = originalLogPath
+		p.LogPathMutex.Unlock()
+	}()
+	
+	LiveLogTailer(p, signalCh, readySignal)
 }
 
 // IsMultiWebsiteMode returns true if the processor is configured for multi-website mode.

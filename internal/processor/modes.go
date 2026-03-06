@@ -47,8 +47,13 @@ type Tailer struct {
 // NewTailer creates and initializes a new Tailer. It opens the file, gets its
 // initial stats for rotation detection, and seeks to the end for live tailing.
 func NewTailer(p *app.Processor, seekToEnd bool) (*Tailer, error) {
+	// Safely read LogPath (protected in multi-website mode)
+	p.LogPathMutex.Lock()
+	logPath := p.LogPath
+	p.LogPathMutex.Unlock()
+	
 	t := &Tailer{
-		path:   p.LogPath,
+		path:   logPath,
 		logger: p.LogFunc,
 	}
 	t.config.EOFPollingDelay = p.Config.Application.EOFPollingDelay
@@ -450,6 +455,11 @@ func CleanupTopActors(p *app.Processor, stop <-chan struct{}) {
 
 // LiveLogTailer continuously tails a log file, handling rotation and truncation.
 func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan<- struct{}) {
+	// Read LogPath once at the start (thread-safe in multi-website mode)
+	p.LogPathMutex.Lock()
+	logPath := p.LogPath
+	p.LogPathMutex.Unlock()
+	
 	var (
 		firstRun = true // Flag to control initial seek behavior.
 		shutdown = false
@@ -469,7 +479,7 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 			}
 		}
 
-		p.LogFunc(logging.LevelInfo, "TAIL", "Starting log tailer on %s...", p.LogPath)
+		p.LogFunc(logging.LevelInfo, "TAIL", "Starting log tailer on %s...", logPath)
 
 		// Determine whether to seek to end on this iteration.
 		// On the very first run, seek to the end to ignore old content,
@@ -481,7 +491,7 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 		tailer, err := NewTailer(p, seekToEnd)
 		if err != nil {
 			// File not found or error on initial open, wait and retry.
-			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", p.LogPath, err, config.ErrorRetryDelay)
+			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", logPath, err, config.ErrorRetryDelay)
 			restartTailing(config.ErrorRetryDelay)
 			continue
 		}
