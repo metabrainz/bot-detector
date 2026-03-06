@@ -769,7 +769,12 @@ func runCompaction(p *app.Processor) {
 
 	for ip, state := range p.IPStates {
 		if state.State == persistence.BlockStateBlocked && !now.Before(state.ExpireTime) {
-			delete(p.IPStates, ip)
+			// Keep expired blocks but mark as unblocked (preserves reason for status queries)
+			p.IPStates[ip] = persistence.IPState{
+				State:      persistence.BlockStateUnblocked,
+				ExpireTime: state.ExpireTime,
+				Reason:     state.Reason,
+			}
 			expiredBlocks++
 		}
 	}

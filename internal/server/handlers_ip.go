@@ -135,7 +135,7 @@ func renderLocalIPStatus(w http.ResponseWriter, p Provider, canonical string) {
 		formatPersistenceState(w, persistState, hasPersist)
 		// If no persistence reason available, add note
 		if !hasPersist || reflect.ValueOf(persistState).FieldByName("Reason").String() == "" {
-			_, _ = fmt.Fprint(w, "note: Block reason unavailable (enable persistence to track reasons across restarts)\n")
+			_, _ = fmt.Fprint(w, "note: Block reason unavailable (IP may have been manually added to HAProxy or blocked before persistence was enabled)\n")
 		}
 		return
 	}
