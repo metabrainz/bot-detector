@@ -266,23 +266,24 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 	if p.DryRun {
 		logDryRunCompletion(p, chain, entry, websiteName)
 	} else {
-		// In live mode, log the action taken with website context.
+		// In live mode, log the action taken with formatted chain reason
+		formattedReason := formatBlockReason(chain.Name, entry)
 		switch chain.Action {
 		case "block":
 			if websiteName != "" {
-				p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s on website '%s' (vhost: %s). Blocking for %v%s",
-					chain.Name, entry.IPInfo.Address, websiteName, entry.VHost, chain.BlockDuration, getOnMatchSuffix(chain))
+				p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s on website '%s'. Blocking for %v%s",
+					formattedReason, entry.IPInfo.Address, websiteName, chain.BlockDuration, getOnMatchSuffix(chain))
 			} else {
 				p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v%s",
-					chain.Name, entry.IPInfo.Address, chain.BlockDuration, getOnMatchSuffix(chain))
+					formattedReason, entry.IPInfo.Address, chain.BlockDuration, getOnMatchSuffix(chain))
 			}
 		case "log":
 			if websiteName != "" {
-				p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s on website '%s' (vhost: %s). Action set to 'log'%s",
-					chain.Name, entry.IPInfo.Address, websiteName, entry.VHost, getOnMatchSuffix(chain))
+				p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s on website '%s'. Action set to 'log'%s",
+					formattedReason, entry.IPInfo.Address, websiteName, getOnMatchSuffix(chain))
 			} else {
 				p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s. Action set to 'log'%s",
-					chain.Name, entry.IPInfo.Address, getOnMatchSuffix(chain))
+					formattedReason, entry.IPInfo.Address, getOnMatchSuffix(chain))
 			}
 		}
 	}
