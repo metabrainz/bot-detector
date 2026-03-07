@@ -22,19 +22,22 @@ func MultiLogTailer(p *app.Processor, signalCh <-chan os.Signal) {
 	manager.Wait()
 }
 
-// liveLogTailerWithPath is like LiveLogTailer but accepts logPath as a parameter
+// liveLogTailerWithPath is like LiveLogTailer but accepts logPath and website as parameters
 // to avoid race conditions when multiple goroutines tail different files.
-func liveLogTailerWithPath(p *app.Processor, logPath string, signalCh <-chan os.Signal, readySignal chan<- struct{}) {
-	// Safely set LogPath for this goroutine's use
+func liveLogTailerWithPath(p *app.Processor, logPath, website string, signalCh <-chan os.Signal, readySignal chan<- struct{}) {
+	// Safely set LogPath and CurrentWebsite for this goroutine's use
 	p.LogPathMutex.Lock()
 	originalLogPath := p.LogPath
+	originalWebsite := p.CurrentWebsite
 	p.LogPath = logPath
+	p.CurrentWebsite = website
 	p.LogPathMutex.Unlock()
 
-	// Ensure we restore the original value
+	// Ensure we restore the original values
 	defer func() {
 		p.LogPathMutex.Lock()
 		p.LogPath = originalLogPath
+		p.CurrentWebsite = originalWebsite
 		p.LogPathMutex.Unlock()
 	}()
 
