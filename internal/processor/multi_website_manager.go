@@ -26,15 +26,28 @@ type MultiWebsiteTailerManager struct {
 	tailers      map[string]*WebsiteTailer
 	mu           sync.RWMutex
 	wg           sync.WaitGroup
+	stopOnce     sync.Once
+	stopCh       chan struct{} // Broadcast channel for shutdown
 }
 
 // NewMultiWebsiteTailerManager creates a new manager
 func NewMultiWebsiteTailerManager(p *app.Processor, signalCh <-chan os.Signal) *MultiWebsiteTailerManager {
-	return &MultiWebsiteTailerManager{
+	m := &MultiWebsiteTailerManager{
 		p:            p,
 		globalSignal: signalCh,
 		tailers:      make(map[string]*WebsiteTailer),
+		stopCh:       make(chan struct{}),
 	}
+	
+	// Listen for global signal and broadcast to all tailers
+	go func() {
+		<-signalCh
+		m.stopOnce.Do(func() {
+			close(m.stopCh)
+		})
+	}()
+	
+	return m
 }
 
 // Start initializes tailers for all configured websites
@@ -87,12 +100,12 @@ func (m *MultiWebsiteTailerManager) startTailerLocked(website config.WebsiteConf
 		m.p.CurrentWebsite = tailer.Name
 		m.p.LogPathMutex.Unlock()
 
-		// Create a combined signal channel that listens to both global signal and tailer-specific stop
+		// Create a combined signal channel that listens to both global stop and tailer-specific stop
 		combinedSignal := make(chan os.Signal, 1)
 		go func() {
 			select {
-			case sig := <-m.globalSignal:
-				combinedSignal <- sig
+			case <-m.stopCh:
+				close(combinedSignal)
 			case <-tailer.StopCh:
 				close(combinedSignal)
 			}
