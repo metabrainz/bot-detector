@@ -13,6 +13,18 @@ import (
 	"time"
 )
 
+// formatBlockReason creates a block reason string with vhost/website context.
+// Format: "ChainName@vhost" or "ChainName[website]" or "ChainName"
+func formatBlockReason(chainName string, entry *app.LogEntry) string {
+	if entry.VHost != "" {
+		return fmt.Sprintf("%s@%s", chainName, entry.VHost)
+	}
+	if entry.Website != "" {
+		return fmt.Sprintf("%s[%s]", chainName, entry.Website)
+	}
+	return chainName
+}
+
 // GetActor constructs the correct store.Actor key for a given log entry based on the chain's match_key.
 // It handles IP version filtering and decides whether to include the User-Agent in the key.
 // If the entry's IP version doesn't match the key (e.g., ipv4 vs ipv6), it returns an empty store.Actor.
@@ -305,14 +317,7 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 		ipOnlyActor := store.Actor(store.Actor{IPInfo: entry.IPInfo, UA: ""})
 		ipActivity := store.GetOrCreateUnsafe(p.ActivityStore, ipOnlyActor)
 		
-		// Include vhost or website in reason for log file identification
-		blockReason := chain.Name
-		if entry.VHost != "" {
-			blockReason = fmt.Sprintf("%s@%s", chain.Name, entry.VHost)
-		} else if entry.Website != "" {
-			blockReason = fmt.Sprintf("%s[%s]", chain.Name, entry.Website)
-		}
-		internedReason := p.InternReason(blockReason)
+		internedReason := p.InternReason(formatBlockReason(chain.Name, entry))
 		
 		ipActivity.IsBlocked = true                                                              // Mark as blocked_
 		ipActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedReason} // Set SkipInfo
@@ -341,14 +346,7 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 			defer p.PersistenceMutex.Unlock()
 
 			unblockTime := p.NowFunc().Add(chain.BlockDuration)
-			// Include vhost or website in reason for log file identification
-			reason := chain.Name
-			if entry.VHost != "" {
-				reason = fmt.Sprintf("%s@%s", chain.Name, entry.VHost)
-			} else if entry.Website != "" {
-				reason = fmt.Sprintf("%s[%s]", chain.Name, entry.Website)
-			}
-			reason = p.InternReason(reason)
+			reason := p.InternReason(formatBlockReason(chain.Name, entry))
 			event := &persistence.AuditEvent{
 				Timestamp: p.NowFunc(),
 				Event:     persistence.EventTypeBlock,
