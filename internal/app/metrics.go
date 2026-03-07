@@ -160,7 +160,10 @@ func collectMetricsSummaryData(p *Processor, elapsedTime time.Duration, filterTa
 		TopN:              p.TopN,
 	}
 
-	if p.LogPath != "" {
+	// In multi-website mode, show website count instead of single log path
+	if len(p.Websites) > 0 {
+		data.LogSource = fmt.Sprintf("%d websites", len(p.Websites))
+	} else if p.LogPath != "" {
 		data.LogSource = p.LogPath
 	} else {
 		data.LogSource = "stdin"
