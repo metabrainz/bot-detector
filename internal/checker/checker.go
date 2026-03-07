@@ -304,13 +304,22 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 		// Update the in-memory state to reflect the block for both live and dry runs.
 		ipOnlyActor := store.Actor(store.Actor{IPInfo: entry.IPInfo, UA: ""})
 		ipActivity := store.GetOrCreateUnsafe(p.ActivityStore, ipOnlyActor)
-		internedChainName := p.InternReason(chain.Name)
-		ipActivity.IsBlocked = true                                                                  // Mark as blocked_
-		ipActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedChainName} // Set SkipInfo
+		
+		// Include vhost or website in reason for log file identification
+		blockReason := chain.Name
+		if entry.VHost != "" {
+			blockReason = fmt.Sprintf("%s@%s", chain.Name, entry.VHost)
+		} else if entry.Website != "" {
+			blockReason = fmt.Sprintf("%s[%s]", chain.Name, entry.Website)
+		}
+		internedReason := p.InternReason(blockReason)
+		
+		ipActivity.IsBlocked = true                                                              // Mark as blocked_
+		ipActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedReason} // Set SkipInfo
 		ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration)
 
-		currentActivity.IsBlocked = true                                                                  // Mark as blocked
-		currentActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedChainName} // Set SkipInfo
+		currentActivity.IsBlocked = true                                                              // Mark as blocked
+		currentActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedReason} // Set SkipInfo
 		currentActivity.BlockedUntil = ipActivity.BlockedUntil
 	case "log":
 		if p.EnableMetrics {
@@ -332,7 +341,14 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 			defer p.PersistenceMutex.Unlock()
 
 			unblockTime := p.NowFunc().Add(chain.BlockDuration)
-			reason := p.InternReason(chain.Name)
+			// Include vhost or website in reason for log file identification
+			reason := chain.Name
+			if entry.VHost != "" {
+				reason = fmt.Sprintf("%s@%s", chain.Name, entry.VHost)
+			} else if entry.Website != "" {
+				reason = fmt.Sprintf("%s[%s]", chain.Name, entry.Website)
+			}
+			reason = p.InternReason(reason)
 			event := &persistence.AuditEvent{
 				Timestamp: p.NowFunc(),
 				Event:     persistence.EventTypeBlock,
