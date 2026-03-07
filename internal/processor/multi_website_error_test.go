@@ -80,6 +80,9 @@ func TestMultiWebsite_MissingLogFile(t *testing.T) {
 		close(done)
 	}()
 
+	// Give the manager time to start listening for signals
+	time.Sleep(50 * time.Millisecond)
+
 	// Wait for error to be logged, then shutdown
 	timeout := time.After(5 * time.Second)
 	ticker := time.NewTicker(50 * time.Millisecond)
@@ -91,8 +94,8 @@ func TestMultiWebsite_MissingLogFile(t *testing.T) {
 			if atomic.LoadInt32(&errorLogged) > 0 {
 				// Wait a bit more to ensure both tailers have started
 				time.Sleep(100 * time.Millisecond)
-				// Error logged, send shutdown
-				close(p.SignalCh)
+				// Error logged, send shutdown signal
+				p.SignalCh <- os.Interrupt
 				goto waitDone
 			}
 		case <-timeout:
