@@ -485,6 +485,29 @@ func (p *Processor) GenerateWebsiteStatsReport() string {
 			totalChains += len(chainIndices)
 		}
 		report.WriteString(fmt.Sprintf("    Chains: %d\n", totalChains))
+
+		// Show per-website metrics
+		linesParsed := int64(0)
+		if val, ok := p.Metrics.WebsiteLinesParsed.Load(website.Name); ok {
+			linesParsed = val.(*atomic.Int64).Load()
+		}
+		chainsMatched := int64(0)
+		if val, ok := p.Metrics.WebsiteChainsMatched.Load(website.Name); ok {
+			chainsMatched = val.(*atomic.Int64).Load()
+		}
+		chainsComplete := int64(0)
+		if val, ok := p.Metrics.WebsiteChainsComplete.Load(website.Name); ok {
+			chainsComplete = val.(*atomic.Int64).Load()
+		}
+		chainsReset := int64(0)
+		if val, ok := p.Metrics.WebsiteChainsReset.Load(website.Name); ok {
+			chainsReset = val.(*atomic.Int64).Load()
+		}
+
+		report.WriteString(fmt.Sprintf("    Lines Parsed: %d\n", linesParsed))
+		report.WriteString(fmt.Sprintf("    Chain Matches: %d\n", chainsMatched))
+		report.WriteString(fmt.Sprintf("    Chain Completions: %d\n", chainsComplete))
+		report.WriteString(fmt.Sprintf("    Chain Resets: %d\n", chainsReset))
 	}
 
 	// Unknown vhosts section

@@ -20,6 +20,12 @@ type Metrics struct {
 	StepExecutionCounts *sync.Map // New: Counter for each logical step executed.
 	MetricsEnabled      bool      // New: Flag to enable/disable metric collection.
 
+	// Per-website metrics (multi-website mode)
+	WebsiteLinesParsed    *sync.Map // map[website]int64
+	WebsiteChainsMatched  *sync.Map // map[website]int64
+	WebsiteChainsReset    *sync.Map // map[website]int64
+	WebsiteChainsComplete *sync.Map // map[website]int64
+
 	// General counters with struct tags for metadata.
 	// `metric:"..."` is the display name.
 	// `dryrun:"true"` marks it for display in dry-run mode.
@@ -57,5 +63,24 @@ func NewMetrics() *Metrics {
 		CmdsPerBlocker:      &sync.Map{},
 		StepExecutionCounts: &sync.Map{}, // Initialize the new field
 		MetricsEnabled:      false,       // Initialize to false by default
+		WebsiteLinesParsed:  &sync.Map{},
+		WebsiteChainsMatched: &sync.Map{},
+		WebsiteChainsReset:   &sync.Map{},
+		WebsiteChainsComplete: &sync.Map{},
 	}
+}
+
+// IncrementWebsiteMetric atomically increments a counter in a website metrics map.
+func IncrementWebsiteMetric(m *sync.Map, website string, delta int64) {
+	val, _ := m.LoadOrStore(website, new(atomic.Int64))
+	val.(*atomic.Int64).Add(delta)
+}
+
+// GetWebsiteMetric returns the current value of a website metric.
+func GetWebsiteMetric(m *sync.Map, website string) int64 {
+	val, ok := m.Load(website)
+	if !ok {
+		return 0
+	}
+	return val.(*atomic.Int64).Load()
 }

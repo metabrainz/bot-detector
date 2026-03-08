@@ -242,6 +242,11 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 				}
 			}
 		}
+		// Track per-website completion
+		if entry.Website != "" {
+			val, _ := p.Metrics.WebsiteChainsComplete.LoadOrStore(entry.Website, new(atomic.Int64))
+			val.(*atomic.Int64).Add(1)
+		}
 	}
 
 	// --- 1. Log the completion event ---
@@ -510,6 +515,11 @@ func handleTimeRuleReset(p *app.Processor, chain *config.BehavioralChain, entry 
 				counter.Add(1)
 			}
 		}
+		// Track per-website reset
+		if entry.Website != "" {
+			val, _ := p.Metrics.WebsiteChainsReset.LoadOrStore(entry.Website, new(atomic.Int64))
+			val.(*atomic.Int64).Add(1)
+		}
 	}
 	if p.TopN > 0 {
 		actor := GetActor(chain, entry)
@@ -606,6 +616,11 @@ func ProcessChainForEntry(p *app.Processor, chain *config.BehavioralChain, entry
 				if counter, ok := val.(*atomic.Int64); ok {
 					counter.Add(1)
 				}
+			}
+			// Track per-website match
+			if entry.Website != "" {
+				val, _ := p.Metrics.WebsiteChainsMatched.LoadOrStore(entry.Website, new(atomic.Int64))
+				val.(*atomic.Int64).Add(1)
 			}
 		}
 

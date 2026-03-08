@@ -5,6 +5,7 @@ import (
 	"bot-detector/internal/logging"
 	"bot-detector/internal/parser"
 	"bot-detector/internal/utils"
+	"sync/atomic"
 )
 
 // AccessLogTimeFormat defines the timestamp format used in standard access logs.
@@ -59,6 +60,13 @@ func ProcessLogLineWithWebsite(p *app.Processor, line string, website string) {
 		p.LogPathMutex.Lock()
 		entry.Website = p.CurrentWebsite
 		p.LogPathMutex.Unlock()
+	}
+
+	// Track per-website line parsing
+	if entry.Website != "" {
+		p.Metrics.WebsiteLinesParsed.LoadOrStore(entry.Website, new(atomic.Int64))
+		val, _ := p.Metrics.WebsiteLinesParsed.Load(entry.Website)
+		val.(*atomic.Int64).Add(1)
 	}
 
 	// 3. If not blocked, process the log line through all behavioral chains
