@@ -13,6 +13,12 @@ const AccessLogTimeFormat = "02/Jan/2006:15:04:05 -0700"
 // ProcessLogLineInternal processes a single line of log input.
 // Exported for use in tests.
 func ProcessLogLineInternal(p *app.Processor, line string) {
+	ProcessLogLineWithWebsite(p, line, "")
+}
+
+// ProcessLogLineWithWebsite processes a single line with an explicit website name.
+// This is used in multi-website mode to avoid race conditions.
+func ProcessLogLineWithWebsite(p *app.Processor, line string, website string) {
 	// 1. Parse the line
 	parsedEntry, err := parser.ParseLogLine(p, line)
 
@@ -46,8 +52,10 @@ func ProcessLogLineInternal(p *app.Processor, line string) {
 		VHost:      parsedEntry.VHost,
 	}
 
-	// Set website from tailer context (multi-website mode)
-	if len(p.Websites) > 0 {
+	// Set website from parameter (multi-website mode) or from CurrentWebsite (legacy)
+	if website != "" {
+		entry.Website = website
+	} else if len(p.Websites) > 0 {
 		p.LogPathMutex.Lock()
 		entry.Website = p.CurrentWebsite
 		p.LogPathMutex.Unlock()

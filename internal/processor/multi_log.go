@@ -25,19 +25,39 @@ func MultiLogTailer(p *app.Processor, signalCh <-chan os.Signal) {
 // liveLogTailerWithPath is like LiveLogTailer but accepts logPath and website as parameters
 // to avoid race conditions when multiple goroutines tail different files.
 func liveLogTailerWithPath(p *app.Processor, logPath, website string, signalCh <-chan os.Signal, readySignal chan<- struct{}) {
-	// Safely set LogPath and CurrentWebsite for this goroutine's use
+	// Create a wrapper for ProcessLogLine that captures the website name
+	// This avoids race conditions with the shared CurrentWebsite variable
 	p.LogPathMutex.Lock()
 	originalLogPath := p.LogPath
-	originalWebsite := p.CurrentWebsite
+	originalProcessLogLine := p.ProcessLogLine
 	p.LogPath = logPath
-	p.CurrentWebsite = website
+	
+	// Wrap the original ProcessLogLine to inject the website parameter
+	wrappedProcessLogLine := func(line string) {
+		// Temporarily set CurrentWebsite for this line processing
+		// This is needed for backward compatibility with code that reads CurrentWebsite
+		p.LogPathMutex.Lock()
+		savedWebsite := p.CurrentWebsite
+		p.CurrentWebsite = website
+		p.LogPathMutex.Unlock()
+		
+		// Call the original function
+		originalProcessLogLine(line)
+		
+		// Restore the previous value
+		p.LogPathMutex.Lock()
+		p.CurrentWebsite = savedWebsite
+		p.LogPathMutex.Unlock()
+	}
+	
+	p.ProcessLogLine = wrappedProcessLogLine
 	p.LogPathMutex.Unlock()
 
 	// Ensure we restore the original values
 	defer func() {
 		p.LogPathMutex.Lock()
 		p.LogPath = originalLogPath
-		p.CurrentWebsite = originalWebsite
+		p.ProcessLogLine = originalProcessLogLine
 		p.LogPathMutex.Unlock()
 	}()
 

@@ -687,12 +687,6 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 			if siteChains, ok := p.WebsiteChains[websiteName]; ok {
 				chainIndices = append(chainIndices, siteChains...)
 			}
-			// Debug: log chain count for first few entries per vhost
-			if len(chainIndices) == 0 {
-				p.LogFunc(logging.LevelWarning, "DEBUG_CHAINS",
-					"VHost '%s' (website '%s'): 0 chains to process (global=%d, website-specific=%d)",
-					entry.VHost, websiteName, len(p.GlobalChains), len(p.WebsiteChains[websiteName]))
-			}
 		} else if p.CatchAllWebsite != "" {
 			// No vhost match, but we have a catch-all website
 			if siteChains, ok := p.WebsiteChains[p.CatchAllWebsite]; ok {
