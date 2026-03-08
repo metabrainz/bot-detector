@@ -39,9 +39,10 @@ func TestMultiWebsiteTailerManager_DynamicAdd(t *testing.T) {
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
+		LogPathMutex:  sync.Mutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
-		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
+		LogRegex:      regexp.MustCompile(`^(?P<VHost>\S+) (?P<IP>\S+) \S+ \S+ \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)" (?P<StatusCode>\d+) (?P<Size>\d+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
@@ -150,9 +151,10 @@ func TestMultiWebsiteTailerManager_DynamicRemove(t *testing.T) {
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
+		LogPathMutex:  sync.Mutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
-		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
+		LogRegex:      regexp.MustCompile(`^(?P<VHost>\S+) (?P<IP>\S+) \S+ \S+ \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)" (?P<StatusCode>\d+) (?P<Size>\d+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
@@ -247,9 +249,10 @@ func TestMultiWebsiteTailerManager_LogPathChange(t *testing.T) {
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
+		LogPathMutex:  sync.Mutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
-		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
+		LogRegex:      regexp.MustCompile(`^(?P<VHost>\S+) (?P<IP>\S+) \S+ \S+ \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)" (?P<StatusCode>\d+) (?P<Size>\d+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,

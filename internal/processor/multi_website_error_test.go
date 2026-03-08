@@ -37,9 +37,10 @@ func TestMultiWebsite_MissingLogFile(t *testing.T) {
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
+		LogPathMutex:  sync.Mutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
-		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
+		LogRegex:      regexp.MustCompile(`^(?P<VHost>\S+) (?P<IP>\S+) \S+ \S+ \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)" (?P<StatusCode>\d+) (?P<Size>\d+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
@@ -138,9 +139,10 @@ known.com 10.0.0.4 - - [01/Jan/2026:12:00:03 +0000] "GET /test HTTP/1.1" 200 100
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
+		LogPathMutex:  sync.Mutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
-		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
+		LogRegex:      regexp.MustCompile(`^(?P<VHost>\S+) (?P<IP>\S+) \S+ \S+ \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)" (?P<StatusCode>\d+) (?P<Size>\d+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
@@ -167,18 +169,19 @@ known.com 10.0.0.4 - - [01/Jan/2026:12:00:03 +0000] "GET /test HTTP/1.1" 200 100
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
 
-	// Simulate the real processing logic that checks for unknown vhosts
-	p.ProcessLogLine = func(line string) {
-		var vhost string
-		_, _ = fmt.Sscanf(line, "%s", &vhost)
-
-		if _, known := p.VHostToWebsite[vhost]; !known {
-			p.UnknownVHostsMux.Lock()
-			if !p.UnknownVHosts[vhost] {
-				p.UnknownVHosts[vhost] = true
-				atomic.AddInt32(&unknownVHostWarnings, 1)
+	// Mock CheckChainsFunc to detect unknown vhosts (simulates real checker behavior)
+	var entriesProcessed int32
+	p.CheckChainsFunc = func(entry *app.LogEntry) {
+		atomic.AddInt32(&entriesProcessed, 1)
+		if entry.VHost != "" {
+			if _, known := p.VHostToWebsite[entry.VHost]; !known {
+				p.UnknownVHostsMux.Lock()
+				if !p.UnknownVHosts[entry.VHost] {
+					p.UnknownVHosts[entry.VHost] = true
+					atomic.AddInt32(&unknownVHostWarnings, 1)
+				}
+				p.UnknownVHostsMux.Unlock()
 			}
-			p.UnknownVHostsMux.Unlock()
 		}
 	}
 
@@ -193,6 +196,10 @@ known.com 10.0.0.4 - - [01/Jan/2026:12:00:03 +0000] "GET /test HTTP/1.1" 200 100
 	select {
 	case <-done:
 		warnings := atomic.LoadInt32(&unknownVHostWarnings)
+		entries := atomic.LoadInt32(&entriesProcessed)
+		
+		t.Logf("Processed %d entries, %d unknown vhost warnings", entries, warnings)
+		
 		if warnings != 2 {
 			t.Errorf("Expected 2 unknown vhost warnings, got %d", warnings)
 		}
@@ -232,9 +239,10 @@ func TestMultiWebsite_EmptyLogFiles(t *testing.T) {
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
+		LogPathMutex:  sync.Mutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
-		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
+		LogRegex:      regexp.MustCompile(`^(?P<VHost>\S+) (?P<IP>\S+) \S+ \S+ \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)" (?P<StatusCode>\d+) (?P<Size>\d+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
@@ -301,9 +309,10 @@ site.com 10.0.0.2 - - [01/Jan/2026:12:00:01 +0000] "GET /test HTTP/1.1" 200 100 
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
 		ConfigMutex:   &sync.RWMutex{},
+		LogPathMutex:  sync.Mutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
-		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
+		LogRegex:      regexp.MustCompile(`^(?P<VHost>\S+) (?P<IP>\S+) \S+ \S+ \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)" (?P<StatusCode>\d+) (?P<Size>\d+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
