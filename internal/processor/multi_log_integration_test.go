@@ -8,7 +8,6 @@ import (
 	"bot-detector/internal/metrics"
 	"bot-detector/internal/store"
 	"fmt"
-	"regexp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,23 +16,6 @@ import (
 	"testing"
 	"time"
 )
-
-// testParserConfig returns a parser config for testing with vhost-based logs
-func testParserConfig() config.ParserConfig {
-	return config.ParserConfig{
-		LogFormat:   `^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`,
-		VHostIndex:  1,
-		IPIndex:     2,
-		TimeIndex:   3,
-		MethodIndex: 4,
-		PathIndex:   5,
-		StatusIndex: 7,
-		SizeIndex:   8,
-		RefIndex:    9,
-		UAIndex:     10,
-		LineEnding:  "lf",
-	}
-}
 
 // TestMultiLogTailer_Integration tests concurrent tailing of multiple websites with signal shutdown
 func TestMultiLogTailer_Integration(t *testing.T) {
@@ -65,7 +47,6 @@ admin.example.com 10.0.2.2 - - [01/Jan/2026:12:00:01 +0000] "GET /admin HTTP/1.1
 		t.Fatalf("Failed to create admin log: %v", err)
 	}
 
-	// Track processed lines per website
 	// Create processor with multi-website configuration
 	p := &app.Processor{
 		ActivityMutex: &sync.RWMutex{},
@@ -73,7 +54,6 @@ admin.example.com 10.0.2.2 - - [01/Jan/2026:12:00:01 +0000] "GET /admin HTTP/1.1
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
-		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
