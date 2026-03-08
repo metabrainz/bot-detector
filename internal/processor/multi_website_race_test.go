@@ -70,6 +70,7 @@ site.com 10.0.0.2 - - [01/Jan/2026:12:00:01 +0000] "GET /test HTTP/1.1" 200 100 
 		},
 		UnknownVHosts: make(map[string]bool),
 		ExitOnEOF:     true,
+		UnknownVHostsMux: sync.Mutex{},
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
@@ -160,6 +161,7 @@ func TestMultiWebsite_LogPathMutex(t *testing.T) {
 		},
 		UnknownVHosts: make(map[string]bool),
 		ExitOnEOF:     true,
+		UnknownVHostsMux: sync.Mutex{},
 		LogPath:       "initial.log", // Will be overwritten by each tailer
 	}
 
@@ -234,6 +236,7 @@ func TestMultiWebsite_UnknownVHostsConcurrency(t *testing.T) {
 		CatchAllWebsite: "", // No catch-all website
 		UnknownVHosts:   make(map[string]bool),
 		ExitOnEOF:       true,
+		UnknownVHostsMux: sync.Mutex{},
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)

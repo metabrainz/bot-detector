@@ -62,6 +62,7 @@ func TestMultiWebsiteTailerManager_DynamicAdd(t *testing.T) {
 		},
 		UnknownVHosts: make(map[string]bool),
 		ExitOnEOF:     true,
+		UnknownVHostsMux: sync.Mutex{},
 		ProcessLogLine: func(line string) {
 			atomic.AddInt32(&linesProcessed, 1)
 		},
@@ -174,6 +175,7 @@ func TestMultiWebsiteTailerManager_DynamicRemove(t *testing.T) {
 		},
 		UnknownVHosts:  make(map[string]bool),
 		ExitOnEOF:      true,
+		UnknownVHostsMux: sync.Mutex{},
 		ProcessLogLine: func(line string) {},
 		LogFunc: func(level logging.LogLevel, tag string, format string, v ...interface{}) {
 			logMutex.Lock()
@@ -268,6 +270,7 @@ func TestMultiWebsiteTailerManager_LogPathChange(t *testing.T) {
 		},
 		UnknownVHosts:  make(map[string]bool),
 		ExitOnEOF:      true,
+		UnknownVHostsMux: sync.Mutex{},
 		ProcessLogLine: func(line string) {},
 		LogFunc: func(level logging.LogLevel, tag string, format string, v ...interface{}) {
 			logMutex.Lock()

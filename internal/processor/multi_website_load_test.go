@@ -82,6 +82,7 @@ func TestMultiWebsite_HighVolumeProcessing(t *testing.T) {
 		},
 		UnknownVHosts: make(map[string]bool),
 		ExitOnEOF:     true,
+		UnknownVHostsMux: sync.Mutex{},
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
@@ -167,6 +168,7 @@ func TestMultiWebsite_MemoryUsage(t *testing.T) {
 		},
 		UnknownVHosts: make(map[string]bool),
 		ExitOnEOF:     true,
+		UnknownVHostsMux: sync.Mutex{},
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
@@ -251,6 +253,7 @@ func TestMultiWebsite_CommandQueueStress(t *testing.T) {
 		VHostToWebsite: vhostMap,
 		UnknownVHosts:  make(map[string]bool),
 		ExitOnEOF:      true,
+		UnknownVHostsMux: sync.Mutex{},
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)

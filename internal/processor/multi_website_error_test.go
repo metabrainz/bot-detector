@@ -63,6 +63,7 @@ func TestMultiWebsite_MissingLogFile(t *testing.T) {
 		},
 		UnknownVHosts: make(map[string]bool),
 		ExitOnEOF:     true,
+		UnknownVHostsMux: sync.Mutex{},
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
@@ -161,6 +162,7 @@ known.com 10.0.0.4 - - [01/Jan/2026:12:00:03 +0000] "GET /test HTTP/1.1" 200 100
 		},
 		UnknownVHosts: make(map[string]bool),
 		ExitOnEOF:     true,
+		UnknownVHostsMux: sync.Mutex{},
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
@@ -256,6 +258,7 @@ func TestMultiWebsite_EmptyLogFiles(t *testing.T) {
 		},
 		UnknownVHosts: make(map[string]bool),
 		ExitOnEOF:     true,
+		UnknownVHostsMux: sync.Mutex{},
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
@@ -322,6 +325,7 @@ site.com 10.0.0.2 - - [01/Jan/2026:12:00:01 +0000] "GET /test HTTP/1.1" 200 100 
 		},
 		UnknownVHosts: make(map[string]bool),
 		ExitOnEOF:     true,
+		UnknownVHostsMux: sync.Mutex{},
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
