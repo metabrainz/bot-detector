@@ -10,6 +10,12 @@ import (
 // All goroutines share the same signal channel for coordinated shutdown.
 // This version uses the dynamic manager to support runtime website changes.
 func MultiLogTailer(p *app.Processor, signalCh <-chan os.Signal) {
+	// Capture the original ProcessLogLine ONCE before any tailers start
+	// This prevents nested wrappers when multiple tailers run concurrently
+	if p.OriginalProcessLogLine == nil {
+		p.OriginalProcessLogLine = p.ProcessLogLine
+	}
+	
 	manager := NewMultiWebsiteTailerManager(p, signalCh)
 
 	// Store manager in processor for config reload access
@@ -25,39 +31,42 @@ func MultiLogTailer(p *app.Processor, signalCh <-chan os.Signal) {
 // liveLogTailerWithPath is like LiveLogTailer but accepts logPath and website as parameters
 // to avoid race conditions when multiple goroutines tail different files.
 func liveLogTailerWithPath(p *app.Processor, logPath, website string, signalCh <-chan os.Signal, readySignal chan<- struct{}) {
-	// Create a wrapper for ProcessLogLine that captures the website name
-	// This avoids race conditions with the shared CurrentWebsite variable
+	// Set LogPath and create a website-specific ProcessLogLine
 	p.LogPathMutex.Lock()
 	originalLogPath := p.LogPath
-	originalProcessLogLine := p.ProcessLogLine
 	p.LogPath = logPath
 	
-	// Wrap the original ProcessLogLine to inject the website parameter
-	wrappedProcessLogLine := func(line string) {
-		// Temporarily set CurrentWebsite for this line processing
-		// This is needed for backward compatibility with code that reads CurrentWebsite
+	// Use the ORIGINAL ProcessLogLine (captured at startup) to avoid nested wrappers
+	// Each tailer wraps the same original function, not each other's wrappers
+	baseProcessLogLine := p.OriginalProcessLogLine
+	if baseProcessLogLine == nil {
+		// Fallback if not set (shouldn't happen in production)
+		baseProcessLogLine = p.ProcessLogLine
+	}
+	
+	// Create a closure that sets CurrentWebsite before calling the base function
+	p.ProcessLogLine = func(line string) {
+		// Set CurrentWebsite for this line
 		p.LogPathMutex.Lock()
 		savedWebsite := p.CurrentWebsite
 		p.CurrentWebsite = website
 		p.LogPathMutex.Unlock()
 		
-		// Call the original function
-		originalProcessLogLine(line)
+		// Call the base ProcessLogLine
+		baseProcessLogLine(line)
 		
-		// Restore the previous value
+		// Restore CurrentWebsite
 		p.LogPathMutex.Lock()
 		p.CurrentWebsite = savedWebsite
 		p.LogPathMutex.Unlock()
 	}
-	
-	p.ProcessLogLine = wrappedProcessLogLine
 	p.LogPathMutex.Unlock()
 
-	// Ensure we restore the original values
+	// Ensure we restore the original values when done
 	defer func() {
 		p.LogPathMutex.Lock()
 		p.LogPath = originalLogPath
-		p.ProcessLogLine = originalProcessLogLine
+		p.ProcessLogLine = baseProcessLogLine
 		p.LogPathMutex.Unlock()
 	}()
 

@@ -455,9 +455,10 @@ func CleanupTopActors(p *app.Processor, stop <-chan struct{}) {
 
 // LiveLogTailer continuously tails a log file, handling rotation and truncation.
 func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan<- struct{}) {
-	// Read LogPath once at the start (thread-safe in multi-website mode)
+	// Read LogPath and ProcessLogLine once at the start (thread-safe in multi-website mode)
 	p.LogPathMutex.Lock()
 	logPath := p.LogPath
+	processLogLine := p.ProcessLogLine // Capture locally to avoid races
 	p.LogPathMutex.Unlock()
 
 	var (
@@ -552,7 +553,7 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 				break // Break the inner loop to force a file reopen via the outer loop.
 			}
 
-			p.ProcessLogLine(line)
+			processLogLine(line) // Use local copy to avoid race
 			p.Metrics.LinesProcessed.Add(1)
 		}
 	}
