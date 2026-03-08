@@ -10,9 +10,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -25,6 +24,7 @@ func setupTestProcessor(t *testing.T, websites []config.WebsiteConfig) *app.Proc
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
+		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
@@ -140,41 +140,11 @@ func TestMultiLogTailer_SignalShutdown(t *testing.T) {
 		t.Fatalf("Failed to create log2: %v", err)
 	}
 
-	p := &app.Processor{
-		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[store.Actor]*store.ActorActivity),
-		ConfigMutex:   &sync.RWMutex{},
-		Metrics:       metrics.NewMetrics(),
-		Chains:        []config.BehavioralChain{},
-		Config: &config.AppConfig{
-			Application: config.ApplicationConfig{
-				EOFPollingDelay: 50 * time.Millisecond,
-			},
-			Parser: config.ParserConfig{
-				LineEnding: "lf",
-			},
-			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
-			StatFunc:   os.Stat,
-		},
-		DryRun:   true,
-		NowFunc:  time.Now,
-		SignalCh: make(chan os.Signal, 1),
-		Websites: []config.WebsiteConfig{
-			{Name: "site1", VHosts: []string{"site1.com"}, LogPath: log1},
-			{Name: "site2", VHosts: []string{"site2.com"}, LogPath: log2},
-		},
-		VHostToWebsite: map[string]string{
-			"site1.com": "site1",
-			"site2.com": "site2",
-		},
-		UnknownVHosts: make(map[string]bool),
-	}
-
-	p.Blocker = blocker.NewHAProxyBlocker(p, true)
-	p.ProcessLogLine = func(line string) {}
-	p.LogFunc = func(level logging.LogLevel, tag string, format string, v ...interface{}) {
-		t.Logf("[%s] %s", tag, fmt.Sprintf(format, v...))
-	}
+	p := setupTestProcessor(t, []config.WebsiteConfig{
+		{Name: "site1", VHosts: []string{"site1.com"}, LogPath: log1},
+		{Name: "site2", VHosts: []string{"site2.com"}, LogPath: log2},
+	})
+	p.Config.Application.EOFPollingDelay = 50 * time.Millisecond
 
 	// Start multi-log tailer
 	done := make(chan struct{})
@@ -218,47 +188,11 @@ func TestMultiLogTailer_ConcurrentWrites(t *testing.T) {
 	}
 	_ = f2.Close()
 
-	var linesProcessed int32
-
-	p := &app.Processor{
-		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[store.Actor]*store.ActorActivity),
-		ConfigMutex:   &sync.RWMutex{},
-		Metrics:       metrics.NewMetrics(),
-		Chains:        []config.BehavioralChain{},
-		Config: &config.AppConfig{
-			Application: config.ApplicationConfig{
-				EOFPollingDelay: 10 * time.Millisecond,
-			},
-			Parser: config.ParserConfig{
-				LineEnding: "lf",
-			},
-			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
-			StatFunc:   os.Stat,
-		},
-		DryRun:   true,
-		NowFunc:  time.Now,
-		SignalCh: make(chan os.Signal, 1),
-		Websites: []config.WebsiteConfig{
-			{Name: "site1", VHosts: []string{"site1.com"}, LogPath: log1},
-			{Name: "site2", VHosts: []string{"site2.com"}, LogPath: log2},
-		},
-		VHostToWebsite: map[string]string{
-			"site1.com": "site1",
-			"site2.com": "site2",
-		},
-		UnknownVHosts: make(map[string]bool),
-	}
-
-	p.Blocker = blocker.NewHAProxyBlocker(p, true)
-
-	p.ProcessLogLine = func(line string) {
-		// Simple check - just count non-empty lines
-		if len(strings.TrimSpace(line)) > 0 && !strings.HasPrefix(line, "#") {
-			atomic.AddInt32(&linesProcessed, 1)
-		}
-	}
-
+	p := setupTestProcessor(t, []config.WebsiteConfig{
+		{Name: "site1", VHosts: []string{"site1.com"}, LogPath: log1},
+		{Name: "site2", VHosts: []string{"site2.com"}, LogPath: log2},
+	})
+	p.ExitOnEOF = false // Keep tailing for concurrent writes
 	p.LogFunc = func(level logging.LogLevel, tag string, format string, v ...interface{}) {}
 
 	// Start multi-log tailer
@@ -311,7 +245,7 @@ func TestMultiLogTailer_ConcurrentWrites(t *testing.T) {
 	}
 
 	// Verify all lines were processed
-	total := atomic.LoadInt32(&linesProcessed)
+	total := p.Metrics.LinesProcessed.Load()
 	if total != 10 {
 		t.Errorf("Expected 10 lines processed, got %d", total)
 	}

@@ -9,6 +9,7 @@ import (
 	"bot-detector/internal/store"
 	"fmt"
 	"os"
+	"regexp"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -38,6 +39,7 @@ func TestMultiWebsite_MissingLogFile(t *testing.T) {
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
+		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
@@ -137,6 +139,7 @@ known.com 10.0.0.4 - - [01/Jan/2026:12:00:03 +0000] "GET /test HTTP/1.1" 200 100
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
+		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
@@ -229,6 +232,7 @@ func TestMultiWebsite_EmptyLogFiles(t *testing.T) {
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
+		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
@@ -296,6 +300,7 @@ site.com 10.0.0.2 - - [01/Jan/2026:12:00:01 +0000] "GET /test HTTP/1.1" 200 100 
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
+		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,

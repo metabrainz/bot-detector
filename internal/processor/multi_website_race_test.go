@@ -10,6 +10,7 @@ import (
 	"bot-detector/internal/utils"
 	"fmt"
 	"os"
+	"regexp"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -43,6 +44,7 @@ site.com 10.0.0.2 - - [01/Jan/2026:12:00:01 +0000] "GET /test HTTP/1.1" 200 100 
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
+		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
@@ -134,6 +136,7 @@ func TestMultiWebsite_LogPathMutex(t *testing.T) {
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
+		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
@@ -212,6 +215,7 @@ func TestMultiWebsite_UnknownVHostsConcurrency(t *testing.T) {
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
+		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,

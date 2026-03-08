@@ -9,6 +9,7 @@ import (
 	"bot-detector/internal/store"
 	"fmt"
 	"os"
+	"regexp"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -55,6 +56,7 @@ func TestMultiWebsite_HighVolumeProcessing(t *testing.T) {
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
+		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 5 * time.Millisecond,
@@ -143,6 +145,7 @@ func TestMultiWebsite_MemoryUsage(t *testing.T) {
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
+		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 5 * time.Millisecond,
@@ -227,6 +230,7 @@ func TestMultiWebsite_CommandQueueStress(t *testing.T) {
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
+		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 5 * time.Millisecond,
