@@ -9,8 +9,8 @@ import (
 	"bot-detector/internal/store"
 	"fmt"
 	"os"
-	"regexp"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -82,14 +82,13 @@ func TestMultiWebsite_HighVolumeProcessing(t *testing.T) {
 			"site2.com": "site2",
 			"site3.com": "site3",
 		},
-		UnknownVHosts: make(map[string]bool),
-		ExitOnEOF:     true,
+		UnknownVHosts:    make(map[string]bool),
+		ExitOnEOF:        true,
 		UnknownVHostsMux: sync.Mutex{},
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
-	p.CheckChainsFunc = func(entry *app.LogEntry) {}
-	p.ProcessLogLine = func(line string) {
+	p.CheckChainsFunc = func(entry *app.LogEntry) {
 		atomic.AddInt64(&linesProcessed, 1)
 	}
 	p.LogFunc = func(level logging.LogLevel, tag string, format string, v ...interface{}) {}
@@ -171,8 +170,8 @@ func TestMultiWebsite_MemoryUsage(t *testing.T) {
 		VHostToWebsite: map[string]string{
 			"site.com": "site1",
 		},
-		UnknownVHosts: make(map[string]bool),
-		ExitOnEOF:     true,
+		UnknownVHosts:    make(map[string]bool),
+		ExitOnEOF:        true,
 		UnknownVHostsMux: sync.Mutex{},
 	}
 
@@ -254,19 +253,18 @@ func TestMultiWebsite_CommandQueueStress(t *testing.T) {
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
-		DryRun:         true,
-		NowFunc:        time.Now,
-		SignalCh:       make(chan os.Signal, 1),
-		Websites:       websites,
-		VHostToWebsite: vhostMap,
-		UnknownVHosts:  make(map[string]bool),
-		ExitOnEOF:      true,
+		DryRun:           true,
+		NowFunc:          time.Now,
+		SignalCh:         make(chan os.Signal, 1),
+		Websites:         websites,
+		VHostToWebsite:   vhostMap,
+		UnknownVHosts:    make(map[string]bool),
+		ExitOnEOF:        true,
 		UnknownVHostsMux: sync.Mutex{},
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
-	p.CheckChainsFunc = func(entry *app.LogEntry) {}
-	p.ProcessLogLine = func(line string) {
+	p.CheckChainsFunc = func(entry *app.LogEntry) {
 		// Simulate queueing a block command
 		atomic.AddInt64(&commandsQueued, 1)
 	}

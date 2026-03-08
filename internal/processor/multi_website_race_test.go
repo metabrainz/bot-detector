@@ -10,8 +10,8 @@ import (
 	"bot-detector/internal/utils"
 	"fmt"
 	"os"
-	"regexp"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"testing"
 	"time"
@@ -70,12 +70,13 @@ site.com 10.0.0.2 - - [01/Jan/2026:12:00:01 +0000] "GET /test HTTP/1.1" 200 100 
 			"site2.com": "site2",
 			"site3.com": "site3",
 		},
-		UnknownVHosts: make(map[string]bool),
-		ExitOnEOF:     true,
+		UnknownVHosts:    make(map[string]bool),
+		ExitOnEOF:        true,
 		UnknownVHostsMux: sync.Mutex{},
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
+	p.CheckChainsFunc = func(entry *app.LogEntry) {}
 
 	// ProcessLogLine accesses shared state - this will trigger race detector if unsafe
 	p.ProcessLogLine = func(line string) {
@@ -163,10 +164,10 @@ func TestMultiWebsite_LogPathMutex(t *testing.T) {
 			"site1.com": "site1",
 			"site2.com": "site2",
 		},
-		UnknownVHosts: make(map[string]bool),
-		ExitOnEOF:     true,
+		UnknownVHosts:    make(map[string]bool),
+		ExitOnEOF:        true,
 		UnknownVHostsMux: sync.Mutex{},
-		LogPath:       "initial.log", // Will be overwritten by each tailer
+		LogPath:          "initial.log", // Will be overwritten by each tailer
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
@@ -234,33 +235,31 @@ func TestMultiWebsite_UnknownVHostsConcurrency(t *testing.T) {
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
-		DryRun:          true,
-		NowFunc:         time.Now,
-		SignalCh:        make(chan os.Signal, 1),
-		Websites:        websites,
-		VHostToWebsite:  vhostMap,
-		CatchAllWebsite: "", // No catch-all website
-		UnknownVHosts:   make(map[string]bool),
-		ExitOnEOF:       true,
+		DryRun:           true,
+		NowFunc:          time.Now,
+		SignalCh:         make(chan os.Signal, 1),
+		Websites:         websites,
+		VHostToWebsite:   vhostMap,
+		CatchAllWebsite:  "", // No catch-all website
+		UnknownVHosts:    make(map[string]bool),
+		ExitOnEOF:        true,
 		UnknownVHostsMux: sync.Mutex{},
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
 
 	// Simulate checking for unknown vhosts (this happens in real processing)
-	p.ProcessLogLine = func(line string) {
-		// Extract vhost (first field)
-		var vhost string
-		_, _ = fmt.Sscanf(line, "%s", &vhost)
-
+	p.CheckChainsFunc = func(entry *app.LogEntry) {
 		// Check if vhost is known
-		if _, known := p.VHostToWebsite[vhost]; !known {
-			// Access UnknownVHosts map - must be thread-safe
-			p.UnknownVHostsMux.Lock()
-			if !p.UnknownVHosts[vhost] {
-				p.UnknownVHosts[vhost] = true
+		if entry.VHost != "" {
+			if _, known := p.VHostToWebsite[entry.VHost]; !known {
+				// Access UnknownVHosts map - must be thread-safe
+				p.UnknownVHostsMux.Lock()
+				if !p.UnknownVHosts[entry.VHost] {
+					p.UnknownVHosts[entry.VHost] = true
+				}
+				p.UnknownVHostsMux.Unlock()
 			}
-			p.UnknownVHostsMux.Unlock()
 		}
 	}
 

@@ -31,7 +31,7 @@ func liveLogTailerWithPath(p *app.Processor, logPath, website string, signalCh <
 	// We don't restore it because each tailer reads it once at the start
 	p.LogPathMutex.Lock()
 	p.LogPath = logPath
-	
+
 	// Create a website-specific ProcessLogLine that calls ProcessLogLineWithWebsite
 	// This avoids race conditions from sharing p.ProcessLogLine
 	p.ProcessLogLine = func(line string) {

@@ -9,8 +9,8 @@ import (
 	"bot-detector/internal/store"
 	"fmt"
 	"os"
-	"regexp"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -62,10 +62,10 @@ func TestMultiWebsiteTailerManager_DynamicAdd(t *testing.T) {
 		VHostToWebsite: map[string]string{
 			"site1.com": "site1",
 		},
-		UnknownVHosts: make(map[string]bool),
-		ExitOnEOF:     true,
+		UnknownVHosts:    make(map[string]bool),
+		ExitOnEOF:        true,
 		UnknownVHostsMux: sync.Mutex{},
-		ProcessLogLine: func(line string) {
+		CheckChainsFunc: func(entry *app.LogEntry) {
 			atomic.AddInt32(&linesProcessed, 1)
 		},
 		LogFunc: func(level logging.LogLevel, tag string, format string, v ...interface{}) {
@@ -76,7 +76,9 @@ func TestMultiWebsiteTailerManager_DynamicAdd(t *testing.T) {
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
-	p.CheckChainsFunc = func(entry *app.LogEntry) {}
+	p.CheckChainsFunc = func(entry *app.LogEntry) {
+		atomic.AddInt32(&linesProcessed, 1)
+	}
 
 	signalCh := make(chan os.Signal, 1)
 	manager := NewMultiWebsiteTailerManager(p, signalCh)
@@ -178,10 +180,10 @@ func TestMultiWebsiteTailerManager_DynamicRemove(t *testing.T) {
 			"site1.com": "site1",
 			"site2.com": "site2",
 		},
-		UnknownVHosts:  make(map[string]bool),
-		ExitOnEOF:      true,
+		UnknownVHosts:    make(map[string]bool),
+		ExitOnEOF:        true,
 		UnknownVHostsMux: sync.Mutex{},
-		ProcessLogLine: func(line string) {},
+		ProcessLogLine:   func(line string) {},
 		LogFunc: func(level logging.LogLevel, tag string, format string, v ...interface{}) {
 			logMutex.Lock()
 			defer logMutex.Unlock()
@@ -276,10 +278,10 @@ func TestMultiWebsiteTailerManager_LogPathChange(t *testing.T) {
 		VHostToWebsite: map[string]string{
 			"site1.com": "site1",
 		},
-		UnknownVHosts:  make(map[string]bool),
-		ExitOnEOF:      true,
+		UnknownVHosts:    make(map[string]bool),
+		ExitOnEOF:        true,
 		UnknownVHostsMux: sync.Mutex{},
-		ProcessLogLine: func(line string) {},
+		ProcessLogLine:   func(line string) {},
 		LogFunc: func(level logging.LogLevel, tag string, format string, v ...interface{}) {
 			logMutex.Lock()
 			defer logMutex.Unlock()

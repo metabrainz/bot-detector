@@ -9,8 +9,8 @@ import (
 	"bot-detector/internal/store"
 	"fmt"
 	"os"
-	"regexp"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,8 +63,8 @@ func TestMultiWebsite_MissingLogFile(t *testing.T) {
 			"site1.com": "site1",
 			"site2.com": "site2",
 		},
-		UnknownVHosts: make(map[string]bool),
-		ExitOnEOF:     true,
+		UnknownVHosts:    make(map[string]bool),
+		ExitOnEOF:        true,
 		UnknownVHostsMux: sync.Mutex{},
 	}
 
@@ -164,8 +164,8 @@ known.com 10.0.0.4 - - [01/Jan/2026:12:00:03 +0000] "GET /test HTTP/1.1" 200 100
 		VHostToWebsite: map[string]string{
 			"known.com": "site1",
 		},
-		UnknownVHosts: make(map[string]bool),
-		ExitOnEOF:     true,
+		UnknownVHosts:    make(map[string]bool),
+		ExitOnEOF:        true,
 		UnknownVHostsMux: sync.Mutex{},
 	}
 
@@ -204,9 +204,9 @@ known.com 10.0.0.4 - - [01/Jan/2026:12:00:03 +0000] "GET /test HTTP/1.1" 200 100
 		t.Logf("Done channel closed")
 		warnings := atomic.LoadInt32(&unknownVHostWarnings)
 		entries := atomic.LoadInt32(&entriesProcessed)
-		
+
 		t.Logf("Processed %d entries, %d unknown vhost warnings", entries, warnings)
-		
+
 		if warnings != 2 {
 			t.Errorf("Expected 2 unknown vhost warnings, got %d", warnings)
 		}
@@ -272,8 +272,8 @@ func TestMultiWebsite_EmptyLogFiles(t *testing.T) {
 			"site1.com": "site1",
 			"site2.com": "site2",
 		},
-		UnknownVHosts: make(map[string]bool),
-		ExitOnEOF:     true,
+		UnknownVHosts:    make(map[string]bool),
+		ExitOnEOF:        true,
 		UnknownVHostsMux: sync.Mutex{},
 	}
 
@@ -339,8 +339,8 @@ site.com 10.0.0.2 - - [01/Jan/2026:12:00:01 +0000] "GET /test HTTP/1.1" 200 100 
 		VHostToWebsite: map[string]string{
 			"site.com": "site1",
 		},
-		UnknownVHosts: make(map[string]bool),
-		ExitOnEOF:     true,
+		UnknownVHosts:    make(map[string]bool),
+		ExitOnEOF:        true,
 		UnknownVHostsMux: sync.Mutex{},
 	}
 

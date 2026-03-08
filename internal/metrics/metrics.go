@@ -53,19 +53,19 @@ func NewMetrics() *Metrics {
 		// sync.Map is used here as it's optimized for write-once, read-many scenarios
 		// and is safe for concurrent access without a global lock, which is ideal
 		// for initializing chain counters at startup and incrementing them later.
-		ChainsCompleted:     &sync.Map{},
-		ChainsReset:         &sync.Map{},
-		ChainsHits:          &sync.Map{},
-		MatchKeyHits:        &sync.Map{},
-		GoodActorHits:       &sync.Map{},
-		SkipsByReason:       &sync.Map{},
-		BlockDurations:      &sync.Map{},
-		CmdsPerBlocker:      &sync.Map{},
-		StepExecutionCounts: &sync.Map{}, // Initialize the new field
-		MetricsEnabled:      false,       // Initialize to false by default
-		WebsiteLinesParsed:  &sync.Map{},
-		WebsiteChainsMatched: &sync.Map{},
-		WebsiteChainsReset:   &sync.Map{},
+		ChainsCompleted:       &sync.Map{},
+		ChainsReset:           &sync.Map{},
+		ChainsHits:            &sync.Map{},
+		MatchKeyHits:          &sync.Map{},
+		GoodActorHits:         &sync.Map{},
+		SkipsByReason:         &sync.Map{},
+		BlockDurations:        &sync.Map{},
+		CmdsPerBlocker:        &sync.Map{},
+		StepExecutionCounts:   &sync.Map{}, // Initialize the new field
+		MetricsEnabled:        false,       // Initialize to false by default
+		WebsiteLinesParsed:    &sync.Map{},
+		WebsiteChainsMatched:  &sync.Map{},
+		WebsiteChainsReset:    &sync.Map{},
 		WebsiteChainsComplete: &sync.Map{},
 	}
 }
