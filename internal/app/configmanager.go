@@ -317,12 +317,6 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	if len(p.Websites) > 0 {
 		p.VHostToWebsite, p.CatchAllWebsite = BuildVHostMap(p.Websites)
 		p.WebsiteChains, p.GlobalChains = CategorizeChains(p.Chains)
-		p.LogFunc(logging.LevelInfo, "DEBUG_CATEGORIZE",
-			"Categorized %d chains: %d global, %d website-specific (websites: %v)",
-			len(p.Chains), len(p.GlobalChains), len(p.WebsiteChains), p.Websites)
-		if len(p.GlobalChains) > 0 {
-			p.LogFunc(logging.LevelInfo, "DEBUG_GLOBAL", "Global chain indices: %v", p.GlobalChains)
-		}
 	} else {
 		p.VHostToWebsite = nil
 		p.CatchAllWebsite = ""
