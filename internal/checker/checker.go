@@ -317,14 +317,14 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 		// Update the in-memory state to reflect the block for both live and dry runs.
 		ipOnlyActor := store.Actor(store.Actor{IPInfo: entry.IPInfo, UA: ""})
 		ipActivity := store.GetOrCreateUnsafe(p.ActivityStore, ipOnlyActor)
-		
+
 		internedReason := p.InternReason(formatBlockReason(chain.Name, entry))
-		
-		ipActivity.IsBlocked = true                                                              // Mark as blocked_
+
+		ipActivity.IsBlocked = true                                                               // Mark as blocked_
 		ipActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedReason} // Set SkipInfo
 		ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration)
 
-		currentActivity.IsBlocked = true                                                              // Mark as blocked
+		currentActivity.IsBlocked = true                                                               // Mark as blocked
 		currentActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedReason} // Set SkipInfo
 		currentActivity.BlockedUntil = ipActivity.BlockedUntil
 	case "log":
@@ -794,8 +794,25 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 			// The lock is already held by the caller (CheckChains).
 			activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 
-			// Check if the cooldown has passed or if it has never been unblocked.
-			if activity.LastUnblockTime.IsZero() || time.Since(activity.LastUnblockTime) > unblockCooldown {
+			// Check if IP is blocked in persistence
+			var isBlocked bool
+			if p.PersistenceEnabled {
+				p.PersistenceMutex.Lock()
+				ipState, exists := p.IPStates[entry.IPInfo.Address]
+				isBlocked = exists && ipState.State == persistence.BlockStateBlocked
+				p.PersistenceMutex.Unlock()
+			}
+
+			// Determine if we should unblock:
+			// - Always unblock if IP is blocked (immediate safety)
+			// - Unblock on first appearance (handles pre-existing blocks)
+			// - Apply cooldown for subsequent non-blocked appearances (prevents spam)
+			shouldUnblock := isBlocked || activity.LastUnblockTime.IsZero()
+			if !isBlocked && !activity.LastUnblockTime.IsZero() {
+				shouldUnblock = time.Since(activity.LastUnblockTime) > unblockCooldown
+			}
+
+			if shouldUnblock {
 				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s (rule: %s). Issuing unblock command.", entry.IPInfo.Address, goodActorRuleName)
 
 				// Create detailed unblock reason with good actor name
@@ -831,8 +848,10 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 					Version: entry.IPInfo.Version,
 				}
 				// The blocker's Unblock method is non-blocking and rate-limited.
-				if err := p.Blocker.Unblock(blockerIPInfo, unblockReason); err != nil {
-					p.LogFunc(logging.LevelError, "UNBLOCK_FAIL", "Failed to queue unblock command for %s: %v", entry.IPInfo.Address, err)
+				if !p.DryRun && p.Blocker != nil {
+					if err := p.Blocker.Unblock(blockerIPInfo, unblockReason); err != nil {
+						p.LogFunc(logging.LevelError, "UNBLOCK_FAIL", "Failed to queue unblock command for %s: %v", entry.IPInfo.Address, err)
+					}
 				}
 				activity.LastUnblockTime = time.Now()
 				activity.LastUnblockReason = unblockReason

@@ -38,7 +38,7 @@ func NewMultiWebsiteTailerManager(p *app.Processor, signalCh <-chan os.Signal) *
 		tailers:      make(map[string]*WebsiteTailer),
 		stopCh:       make(chan struct{}),
 	}
-	
+
 	// Listen for global signal and broadcast to all tailers
 	go func() {
 		<-signalCh
@@ -46,7 +46,7 @@ func NewMultiWebsiteTailerManager(p *app.Processor, signalCh <-chan os.Signal) *
 			close(m.stopCh)
 		})
 	}()
-	
+
 	return m
 }
 

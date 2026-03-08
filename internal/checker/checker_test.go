@@ -3,6 +3,7 @@ package checker_test
 import (
 	"bot-detector/internal/checker"
 	"bot-detector/internal/logparser"
+	"bot-detector/internal/persistence"
 	"bot-detector/internal/testutil"
 
 	"bot-detector/internal/app"
@@ -532,31 +533,138 @@ func TestCheckChains_UnblockOnGoodActor(t *testing.T) {
 		Path:      "/some/path",
 	}
 
-	// --- Act 1: Initial Detection ---
+	// --- Act 1: Initial Detection (First Appearance) ---
 	h.processEntry(goodEntry)
 
-	// --- Assert 1: Unblock command should be sent ---
+	// --- Assert 1: Unblock command should be sent on first appearance ---
 	if !h.unblockCalled {
 		t.Fatal("Expected Unblock() to be called on the first good actor match, but it was not.")
 	}
 	h.unblockCalled = false // Reset for the next assertion.
 
-	// --- Act 2: Cooldown Period ---
+	// --- Act 2: Immediate Subsequent Request (Not Blocked) ---
 	// Process the same entry again immediately.
 	h.processEntry(goodEntry)
 
-	// --- Assert 2: Unblock command should NOT be sent ---
+	// --- Assert 2: Unblock command should NOT be sent (not blocked, cooldown active) ---
 	if h.unblockCalled {
-		t.Fatal("Unblock() was called during the cooldown period, but it should have been skipped.")
+		t.Fatal("Unblock() was called during the cooldown period for non-blocked IP, but it should have been skipped.")
 	}
 
-	// --- Act 3: After Cooldown ---
+	// --- Act 3: After Cooldown (Still Not Blocked) ---
 	time.Sleep(cooldown + 20*time.Millisecond) // Wait for the cooldown to expire.
 	h.processEntry(goodEntry)
 
-	// --- Assert 3: Unblock command should be sent again ---
+	// --- Assert 3: Unblock command should be sent again after cooldown ---
 	if !h.unblockCalled {
 		t.Fatal("Expected Unblock() to be called again after the cooldown expired, but it was not.")
+	}
+	h.unblockCalled = false // Reset for the next assertion.
+
+	// --- Act 4: Simulate IP Getting Blocked ---
+	// Enable persistence and mark IP as blocked
+	h.processor.PersistenceEnabled = true
+	h.processor.IPStates = make(map[string]persistence.IPState)
+	h.processor.IPStates[goodIP] = persistence.IPState{
+		State:  persistence.BlockStateBlocked,
+		Reason: "test-block",
+	}
+
+	// Process entry immediately (within cooldown period)
+	h.processEntry(goodEntry)
+
+	// --- Assert 4: Unblock should be sent immediately when IP is blocked (ignores cooldown) ---
+	if !h.unblockCalled {
+		t.Fatal("Expected Unblock() to be called immediately when IP is blocked, regardless of cooldown.")
+	}
+}
+
+// TestCheckChains_UnblockOnGoodActor_MultipleIPs verifies that multiple IPs from the same
+// good actor rule only trigger unblock on first appearance, not repeatedly.
+func TestCheckChains_UnblockOnGoodActor_MultipleIPs(t *testing.T) {
+	// --- Setup ---
+	const cooldown = 100 * time.Millisecond
+
+	// 1. Create a harness with the unblock feature enabled.
+	h := NewCheckerTestHarness(t, &config.AppConfig{
+		Checker: config.CheckerConfig{
+			UnblockOnGoodActor: true,
+			UnblockCooldown:    cooldown,
+		},
+	})
+
+	// 2. Define good actor rules for each IP individually (simpler than CIDR for testing).
+	h.processor.Config.GoodActors = []config.GoodActorDef{}
+	ips := []string{"10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4", "10.0.0.5"}
+
+	for _, ip := range ips {
+		goodActorCtx := config.MatcherContext{
+			ChainName:          "good_actor_test",
+			StepIndex:          0,
+			CanonicalFieldName: "IP",
+			FileDependencies: map[string]*types.FileDependency{
+				"test.txt": {
+					Path: "test.txt",
+					CurrentStatus: &types.FileDependencyStatus{
+						Status:   types.FileStatusLoaded,
+						Checksum: "checksum1",
+					},
+				},
+			},
+			FilePath: "",
+		}
+		goodActorMatcher, err := config.CompileStringMatcher(goodActorCtx, ip)
+		if err != nil {
+			t.Fatalf("Failed to compile good actor matcher for %s: %v", ip, err)
+		}
+		h.processor.Config.GoodActors = append(h.processor.Config.GoodActors, config.GoodActorDef{
+			Name:       "test_good_ip_" + ip,
+			IPMatchers: []config.FieldMatcher{goodActorMatcher},
+		})
+	}
+
+	// 3. Process multiple IPs from the same good actor range.
+	unblockCount := 0
+
+	for i, ip := range ips {
+		entry := &app.LogEntry{
+			IPInfo:    utils.NewIPInfo(ip),
+			Timestamp: time.Now(),
+			Path:      "/some/path",
+		}
+		h.processEntry(entry)
+		if h.unblockCalled {
+			unblockCount++
+			h.unblockCalled = false
+		} else {
+			t.Logf("IP %s (index %d) did not trigger unblock", ip, i)
+		}
+	}
+
+	// --- Assert: Each IP should trigger unblock on first appearance ---
+	if unblockCount != len(ips) {
+		t.Logf("Captured logs: %v", h.capturedLogs)
+		t.Fatalf("Expected %d unblock calls (one per IP on first appearance), got %d", len(ips), unblockCount)
+	}
+
+	// --- Act: Process same IPs again immediately ---
+	unblockCount = 0
+	for _, ip := range ips {
+		entry := &app.LogEntry{
+			IPInfo:    utils.NewIPInfo(ip),
+			Timestamp: time.Now(),
+			Path:      "/some/path",
+		}
+		h.processEntry(entry)
+		if h.unblockCalled {
+			unblockCount++
+			h.unblockCalled = false
+		}
+	}
+
+	// --- Assert: No unblocks should occur (cooldown active, not blocked) ---
+	if unblockCount != 0 {
+		t.Fatalf("Expected 0 unblock calls during cooldown for non-blocked IPs, got %d", unblockCount)
 	}
 }
 
