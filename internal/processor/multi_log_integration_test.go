@@ -17,6 +17,54 @@ import (
 	"time"
 )
 
+// setupTestProcessor creates a processor with minimal working configuration for multi-website tests
+func setupTestProcessor(t *testing.T, websites []config.WebsiteConfig) *app.Processor {
+	p := &app.Processor{
+		ActivityMutex: &sync.RWMutex{},
+		ActivityStore: make(map[store.Actor]*store.ActorActivity),
+		ConfigMutex:   &sync.RWMutex{},
+		Metrics:       metrics.NewMetrics(),
+		Chains:        []config.BehavioralChain{},
+		Config: &config.AppConfig{
+			Application: config.ApplicationConfig{
+				EOFPollingDelay: 10 * time.Millisecond,
+			},
+			Parser: config.ParserConfig{
+				LineEnding: "lf",
+			},
+			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
+			StatFunc:   os.Stat,
+		},
+		DryRun:        true,
+		NowFunc:       time.Now,
+		SignalCh:      make(chan os.Signal, 1),
+		Websites:      websites,
+		UnknownVHosts: make(map[string]bool),
+		ExitOnEOF:     true,
+	}
+
+	// Build vhost map
+	vhostMap := make(map[string]string)
+	for _, ws := range websites {
+		for _, vhost := range ws.VHosts {
+			vhostMap[vhost] = ws.Name
+		}
+	}
+	p.VHostToWebsite = vhostMap
+
+	// Initialize blocker
+	p.Blocker = blocker.NewHAProxyBlocker(p, true)
+
+	// Set up a no-op CheckChainsFunc
+	p.CheckChainsFunc = func(entry *app.LogEntry) {}
+
+	p.LogFunc = func(level logging.LogLevel, tag string, format string, v ...interface{}) {
+		t.Logf("[%s] %s", tag, fmt.Sprintf(format, v...))
+	}
+
+	return p
+}
+
 // TestMultiLogTailer_Integration tests concurrent tailing of multiple websites with signal shutdown
 func TestMultiLogTailer_Integration(t *testing.T) {
 	tempDir := t.TempDir()
@@ -48,48 +96,11 @@ admin.example.com 10.0.2.2 - - [01/Jan/2026:12:00:01 +0000] "GET /admin HTTP/1.1
 	}
 
 	// Create processor with multi-website configuration
-	p := &app.Processor{
-		ActivityMutex: &sync.RWMutex{},
-		ActivityStore: make(map[store.Actor]*store.ActorActivity),
-		ConfigMutex:   &sync.RWMutex{},
-		Metrics:       metrics.NewMetrics(),
-		Chains:        []config.BehavioralChain{},
-		Config: &config.AppConfig{
-			Application: config.ApplicationConfig{
-				EOFPollingDelay: 10 * time.Millisecond,
-			},
-			Parser: config.ParserConfig{
-				LineEnding: "lf",
-			},
-			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
-			StatFunc:   os.Stat,
-		},
-		DryRun:   true,
-		NowFunc:  time.Now,
-		SignalCh: make(chan os.Signal, 1),
-		Websites: []config.WebsiteConfig{
-			{Name: "main", VHosts: []string{"www.example.com"}, LogPath: mainLog},
-			{Name: "api", VHosts: []string{"api.example.com"}, LogPath: apiLog},
-			{Name: "admin", VHosts: []string{"admin.example.com"}, LogPath: adminLog},
-		},
-		VHostToWebsite: map[string]string{
-			"www.example.com":   "main",
-			"api.example.com":   "api",
-			"admin.example.com": "admin",
-		},
-		UnknownVHosts: make(map[string]bool),
-		ExitOnEOF:     true, // Exit after reading existing content
-	}
-
-	// Initialize blocker
-	p.Blocker = blocker.NewHAProxyBlocker(p, true)
-
-	// Set up a no-op CheckChainsFunc since we're just testing line processing
-	p.CheckChainsFunc = func(entry *app.LogEntry) {}
-
-	p.LogFunc = func(level logging.LogLevel, tag string, format string, v ...interface{}) {
-		t.Logf("[%s] %s", tag, fmt.Sprintf(format, v...))
-	}
+	p := setupTestProcessor(t, []config.WebsiteConfig{
+		{Name: "main", VHosts: []string{"www.example.com"}, LogPath: mainLog},
+		{Name: "api", VHosts: []string{"api.example.com"}, LogPath: apiLog},
+		{Name: "admin", VHosts: []string{"admin.example.com"}, LogPath: adminLog},
+	})
 
 	// Start multi-log tailer
 	done := make(chan struct{})
