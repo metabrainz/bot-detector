@@ -608,6 +608,13 @@ func execute(params *commandline.AppParameters) error {
 		p.WebsiteChains, p.GlobalChains = app.CategorizeChains(p.Chains)
 		p.LogFunc(logging.LevelInfo, "SETUP", "Multi-website mode: %d websites, %d global chains",
 			len(p.Websites), len(p.GlobalChains))
+		if len(p.GlobalChains) > 0 {
+			p.LogFunc(logging.LevelInfo, "DEBUG_GLOBAL", "Global chain indices: %v", p.GlobalChains)
+			for _, idx := range p.GlobalChains {
+				p.LogFunc(logging.LevelInfo, "DEBUG_GLOBAL", "  Chain[%d]: %s (websites: %v)",
+					idx, p.Chains[idx].Name, p.Chains[idx].Websites)
+			}
+		}
 	}
 
 	haproxyBlocker := blocker.NewHAProxyBlocker(p, p.DryRun)
