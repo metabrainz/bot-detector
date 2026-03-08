@@ -31,46 +31,40 @@ func MultiLogTailer(p *app.Processor, signalCh <-chan os.Signal) {
 // liveLogTailerWithPath is like LiveLogTailer but accepts logPath and website as parameters
 // to avoid race conditions when multiple goroutines tail different files.
 func liveLogTailerWithPath(p *app.Processor, logPath, website string, signalCh <-chan os.Signal, readySignal chan<- struct{}) {
-	// Set LogPath and create a website-specific ProcessLogLine
+	// Set LogPath and ProcessLogLine for this tailer
+	// CRITICAL: We set p.LogPath here, and LiveLogTailer reads it immediately at startup
+	// We don't restore it because each tailer reads it once at the start
 	p.LogPathMutex.Lock()
-	originalLogPath := p.LogPath
 	p.LogPath = logPath
 	
 	// Use the ORIGINAL ProcessLogLine (captured at startup) to avoid nested wrappers
-	// Each tailer wraps the same original function, not each other's wrappers
 	baseProcessLogLine := p.OriginalProcessLogLine
 	if baseProcessLogLine == nil {
-		// Fallback if not set (shouldn't happen in production)
 		baseProcessLogLine = p.ProcessLogLine
 	}
 	
 	// Create a closure that sets CurrentWebsite before calling the base function
 	p.ProcessLogLine = func(line string) {
-		// Set CurrentWebsite for this line
 		p.LogPathMutex.Lock()
 		savedWebsite := p.CurrentWebsite
 		p.CurrentWebsite = website
 		p.LogPathMutex.Unlock()
 		
-		// Call the base ProcessLogLine
 		baseProcessLogLine(line)
 		
-		// Restore CurrentWebsite
 		p.LogPathMutex.Lock()
 		p.CurrentWebsite = savedWebsite
 		p.LogPathMutex.Unlock()
 	}
 	p.LogPathMutex.Unlock()
 
-	// Ensure we restore the original values when done
-	defer func() {
-		p.LogPathMutex.Lock()
-		p.LogPath = originalLogPath
-		p.ProcessLogLine = baseProcessLogLine
-		p.LogPathMutex.Unlock()
-	}()
-
+	// LiveLogTailer will read p.LogPath immediately at startup (line 460)
+	// and capture it locally, so it's safe even if another tailer changes it later
 	LiveLogTailer(p, signalCh, readySignal)
+	
+	// Note: We don't restore p.LogPath or p.ProcessLogLine because:
+	// 1. Each tailer captures them locally at startup
+	// 2. Restoring them causes races when tailers start concurrently
 }
 
 // IsMultiWebsiteMode returns true if the processor is configured for multi-website mode.
