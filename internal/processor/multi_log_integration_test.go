@@ -31,7 +31,8 @@ func setupTestProcessor(t *testing.T, websites []config.WebsiteConfig) *app.Proc
 				EOFPollingDelay: 10 * time.Millisecond,
 			},
 			Parser: config.ParserConfig{
-				LineEnding: "lf",
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				LineEnding:      "lf",
 			},
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,

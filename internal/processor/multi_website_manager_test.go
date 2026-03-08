@@ -48,7 +48,8 @@ func TestMultiWebsiteTailerManager_DynamicAdd(t *testing.T) {
 				EOFPollingDelay: 10 * time.Millisecond,
 			},
 			Parser: config.ParserConfig{
-				LineEnding: "lf",
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				LineEnding:      "lf",
 			},
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
@@ -75,6 +76,7 @@ func TestMultiWebsiteTailerManager_DynamicAdd(t *testing.T) {
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
+	p.CheckChainsFunc = func(entry *app.LogEntry) {}
 
 	signalCh := make(chan os.Signal, 1)
 	manager := NewMultiWebsiteTailerManager(p, signalCh)
@@ -160,7 +162,8 @@ func TestMultiWebsiteTailerManager_DynamicRemove(t *testing.T) {
 				EOFPollingDelay: 10 * time.Millisecond,
 			},
 			Parser: config.ParserConfig{
-				LineEnding: "lf",
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				LineEnding:      "lf",
 			},
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
@@ -187,6 +190,7 @@ func TestMultiWebsiteTailerManager_DynamicRemove(t *testing.T) {
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
+	p.CheckChainsFunc = func(entry *app.LogEntry) {}
 
 	signalCh := make(chan os.Signal, 1)
 	manager := NewMultiWebsiteTailerManager(p, signalCh)
@@ -258,7 +262,8 @@ func TestMultiWebsiteTailerManager_LogPathChange(t *testing.T) {
 				EOFPollingDelay: 10 * time.Millisecond,
 			},
 			Parser: config.ParserConfig{
-				LineEnding: "lf",
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				LineEnding:      "lf",
 			},
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
@@ -283,6 +288,7 @@ func TestMultiWebsiteTailerManager_LogPathChange(t *testing.T) {
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
+	p.CheckChainsFunc = func(entry *app.LogEntry) {}
 
 	signalCh := make(chan os.Signal, 1)
 	manager := NewMultiWebsiteTailerManager(p, signalCh)

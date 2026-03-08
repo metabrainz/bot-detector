@@ -51,7 +51,8 @@ site.com 10.0.0.2 - - [01/Jan/2026:12:00:01 +0000] "GET /test HTTP/1.1" 200 100 
 				EOFPollingDelay: 10 * time.Millisecond,
 			},
 			Parser: config.ParserConfig{
-				LineEnding: "lf",
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				LineEnding:      "lf",
 			},
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
@@ -145,7 +146,8 @@ func TestMultiWebsite_LogPathMutex(t *testing.T) {
 				EOFPollingDelay: 10 * time.Millisecond,
 			},
 			Parser: config.ParserConfig{
-				LineEnding: "lf",
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				LineEnding:      "lf",
 			},
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
@@ -168,7 +170,7 @@ func TestMultiWebsite_LogPathMutex(t *testing.T) {
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
-	p.ProcessLogLine = func(line string) {}
+	p.CheckChainsFunc = func(entry *app.LogEntry) {}
 	p.LogFunc = func(level logging.LogLevel, tag string, format string, v ...interface{}) {}
 
 	// The test is that this doesn't trigger race detector
@@ -226,7 +228,8 @@ func TestMultiWebsite_UnknownVHostsConcurrency(t *testing.T) {
 				EOFPollingDelay: 10 * time.Millisecond,
 			},
 			Parser: config.ParserConfig{
-				LineEnding: "lf",
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				LineEnding:      "lf",
 			},
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,

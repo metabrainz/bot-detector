@@ -63,7 +63,8 @@ func TestMultiWebsite_HighVolumeProcessing(t *testing.T) {
 				EOFPollingDelay: 5 * time.Millisecond,
 			},
 			Parser: config.ParserConfig{
-				LineEnding: "lf",
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				LineEnding:      "lf",
 			},
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
@@ -87,6 +88,7 @@ func TestMultiWebsite_HighVolumeProcessing(t *testing.T) {
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
+	p.CheckChainsFunc = func(entry *app.LogEntry) {}
 	p.ProcessLogLine = func(line string) {
 		atomic.AddInt64(&linesProcessed, 1)
 	}
@@ -154,7 +156,8 @@ func TestMultiWebsite_MemoryUsage(t *testing.T) {
 				EOFPollingDelay: 5 * time.Millisecond,
 			},
 			Parser: config.ParserConfig{
-				LineEnding: "lf",
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				LineEnding:      "lf",
 			},
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
@@ -174,6 +177,7 @@ func TestMultiWebsite_MemoryUsage(t *testing.T) {
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
+	p.CheckChainsFunc = func(entry *app.LogEntry) {}
 	p.ProcessLogLine = func(line string) {
 		// Just count lines - no need to actually store state for this test
 	}
@@ -241,7 +245,8 @@ func TestMultiWebsite_CommandQueueStress(t *testing.T) {
 				EOFPollingDelay: 5 * time.Millisecond,
 			},
 			Parser: config.ParserConfig{
-				LineEnding: "lf",
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				LineEnding:      "lf",
 			},
 			Blockers: config.BlockersConfig{
 				CommandQueueSize: 1000, // Test queue capacity
@@ -260,6 +265,7 @@ func TestMultiWebsite_CommandQueueStress(t *testing.T) {
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
+	p.CheckChainsFunc = func(entry *app.LogEntry) {}
 	p.ProcessLogLine = func(line string) {
 		// Simulate queueing a block command
 		atomic.AddInt64(&commandsQueued, 1)

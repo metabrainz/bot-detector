@@ -46,7 +46,8 @@ func TestMultiWebsite_MissingLogFile(t *testing.T) {
 				EOFPollingDelay: 10 * time.Millisecond,
 			},
 			Parser: config.ParserConfig{
-				LineEnding: "lf",
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				LineEnding:      "lf",
 			},
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
@@ -68,7 +69,7 @@ func TestMultiWebsite_MissingLogFile(t *testing.T) {
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
-	p.ProcessLogLine = func(line string) {}
+	p.CheckChainsFunc = func(entry *app.LogEntry) {}
 	p.LogFunc = func(level logging.LogLevel, tag string, format string, v ...interface{}) {
 		msg := fmt.Sprintf(format, v...)
 		if strings.Contains(msg, "Failed to open") || strings.Contains(msg, "no such file") {
@@ -148,7 +149,8 @@ known.com 10.0.0.4 - - [01/Jan/2026:12:00:03 +0000] "GET /test HTTP/1.1" 200 100
 				EOFPollingDelay: 10 * time.Millisecond,
 			},
 			Parser: config.ParserConfig{
-				LineEnding: "lf",
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				LineEnding:      "lf",
 			},
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
@@ -185,16 +187,21 @@ known.com 10.0.0.4 - - [01/Jan/2026:12:00:03 +0000] "GET /test HTTP/1.1" 200 100
 		}
 	}
 
-	p.LogFunc = func(level logging.LogLevel, tag string, format string, v ...interface{}) {}
+	p.LogFunc = func(level logging.LogLevel, tag string, format string, v ...interface{}) {
+		t.Logf("[%s] %s", tag, fmt.Sprintf(format, v...))
+	}
 
 	done := make(chan struct{})
 	go func() {
+		t.Log("Starting MultiLogTailer...")
 		MultiLogTailer(p, p.SignalCh)
+		t.Log("MultiLogTailer returned")
 		close(done)
 	}()
 
 	select {
 	case <-done:
+		t.Logf("Done channel closed")
 		warnings := atomic.LoadInt32(&unknownVHostWarnings)
 		entries := atomic.LoadInt32(&entriesProcessed)
 		
@@ -248,7 +255,8 @@ func TestMultiWebsite_EmptyLogFiles(t *testing.T) {
 				EOFPollingDelay: 10 * time.Millisecond,
 			},
 			Parser: config.ParserConfig{
-				LineEnding: "lf",
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				LineEnding:      "lf",
 			},
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
@@ -303,8 +311,6 @@ site.com 10.0.0.2 - - [01/Jan/2026:12:00:01 +0000] "GET /test HTTP/1.1" 200 100 
 		t.Fatalf("Failed to create log: %v", err)
 	}
 
-	var linesProcessed int32
-
 	p := &app.Processor{
 		ActivityMutex: &sync.RWMutex{},
 		ActivityStore: make(map[store.Actor]*store.ActorActivity),
@@ -318,7 +324,8 @@ site.com 10.0.0.2 - - [01/Jan/2026:12:00:01 +0000] "GET /test HTTP/1.1" 200 100 
 				EOFPollingDelay: 10 * time.Millisecond,
 			},
 			Parser: config.ParserConfig{
-				LineEnding: "lf",
+				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+				LineEnding:      "lf",
 			},
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
@@ -338,10 +345,7 @@ site.com 10.0.0.2 - - [01/Jan/2026:12:00:01 +0000] "GET /test HTTP/1.1" 200 100 
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
-	p.ProcessLogLine = func(line string) {
-		// All lines are passed to ProcessLogLine, even malformed ones
-		atomic.AddInt32(&linesProcessed, 1)
-	}
+	p.CheckChainsFunc = func(entry *app.LogEntry) {}
 	p.LogFunc = func(level logging.LogLevel, tag string, format string, v ...interface{}) {}
 
 	done := make(chan struct{})
@@ -353,7 +357,7 @@ site.com 10.0.0.2 - - [01/Jan/2026:12:00:01 +0000] "GET /test HTTP/1.1" 200 100 
 	select {
 	case <-done:
 		// Should process all 4 lines (including malformed ones)
-		total := atomic.LoadInt32(&linesProcessed)
+		total := p.Metrics.LinesProcessed.Load()
 		if total != 4 {
 			t.Errorf("Expected 4 lines processed, got %d", total)
 		}
