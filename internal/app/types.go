@@ -70,7 +70,6 @@ type Processor struct {
 	SignalCh             chan os.Signal
 	LogFunc              func(level logging.LogLevel, tag string, format string, v ...interface{})
 	ProcessLogLine       func(line string)
-	OriginalProcessLogLine func(line string) // Captured at multi-website startup to avoid nested wrappers
 	NowFunc              func() time.Time // Mockable time function.
 	SignalOooBufferFlush func()
 	TestSignals          *TestSignals // Test-only signals for synchronization.

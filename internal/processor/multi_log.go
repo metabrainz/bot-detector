@@ -2,6 +2,7 @@ package processor
 
 import (
 	"bot-detector/internal/app"
+	"bot-detector/internal/logparser"
 	"os"
 )
 
@@ -10,12 +11,6 @@ import (
 // All goroutines share the same signal channel for coordinated shutdown.
 // This version uses the dynamic manager to support runtime website changes.
 func MultiLogTailer(p *app.Processor, signalCh <-chan os.Signal) {
-	// Capture the original ProcessLogLine ONCE before any tailers start
-	// This prevents nested wrappers when multiple tailers run concurrently
-	if p.OriginalProcessLogLine == nil {
-		p.OriginalProcessLogLine = p.ProcessLogLine
-	}
-	
 	manager := NewMultiWebsiteTailerManager(p, signalCh)
 
 	// Store manager in processor for config reload access
@@ -31,40 +26,22 @@ func MultiLogTailer(p *app.Processor, signalCh <-chan os.Signal) {
 // liveLogTailerWithPath is like LiveLogTailer but accepts logPath and website as parameters
 // to avoid race conditions when multiple goroutines tail different files.
 func liveLogTailerWithPath(p *app.Processor, logPath, website string, signalCh <-chan os.Signal, readySignal chan<- struct{}) {
-	// Set LogPath and ProcessLogLine for this tailer
+	// Set LogPath for this tailer
 	// CRITICAL: We set p.LogPath here, and LiveLogTailer reads it immediately at startup
 	// We don't restore it because each tailer reads it once at the start
 	p.LogPathMutex.Lock()
 	p.LogPath = logPath
 	
-	// Use the ORIGINAL ProcessLogLine (captured at startup) to avoid nested wrappers
-	baseProcessLogLine := p.OriginalProcessLogLine
-	if baseProcessLogLine == nil {
-		baseProcessLogLine = p.ProcessLogLine
-	}
-	
-	// Create a closure that sets CurrentWebsite before calling the base function
+	// Create a website-specific ProcessLogLine that calls ProcessLogLineWithWebsite
+	// This avoids race conditions from sharing p.ProcessLogLine
 	p.ProcessLogLine = func(line string) {
-		p.LogPathMutex.Lock()
-		savedWebsite := p.CurrentWebsite
-		p.CurrentWebsite = website
-		p.LogPathMutex.Unlock()
-		
-		baseProcessLogLine(line)
-		
-		p.LogPathMutex.Lock()
-		p.CurrentWebsite = savedWebsite
-		p.LogPathMutex.Unlock()
+		logparser.ProcessLogLineWithWebsite(p, line, website)
 	}
 	p.LogPathMutex.Unlock()
 
-	// LiveLogTailer will read p.LogPath immediately at startup (line 460)
-	// and capture it locally, so it's safe even if another tailer changes it later
+	// LiveLogTailer will read p.LogPath and p.ProcessLogLine immediately at startup
+	// and capture them locally, so it's safe even if another tailer changes them later
 	LiveLogTailer(p, signalCh, readySignal)
-	
-	// Note: We don't restore p.LogPath or p.ProcessLogLine because:
-	// 1. Each tailer captures them locally at startup
-	// 2. Restoring them causes races when tailers start concurrently
 }
 
 // IsMultiWebsiteMode returns true if the processor is configured for multi-website mode.

@@ -8,6 +8,7 @@ import (
 	"bot-detector/internal/metrics"
 	"bot-detector/internal/store"
 	"fmt"
+	"regexp"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,23 @@ import (
 	"testing"
 	"time"
 )
+
+// testParserConfig returns a parser config for testing with vhost-based logs
+func testParserConfig() config.ParserConfig {
+	return config.ParserConfig{
+		LogFormat:   `^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`,
+		VHostIndex:  1,
+		IPIndex:     2,
+		TimeIndex:   3,
+		MethodIndex: 4,
+		PathIndex:   5,
+		StatusIndex: 7,
+		SizeIndex:   8,
+		RefIndex:    9,
+		UAIndex:     10,
+		LineEnding:  "lf",
+	}
+}
 
 // TestMultiLogTailer_Integration tests concurrent tailing of multiple websites with signal shutdown
 func TestMultiLogTailer_Integration(t *testing.T) {
@@ -48,8 +66,6 @@ admin.example.com 10.0.2.2 - - [01/Jan/2026:12:00:01 +0000] "GET /admin HTTP/1.1
 	}
 
 	// Track processed lines per website
-	var linesProcessed int32
-
 	// Create processor with multi-website configuration
 	p := &app.Processor{
 		ActivityMutex: &sync.RWMutex{},
@@ -57,6 +73,7 @@ admin.example.com 10.0.2.2 - - [01/Jan/2026:12:00:01 +0000] "GET /admin HTTP/1.1
 		ConfigMutex:   &sync.RWMutex{},
 		Metrics:       metrics.NewMetrics(),
 		Chains:        []config.BehavioralChain{},
+		LogRegex:      regexp.MustCompile(`^(\S+) (\S+) \S+ \S+ \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]*)" "([^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
 				EOFPollingDelay: 10 * time.Millisecond,
@@ -87,10 +104,8 @@ admin.example.com 10.0.2.2 - - [01/Jan/2026:12:00:01 +0000] "GET /admin HTTP/1.1
 	// Initialize blocker
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
 
-	// Track lines processed
-	p.ProcessLogLine = func(line string) {
-		atomic.AddInt32(&linesProcessed, 1)
-	}
+	// Set up a no-op CheckChainsFunc since we're just testing line processing
+	p.CheckChainsFunc = func(entry *app.LogEntry) {}
 
 	p.LogFunc = func(level logging.LogLevel, tag string, format string, v ...interface{}) {
 		t.Logf("[%s] %s", tag, fmt.Sprintf(format, v...))
@@ -112,7 +127,7 @@ admin.example.com 10.0.2.2 - - [01/Jan/2026:12:00:01 +0000] "GET /admin HTTP/1.1
 	}
 
 	// Verify all lines were processed
-	totalLines := atomic.LoadInt32(&linesProcessed)
+	totalLines := p.Metrics.LinesProcessed.Load()
 	if totalLines != 6 {
 		t.Errorf("Expected 6 lines processed (2 per website), got %d", totalLines)
 	}
