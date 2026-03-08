@@ -479,12 +479,12 @@ func (p *Processor) GenerateWebsiteStatsReport() string {
 		report.WriteString(fmt.Sprintf("    VHosts: %s\n", utils.ForHTML(strings.Join(website.VHosts, ", "))))
 		report.WriteString(fmt.Sprintf("    Log Path: %s\n", utils.ForHTML(website.LogPath)))
 
-		// Show chains for this website
+		// Count total chains (global + website-specific)
+		totalChains := len(p.GlobalChains)
 		if chainIndices, ok := p.WebsiteChains[website.Name]; ok {
-			report.WriteString(fmt.Sprintf("    Chains: %d\n", len(chainIndices)))
-		} else {
-			report.WriteString("    Chains: 0\n")
+			totalChains += len(chainIndices)
 		}
+		report.WriteString(fmt.Sprintf("    Chains: %d\n", totalChains))
 	}
 
 	// Unknown vhosts section
