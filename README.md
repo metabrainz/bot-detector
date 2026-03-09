@@ -126,7 +126,7 @@ See [Cluster Configuration](docs/ClusterConfiguration.md) and [Cluster and Docke
 | **`--exit-on-eof`** | | Exits after processing the log file to EOF instead of tailing. |
 | **`--help`** | | Display command-line help. |
 | **`--listen`** | string | Starts a web server on this address (e.g., `:8080` or `:8080,role=api`). Can be specified multiple times for multiple listeners. |
-| **`--log-path`** | filepath | Path to the access log file to tail (or to read in dry-run mode). |
+| **`--log-path`** | filepath | Path to the access log file to tail (or to read in dry-run mode). Ignored in multi-website mode where log paths are defined in `config.yaml`. |
 | **`--reload-on`** | string | Controls config reloading: `watcher`, `HUP`, `USR1`, or `USR2`. |
 | **`--state-dir`** | dirpath | Path to the state directory. Enables persistence if set. |
 | **`--top-n`** | number | In dry-run mode, show top N actors per chain. |

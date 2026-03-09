@@ -11,6 +11,7 @@ The configuration is structured as a top-level map containing settings for the a
 | Field | Type | Description |
 | :---- | :---- | :---- |
 | **version** | string | The configuration version. Must match a supported version (e.g., "1.0"). |
+| **root_dir** | string | Optional. Base directory for resolving relative log paths in multi-website mode. If not specified, defaults to the current working directory. Absolute paths in `log_path` ignore this setting. |
 | **websites** | list of objects | Optional. Multi-website configuration. See table [`websites`](#websites). If omitted, operates in legacy single-website mode. |
 | **application** | object | General application settings. See table [`application`](#application). |
 | **parser** | object | Settings related to parsing log lines. See table [`parser`](#parser). |
@@ -32,14 +33,20 @@ The configuration is structured as a top-level map containing settings for the a
 
 **Example:**
 ```yaml
+root_dir: "/var/log/haproxy"  # Optional: base directory for relative paths
+
 websites:
   - name: "main_site"
     vhosts: ["www.example.com", "example.com"]
-    log_path: "/var/log/haproxy/main.log"
+    log_path: "main.log"  # Relative → /var/log/haproxy/main.log
   
   - name: "api_site"
     vhosts: ["api.example.com"]
-    log_path: "/var/log/haproxy/api.log"
+    log_path: "api/access.log"  # Relative → /var/log/haproxy/api/access.log
+  
+  - name: "special_site"
+    vhosts: ["special.example.com"]
+    log_path: "/custom/path/special.log"  # Absolute → ignores root_dir
 ```
 
 **Backward Compatibility:** If the `websites` section is omitted, bot-detector operates in legacy single-website mode and requires the `--log-path` command-line flag.
