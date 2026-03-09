@@ -161,7 +161,7 @@ func TestNewTailer(t *testing.T) {
 
 	// --- Test Cases ---
 	t.Run("Successful Creation", func(t *testing.T) {
-		tailer, err := processor.NewTailer(p, true)
+		tailer, err := processor.NewTailer(p, logFilePath, true)
 		if err != nil {
 			t.Fatalf("Expected no error, but got: %v", err)
 		}
@@ -185,7 +185,7 @@ func TestNewTailer(t *testing.T) {
 	//
 	// 	t.Run("File Not Found", func(t *testing.T) {
 	// 		p.LogPath = filepath.Join(tempDir, "nonexistent.log")
-	// 		_, err = processor.NewTailer(p, true)
+	// 		_, err = processor.NewTailer(p, logFilePath, true)
 	// 		if err == nil {
 	// 			t.Fatal("Expected an error for non-existent file, but got nil")
 	// 		}
@@ -199,9 +199,8 @@ func TestNewTailer(t *testing.T) {
 		p.Config.FileOpener = func(name string) (config.FileHandle, error) {
 			return &statErrorFile{nil}, nil // Return a handle that will fail on Stat()
 		}
-		p.LogPath = logFilePath // Reset to a valid path
 
-		_, err := processor.NewTailer(p, true)
+		_, err := processor.NewTailer(p, logFilePath, true)
 		if err == nil {
 			t.Fatal("Expected an error when stat fails, but got nil")
 		}

@@ -46,12 +46,7 @@ type Tailer struct {
 
 // NewTailer creates and initializes a new Tailer. It opens the file, gets its
 // initial stats for rotation detection, and seeks to the end for live tailing.
-func NewTailer(p *app.Processor, seekToEnd bool) (*Tailer, error) {
-	// Safely read LogPath (protected in multi-website mode)
-	p.LogPathMutex.Lock()
-	logPath := p.LogPath
-	p.LogPathMutex.Unlock()
-
+func NewTailer(p *app.Processor, logPath string, seekToEnd bool) (*Tailer, error) {
 	t := &Tailer{
 		path:   logPath,
 		logger: p.LogFunc,
@@ -489,7 +484,7 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 		isFirstRun := firstRun // Save before modifying
 		firstRun = false
 
-		tailer, err := NewTailer(p, seekToEnd)
+		tailer, err := NewTailer(p, logPath, seekToEnd)
 		if err != nil {
 			// File not found or error on initial open, wait and retry.
 			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", logPath, err, config.ErrorRetryDelay)
