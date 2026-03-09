@@ -7,6 +7,7 @@ import (
 	"bot-detector/internal/utils"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -307,15 +308,29 @@ func logPerChainMetrics(p *Processor, logFunc func(logging.LogLevel, string, str
 	if len(data.ChainMetrics) > 0 {
 		logFunc(logging.LevelInfo, logTag, "--- Per-Chain Metrics ---")
 		for _, metric := range data.ChainMetrics {
+			// Find the chain to get website information
+			chainName := metric.Name
+			var websiteInfo string
+			for i := range p.Chains {
+				if p.Chains[i].Name == metric.Name {
+					if len(p.Chains[i].Websites) == 0 {
+						websiteInfo = " [global]"
+					} else {
+						websiteInfo = fmt.Sprintf(" [%s]", strings.Join(p.Chains[i].Websites, ", "))
+					}
+					break
+				}
+			}
+			
 			if validHits > 0 {
 				hitsPctStr := formatPercentage(metric.Hits, validHits)
 				completionsPctStr := formatPercentage(metric.Completions, data.TotalChainsCompleted)
 				resetsPctStr := formatPercentage(metric.Resets, metric.Hits)
-				logFunc(logging.LevelInfo, logTag, "  - %s: Matches: %d (%s), Completed: %d (%s), Resets: %d (%s)",
-					metric.Name, metric.Hits, hitsPctStr, metric.Completions, completionsPctStr, metric.Resets, resetsPctStr)
+				logFunc(logging.LevelInfo, logTag, "  - %s%s: Matches: %d (%s), Completed: %d (%s), Resets: %d (%s)",
+					chainName, websiteInfo, metric.Hits, hitsPctStr, metric.Completions, completionsPctStr, metric.Resets, resetsPctStr)
 			} else {
-				logFunc(logging.LevelInfo, logTag, "  - %s: Matches: %d, Completed: %d, Resets: %d",
-					metric.Name, metric.Hits, metric.Completions, metric.Resets)
+				logFunc(logging.LevelInfo, logTag, "  - %s%s: Matches: %d, Completed: %d, Resets: %d",
+					chainName, websiteInfo, metric.Hits, metric.Completions, metric.Resets)
 			}
 		}
 	}
