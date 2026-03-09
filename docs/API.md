@@ -129,7 +129,7 @@ These endpoints are available when cluster mode is enabled. They provide cluster
 
 *   **Method:** `GET`
 *   **Content-Type:** `application/json`
-*   **Description:** Returns this node's current metrics snapshot in JSON format. This endpoint is used by leader nodes to collect metrics from follower nodes, but can also be queried directly for monitoring individual nodes. The metrics include processing statistics, actor statistics, chain execution statistics, and various performance counters.
+*   **Description:** Returns this node's current metrics snapshot in JSON format. This endpoint is used by leader nodes to collect metrics from follower nodes, but can also be queried directly for monitoring individual nodes. The metrics include processing statistics, actor statistics, chain execution statistics, per-website statistics (in multi-website mode), and various performance counters.
 *   **Response Format:**
     ```json
     {
@@ -182,9 +182,24 @@ These endpoints are available when cluster mode is enabled. They provide cluster
           "completed": 2,
           "resets": 0
         }
+      },
+      "website_metrics": {
+        "main_site": {
+          "lines_parsed": 450,
+          "chains_matched": 12,
+          "chains_reset": 1,
+          "chains_completed": 8
+        },
+        "api_site": {
+          "lines_parsed": 550,
+          "chains_matched": 30,
+          "chains_reset": 0,
+          "chains_completed": 34
+        }
       }
     }
     ```
+*   **Note:** The `website_metrics` field is only present when multi-website mode is enabled.
 *   **Responses:**
     *   `200 OK`: Successfully returns the metrics snapshot.
     *   `500 Internal Server Error`: If the server fails to generate the metrics snapshot.
@@ -193,7 +208,7 @@ These endpoints are available when cluster mode is enabled. They provide cluster
 
 *   **Method:** `GET`
 *   **Content-Type:** `application/json`
-*   **Description:** Returns cluster-wide aggregated metrics from all nodes (leader only). This endpoint provides a comprehensive view of the entire cluster's performance, including per-node health status and cluster-wide metric summation. Only available on leader nodes; follower nodes will return a 404 error.
+*   **Description:** Returns cluster-wide aggregated metrics from all nodes (leader only). This endpoint provides a comprehensive view of the entire cluster's performance, including per-node health status, cluster-wide metric summation, and per-website aggregates (in multi-website mode). Only available on leader nodes; follower nodes will return a 404 error.
 *   **Response Format:**
     ```json
     {
@@ -233,6 +248,20 @@ These endpoints are available when cluster mode is enabled. They provide cluster
             "hits": 6,
             "completed": 3,
             "resets": 0
+          }
+        },
+        "website_metrics": {
+          "main_site": {
+            "lines_parsed": 1350,
+            "chains_matched": 36,
+            "chains_reset": 3,
+            "chains_completed": 24
+          },
+          "api_site": {
+            "lines_parsed": 1650,
+            "chains_matched": 90,
+            "chains_reset": 0,
+            "chains_completed": 102
           }
         }
       },

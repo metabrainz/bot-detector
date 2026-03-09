@@ -100,6 +100,18 @@ func sumChainMetrics(dst, src map[string]server.ChainMetric) {
 	}
 }
 
+// sumWebsiteMetrics adds per-website metrics from src into dst.
+func sumWebsiteMetrics(dst, src map[string]server.WebsiteMetric) {
+	for website, srcMetric := range src {
+		dstMetric := dst[website]
+		dstMetric.LinesParsed += srcMetric.LinesParsed
+		dstMetric.ChainsMatched += srcMetric.ChainsMatched
+		dstMetric.ChainsReset += srcMetric.ChainsReset
+		dstMetric.ChainsCompleted += srcMetric.ChainsCompleted
+		dst[website] = dstMetric
+	}
+}
+
 // AggregateMetrics takes collected metrics from all nodes and produces an aggregated view.
 // The staleThreshold parameter determines when a node is considered stale (typically 2-3x the poll interval).
 func AggregateMetrics(collectedMetrics map[string]*CollectedMetrics, nodes []NodeConfig, staleThreshold time.Duration) *AggregatedMetrics {
@@ -117,6 +129,7 @@ func AggregateMetrics(collectedMetrics map[string]*CollectedMetrics, nodes []Nod
 			MatchKeyHits:    make(map[string]int64),
 			BlockDurations:  make(map[string]int64),
 			PerChainMetrics: make(map[string]server.ChainMetric),
+			WebsiteMetrics:  make(map[string]server.WebsiteMetric),
 		},
 	}
 
@@ -181,6 +194,9 @@ func AggregateMetrics(collectedMetrics map[string]*CollectedMetrics, nodes []Nod
 			}
 			if snapshot.PerChainMetrics != nil {
 				sumChainMetrics(result.Aggregated.PerChainMetrics, snapshot.PerChainMetrics)
+			}
+			if snapshot.WebsiteMetrics != nil {
+				sumWebsiteMetrics(result.Aggregated.WebsiteMetrics, snapshot.WebsiteMetrics)
 			}
 		}
 	}

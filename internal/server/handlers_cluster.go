@@ -65,6 +65,15 @@ type MetricsSnapshot struct {
 	MatchKeyHits    map[string]int64       `json:"match_key_hits,omitempty"`
 	BlockDurations  map[string]int64       `json:"block_durations,omitempty"`
 	PerChainMetrics map[string]ChainMetric `json:"per_chain_metrics,omitempty"`
+	WebsiteMetrics  map[string]WebsiteMetric `json:"website_metrics,omitempty"` // Per-website stats (multi-website mode)
+}
+
+// WebsiteMetric contains per-website execution metrics.
+type WebsiteMetric struct {
+	LinesParsed     int64 `json:"lines_parsed"`
+	ChainsMatched   int64 `json:"chains_matched"`
+	ChainsReset     int64 `json:"chains_reset"`
+	ChainsCompleted int64 `json:"chains_completed"`
 }
 
 // ProcessingStats contains general log processing statistics.

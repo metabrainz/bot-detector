@@ -3,6 +3,7 @@ package app
 import (
 	"bot-detector/internal/cluster"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/metrics"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/server"
 	"bot-detector/internal/store"
@@ -113,6 +114,7 @@ func (p *Processor) GetMetricsSnapshot() server.MetricsSnapshot {
 		MatchKeyHits:    extractSyncMapInt64(p.Metrics.MatchKeyHits),
 		BlockDurations:  extractSyncMapInt64(p.Metrics.BlockDurations),
 		PerChainMetrics: perChainMetrics,
+		WebsiteMetrics:  extractWebsiteMetrics(p.Metrics),
 	}
 
 	return snapshot
@@ -217,6 +219,55 @@ func extractPerChainMetrics(hits, completed, resets *sync.Map) map[string]server
 		}
 
 		result[chainName] = metric
+	}
+
+	return result
+}
+
+// extractWebsiteMetrics extracts per-website metrics from the Metrics struct.
+func extractWebsiteMetrics(m *metrics.Metrics) map[string]server.WebsiteMetric {
+	result := make(map[string]server.WebsiteMetric)
+	if m == nil {
+		return result
+	}
+
+	// Collect all website names
+	websiteNames := make(map[string]bool)
+	if m.WebsiteLinesParsed != nil {
+		m.WebsiteLinesParsed.Range(func(key, _ interface{}) bool {
+			if k, ok := key.(string); ok {
+				websiteNames[k] = true
+			}
+			return true
+		})
+	}
+
+	// Build metrics for each website
+	for website := range websiteNames {
+		metric := server.WebsiteMetric{}
+
+		if v, ok := m.WebsiteLinesParsed.Load(website); ok {
+			if counter, ok := v.(*atomic.Int64); ok {
+				metric.LinesParsed = counter.Load()
+			}
+		}
+		if v, ok := m.WebsiteChainsMatched.Load(website); ok {
+			if counter, ok := v.(*atomic.Int64); ok {
+				metric.ChainsMatched = counter.Load()
+			}
+		}
+		if v, ok := m.WebsiteChainsReset.Load(website); ok {
+			if counter, ok := v.(*atomic.Int64); ok {
+				metric.ChainsReset = counter.Load()
+			}
+		}
+		if v, ok := m.WebsiteChainsComplete.Load(website); ok {
+			if counter, ok := v.(*atomic.Int64); ok {
+				metric.ChainsCompleted = counter.Load()
+			}
+		}
+
+		result[website] = metric
 	}
 
 	return result
