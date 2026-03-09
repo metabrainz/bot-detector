@@ -97,16 +97,18 @@ func (m *MultiWebsiteTailerManager) startTailerLocked(website config.WebsiteConf
 
 		// Create a combined signal channel that listens to both global stop and tailer-specific stop
 		combinedSignal := make(chan os.Signal, 1)
+		stopForwarder := make(chan struct{})
 		go func() {
+			defer close(combinedSignal)
 			select {
 			case <-m.stopCh:
-				close(combinedSignal)
 			case <-tailer.StopCh:
-				close(combinedSignal)
+			case <-stopForwarder:
 			}
 		}()
 
 		liveLogTailerWithPath(m.p, tailer.LogPath, tailer.Name, combinedSignal, nil)
+		close(stopForwarder)
 
 		tailer.mu.Lock()
 		tailer.Running = false
