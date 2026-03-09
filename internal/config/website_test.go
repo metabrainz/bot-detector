@@ -109,9 +109,78 @@ func TestValidateWebsites_UnknownWebsiteInChain(t *testing.T) {
 		{Name: "TestChain", Websites: []string{"unknown"}},
 	}
 
+	// validateWebsites no longer checks chain references
 	err := validateWebsites(websites, chains)
-	if err == nil {
-		t.Error("Expected error for unknown website reference in chain")
+	if err != nil {
+		t.Errorf("validateWebsites should not error on unknown website in chain: %v", err)
+	}
+
+	// filterInvalidWebsitesFromChains should filter out invalid websites
+	validWebsites := map[string]bool{"main": true}
+	filterInvalidWebsitesFromChains(chains, validWebsites)
+
+	// Chain should have empty website list after filtering
+	if len(chains[0].Websites) != 0 {
+		t.Errorf("Expected chain to have 0 websites after filtering, got %d", len(chains[0].Websites))
+	}
+}
+
+func TestFilterInvalidWebsitesFromChains(t *testing.T) {
+	validWebsites := map[string]bool{
+		"main": true,
+		"api":  true,
+	}
+
+	tests := []struct {
+		name            string
+		inputWebsites   []string
+		expectedOutput  []string
+		expectWarning   bool
+	}{
+		{
+			name:           "All valid websites",
+			inputWebsites:  []string{"main", "api"},
+			expectedOutput: []string{"main", "api"},
+			expectWarning:  false,
+		},
+		{
+			name:           "Some invalid websites",
+			inputWebsites:  []string{"main", "unknown", "api"},
+			expectedOutput: []string{"main", "api"},
+			expectWarning:  true,
+		},
+		{
+			name:           "All invalid websites",
+			inputWebsites:  []string{"unknown1", "unknown2"},
+			expectedOutput: []string{},
+			expectWarning:  true,
+		},
+		{
+			name:           "Global chain (empty list)",
+			inputWebsites:  []string{},
+			expectedOutput: []string{},
+			expectWarning:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			chains := []BehavioralChain{
+				{Name: "TestChain", Websites: tt.inputWebsites},
+			}
+
+			filterInvalidWebsitesFromChains(chains, validWebsites)
+
+			if len(chains[0].Websites) != len(tt.expectedOutput) {
+				t.Errorf("Expected %d websites, got %d", len(tt.expectedOutput), len(chains[0].Websites))
+			}
+
+			for i, ws := range chains[0].Websites {
+				if ws != tt.expectedOutput[i] {
+					t.Errorf("Expected website[%d] = %s, got %s", i, tt.expectedOutput[i], ws)
+				}
+			}
+		})
 	}
 }
 

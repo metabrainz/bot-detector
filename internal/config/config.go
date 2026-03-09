@@ -1232,16 +1232,39 @@ func validateWebsites(websites []WebsiteConfig, chains []BehavioralChain) error 
 		}
 	}
 
-	// Validate chain website references
-	for _, chain := range chains {
-		for _, ws := range chain.Websites {
-			if !names[ws] {
-				return fmt.Errorf("chain '%s' references unknown website: %s", chain.Name, ws)
+	return nil
+}
+
+// filterInvalidWebsitesFromChains validates chain website references and filters out invalid ones.
+// It logs warnings for invalid website references but doesn't fail the config load.
+// If a chain has all invalid websites, it's effectively disabled (won't match anything).
+func filterInvalidWebsitesFromChains(chains []BehavioralChain, validWebsites map[string]bool) {
+	for i := range chains {
+		if len(chains[i].Websites) == 0 {
+			continue // Global chain, nothing to filter
+		}
+
+		validWebsiteList := make([]string, 0, len(chains[i].Websites))
+		for _, ws := range chains[i].Websites {
+			if !validWebsites[ws] {
+				logging.LogOutput(logging.LevelWarning, "CONFIG",
+					"Chain '%s' references unknown website '%s' - ignoring this website reference",
+					chains[i].Name, ws)
+			} else {
+				validWebsiteList = append(validWebsiteList, ws)
 			}
 		}
-	}
 
-	return nil
+		// Update the chain's website list with only valid websites
+		chains[i].Websites = validWebsiteList
+
+		// If all websites were invalid, log additional warning
+		if len(chains[i].Websites) == 0 {
+			logging.LogOutput(logging.LevelWarning, "CONFIG",
+				"Chain '%s' has no valid website references - chain will be disabled",
+				chains[i].Name)
+		}
+	}
 }
 
 // LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
@@ -1358,10 +1381,19 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		return nil, err
 	}
 
-	// Validate websites configuration
+	// Validate websites configuration (structure only)
 	if err := validateWebsites(config.Websites, newChains); err != nil {
 		return nil, err
 	}
+
+	// Build valid website names map
+	validWebsites := make(map[string]bool)
+	for _, ws := range config.Websites {
+		validWebsites[ws.Name] = true
+	}
+
+	// Filter invalid website references from chains (logs warnings, doesn't fail)
+	filterInvalidWebsitesFromChains(newChains, validWebsites)
 
 	// Resolve relative log paths for websites
 	resolvedWebsites, err := resolveWebsiteLogPaths(config.Websites, config.RootDir, opts.ConfigFilePath)
