@@ -29,7 +29,11 @@ func ProcessLogLineWithWebsite(p *app.Processor, line string, website string) {
 		if utils.IsTesting() {
 			logLevel = logging.LevelDebug
 		}
-		p.LogFunc(logLevel, "PARSE_FAIL", "Parsing failed for line \"%s\": %v", line, err)
+		if website != "" {
+			p.LogFunc(logLevel, "PARSE_FAIL", "Parsing failed for line \"%s\" on website '%s': %v", line, website, err)
+		} else {
+			p.LogFunc(logLevel, "PARSE_FAIL", "Parsing failed for line \"%s\": %v", line, err)
+		}
 		p.Metrics.ParseErrors.Add(1)
 		return
 	}

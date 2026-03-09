@@ -82,7 +82,11 @@ func PreCheckActivity(p *app.Processor, entry *app.LogEntry, actor store.Actor) 
 	if activity.IsBlocked {
 		if time.Now().After(activity.BlockedUntil) {
 			// Block has expired, clear it and proceed.
-			p.LogFunc(logging.LevelDebug, "EXPIRE", "Chain-specific block expired for actor %s (UA: %s).", actor.IPInfo.Address, actor.UA)
+			websiteCtx := ""
+			if entry.Website != "" {
+				websiteCtx = fmt.Sprintf(" on website '%s'", entry.Website)
+			}
+			p.LogFunc(logging.LevelDebug, "EXPIRE", "Chain-specific block expired for actor %s (UA: %s)%s.", actor.IPInfo.Address, actor.UA, websiteCtx)
 			activity.IsBlocked = false
 			activity.SkipInfo = store.SkipInfo{} // Clear the skip info.
 			activity.BlockedUntil = time.Time{}
@@ -94,7 +98,11 @@ func PreCheckActivity(p *app.Processor, entry *app.LogEntry, actor store.Actor) 
 			// Only log the skip message the first time.
 			if activity.SkipInfo.Type != utils.SkipTypeBlocked { // This ensures we only log once per block.
 				// The source is already set when the block was applied.
-				p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (blocked:%s).", actor.IPInfo.Address, entry.UserAgent, activity.SkipInfo.Source)
+				websiteCtx := ""
+				if entry.Website != "" {
+					websiteCtx = fmt.Sprintf(" on website '%s'", entry.Website)
+				}
+				p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (blocked:%s)%s.", actor.IPInfo.Address, entry.UserAgent, activity.SkipInfo.Source, websiteCtx)
 			}
 			return activity, true, activity.SkipInfo
 		}
@@ -793,7 +801,11 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 		// Only log the skip message and set the state the first time.
 		if activity.SkipInfo.Type == utils.SkipTypeNone {
 			activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeGoodActor, Source: p.InternReason(goodActorRuleName)}
-			p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (good_actor:%s).", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName)
+			websiteCtx := ""
+			if entry.Website != "" {
+				websiteCtx = fmt.Sprintf(" on website '%s'", entry.Website)
+			}
+			p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (good_actor:%s)%s.", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName, websiteCtx)
 		}
 
 		// --- UNBLOCK ON GOOD ACTOR LOGIC ---
