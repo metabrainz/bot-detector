@@ -3,10 +3,12 @@ package processor
 import (
 	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
+	"bot-detector/internal/checker"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/metrics"
 	"bot-detector/internal/store"
+	"bot-detector/internal/types"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,7 +45,6 @@ func TestMultiWebsite_FullIntegration(t *testing.T) {
 		ConfigMutex:   &sync.RWMutex{},
 		LogPathMutex:  sync.Mutex{},
 		Metrics:       metrics.NewMetrics(),
-		Chains:        []config.BehavioralChain{}, // No chains for this test, just verify parsing
 		LogRegex:      regexp.MustCompile(`^(?P<VHost>\S+) (?P<IP>\S+) \S+ \S+ \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>\S+)" (?P<StatusCode>\d+) (?P<Size>\d+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"`),
 		Config: &config.AppConfig{
 			Application: config.ApplicationConfig{
@@ -53,11 +54,14 @@ func TestMultiWebsite_FullIntegration(t *testing.T) {
 				TimestampFormat: "02/Jan/2006:15:04:05 -0700",
 				LineEnding:      "lf",
 			},
+			Checker: config.CheckerConfig{
+				MaxTimeSinceLastHit: 10 * time.Second,
+			},
 			FileOpener: func(name string) (config.FileHandle, error) { return os.Open(name) },
 			StatFunc:   os.Stat,
 		},
-		DryRun:  true,
-		NowFunc: time.Now,
+		DryRun:    true,
+		NowFunc:   time.Now,
 		ExitOnEOF: false, // Keep tailing to detect rotation
 		Websites: []config.WebsiteConfig{
 			{Name: "site1", VHosts: []string{"site1.com"}, LogPath: site1Log},
@@ -71,25 +75,107 @@ func TestMultiWebsite_FullIntegration(t *testing.T) {
 		},
 		UnknownVHosts:    make(map[string]bool),
 		UnknownVHostsMux: sync.Mutex{},
-		CheckChainsFunc: func(entry *app.LogEntry) {
-			// Track parsed entries per website
-			key := fmt.Sprintf("%s:parsed", entry.Website)
-			val, _ := events.LoadOrStore(key, new(atomic.Int64))
-			val.(*atomic.Int64).Add(1)
+	}
 
-			// Track specific IPs per website
-			ipKey := fmt.Sprintf("%s:ip:%s", entry.Website, entry.IPInfo.Address)
-			ipVal, _ := events.LoadOrStore(ipKey, new(atomic.Int64))
-			ipVal.(*atomic.Int64).Add(1)
+	// Define chains: 1 global + 1 per website
+	p.Chains = []config.BehavioralChain{
+		// Global chain: 2 requests to /api
+		{
+			Name:          "Global-API-Abuse",
+			MatchKey:      "ip",
+			Action:        "log",
+			BlockDuration: 30 * time.Minute,
+			Websites:      []string{}, // Empty = global
+			StepsYAML: []config.StepDefYAML{
+				{FieldMatches: map[string]interface{}{"Path": "/api"}},
+				{FieldMatches: map[string]interface{}{"Path": "/api"}},
+			},
 		},
-		LogFunc: func(level logging.LogLevel, tag string, format string, v ...interface{}) {
-			logMutex.Lock()
-			defer logMutex.Unlock()
-			msg := fmt.Sprintf("[%s] %s", tag, fmt.Sprintf(format, v...))
-			logMessages = append(logMessages, msg)
-			// Log everything to see what's happening
-			t.Logf("%s", msg)
+		// Site1-specific: 2 requests to /admin
+		{
+			Name:          "Site1-Admin-Access",
+			MatchKey:      "ip",
+			Action:        "log",
+			BlockDuration: 30 * time.Minute,
+			Websites:      []string{"site1"},
+			StepsYAML: []config.StepDefYAML{
+				{FieldMatches: map[string]interface{}{"Path": "/admin"}},
+				{FieldMatches: map[string]interface{}{"Path": "/admin"}},
+			},
 		},
+		// Site2-specific: 2 requests to /login
+		{
+			Name:          "Site2-Login-Abuse",
+			MatchKey:      "ip",
+			Action:        "log",
+			BlockDuration: 30 * time.Minute,
+			Websites:      []string{"site2"},
+			StepsYAML: []config.StepDefYAML{
+				{FieldMatches: map[string]interface{}{"Path": "/login"}},
+				{FieldMatches: map[string]interface{}{"Path": "/login"}},
+			},
+		},
+		// Site3-specific: 2 requests to /data
+		{
+			Name:          "Site3-Data-Access",
+			MatchKey:      "ip",
+			Action:        "log",
+			BlockDuration: 30 * time.Minute,
+			Websites:      []string{"site3"},
+			StepsYAML: []config.StepDefYAML{
+				{FieldMatches: map[string]interface{}{"Path": "/data"}},
+				{FieldMatches: map[string]interface{}{"Path": "/data"}},
+			},
+		},
+	}
+
+	// Initialize chains (compile matchers)
+	testFileDependencies := make(map[string]*types.FileDependency)
+	for i := range p.Chains {
+		chain := &p.Chains[i]
+		// Initialize metrics
+		chain.MetricsHitsCounter = new(atomic.Int64)
+		chain.MetricsResetCounter = new(atomic.Int64)
+		chain.MetricsCounter = new(atomic.Int64)
+		chain.FieldMatchCounts = &sync.Map{}
+		
+		for j, stepYAML := range chain.StepsYAML {
+			matchers, err := config.CompileMatchers(chain.Name, j, stepYAML.FieldMatches, testFileDependencies, "")
+			if err != nil {
+				t.Fatalf("Failed to compile matchers for chain '%s': %v", chain.Name, err)
+			}
+			chain.Steps = append(chain.Steps, config.StepDef{
+				Order:    j + 1,
+				Matchers: matchers,
+			})
+		}
+	}
+
+	// Categorize chains into website-specific and global
+	p.WebsiteChains, p.GlobalChains = app.CategorizeChains(p.Chains)
+
+	// Set up chain checking with event tracking
+	p.CheckChainsFunc = func(entry *app.LogEntry) {
+		// Track parsed entries per website
+		key := fmt.Sprintf("%s:parsed", entry.Website)
+		val, _ := events.LoadOrStore(key, new(atomic.Int64))
+		val.(*atomic.Int64).Add(1)
+
+		// Track specific IPs per website
+		ipKey := fmt.Sprintf("%s:ip:%s", entry.Website, entry.IPInfo.Address)
+		ipVal, _ := events.LoadOrStore(ipKey, new(atomic.Int64))
+		ipVal.(*atomic.Int64).Add(1)
+
+		// Run actual chain checking
+		checker.CheckChains(p, entry)
+	}
+
+	// Set up logging
+	p.LogFunc = func(level logging.LogLevel, tag string, format string, v ...interface{}) {
+		logMutex.Lock()
+		defer logMutex.Unlock()
+		msg := fmt.Sprintf("[%s] %s", tag, fmt.Sprintf(format, v...))
+		logMessages = append(logMessages, msg)
 	}
 
 	p.Blocker = blocker.NewHAProxyBlocker(p, true)
@@ -116,28 +202,47 @@ func TestMultiWebsite_FullIntegration(t *testing.T) {
 
 	// NOW write initial content (will be read as new lines)
 	writeLog(t, site1Log, []string{
+		// Trigger global chain
 		`site1.com 10.0.1.1 - - [01/Jan/2026:12:00:00 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot1"`,
 		`site1.com 10.0.1.1 - - [01/Jan/2026:12:00:01 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot1"`,
+		// Trigger site1-specific chain
 		`site1.com 10.0.1.2 - - [01/Jan/2026:12:00:02 +0000] "GET /admin HTTP/1.1" 200 100 "-" "Bot2"`,
 		`site1.com 10.0.1.2 - - [01/Jan/2026:12:00:03 +0000] "GET /admin HTTP/1.1" 200 100 "-" "Bot2"`,
+		// Try to trigger site2 chain (should NOT work from site1)
+		`site1.com 10.0.1.3 - - [01/Jan/2026:12:00:04 +0000] "GET /login HTTP/1.1" 200 100 "-" "Bot3"`,
+		`site1.com 10.0.1.3 - - [01/Jan/2026:12:00:05 +0000] "GET /login HTTP/1.1" 200 100 "-" "Bot3"`,
 	})
 
 	writeLog(t, site2Log, []string{
-		`site2.com 10.0.2.1 - - [01/Jan/2026:12:00:00 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot3"`,
-		`site2.com 10.0.2.1 - - [01/Jan/2026:12:00:01 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot3"`,
-		`site2.com 10.0.2.2 - - [01/Jan/2026:12:00:02 +0000] "GET /login HTTP/1.1" 200 100 "-" "Bot4"`,
-		`site2.com 10.0.2.2 - - [01/Jan/2026:12:00:03 +0000] "GET /login HTTP/1.1" 200 100 "-" "Bot4"`,
+		// Trigger global chain
+		`site2.com 10.0.2.1 - - [01/Jan/2026:12:00:00 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot4"`,
+		`site2.com 10.0.2.1 - - [01/Jan/2026:12:00:01 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot4"`,
+		// Trigger site2-specific chain
+		`site2.com 10.0.2.2 - - [01/Jan/2026:12:00:02 +0000] "GET /login HTTP/1.1" 200 100 "-" "Bot5"`,
+		`site2.com 10.0.2.2 - - [01/Jan/2026:12:00:03 +0000] "GET /login HTTP/1.1" 200 100 "-" "Bot5"`,
+		// Try to trigger site3 chain (should NOT work from site2)
+		`site2.com 10.0.2.3 - - [01/Jan/2026:12:00:04 +0000] "GET /data HTTP/1.1" 200 100 "-" "Bot6"`,
+		`site2.com 10.0.2.3 - - [01/Jan/2026:12:00:05 +0000] "GET /data HTTP/1.1" 200 100 "-" "Bot6"`,
 	})
 
 	writeLog(t, site3Log, []string{
-		`site3.com 10.0.3.1 - - [01/Jan/2026:12:00:00 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot5"`,
-		`site3.com 10.0.3.1 - - [01/Jan/2026:12:00:01 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot5"`,
-		`site3.com 10.0.3.2 - - [01/Jan/2026:12:00:02 +0000] "GET /data HTTP/1.1" 200 100 "-" "Bot6"`,
-		`site3.com 10.0.3.2 - - [01/Jan/2026:12:00:03 +0000] "GET /data HTTP/1.1" 200 100 "-" "Bot6"`,
+		// Trigger global chain
+		`site3.com 10.0.3.1 - - [01/Jan/2026:12:00:00 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot7"`,
+		`site3.com 10.0.3.1 - - [01/Jan/2026:12:00:01 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot7"`,
+		// Trigger site3-specific chain
+		`site3.com 10.0.3.2 - - [01/Jan/2026:12:00:02 +0000] "GET /data HTTP/1.1" 200 100 "-" "Bot8"`,
+		`site3.com 10.0.3.2 - - [01/Jan/2026:12:00:03 +0000] "GET /data HTTP/1.1" 200 100 "-" "Bot8"`,
+		// Try to trigger site1 chain (should NOT work from site3)
+		`site3.com 10.0.3.3 - - [01/Jan/2026:12:00:04 +0000] "GET /admin HTTP/1.1" 200 100 "-" "Bot9"`,
+		`site3.com 10.0.3.3 - - [01/Jan/2026:12:00:05 +0000] "GET /admin HTTP/1.1" 200 100 "-" "Bot9"`,
 	})
 
 	// Wait for initial processing
 	time.Sleep(300 * time.Millisecond)
+
+	// Flush entry buffer to ensure all entries are processed
+	checker.FlushEntryBuffer(p)
+	time.Sleep(100 * time.Millisecond)
 
 	// Debug: check what we have
 	var totalParsed int64
@@ -151,17 +256,86 @@ func TestMultiWebsite_FullIntegration(t *testing.T) {
 
 	// Verify initial parsing
 	t.Log("=== Phase 1: Initial log parsing ===")
-	assertEventCount(t, &events, "site1:parsed", 4)
-	assertEventCount(t, &events, "site2:parsed", 4)
-	assertEventCount(t, &events, "site3:parsed", 4)
+	assertEventCount(t, &events, "site1:parsed", 6)
+	assertEventCount(t, &events, "site2:parsed", 6)
+	assertEventCount(t, &events, "site3:parsed", 6)
 
-	// Verify IP isolation per website
+	// Verify IP tracking per website
 	assertEventCount(t, &events, "site1:ip:10.0.1.1", 2)
 	assertEventCount(t, &events, "site1:ip:10.0.1.2", 2)
+	assertEventCount(t, &events, "site1:ip:10.0.1.3", 2)
 	assertEventCount(t, &events, "site2:ip:10.0.2.1", 2)
 	assertEventCount(t, &events, "site2:ip:10.0.2.2", 2)
+	assertEventCount(t, &events, "site2:ip:10.0.2.3", 2)
 	assertEventCount(t, &events, "site3:ip:10.0.3.1", 2)
 	assertEventCount(t, &events, "site3:ip:10.0.3.2", 2)
+	assertEventCount(t, &events, "site3:ip:10.0.3.3", 2)
+
+	// Verify chain completions from log messages
+	t.Log("=== Verifying chain completions ===")
+	
+	logMutex.Lock()
+	globalCompletions := 0
+	site1Completions := 0
+	site2Completions := 0
+	site3Completions := 0
+	site1WrongChain := 0 // site1 trying to trigger site2 chain
+	site2WrongChain := 0 // site2 trying to trigger site3 chain
+	site3WrongChain := 0 // site3 trying to trigger site1 chain
+
+	for _, msg := range logMessages {
+		if contains(msg, "Global-API-Abuse") && contains(msg, "completed by IP") {
+			globalCompletions++
+		}
+		if contains(msg, "Site1-Admin-Access") && contains(msg, "completed by IP") {
+			site1Completions++
+		}
+		if contains(msg, "Site2-Login-Abuse") && contains(msg, "completed by IP") {
+			if contains(msg, "10.0.2.2") {
+				site2Completions++ // Correct
+			} else if contains(msg, "10.0.1.3") {
+				site1WrongChain++ // Wrong - site1 triggered site2 chain
+			}
+		}
+		if contains(msg, "Site3-Data-Access") && contains(msg, "completed by IP") {
+			if contains(msg, "10.0.3.2") {
+				site3Completions++ // Correct
+			} else if contains(msg, "10.0.2.3") {
+				site2WrongChain++ // Wrong - site2 triggered site3 chain
+			}
+		}
+		if contains(msg, "Site1-Admin-Access") && contains(msg, "10.0.3.3") {
+			site3WrongChain++ // Wrong - site3 triggered site1 chain
+		}
+	}
+	logMutex.Unlock()
+
+	// Global chain should complete 3 times (once per website)
+	if globalCompletions != 3 {
+		t.Errorf("Expected 3 global chain completions, got %d", globalCompletions)
+	}
+
+	// Each site-specific chain should complete exactly once
+	if site1Completions != 1 {
+		t.Errorf("Expected 1 site1 chain completion, got %d", site1Completions)
+	}
+	if site2Completions != 1 {
+		t.Errorf("Expected 1 site2 chain completion, got %d", site2Completions)
+	}
+	if site3Completions != 1 {
+		t.Errorf("Expected 1 site3 chain completion, got %d", site3Completions)
+	}
+
+	// Verify isolation: wrong chains should NOT trigger
+	if site1WrongChain > 0 {
+		t.Errorf("Site1 incorrectly triggered Site2 chain %d times", site1WrongChain)
+	}
+	if site2WrongChain > 0 {
+		t.Errorf("Site2 incorrectly triggered Site3 chain %d times", site2WrongChain)
+	}
+	if site3WrongChain > 0 {
+		t.Errorf("Site3 incorrectly triggered Site1 chain %d times", site3WrongChain)
+	}
 
 	// Test log rotation: rename old logs and create new ones
 	t.Log("=== Phase 2: Log rotation ===")
@@ -173,16 +347,16 @@ func TestMultiWebsite_FullIntegration(t *testing.T) {
 	// Use Create since these are new files after rotation
 	for path, lines := range map[string][]string{
 		site1Log: {
-			`site1.com 10.0.1.3 - - [01/Jan/2026:12:00:10 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot7"`,
-			`site1.com 10.0.1.3 - - [01/Jan/2026:12:00:11 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot7"`,
+			`site1.com 10.0.1.10 - - [01/Jan/2026:12:00:10 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot10"`,
+			`site1.com 10.0.1.10 - - [01/Jan/2026:12:00:11 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot10"`,
 		},
 		site2Log: {
-			`site2.com 10.0.2.3 - - [01/Jan/2026:12:00:10 +0000] "GET /login HTTP/1.1" 200 100 "-" "Bot8"`,
-			`site2.com 10.0.2.3 - - [01/Jan/2026:12:00:11 +0000] "GET /login HTTP/1.1" 200 100 "-" "Bot8"`,
+			`site2.com 10.0.2.10 - - [01/Jan/2026:12:00:10 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot11"`,
+			`site2.com 10.0.2.10 - - [01/Jan/2026:12:00:11 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot11"`,
 		},
 		site3Log: {
-			`site3.com 10.0.3.3 - - [01/Jan/2026:12:00:10 +0000] "GET /data HTTP/1.1" 200 100 "-" "Bot9"`,
-			`site3.com 10.0.3.3 - - [01/Jan/2026:12:00:11 +0000] "GET /data HTTP/1.1" 200 100 "-" "Bot9"`,
+			`site3.com 10.0.3.10 - - [01/Jan/2026:12:00:10 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot12"`,
+			`site3.com 10.0.3.10 - - [01/Jan/2026:12:00:11 +0000] "GET /api HTTP/1.1" 200 100 "-" "Bot12"`,
 		},
 	} {
 		f, err := os.Create(path)
@@ -200,14 +374,29 @@ func TestMultiWebsite_FullIntegration(t *testing.T) {
 
 	// Verify post-rotation parsing
 	t.Log("=== Phase 3: Post-rotation verification ===")
-	assertEventCount(t, &events, "site1:parsed", 6) // 4 + 2 after rotation
-	assertEventCount(t, &events, "site2:parsed", 6)
-	assertEventCount(t, &events, "site3:parsed", 6)
+	assertEventCount(t, &events, "site1:parsed", 8) // 6 + 2 after rotation
+	assertEventCount(t, &events, "site2:parsed", 8)
+	assertEventCount(t, &events, "site3:parsed", 8)
 
 	// Verify new IPs were parsed correctly after rotation
-	assertEventCount(t, &events, "site1:ip:10.0.1.3", 2)
-	assertEventCount(t, &events, "site2:ip:10.0.2.3", 2)
-	assertEventCount(t, &events, "site3:ip:10.0.3.3", 2)
+	assertEventCount(t, &events, "site1:ip:10.0.1.10", 2)
+	assertEventCount(t, &events, "site2:ip:10.0.2.10", 2)
+	assertEventCount(t, &events, "site3:ip:10.0.3.10", 2)
+
+	// Verify global chain completed again after rotation (3 more times)
+	logMutex.Lock()
+	postRotationGlobal := 0
+	for _, msg := range logMessages {
+		if contains(msg, "Global-API-Abuse") && contains(msg, "completed by IP") &&
+			(contains(msg, "10.0.1.10") || contains(msg, "10.0.2.10") || contains(msg, "10.0.3.10")) {
+			postRotationGlobal++
+		}
+	}
+	logMutex.Unlock()
+
+	if postRotationGlobal != 3 {
+		t.Errorf("Expected 3 global chain completions after rotation, got %d", postRotationGlobal)
+	}
 
 	// Shutdown
 	close(signalCh)
@@ -240,9 +429,12 @@ func TestMultiWebsite_FullIntegration(t *testing.T) {
 		t.Errorf("Not all tailers started: site1=%v, site2=%v, site3=%v", site1Started, site2Started, site3Started)
 	}
 
-	t.Logf("✓ Test complete: 3 websites, 12 initial lines + 6 after rotation = 18 total lines parsed")
+	t.Logf("✓ Test complete: 3 websites, 18 initial lines + 6 after rotation = 24 total lines parsed")
 	t.Logf("✓ Log rotation handled successfully on all 3 websites")
 	t.Logf("✓ Website isolation verified")
+	t.Logf("✓ Global chain completed 6 times (3 before + 3 after rotation)")
+	t.Logf("✓ Site-specific chains completed correctly (1 per site)")
+	t.Logf("✓ Cross-site chain triggering prevented (isolation verified)")
 }
 
 func writeLog(t *testing.T, path string, lines []string) {
@@ -255,6 +447,15 @@ func writeLog(t *testing.T, path string, lines []string) {
 	for _, line := range lines {
 		fmt.Fprintln(f, line)
 	}
+}
+
+func findChainByName(chains []config.BehavioralChain, name string) *config.BehavioralChain {
+	for i := range chains {
+		if chains[i].Name == name {
+			return &chains[i]
+		}
+	}
+	return nil
 }
 
 func assertEventCount(t *testing.T, events *sync.Map, key string, expected int64) {
