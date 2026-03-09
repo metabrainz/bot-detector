@@ -210,6 +210,8 @@ chains:
     steps: [...]
 ```
 
+**Invalid website references:** If a chain references a website that doesn't exist, the invalid reference is filtered out with a warning. The chain continues to work for valid websites. If all websites are invalid, the chain is disabled. When you add the missing website and reload config, the chain automatically becomes active.
+
 **In legacy single-website mode** (no `websites` section), all chains are processed for all log entries, and the `websites` field in chains is ignored.
 
 ##### `match_key` Values

@@ -190,6 +190,27 @@ If a log entry has an unknown vhost, it's logged once and skipped.
 
 ## Troubleshooting
 
+### Unknown Website in Chain
+
+If a chain references a website that doesn't exist:
+
+```yaml
+chains:
+  - name: "API-Rate-Limit"
+    websites: ["api_site"]  # This website doesn't exist
+    steps: [...]
+```
+
+**Behavior:**
+- Logs warning: `Chain 'API-Rate-Limit' references unknown website 'api_site' - ignoring this website reference`
+- Invalid website is filtered out from the chain's website list
+- Chain continues to work for any valid websites in the list
+- If all websites are invalid, logs: `Chain 'API-Rate-Limit' has no valid website references - chain will be disabled`
+
+**Solution:** Add the missing website to the `websites` section, or remove the invalid reference from the chain.
+
+**Note:** When you add the missing website and reload config, the chain automatically becomes active for that website.
+
 ### Unknown VHost Warnings
 
 ```
