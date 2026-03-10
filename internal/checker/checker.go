@@ -13,9 +13,9 @@ import (
 	"time"
 )
 
-// formatBlockReason creates a block reason string with vhost/website context.
+// formatChainKey creates a chain key string with vhost/website context.
 // Format: "ChainName@vhost" or "ChainName[website]" or "ChainName"
-func formatBlockReason(chainName string, entry *app.LogEntry) string {
+func formatChainKey(chainName string, entry *app.LogEntry) string {
 	if entry.VHost != "" {
 		return fmt.Sprintf("%s@%s", chainName, entry.VHost)
 	}
@@ -280,7 +280,7 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 		logDryRunCompletion(p, chain, entry, websiteName)
 	} else {
 		// In live mode, log the action taken with formatted chain reason
-		formattedReason := formatBlockReason(chain.Name, entry)
+		formattedReason := formatChainKey(chain.Name, entry)
 		switch chain.Action {
 		case "block":
 			if websiteName != "" {
@@ -331,7 +331,7 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 		ipOnlyActor := store.Actor(store.Actor{IPInfo: entry.IPInfo, UA: ""})
 		ipActivity := store.GetOrCreateUnsafe(p.ActivityStore, ipOnlyActor)
 
-		internedReason := p.InternReason(formatBlockReason(chain.Name, entry))
+		internedReason := p.InternReason(formatChainKey(chain.Name, entry))
 
 		ipActivity.IsBlocked = true                                                               // Mark as blocked_
 		ipActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedReason} // Set SkipInfo
@@ -360,7 +360,7 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 			defer p.PersistenceMutex.Unlock()
 
 			unblockTime := p.NowFunc().Add(chain.BlockDuration)
-			reason := p.InternReason(formatBlockReason(chain.Name, entry))
+			reason := p.InternReason(formatChainKey(chain.Name, entry))
 			event := &persistence.AuditEvent{
 				Timestamp: p.NowFunc(),
 				Event:     persistence.EventTypeBlock,
@@ -466,7 +466,7 @@ func matchStepFields(p *app.Processor, chain *config.BehavioralChain, step *conf
 		// If metrics are enabled, increment the StepExecutionCounts for this step.
 		if p.EnableMetrics {
 			if p.Metrics.StepExecutionCounts != nil {
-				stepIdentifier := fmt.Sprintf("step %d/%d of %s", step.Order, len(chain.Steps), formatBlockReason(chain.Name, entry))
+				stepIdentifier := fmt.Sprintf("step %d/%d of %s", step.Order, len(chain.Steps), formatChainKey(chain.Name, entry))
 				if counter, ok := p.Metrics.StepExecutionCounts.Load(stepIdentifier); ok {
 					if c, ok := counter.(*atomic.Int64); ok {
 						c.Add(1)
@@ -577,8 +577,8 @@ func ProcessChainForEntry(p *app.Processor, chain *config.BehavioralChain, entry
 	}
 
 	// Get the current state for this chain.
-	// Use formatBlockReason to include website/vhost context in the key
-	chainKey := formatBlockReason(chain.Name, entry)
+	// Use formatChainKey to include website/vhost context in the key
+	chainKey := formatChainKey(chain.Name, entry)
 	state, exists := currentActivity.ChainProgress[chainKey]
 	if !exists {
 		// Initialize state if it's the first time we're seeing this actor for this chain.
