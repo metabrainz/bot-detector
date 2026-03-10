@@ -17,10 +17,13 @@ import (
 	"bot-detector/internal/testutil"
 	"bot-detector/internal/utils"
 	"bufio"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -183,12 +186,104 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 	}
 }
 
+// fetchInitialStateFromCluster fetches the current cluster state from the leader
+// instead of replaying the journal. This is much faster for new nodes joining a cluster.
+func fetchInitialStateFromCluster(p *app.Processor) error {
+	// Find leader node
+	var leaderNode *cluster.NodeConfig
+	for i := range p.Cluster.Nodes {
+		if p.Cluster.Nodes[i].Name != p.NodeName {
+			leaderNode = &p.Cluster.Nodes[i]
+			break
+		}
+	}
+	if leaderNode == nil {
+		return fmt.Errorf("no leader node found in cluster configuration")
+	}
+
+	// Fetch merged state from leader
+	url := fmt.Sprintf("%s://%s/api/v1/cluster/state/merged", p.Cluster.Protocol, leaderNode.Address)
+	client := &http.Client{Timeout: p.Cluster.StateSync.Timeout}
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %v", err)
+	}
+
+	if p.Cluster.StateSync.Compression {
+		req.Header.Set("Accept-Encoding", "gzip")
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to fetch from leader: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("leader returned status %d", resp.StatusCode)
+	}
+
+	var reader io.Reader = resp.Body
+	if resp.Header.Get("Content-Encoding") == "gzip" {
+		gz, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to create gzip reader: %v", err)
+		}
+		defer func() { _ = gz.Close() }()
+		reader = gz
+	}
+
+	var mergedResp struct {
+		Version string                         `json:"version"`
+		States  map[string]persistence.IPState `json:"states"`
+	}
+
+	if err := json.NewDecoder(reader).Decode(&mergedResp); err != nil {
+		return fmt.Errorf("failed to decode merged state: %v", err)
+	}
+
+	// Apply fetched state
+	p.IPStates = mergedResp.States
+
+	// Intern all reason strings to save memory
+	for ip, state := range p.IPStates {
+		state.Reason = p.InternReason(state.Reason)
+		p.IPStates[ip] = state
+	}
+
+	// Count for logging
+	blockedCount := 0
+	for _, state := range p.IPStates {
+		if state.State == persistence.BlockStateBlocked {
+			blockedCount++
+		}
+	}
+	unblockedCount := len(p.IPStates) - blockedCount
+
+	p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Fetched initial state from leader %s (version=%s, entries=%d blocked + %d unblocked)",
+		leaderNode.Name, mergedResp.Version, blockedCount, unblockedCount)
+
+	return nil
+}
+
 func restorePersistenceState(p *app.Processor) error {
 	// -- STATE RESTORATION --
 	if err := os.MkdirAll(p.StateDir, 0750); err != nil {
 		return fmt.Errorf("failed to create state directory '%s': %v", p.StateDir, err)
 	}
 	p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.StateDir)
+
+	// Optimization: If state sync is enabled and we're a follower, fetch state from cluster
+	// instead of replaying potentially large journal
+	if p.Cluster != nil && p.Cluster.StateSync.Enabled && p.NodeRole == "follower" {
+		if fetchErr := fetchInitialStateFromCluster(p); fetchErr == nil {
+			p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Successfully fetched initial state from cluster, skipping journal replay")
+			return nil
+		} else {
+			p.LogFunc(logging.LevelWarning, "STATE_SYNC", "Failed to fetch initial state from cluster, falling back to snapshot+journal: %v", fetchErr)
+		}
+	}
 
 	// 1. Load snapshot
 	snapshotPath := filepath.Join(p.StateDir, "state.snapshot")
