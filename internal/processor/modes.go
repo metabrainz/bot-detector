@@ -44,6 +44,12 @@ type Tailer struct {
 	}
 }
 
+// logRotation logs a rotation detection event with consistent formatting.
+func (t *Tailer) logRotation(reason string, dev1, ino1, dev2, ino2 uint64) {
+	t.logger(logging.LevelInfo, "TAIL", "Detected log file rotation (Inode/Device %s: %d/%d vs %d/%d). Reopening file: %s",
+		reason, dev1, ino1, dev2, ino2, t.path)
+}
+
 // NewTailer creates and initializes a new Tailer. It opens the file, gets its
 // initial stats for rotation detection, and seeks to the end for live tailing.
 func NewTailer(p *app.Processor, logPath string, seekToEnd bool) (*Tailer, error) {
@@ -161,16 +167,14 @@ func (t *Tailer) checkForRotation() bool {
 			// This can happen if the original file was unlinked and a new one created,
 			// and our handle now points to the new one (less common, but possible depending on OS/fs).
 			if currentFileStatT.Dev != initialStatT.Dev || currentFileStatT.Ino != initialStatT.Ino {
-				t.logger(logging.LevelInfo, "TAIL", "Detected log file rotation (Inode/Device of open handle changed from initial: %d/%d -> %d/%d). Reopening file.",
-					initialStatT.Dev, initialStatT.Ino, currentFileStatT.Dev, currentFileStatT.Ino)
+				t.logRotation("open handle changed from initial", initialStatT.Dev, initialStatT.Ino, currentFileStatT.Dev, currentFileStatT.Ino)
 				return true
 			}
 
 			// Check if the file at the path has changed from what our open handle is pointing to.
 			// This is the primary detection for `mv` style rotations.
 			if currentFileStatT.Dev != currentPathStatT.Dev || currentFileStatT.Ino != currentPathStatT.Ino {
-				t.logger(logging.LevelInfo, "TAIL", "Detected log file rotation (Inode/Device of open handle differs from path: %d/%d vs %d/%d). Reopening file.",
-					currentFileStatT.Dev, currentFileStatT.Ino, currentPathStatT.Dev, currentPathStatT.Ino)
+				t.logRotation("open handle differs from path", currentFileStatT.Dev, currentFileStatT.Ino, currentPathStatT.Dev, currentPathStatT.Ino)
 				return true
 			}
 		} else {
