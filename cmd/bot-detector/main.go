@@ -703,19 +703,7 @@ func execute(params *commandline.AppParameters) error {
 			logging.LogOutput(logging.LevelInfo, "CONFIG",
 				"Cluster configuration created from BOT_DETECTOR_NODES environment variable (%d nodes)",
 				len(params.Envs.ClusterNodes))
-			loadedCfg.Cluster = &cluster.ClusterConfig{
-				Nodes:                 params.Envs.ClusterNodes,
-				ConfigPollInterval:    10 * time.Second, // Default value
-				MetricsReportInterval: 30 * time.Second, // Default value
-				Protocol:              "http",           // Default value
-				StateSync: cluster.StateSyncConfig{
-					Enabled:     true,
-					Interval:    60 * time.Second,
-					Compression: true,
-					Timeout:     30 * time.Second,
-					Incremental: true,
-				},
-			}
+			loadedCfg.Cluster = config.NewClusterConfigWithDefaults(params.Envs.ClusterNodes)
 		}
 	}
 

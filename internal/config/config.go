@@ -887,6 +887,25 @@ func parseStateSyncConfig(yamlConfig *StateSyncConfigYAML) cluster.StateSyncConf
 	return config
 }
 
+// NewClusterConfigWithDefaults creates a ClusterConfig with default values.
+// Use this when creating cluster config from environment variables or other sources
+// that don't have full YAML configuration.
+func NewClusterConfigWithDefaults(nodes []cluster.NodeConfig) *cluster.ClusterConfig {
+	return &cluster.ClusterConfig{
+		Nodes:                 nodes,
+		ConfigPollInterval:    10 * time.Second,
+		MetricsReportInterval: 30 * time.Second,
+		Protocol:              "http",
+		StateSync: cluster.StateSyncConfig{
+			Enabled:     true,
+			Interval:    60 * time.Second,
+			Compression: true,
+			Timeout:     30 * time.Second,
+			Incremental: true,
+		},
+	}
+}
+
 func parseStringAndBoolSettings(config *TopLevelConfig) (string, string, bool, string, error) {
 	logLevelStr := DefaultLogLevel
 	if config.Application.LogLevel != "" {
