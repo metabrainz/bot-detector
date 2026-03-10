@@ -292,7 +292,7 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 		}
 	}
 
-	m.log(logging.LevelInfo, "STATE_SYNC", "Cached merged state: %d IPs (%d blocked + %d unblocked, local: %d, remote: %d, nodes: %d/%d, mode: %s)",
+	m.log(logging.LevelInfo, "STATE_SYNC", "Cached merged state: %d IPs (%d blocked + %d unblocked), local: %d, remote: %d, nodes: %d/%d, mode: %s",
 		len(merged), blockedCount, unblockedCount, localCount, remoteCount, nodesSucceeded+1, nodesSucceeded+nodesFailed+1, compressionMode)
 }
 
@@ -373,16 +373,18 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	if !metrics.Compressed {
 		modeStr = "plain,full"
 	}
+	deltaStr := ""
 	if isIncremental {
+		deltaStr = fmt.Sprintf(", delta: %d", len(states))
 		if metrics.Compressed {
-			modeStr = fmt.Sprintf("gz,incr,delta:%d", len(states))
+			modeStr = "gz,incr"
 		} else {
-			modeStr = fmt.Sprintf("plain,incr,delta:%d", len(states))
+			modeStr = "plain,incr"
 		}
 	}
 
-	m.log(logging.LevelInfo, "STATE_SYNC", "Merged from leader: %d IPs (%d blocked + %d unblocked, mode: %s, size: %.1f KB, rate: %.1f KB/s, duration: %v)",
-		len(states), blockedCount, unblockedCount, modeStr, metrics.SizeKB, metrics.RateKBps, metrics.Duration.Round(time.Millisecond))
+	m.log(logging.LevelInfo, "STATE_SYNC", "Merged from leader: %d IPs (%d blocked + %d unblocked%s), size: %.1f KB, rate: %.1f KB/s, duration: %v, mode: %s",
+		len(states), blockedCount, unblockedCount, deltaStr, metrics.SizeKB, metrics.RateKBps, metrics.Duration.Round(time.Millisecond), modeStr)
 }
 
 // fetchNodeState fetches state from a specific node

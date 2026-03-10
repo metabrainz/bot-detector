@@ -231,8 +231,8 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 		modeStr = "plain,full"
 	}
 
-	p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Fetched initial state from leader: %d IPs (%d blocked + %d unblocked, mode: %s, size: %.1f KB, rate: %.1f KB/s, duration: %v)",
-		len(p.IPStates), blockedCount, unblockedCount, modeStr, m.SizeKB, m.RateKBps, m.Duration.Round(time.Millisecond))
+	p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Fetched initial state from leader: %d IPs (%d blocked + %d unblocked), size: %.1f KB, rate: %.1f KB/s, duration: %v, mode: %s",
+		len(p.IPStates), blockedCount, unblockedCount, m.SizeKB, m.RateKBps, m.Duration.Round(time.Millisecond), modeStr)
 
 	return timestamp, nil
 }
