@@ -16,6 +16,13 @@ import (
 	"time"
 )
 
+// mustWriteFile writes content to a file or fails the test.
+func mustWriteFile(t *testing.T, path, content string) {
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write file %s: %v", path, err)
+	}
+}
+
 // setupTestProcessor creates a processor with minimal working configuration for multi-website tests
 func setupTestProcessor(t *testing.T, websites []config.WebsiteConfig) *app.Processor {
 	p := &app.Processor{
@@ -87,15 +94,9 @@ api.example.com 10.0.1.2 - - [01/Jan/2026:12:00:01 +0000] "GET /api HTTP/1.1" 20
 admin.example.com 10.0.2.2 - - [01/Jan/2026:12:00:01 +0000] "GET /admin HTTP/1.1" 200 100 "-" "AdminBot"
 `
 
-	if err := os.WriteFile(mainLog, []byte(mainContent), 0644); err != nil {
-		t.Fatalf("Failed to create main log: %v", err)
-	}
-	if err := os.WriteFile(apiLog, []byte(apiContent), 0644); err != nil {
-		t.Fatalf("Failed to create api log: %v", err)
-	}
-	if err := os.WriteFile(adminLog, []byte(adminContent), 0644); err != nil {
-		t.Fatalf("Failed to create admin log: %v", err)
-	}
+	mustWriteFile(t, mainLog, mainContent)
+	mustWriteFile(t, apiLog, apiContent)
+	mustWriteFile(t, adminLog, adminContent)
 
 	// Create processor with multi-website configuration
 	p := setupTestProcessor(t, []config.WebsiteConfig{
@@ -138,9 +139,7 @@ func TestMultiLogTailer_SignalShutdown(t *testing.T) {
 	if err := os.WriteFile(log1, []byte{}, 0644); err != nil {
 		t.Fatalf("Failed to create log1: %v", err)
 	}
-	if err := os.WriteFile(log2, []byte{}, 0644); err != nil {
-		t.Fatalf("Failed to create log2: %v", err)
-	}
+	mustWriteFile(t, log2, "")
 
 	p := setupTestProcessor(t, []config.WebsiteConfig{
 		{Name: "site1", VHosts: []string{"site1.com"}, LogPath: log1},
