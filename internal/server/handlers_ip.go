@@ -784,7 +784,7 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 		// If follower, forward to leader
 		if p.GetNodeRole() == "follower" {
 			path := fmt.Sprintf("/ip/%s/unblock", canonical)
-			resp, err := forwardToLeader(p, "POST", path, nil)
+			resp, err := forwardToLeader(p, r.Method, path, nil)
 			if err != nil {
 				p.Log(logging.LevelError, "API", "Failed to forward unblock request to leader: %v", err)
 				http.Error(w, err.Error(), http.StatusBadGateway)
@@ -833,10 +833,22 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 			go broadcastUnblockToFollowers(p, canonical)
 		}
 
+		p.Log(logging.LevelInfo, "API", "IP %s unblocked via API", canonical)
+
+		// If GET request, show status after unblocking
+		if r.Method == "GET" {
+			// Small delay to let unblock propagate
+			time.Sleep(100 * time.Millisecond)
+
+			// Show cluster-wide status
+			renderClusterIPStatus(w, p, canonical)
+			return
+		}
+
+		// POST request: simple confirmation
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, "IP %s unblocked (gpc0 set to 0, entry will expire naturally)\n", canonical)
-		p.Log(logging.LevelInfo, "API", "IP %s unblocked via API", canonical)
 	}
 }
 
