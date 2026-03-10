@@ -12,7 +12,7 @@ import (
 func rootHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, err := fmt.Fprint(w, p.GenerateHTMLMetricsReport())
+		_, err := fmt.Fprint(w, p.GenerateMetricsReport())
 		if err != nil {
 			logging.LogOutput(logging.LevelError, "metricsHandler", "Error writing metrics report: %v", err)
 		}

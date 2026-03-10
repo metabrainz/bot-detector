@@ -38,8 +38,8 @@ type Provider interface {
 	// for creating a configuration archive.
 	GetConfigForArchive() (mainConfig []byte, modTime time.Time, deps map[string]*types.FileDependency, configDir string, err error)
 
-	// GenerateHTMLMetricsReport generates an HTML-formatted metrics report.
-	GenerateHTMLMetricsReport() string
+	// GenerateMetricsReport generates a plain-text metrics report.
+	GenerateMetricsReport() string
 
 	// GenerateStepsMetricsReport generates a plain-text step execution metrics report.
 	GenerateStepsMetricsReport() string

@@ -46,7 +46,7 @@ func (m *mockProvider) GetListenConfigs() interface{} {
 	return []ListenConfig{&mockListenConfig{address: m.listenAddr}}
 }
 
-func (m *mockProvider) GenerateHTMLMetricsReport() string {
+func (m *mockProvider) GenerateMetricsReport() string {
 	return m.reportContent
 }
 

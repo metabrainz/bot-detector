@@ -459,8 +459,8 @@ func (p *Processor) IncrementCmdsPerBlocker(addr string) {
 	val.(*atomic.Int64).Add(1)
 }
 
-// GenerateHTMLMetricsReport creates the full metrics report as an HTML-safe string.
-func (p *Processor) GenerateHTMLMetricsReport() string {
+// GenerateMetricsReport creates the full metrics report as a plain-text string.
+func (p *Processor) GenerateMetricsReport() string {
 	var report strings.Builder
 	webLogFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		// Sanitize the formatted string before writing it to the HTML report.
