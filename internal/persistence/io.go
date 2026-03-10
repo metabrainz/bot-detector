@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 )
 
 // GetJournalPath returns the journal file path (always events.log for v1).
@@ -61,12 +62,18 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 
 	// Convert entries array to IPStates map
 	ipStates := make(map[string]IPState)
+	// Use snapshot timestamp as ModifiedAt fallback for old snapshots without this field
+	fallbackTime := snapV1.Timestamp
+	if fallbackTime.IsZero() {
+		fallbackTime = time.Now()
+	}
+
 	for _, entry := range snapV1.Snapshot.Entries {
 		ipStates[entry.IP] = IPState{
 			State:      entry.State,
 			ExpireTime: entry.ExpireTime,
 			Reason:     entry.Reason,
-			ModifiedAt: entry.ExpireTime, // Use ExpireTime as fallback for old snapshots
+			ModifiedAt: fallbackTime, // Use snapshot timestamp, not ExpireTime
 		}
 	}
 
