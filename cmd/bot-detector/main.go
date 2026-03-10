@@ -226,13 +226,13 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 	}
 	unblockedCount := len(p.IPStates) - blockedCount
 
-	compressionStatus := "no"
-	if m.Compressed {
-		compressionStatus = "yes"
+	modeStr := "gz,full"
+	if !m.Compressed {
+		modeStr = "plain,full"
 	}
 
-	p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Fetched initial state from leader %s (entries: %d blocked + %d unblocked, compressed: %s, size: %.1f KB, rate: %.1f KB/s, duration: %v)",
-		leaderNode.Name, blockedCount, unblockedCount, compressionStatus, m.SizeKB, m.RateKBps, m.Duration.Round(time.Millisecond))
+	p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Fetched initial state from leader: %d IPs (%d blocked + %d unblocked, mode: %s, size: %.1f KB, rate: %.1f KB/s, duration: %v)",
+		len(p.IPStates), blockedCount, unblockedCount, modeStr, m.SizeKB, m.RateKBps, m.Duration.Round(time.Millisecond))
 
 	return timestamp, nil
 }

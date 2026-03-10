@@ -276,9 +276,9 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 	m.mergedStateCache.ts = now
 	m.mergedStateCache.mu.Unlock()
 
-	compressionStatus := "disabled"
+	compressionMode := "plain"
 	if m.config.StateSync.Compression {
-		compressionStatus = "enabled"
+		compressionMode = "gz"
 	}
 
 	// Count blocked vs unblocked
@@ -292,8 +292,8 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 		}
 	}
 
-	m.log(logging.LevelInfo, "STATE_SYNC", "Cached merged state: %d IPs (%d blocked + %d unblocked, local: %d, remote: %d, nodes: %d/%d, compression: %s)",
-		len(merged), blockedCount, unblockedCount, localCount, remoteCount, nodesSucceeded+1, nodesSucceeded+nodesFailed+1, compressionStatus)
+	m.log(logging.LevelInfo, "STATE_SYNC", "Cached merged state: %d IPs (%d blocked + %d unblocked, local: %d, remote: %d, nodes: %d/%d, mode: %s)",
+		len(merged), blockedCount, unblockedCount, localCount, remoteCount, nodesSucceeded+1, nodesSucceeded+nodesFailed+1, compressionMode)
 }
 
 // fetchAndMergeFromLeader fetches merged state from leader and merges with local
@@ -369,17 +369,20 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	}
 
 	// Format sync mode for logging
-	syncMode := "full"
-	if isIncremental {
-		syncMode = fmt.Sprintf("incremental, delta: %d", len(states))
+	modeStr := "gz,full"
+	if !metrics.Compressed {
+		modeStr = "plain,full"
 	}
-	compressionStatus := "no"
-	if metrics.Compressed {
-		compressionStatus = "yes"
+	if isIncremental {
+		if metrics.Compressed {
+			modeStr = fmt.Sprintf("gz,incr,delta:%d", len(states))
+		} else {
+			modeStr = fmt.Sprintf("plain,incr,delta:%d", len(states))
+		}
 	}
 
-	m.log(logging.LevelInfo, "STATE_SYNC", "Merged %d IPs from leader (%d blocked + %d unblocked, mode: %s, compressed: %s, size: %.1f KB, rate: %.1f KB/s, duration: %v)",
-		len(states), blockedCount, unblockedCount, syncMode, compressionStatus, metrics.SizeKB, metrics.RateKBps, metrics.Duration.Round(time.Millisecond))
+	m.log(logging.LevelInfo, "STATE_SYNC", "Merged from leader: %d IPs (%d blocked + %d unblocked, mode: %s, size: %.1f KB, rate: %.1f KB/s, duration: %v)",
+		len(states), blockedCount, unblockedCount, modeStr, metrics.SizeKB, metrics.RateKBps, metrics.Duration.Round(time.Millisecond))
 }
 
 // fetchNodeState fetches state from a specific node
