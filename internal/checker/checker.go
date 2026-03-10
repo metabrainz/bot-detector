@@ -577,7 +577,9 @@ func ProcessChainForEntry(p *app.Processor, chain *config.BehavioralChain, entry
 	}
 
 	// Get the current state for this chain.
-	state, exists := currentActivity.ChainProgress[chain.Name]
+	// Use formatBlockReason to include website/vhost context in the key
+	chainKey := formatBlockReason(chain.Name, entry)
+	state, exists := currentActivity.ChainProgress[chainKey]
 	if !exists {
 		// Initialize state if it's the first time we're seeing this actor for this chain.
 		state = store.StepState{CurrentStep: 0, LastMatchTime: time.Time{}}
@@ -659,7 +661,7 @@ func ProcessChainForEntry(p *app.Processor, chain *config.BehavioralChain, entry
 			state.CurrentStep = 0
 			// We must also delete the progress here because the function returns early.
 			// The cleanup logic at the end of the function will not be reached.
-			delete(currentActivity.ChainProgress, chain.Name)
+			delete(currentActivity.ChainProgress, chainKey)
 			return stopProcessing
 		}
 
@@ -672,11 +674,11 @@ func ProcessChainForEntry(p *app.Processor, chain *config.BehavioralChain, entry
 	// Only store the state if the actor is actively progressing (CurrentStep > 0).
 	// This saves memory by not storing state for actors that are at step 0.
 	if state.CurrentStep > 0 {
-		currentActivity.ChainProgress[chain.Name] = state
+		currentActivity.ChainProgress[chainKey] = state
 	} else {
 		// If CurrentStep is 0 (due to reset or completion), clean up the state to save memory.
 		// It's safe to call delete even if the key doesn't exist.
-		delete(currentActivity.ChainProgress, chain.Name)
+		delete(currentActivity.ChainProgress, chainKey)
 	}
 	return false
 }
