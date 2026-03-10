@@ -214,6 +214,7 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 		req.Header.Set("Accept-Encoding", "gzip")
 	}
 
+	startTime := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("failed to fetch from leader: %v", err)
@@ -225,7 +226,9 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 	}
 
 	var reader io.Reader = resp.Body
+	compressed := false
 	if resp.Header.Get("Content-Encoding") == "gzip" {
+		compressed = true
 		gz, err := gzip.NewReader(resp.Body)
 		if err != nil {
 			return time.Time{}, fmt.Errorf("failed to create gzip reader: %v", err)
@@ -234,13 +237,20 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 		reader = gz
 	}
 
+	// Read response body
+	bodyBytes, err := io.ReadAll(reader)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to read response: %v", err)
+	}
+	duration := time.Since(startTime)
+
 	var mergedResp struct {
 		Version   string                         `json:"version"`
 		Timestamp time.Time                      `json:"timestamp"`
 		States    map[string]persistence.IPState `json:"states"`
 	}
 
-	if err := json.NewDecoder(reader).Decode(&mergedResp); err != nil {
+	if err := json.Unmarshal(bodyBytes, &mergedResp); err != nil {
 		return time.Time{}, fmt.Errorf("failed to decode merged state: %v", err)
 	}
 
@@ -262,8 +272,16 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 	}
 	unblockedCount := len(p.IPStates) - blockedCount
 
-	p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Fetched initial state from leader %s (version=%s, timestamp=%v, entries=%d blocked + %d unblocked)",
-		leaderNode.Name, mergedResp.Version, mergedResp.Timestamp, blockedCount, unblockedCount)
+	// Calculate transfer metrics
+	sizeKB := float64(len(bodyBytes)) / 1024.0
+	rateKBps := sizeKB / duration.Seconds()
+	compressionStatus := "no"
+	if compressed {
+		compressionStatus = "yes"
+	}
+
+	p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Fetched initial state from leader %s (entries: %d blocked + %d unblocked, compressed: %s, size: %.1f KB, rate: %.1f KB/s)",
+		leaderNode.Name, blockedCount, unblockedCount, compressionStatus, sizeKB, rateKBps)
 
 	return mergedResp.Timestamp, nil
 }
