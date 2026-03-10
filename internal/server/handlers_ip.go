@@ -341,7 +341,7 @@ func aggregateActorStatus(actors []*store.ActorActivity) string {
 
 			// Estimate block time (actual block time not stored, use BlockedUntil - duration)
 			// This is approximate since we don't store the original block time
-			if earliestBlock.IsZero() || a.BlockedUntil.Before(latestExpiry) {
+			if earliestBlock.IsZero() || a.BlockedUntil.Before(earliestBlock) {
 				earliestBlock = a.BlockedUntil.Add(-1 * time.Hour) // Rough estimate
 			}
 			if latestExpiry.IsZero() || a.BlockedUntil.After(latestExpiry) {
