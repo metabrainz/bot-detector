@@ -226,7 +226,7 @@ func (m *mockIPProvider) Log(level logging.LogLevel, tag string, format string, 
 func (m *mockIPProvider) GetConfigForArchive() ([]byte, time.Time, map[string]*types.FileDependency, string, error) {
 	return nil, time.Time{}, nil, "", nil
 }
-func (m *mockIPProvider) GenerateMetricsReport() string  { return "" }
+func (m *mockIPProvider) GenerateMetricsReport() string      { return "" }
 func (m *mockIPProvider) GenerateStepsMetricsReport() string { return "" }
 func (m *mockIPProvider) GetMarshalledConfig() ([]byte, time.Time, error) {
 	return nil, time.Time{}, nil

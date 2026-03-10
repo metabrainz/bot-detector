@@ -462,6 +462,8 @@ func (p *Processor) IncrementCmdsPerBlocker(addr string) {
 // GenerateMetricsReport creates the full metrics report as a plain-text string.
 func (p *Processor) GenerateMetricsReport() string {
 	var report strings.Builder
+	report.WriteString(fmt.Sprintf("Generated: %s\n", time.Now().Format(time.RFC3339)))
+	report.WriteString(fmt.Sprintf("Uptime: %s\n\n", time.Since(p.StartTime).Round(time.Second)))
 	webLogFunc := func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		// Sanitize the formatted string before writing it to the HTML report.
 		report.WriteString(utils.ForHTML(fmt.Sprintf(format, args...)) + "\n")
@@ -473,7 +475,8 @@ func (p *Processor) GenerateMetricsReport() string {
 // GenerateStepsMetricsReport creates a report of step execution counts as an HTML-safe string.
 func (p *Processor) GenerateStepsMetricsReport() string {
 	var report strings.Builder
-	report.WriteString("--- Step Execution Counts ---\n")
+	report.WriteString(fmt.Sprintf("Generated: %s\n\n", time.Now().Format(time.RFC3339)))
+	report.WriteString("=== Step Execution Counts ===\n")
 	if p.Metrics.StepExecutionCounts == nil {
 		report.WriteString("Step metrics are not enabled or initialized.\n")
 		return report.String()
@@ -516,6 +519,7 @@ func (p *Processor) GenerateWebsiteStatsReport() string {
 		return report.String()
 	}
 
+	report.WriteString(fmt.Sprintf("Generated: %s\n\n", time.Now().Format(time.RFC3339)))
 	report.WriteString("=== Multi-Website Statistics ===\n\n")
 
 	// Website configuration
@@ -524,7 +528,7 @@ func (p *Processor) GenerateWebsiteStatsReport() string {
 	report.WriteString(fmt.Sprintf("Website-Specific Chains: %d\n\n", len(p.WebsiteChains)))
 
 	// List configured websites
-	report.WriteString("--- Configured Websites ---\n")
+	report.WriteString("=== Configured Websites ===\n")
 	for _, website := range p.Websites {
 		report.WriteString(fmt.Sprintf("  %s:\n", utils.ForHTML(website.Name)))
 		report.WriteString(fmt.Sprintf("    VHosts: %s\n", utils.ForHTML(strings.Join(website.VHosts, ", "))))
@@ -570,7 +574,7 @@ func (p *Processor) GenerateWebsiteStatsReport() string {
 	}
 	p.UnknownVHostsMux.Unlock()
 
-	report.WriteString("\n--- Unknown VHosts ---\n")
+	report.WriteString("\n=== Unknown VHosts ===\n")
 	if unknownCount == 0 {
 		report.WriteString("  None (all vhosts are recognized)\n")
 	} else {

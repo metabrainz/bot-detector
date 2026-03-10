@@ -40,7 +40,7 @@ func (m *MockProvider) GetShutdownChannel() chan os.Signal                     {
 func (m *MockProvider) GetNodeStatus() NodeStatus                              { return NodeStatus{} }
 func (m *MockProvider) GetMetricsSnapshot() MetricsSnapshot                    { return MetricsSnapshot{} }
 func (m *MockProvider) GetAggregatedMetrics() interface{}                      { return nil }
-func (m *MockProvider) GenerateMetricsReport() string                      { return "" }
+func (m *MockProvider) GenerateMetricsReport() string                          { return "" }
 func (m *MockProvider) GenerateStepsMetricsReport() string                     { return "" }
 func (m *MockProvider) GetMarshalledConfig() ([]byte, time.Time, error)        { return nil, time.Time{}, nil }
 func (m *MockProvider) GetActivityStore() map[store.Actor]*store.ActorActivity { return nil }

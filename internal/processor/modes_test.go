@@ -1343,20 +1343,20 @@ func TestLogMetricsSummary(t *testing.T) {
 	assertContains(t, output, "Chains Reset: 10")
 
 	// Check MatchKey hits with percentages
-	assertContains(t, output, "--- Match Key Distribution (Total: 400) ---")
+	assertContains(t, output, "=== Match Key Distribution (Total: 400) ===")
 	assertContains(t, output, "- ip: 300 (75.00%)")
 	assertContains(t, output, "- ip_ua: 100 (25.00%)")
 
 	// Check Block Durations
-	assertContains(t, output, "--- Blocks by Duration ---")
+	assertContains(t, output, "=== Blocks by Duration ===")
 	assertContains(t, output, "- 5m: 5")
 
 	// Check Per-Blocker Commands
-	assertContains(t, output, "--- Commands Sent per Blocker ---")
+	assertContains(t, output, "=== Commands Sent per Blocker ===")
 	assertContains(t, output, "- 127.0.0.1:9999: 5")
 
 	// Check Per-Chain metrics (sorted by name)
-	assertContains(t, output, "--- Per-Chain Metrics ---")
+	assertContains(t, output, "=== Per-Chain Metrics ===")
 	// ChainA: Matches: 50 (10%), Completed: 5 (50%), Resets: 10 (100%)
 	assertContains(t, output, "- ChainA [global]: Matches: 50 (10.00%), Completed: 5 (50.00%), Resets: 10 (20.00%)")
 	// ChainB: Matches: 100 (20%), Completed: 5 (50%), Resets: 0 (0%)
