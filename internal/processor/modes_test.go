@@ -1356,7 +1356,7 @@ func TestLogMetricsSummary(t *testing.T) {
 	assertContains(t, output, "- 127.0.0.1:9999: 5")
 
 	// Check Per-Chain metrics (sorted by name)
-	assertContains(t, output, "=== Per-Chain Metrics ===")
+	assertContains(t, output, "=== Per-Chain Metrics (2 active) ===")
 	// ChainA: Matches: 50 (10%), Completed: 5 (50%), Resets: 10 (100%)
 	assertContains(t, output, "- ChainA [global]: Matches: 50 (10.00%), Completed: 5 (50.00%), Resets: 10 (20.00%)")
 	// ChainB: Matches: 100 (20%), Completed: 5 (50%), Resets: 0 (0%)

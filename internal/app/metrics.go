@@ -306,8 +306,22 @@ func logPerChainMetrics(p *Processor, logFunc func(logging.LogLevel, string, str
 	validHits := p.Metrics.EntriesChecked.Load()
 
 	if len(data.ChainMetrics) > 0 {
-		logFunc(logging.LevelInfo, logTag, "=== Per-Chain Metrics ===")
+		// Filter out inactive chains (no matches, completions, or resets)
+		var activeMetrics []ChainMetric
 		for _, metric := range data.ChainMetrics {
+			if metric.Hits > 0 || metric.Completions > 0 || metric.Resets > 0 {
+				activeMetrics = append(activeMetrics, metric)
+			}
+		}
+
+		if len(activeMetrics) == 0 {
+			logFunc(logging.LevelInfo, logTag, "=== Per-Chain Metrics ===")
+			logFunc(logging.LevelInfo, logTag, "  (No chain activity)")
+			return
+		}
+
+		logFunc(logging.LevelInfo, logTag, "=== Per-Chain Metrics (%d active) ===", len(activeMetrics))
+		for _, metric := range activeMetrics {
 			// Find the chain to get website information
 			chainName := metric.Name
 			var websiteInfo string
