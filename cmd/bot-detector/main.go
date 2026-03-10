@@ -708,6 +708,13 @@ func execute(params *commandline.AppParameters) error {
 				ConfigPollInterval:    10 * time.Second, // Default value
 				MetricsReportInterval: 30 * time.Second, // Default value
 				Protocol:              "http",           // Default value
+				StateSync: cluster.StateSyncConfig{
+					Enabled:     true,
+					Interval:    60 * time.Second,
+					Compression: true,
+					Timeout:     30 * time.Second,
+					Incremental: true,
+				},
 			}
 		}
 	}
