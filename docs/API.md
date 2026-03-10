@@ -540,9 +540,12 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   **Leader node:** Clear locally, then broadcast to all followers asynchronously
     *   **Standalone node:** Clear locally only
 *   **What gets cleared:**
-    *   All HAProxy stick table entries for the IP (across all duration tables)
+    *   All HAProxy stick table entries for the IP (across all duration tables) - **removed completely**
     *   IP from persistence state (`IPStates` map)
     *   Unblock event written to journal with reason "manual_clear"
+*   **Performance Note:**
+    *   Removing entries from HAProxy tables is **slow** for large tables
+    *   For quick unblocking, use `/ip/{ip}/unblock` instead (sets `gpc0=0`, much faster)
 *   **Notes:**
     *   The IP address is canonicalized before processing (e.g., `2001:0db8::1` → `2001:db8::1`)
     *   Clears from all configured HAProxy instances and all duration tables
@@ -557,6 +560,61 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `500 Internal Server Error`: Failed to clear the IP from HAProxy or persistence.
     *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
     *   `503 Service Unavailable`: Blocker is not available (e.g., dry-run mode).
+
+### `/ip/{ip}/unblock` (GET or POST)
+
+*   **Method:** `GET` or `POST`
+*   **Content-Type:** `text/plain; charset=utf-8` (POST) or cluster status format (GET)
+*   **Description:** Fast unblock operation that sets `gpc0=0` in HAProxy stick tables without removing the entry. The entry remains in the table and expires naturally. This is **much faster** than `/clear` for large tables. Cluster-aware - forwards to leader if called on follower, then broadcasts to all nodes.
+*   **Parameters:**
+    *   `ip` - IPv4 or IPv6 address (will be canonicalized)
+*   **Response Format (POST - Simple confirmation):**
+    ```
+    IP 192.168.1.100 unblocked (gpc0 set to 0, entry will expire naturally)
+    ```
+*   **Response Format (GET - Unblock + Status):**
+    ```
+    cluster_status: unblocked
+    nodes:
+      - name: node1
+        status: unblocked
+        last_unblock: 2026-03-10T15:09:00Z
+        reason: API unblock
+      - name: node2
+        status: unblocked
+        last_unblock: 2026-03-10T15:09:00Z
+        reason: API unblock
+    ```
+*   **Cluster Behavior:**
+    *   **Follower nodes:** Forward the request to the leader (preserves GET/POST method)
+    *   **Leader node:** Unblock locally, then broadcast to all followers asynchronously
+    *   **Standalone node:** Unblock locally only
+*   **What gets updated:**
+    *   HAProxy stick tables: `gpc0` set to 0 (entry remains, expires naturally)
+    *   Persistence state: Unblock event written to journal with reason "API unblock"
+    *   Activity store: IP removed from in-memory chain progress
+*   **Performance:**
+    *   **Fast:** Only updates `gpc0` value, doesn't remove entry from table
+    *   Recommended for day-to-day unblocking operations
+    *   Entry will be removed by HAProxy when it naturally expires
+*   **Usage Examples:**
+    ```bash
+    # Quick unblock with status confirmation (GET)
+    curl http://localhost:8092/ip/192.168.1.100/unblock
+    
+    # Simple unblock (POST)
+    curl -X POST http://localhost:8092/ip/192.168.1.100/unblock
+    ```
+*   **Comparison with `/clear`:**
+    *   `/unblock`: Sets `gpc0=0`, entry expires naturally (fast)
+    *   `/clear`: Removes entry completely from table (slow)
+*   **Responses:**
+    *   `200 OK`: Successfully unblocked the IP.
+    *   `400 Bad Request`: Invalid IP address format.
+    *   `500 Internal Server Error`: Failed to unblock the IP.
+    *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
+    *   `503 Service Unavailable`: Blocker is not available (e.g., dry-run mode).
+
 
 ### `/api/v1/cluster/internal/ip/{ip}` (Internal Use)
 
