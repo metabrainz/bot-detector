@@ -308,6 +308,22 @@ func restorePersistenceState(p *app.Processor) error {
 	}
 	p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.StateDir)
 
+	// Log persistence file status for diagnostics
+	snapshotPath := filepath.Join(p.StateDir, "state.snapshot")
+	journalPath := filepath.Join(p.StateDir, "events.log")
+
+	snapshotInfo := "absent"
+	if info, statErr := os.Stat(snapshotPath); statErr == nil {
+		snapshotInfo = fmt.Sprintf("size=%d bytes, modified=%s", info.Size(), info.ModTime().Format(time.RFC3339))
+	}
+
+	journalInfo := "absent"
+	if info, statErr := os.Stat(journalPath); statErr == nil {
+		journalInfo = fmt.Sprintf("size=%d bytes, modified=%s", info.Size(), info.ModTime().Format(time.RFC3339))
+	}
+
+	p.LogFunc(logging.LevelInfo, "PERSISTENCE_FILES", "Snapshot: %s | Journal: %s", snapshotInfo, journalInfo)
+
 	// Optimization: If state sync is enabled and we're a follower, fetch state from cluster
 	// and only replay local journal entries that are newer than cluster state
 	if p.Cluster != nil && p.Cluster.StateSync.Enabled && p.NodeRole == "follower" {
@@ -345,22 +361,6 @@ func restorePersistenceState(p *app.Processor) error {
 			p.LogFunc(logging.LevelDebug, "STATE_SYNC", "Leader node, using snapshot+journal")
 		}
 	}
-
-	// Log persistence file status for diagnostics
-	snapshotPath := filepath.Join(p.StateDir, "state.snapshot")
-	journalPath := filepath.Join(p.StateDir, "events.log")
-
-	snapshotInfo := "absent"
-	if info, statErr := os.Stat(snapshotPath); statErr == nil {
-		snapshotInfo = fmt.Sprintf("size=%d bytes, modified=%s", info.Size(), info.ModTime().Format(time.RFC3339))
-	}
-
-	journalInfo := "absent"
-	if info, statErr := os.Stat(journalPath); statErr == nil {
-		journalInfo = fmt.Sprintf("size=%d bytes, modified=%s", info.Size(), info.ModTime().Format(time.RFC3339))
-	}
-
-	p.LogFunc(logging.LevelInfo, "PERSISTENCE_FILES", "Snapshot: %s | Journal: %s", snapshotInfo, journalInfo)
 
 	// 1. Load snapshot
 	snapshot, err := persistence.LoadSnapshot(snapshotPath)
