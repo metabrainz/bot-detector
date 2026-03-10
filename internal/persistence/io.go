@@ -66,6 +66,7 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 			State:      entry.State,
 			ExpireTime: entry.ExpireTime,
 			Reason:     entry.Reason,
+			ModifiedAt: entry.ExpireTime, // Use ExpireTime as fallback for old snapshots
 		}
 	}
 

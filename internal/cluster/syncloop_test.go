@@ -305,7 +305,7 @@ func TestStateSyncManager_ConflictResolution(t *testing.T) {
 	}
 
 	// Should have merged reasons
-	if state.Reason != "Brute-Force (leader), SQL-Injection (follower)" {
+	if state.Reason != "Brute-Force (leader) | SQL-Injection (follower)" {
 		t.Errorf("Expected merged reason, got '%s'", state.Reason)
 	}
 

@@ -377,6 +377,7 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 				State:      persistence.BlockStateBlocked,
 				ExpireTime: unblockTime,
 				Reason:     reason,
+				ModifiedAt: time.Now(),
 			}
 		}()
 	}
@@ -867,6 +868,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 							State:      persistence.BlockStateUnblocked,
 							ExpireTime: p.NowFunc(), // Set to now so retention period starts from unblock time
 							Reason:     unblockReason,
+							ModifiedAt: time.Now(),
 						}
 					}()
 				}

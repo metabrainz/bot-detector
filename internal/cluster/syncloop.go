@@ -25,6 +25,8 @@ type StateSyncManager struct {
 	log              func(level logging.LogLevel, tag string, format string, args ...interface{})
 	httpClient       *http.Client
 	mergedStateCache *MergedStateCache
+	lastSyncTime     time.Time // For incremental sync
+	lastSyncMutex    sync.RWMutex
 }
 
 // MergedStateCache stores the leader's merged state
@@ -121,6 +123,7 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 			merged[ip] = persistence.IPState{
 				Reason:     AddSourceNode(state.Reason, m.nodeName, m.nodeAddress),
 				ExpireTime: state.ExpireTime,
+				ModifiedAt: state.ModifiedAt,
 			}
 		}
 	}
@@ -142,10 +145,11 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 		for ip, state := range nodeState {
 			if state.ExpireTime.After(now) {
 				if existing, ok := merged[ip]; ok {
-					// Merge reasons, keep longest expiry
+					// Merge reasons, keep longest expiry, latest modification
 					merged[ip] = persistence.IPState{
 						Reason:     MergeReasons(existing.Reason, state.Reason),
 						ExpireTime: maxTime(existing.ExpireTime, state.ExpireTime),
+						ModifiedAt: maxTime(existing.ModifiedAt, state.ModifiedAt),
 					}
 				} else {
 					merged[ip] = state
@@ -153,6 +157,11 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 			}
 		}
 	}
+
+	// Update last sync time
+	m.lastSyncMutex.Lock()
+	m.lastSyncTime = now
+	m.lastSyncMutex.Unlock()
 
 	// Cache the merged state
 	m.mergedStateCache.mu.Lock()
@@ -172,15 +181,24 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	}
 
 	url := fmt.Sprintf("%s://%s/api/v1/cluster/state/merged", m.config.Protocol, leaderNode.Address)
+
+	// Add since parameter for incremental sync
+	if m.config.StateSync.Incremental {
+		m.lastSyncMutex.RLock()
+		if !m.lastSyncTime.IsZero() {
+			url += "?since=" + m.lastSyncTime.Format(time.RFC3339)
+		}
+		m.lastSyncMutex.RUnlock()
+	}
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		m.log(logging.LevelError, "STATE_SYNC", "Failed to create request: %v", err)
 		return
 	}
 
-	if m.config.StateSync.Compression {
-		req.Header.Set("Accept-Encoding", "gzip")
-	}
+	// Always request gzip, let server decide
+	req.Header.Set("Accept-Encoding", "gzip")
 
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
@@ -215,16 +233,28 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 		return
 	}
 
+	// Check version compatibility
+	if mergedResp.Version != StateSyncVersion {
+		m.log(logging.LevelWarning, "STATE_SYNC", "Version mismatch from leader: got %s, expected %s", mergedResp.Version, StateSyncVersion)
+		// Continue anyway for backward compatibility
+	}
+
+	// Update last sync time
+	m.lastSyncMutex.Lock()
+	m.lastSyncTime = time.Now()
+	m.lastSyncMutex.Unlock()
+
 	// Merge with local state
 	now := time.Now()
 	m.ipStatesMutex.Lock()
 	for ip, state := range mergedResp.States {
 		if state.ExpireTime.After(now) {
 			if existing, ok := m.ipStates[ip]; ok {
-				// Merge reasons, keep longest expiry
+				// Merge reasons, keep longest expiry, latest modification
 				m.ipStates[ip] = persistence.IPState{
 					Reason:     MergeReasons(existing.Reason, state.Reason),
 					ExpireTime: maxTime(existing.ExpireTime, state.ExpireTime),
+					ModifiedAt: maxTime(existing.ModifiedAt, state.ModifiedAt),
 				}
 			} else {
 				m.ipStates[ip] = state
@@ -239,14 +269,23 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 // fetchNodeState fetches state from a specific node
 func (m *StateSyncManager) fetchNodeState(node NodeConfig) (map[string]persistence.IPState, error) {
 	url := fmt.Sprintf("%s://%s/api/v1/cluster/internal/persistence/state", m.config.Protocol, node.Address)
+
+	// Add since parameter for incremental sync
+	if m.config.StateSync.Incremental {
+		m.lastSyncMutex.RLock()
+		if !m.lastSyncTime.IsZero() {
+			url += "?since=" + m.lastSyncTime.Format(time.RFC3339)
+		}
+		m.lastSyncMutex.RUnlock()
+	}
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	if m.config.StateSync.Compression {
-		req.Header.Set("Accept-Encoding", "gzip")
-	}
+	// Always request gzip, let server decide
+	req.Header.Set("Accept-Encoding", "gzip")
 
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
@@ -277,12 +316,19 @@ func (m *StateSyncManager) fetchNodeState(node NodeConfig) (map[string]persisten
 		return nil, err
 	}
 
+	// Check version compatibility
+	if stateResp.Version != StateSyncVersion {
+		m.log(logging.LevelWarning, "STATE_SYNC", "Version mismatch from %s: got %s, expected %s", node.Name, stateResp.Version, StateSyncVersion)
+		// Continue anyway for backward compatibility
+	}
+
 	// Add source node to all reasons
 	result := make(map[string]persistence.IPState)
 	for ip, state := range stateResp.States {
 		result[ip] = persistence.IPState{
 			Reason:     AddSourceNode(state.Reason, node.Name, node.Address),
 			ExpireTime: state.ExpireTime,
+			ModifiedAt: state.ModifiedAt,
 		}
 	}
 

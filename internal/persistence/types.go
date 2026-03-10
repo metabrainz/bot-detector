@@ -127,4 +127,5 @@ type IPState struct {
 	State      BlockState `json:"state"`
 	ExpireTime time.Time  `json:"expire_time"`
 	Reason     string     `json:"reason"`
+	ModifiedAt time.Time  `json:"modified_at"` // When this state was last modified
 }

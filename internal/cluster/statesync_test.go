@@ -68,7 +68,7 @@ func TestMergeReasons(t *testing.T) {
 			name:      "different reasons",
 			existing:  "Login-Abuse[main_site] (leader)",
 			newReason: "API-Abuse[api_site] (follower-1)",
-			want:      "Login-Abuse[main_site] (leader), API-Abuse[api_site] (follower-1)",
+			want:      "Login-Abuse[main_site] (leader) | API-Abuse[api_site] (follower-1)",
 		},
 		{
 			name:      "duplicate reason - same base",
@@ -78,15 +78,15 @@ func TestMergeReasons(t *testing.T) {
 		},
 		{
 			name:      "duplicate in chain",
-			existing:  "Login-Abuse[main_site] (leader), API-Abuse[api_site] (follower-1)",
+			existing:  "Login-Abuse[main_site] (leader) | API-Abuse[api_site] (follower-1)",
 			newReason: "Login-Abuse[main_site] (follower-2)",
-			want:      "Login-Abuse[main_site] (leader), API-Abuse[api_site] (follower-1)",
+			want:      "Login-Abuse[main_site] (leader) | API-Abuse[api_site] (follower-1)",
 		},
 		{
 			name:      "add third unique reason",
-			existing:  "Login-Abuse[main_site] (leader), API-Abuse[api_site] (follower-1)",
+			existing:  "Login-Abuse[main_site] (leader) | API-Abuse[api_site] (follower-1)",
 			newReason: "SQL-Injection[admin_site] (follower-2)",
-			want:      "Login-Abuse[main_site] (leader), API-Abuse[api_site] (follower-1), SQL-Injection[admin_site] (follower-2)",
+			want:      "Login-Abuse[main_site] (leader) | API-Abuse[api_site] (follower-1) | SQL-Injection[admin_site] (follower-2)",
 		},
 	}
 

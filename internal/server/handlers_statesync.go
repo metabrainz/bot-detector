@@ -22,19 +22,31 @@ const (
 func clusterPersistenceStateHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Parse optional "since" parameter for incremental sync
-		// TODO: Implement incremental sync filtering
-		_ = r.URL.Query().Get("since")
+		sinceStr := r.URL.Query().Get("since")
+		var since time.Time
+		incremental := false
+		if sinceStr != "" {
+			var err error
+			since, err = time.Parse(time.RFC3339, sinceStr)
+			if err != nil {
+				http.Error(w, "Invalid 'since' timestamp format", http.StatusBadRequest)
+				return
+			}
+			incremental = true
+		}
 
 		// Collect local IPStates
 		p.GetPersistenceMutex().Lock()
 		states := make(map[string]persistence.IPState)
 		ipStates := p.GetIPStates()
 
-		// TODO: For incremental sync, filter by modification time
-		// For now, return all states
 		for ip, state := range ipStates {
 			// Skip expired entries
 			if !state.ExpireTime.IsZero() && time.Now().After(state.ExpireTime) {
+				continue
+			}
+			// For incremental sync, only include modified after 'since'
+			if incremental && !state.ModifiedAt.IsZero() && !state.ModifiedAt.After(since) {
 				continue
 			}
 			states[ip] = state
@@ -53,15 +65,7 @@ func clusterPersistenceStateHandler(p Provider) http.HandlerFunc {
 
 		// Apply compression if requested and enabled
 		_, useCompression, _, _ := p.GetStateSyncConfig()
-		acceptsGzip := false
-		if encodings := r.Header.Get("Accept-Encoding"); encodings != "" {
-			for _, enc := range r.Header.Values("Accept-Encoding") {
-				if enc == "gzip" {
-					acceptsGzip = true
-					break
-				}
-			}
-		}
+		acceptsGzip := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
 
 		if useCompression && acceptsGzip {
 			w.Header().Set("Content-Encoding", "gzip")
@@ -89,11 +93,19 @@ func clusterMergedStateHandler(p Provider) http.HandlerFunc {
 		}
 
 		// Parse optional "since" parameter for incremental sync
-		// TODO: Implement incremental sync filtering
-		_ = r.URL.Query().Get("since")
+		sinceStr := r.URL.Query().Get("since")
+		var since time.Time
+		if sinceStr != "" {
+			var err error
+			since, err = time.Parse(time.RFC3339, sinceStr)
+			if err != nil {
+				http.Error(w, "Invalid 'since' timestamp format", http.StatusBadRequest)
+				return
+			}
+		}
 
 		// Collect and merge states from all nodes
-		merged, nodesQueried, nodesFailed := collectAndMergeStates(p)
+		merged, nodesQueried, nodesFailed := collectAndMergeStates(p, since)
 
 		// Build response
 		response := MergedStateResponse{
@@ -109,15 +121,7 @@ func clusterMergedStateHandler(p Provider) http.HandlerFunc {
 
 		// Apply compression if requested and enabled
 		_, useCompression, _, _ := p.GetStateSyncConfig()
-		acceptsGzip := false
-		if encodings := r.Header.Get("Accept-Encoding"); encodings != "" {
-			for _, enc := range r.Header.Values("Accept-Encoding") {
-				if enc == "gzip" {
-					acceptsGzip = true
-					break
-				}
-			}
-		}
+		acceptsGzip := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
 
 		if useCompression && acceptsGzip {
 			w.Header().Set("Content-Encoding", "gzip")
@@ -135,7 +139,7 @@ func clusterMergedStateHandler(p Provider) http.HandlerFunc {
 }
 
 // collectAndMergeStates queries all nodes and merges their IPStates.
-func collectAndMergeStates(p Provider) (map[string]persistence.IPState, []string, []string) {
+func collectAndMergeStates(p Provider, since time.Time) (map[string]persistence.IPState, []string, []string) {
 	merged := make(map[string]persistence.IPState)
 	var nodesQueried []string
 	var nodesFailed []string
@@ -161,7 +165,7 @@ func collectAndMergeStates(p Provider) (map[string]persistence.IPState, []string
 
 	protocol := protocolField.String()
 	timeout := stateSyncField.FieldByName("Timeout").Interface().(time.Duration)
-	compression := stateSyncField.FieldByName("Compression").Bool()
+	incremental := stateSyncField.FieldByName("Incremental").Bool()
 
 	nodeName := p.GetNodeName()
 
@@ -170,6 +174,10 @@ func collectAndMergeStates(p Provider) (map[string]persistence.IPState, []string
 	for ip, state := range p.GetIPStates() {
 		// Skip expired entries
 		if !state.ExpireTime.IsZero() && time.Now().After(state.ExpireTime) {
+			continue
+		}
+		// For incremental, filter by modification time
+		if incremental && !since.IsZero() && !state.ModifiedAt.IsZero() && !state.ModifiedAt.After(since) {
 			continue
 		}
 		// Add source node to reason
@@ -191,6 +199,10 @@ func collectAndMergeStates(p Provider) (map[string]persistence.IPState, []string
 		}
 
 		url := protocol + "://" + nodeAddressField + "/api/v1/cluster/internal/persistence/state"
+		if incremental && !since.IsZero() {
+			url += "?since=" + since.Format(time.RFC3339)
+		}
+
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
 			p.Log(logging.LevelWarning, "STATE_MERGE", "Failed to create request for %s: %v", nodeNameField, err)
@@ -198,10 +210,8 @@ func collectAndMergeStates(p Provider) (map[string]persistence.IPState, []string
 			continue
 		}
 
-		// Request gzip compression if enabled
-		if compression {
-			req.Header.Set("Accept-Encoding", "gzip")
-		}
+		// Request gzip compression if enabled (always request, let server decide)
+		req.Header.Set("Accept-Encoding", "gzip")
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -210,14 +220,34 @@ func collectAndMergeStates(p Provider) (map[string]persistence.IPState, []string
 			continue
 		}
 
+		// Check if response is gzipped
+		var reader = resp.Body
+		if resp.Header.Get("Content-Encoding") == "gzip" {
+			gz, err := gzip.NewReader(resp.Body)
+			if err != nil {
+				p.Log(logging.LevelWarning, "STATE_MERGE", "Failed to create gzip reader for %s: %v", nodeNameField, err)
+				_ = resp.Body.Close()
+				nodesFailed = append(nodesFailed, nodeNameField)
+				continue
+			}
+			defer func() { _ = gz.Close() }()
+			reader = gz
+		}
+
 		var stateResp StateSyncResponse
-		if err := json.NewDecoder(resp.Body).Decode(&stateResp); err != nil {
+		if err := json.NewDecoder(reader).Decode(&stateResp); err != nil {
 			p.Log(logging.LevelWarning, "STATE_MERGE", "Failed to decode state from %s: %v", nodeNameField, err)
 			_ = resp.Body.Close()
 			nodesFailed = append(nodesFailed, nodeNameField)
 			continue
 		}
 		_ = resp.Body.Close()
+
+		// Check version compatibility
+		if stateResp.Version != StateSyncVersion {
+			p.Log(logging.LevelWarning, "STATE_MERGE", "Version mismatch from %s: got %s, expected %s", nodeNameField, stateResp.Version, StateSyncVersion)
+			// Continue anyway for backward compatibility
+		}
 
 		nodesQueried = append(nodesQueried, nodeNameField)
 
@@ -233,6 +263,10 @@ func collectAndMergeStates(p Provider) (map[string]persistence.IPState, []string
 				// Keep longer expiry
 				if existing.ExpireTime.After(state.ExpireTime) {
 					state.ExpireTime = existing.ExpireTime
+				}
+				// Keep latest modification time
+				if state.ModifiedAt.After(existing.ModifiedAt) {
+					existing.ModifiedAt = state.ModifiedAt
 				}
 			}
 			merged[ip] = state
@@ -265,14 +299,14 @@ func mergeReasons(existing, newReason string) string {
 
 	// Parse existing reasons into map
 	reasonMap := make(map[string]bool)
-	for _, part := range strings.Split(existing, ", ") {
-		baseReason := extractBaseReason(part)
+	for _, part := range strings.Split(existing, " | ") {
+		baseReason := extractBaseReason(strings.TrimSpace(part))
 		reasonMap[baseReason] = true
 	}
 
 	newBaseReason := extractBaseReason(newReason)
 	if !reasonMap[newBaseReason] {
-		return existing + ", " + newReason
+		return existing + " | " + newReason
 	}
 	return existing
 }
