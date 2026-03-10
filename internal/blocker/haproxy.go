@@ -223,26 +223,22 @@ type IPClearInfo struct {
 	ExpMillis int64
 }
 
-// GetIPDetails returns detailed information about an IP across all tables and backends.
-// Returns a slice of IPClearInfo describing where the IP is found.
-func (b *HAProxyBlocker) GetIPDetails(ipInfo utils.IPInfo) ([]IPClearInfo, error) {
-	if b.IsDryRun {
-		return nil, nil
-	}
-
+// getRelevantTables retrieves and filters HAProxy tables by IP version.
+// Returns the filtered table names and blocker addresses, or an error.
+func (b *HAProxyBlocker) getRelevantTables(ipInfo utils.IPInfo) ([]string, []string, error) {
 	if ipInfo.Version != 4 && ipInfo.Version != 6 {
-		return nil, nil
+		return nil, nil, fmt.Errorf("unrecognized IP version for %s", ipInfo.Address)
 	}
 
 	addresses := b.P.GetBlockerAddresses()
 	if len(addresses) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Get all table names from first backend
 	tableNames, err := b.getHAProxyTableNames(addresses[0])
 	if err != nil {
-		return nil, fmt.Errorf("failed to get table names: %w", err)
+		return nil, nil, fmt.Errorf("failed to get table names: %w", err)
 	}
 
 	// Filter tables by IP version
@@ -254,6 +250,20 @@ func (b *HAProxyBlocker) GetIPDetails(ipInfo utils.IPInfo) ([]IPClearInfo, error
 		}
 	}
 
+	return relevantTables, addresses, nil
+}
+
+// GetIPDetails returns detailed information about an IP across all tables and backends.
+// Returns a slice of IPClearInfo describing where the IP is found.
+func (b *HAProxyBlocker) GetIPDetails(ipInfo utils.IPInfo) ([]IPClearInfo, error) {
+	if b.IsDryRun {
+		return nil, nil
+	}
+
+	relevantTables, addresses, err := b.getRelevantTables(ipInfo)
+	if err != nil {
+		return nil, nil
+	}
 	if len(relevantTables) == 0 {
 		return nil, nil
 	}
@@ -285,31 +295,11 @@ func (b *HAProxyBlocker) ClearIP(ipInfo utils.IPInfo) ([]interface{}, error) {
 		return nil, nil
 	}
 
-	if ipInfo.Version != 4 && ipInfo.Version != 6 {
-		b.P.Log(logging.LevelError, "SKIP_CLEAR", "Cannot clear IP %s: unrecognized IP version", ipInfo.Address)
-		return nil, nil
-	}
-
-	addresses := b.P.GetBlockerAddresses()
-	if len(addresses) == 0 {
-		return nil, nil
-	}
-
-	// Get all table names from first backend
-	tableNames, err := b.getHAProxyTableNames(addresses[0])
+	relevantTables, addresses, err := b.getRelevantTables(ipInfo)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get table names: %w", err)
+		b.P.Log(logging.LevelError, "SKIP_CLEAR", "Cannot clear IP %s: %v", ipInfo.Address, err)
+		return nil, nil
 	}
-
-	// Filter tables by IP version
-	suffix := getIPVersionSuffix(ipInfo.Version)
-	var relevantTables []string
-	for _, tableName := range tableNames {
-		if strings.HasSuffix(tableName, suffix) {
-			relevantTables = append(relevantTables, tableName)
-		}
-	}
-
 	if len(relevantTables) == 0 {
 		return nil, nil
 	}
@@ -406,31 +396,18 @@ func (b *HAProxyBlocker) IsIPBlocked(ipInfo utils.IPInfo) (bool, error) {
 		return false, nil
 	}
 
-	if ipInfo.Version != 4 && ipInfo.Version != 6 {
-		return false, fmt.Errorf("unrecognized IP version for %s", ipInfo.Address)
+	relevantTables, addresses, err := b.getRelevantTables(ipInfo)
+	if err != nil {
+		return false, err
 	}
-
-	addresses := b.P.GetBlockerAddresses()
-	if len(addresses) == 0 {
+	if len(relevantTables) == 0 {
 		return false, nil
 	}
 
 	// Check first available backend
 	addr := addresses[0]
 
-	// Get all table names
-	tableNames, err := b.getHAProxyTableNames(addr)
-	if err != nil {
-		return false, fmt.Errorf("failed to get table names: %w", err)
-	}
-
-	// Filter tables by IP version suffix
-	suffix := getIPVersionSuffix(ipInfo.Version)
-	for _, tableName := range tableNames {
-		if !strings.HasSuffix(tableName, suffix) {
-			continue
-		}
-
+	for _, tableName := range relevantTables {
 		// Query specific IP key directly
 		entry, err := b.getHAProxyIPInTable(addr, tableName, ipInfo.Address)
 		if err != nil {
