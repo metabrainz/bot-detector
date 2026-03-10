@@ -299,7 +299,12 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 
 	syncMode := "full"
 	if m.config.StateSync.Incremental {
-		syncMode = "incremental"
+		m.lastSyncMutex.RLock()
+		isIncremental := !m.lastSyncTime.IsZero()
+		m.lastSyncMutex.RUnlock()
+		if isIncremental {
+			syncMode = fmt.Sprintf("incremental, delta: %d", len(mergedResp.States))
+		}
 	}
 	compressionStatus := "no"
 	if compressed {
