@@ -488,10 +488,13 @@ func (p *Processor) GenerateStepsMetricsReport() string {
 		Count int64
 	}
 	var stepMetrics []StepMetric
+	var totalSteps int64
 	p.Metrics.StepExecutionCounts.Range(func(key, value interface{}) bool {
 		stepName, _ := key.(string)
 		count, _ := value.(*atomic.Int64)
-		stepMetrics = append(stepMetrics, StepMetric{Name: stepName, Count: count.Load()})
+		stepCount := count.Load()
+		stepMetrics = append(stepMetrics, StepMetric{Name: stepName, Count: stepCount})
+		totalSteps += stepCount
 		return true
 	})
 
@@ -502,8 +505,13 @@ func (p *Processor) GenerateStepsMetricsReport() string {
 		return stepMetrics[i].Count >= stepMetrics[j].Count
 	})
 
+	report.WriteString(fmt.Sprintf("Total Step Executions: %d\n\n", totalSteps))
 	for _, sm := range stepMetrics {
-		report.WriteString(fmt.Sprintf("%12d %s\n", sm.Count, utils.ForHTML(sm.Name)))
+		percentage := float64(0)
+		if totalSteps > 0 {
+			percentage = float64(sm.Count) * 100.0 / float64(totalSteps)
+		}
+		report.WriteString(fmt.Sprintf("%12d  %6.2f%%  %s\n", sm.Count, percentage, utils.ForHTML(sm.Name)))
 	}
 	return report.String()
 }
