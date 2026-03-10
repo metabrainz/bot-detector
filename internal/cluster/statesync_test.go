@@ -33,6 +33,13 @@ func TestAddSourceNode(t *testing.T) {
 			nodeAddress: "192.168.1.2:8080",
 			want:        "Login-Abuse[main_site] (leader)",
 		},
+		{
+			name:        "empty source - both empty",
+			reason:      "Login-Abuse",
+			nodeName:    "",
+			nodeAddress: "",
+			want:        "Login-Abuse", // Should return unchanged
+		},
 	}
 
 	for _, tt := range tests {

@@ -146,11 +146,19 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 			if state.ExpireTime.After(now) {
 				if existing, ok := merged[ip]; ok {
 					// Merge reasons, keep longest expiry, latest modification
-					merged[ip] = persistence.IPState{
+					// Keep State from entry with longest expiry
+					mergedState := persistence.IPState{
 						Reason:     MergeReasons(existing.Reason, state.Reason),
 						ExpireTime: maxTime(existing.ExpireTime, state.ExpireTime),
 						ModifiedAt: maxTime(existing.ModifiedAt, state.ModifiedAt),
 					}
+					// Use State from the entry with longest expiry
+					if state.ExpireTime.After(existing.ExpireTime) {
+						mergedState.State = state.State
+					} else {
+						mergedState.State = existing.State
+					}
+					merged[ip] = mergedState
 				} else {
 					merged[ip] = state
 				}
@@ -186,7 +194,7 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	if m.config.StateSync.Incremental {
 		m.lastSyncMutex.RLock()
 		if !m.lastSyncTime.IsZero() {
-			url += "?since=" + m.lastSyncTime.Format(time.RFC3339)
+			url += "?since=" + m.lastSyncTime.UTC().Format(time.RFC3339)
 		}
 		m.lastSyncMutex.RUnlock()
 	}
@@ -251,11 +259,18 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 		if state.ExpireTime.After(now) {
 			if existing, ok := m.ipStates[ip]; ok {
 				// Merge reasons, keep longest expiry, latest modification
-				m.ipStates[ip] = persistence.IPState{
+				mergedState := persistence.IPState{
 					Reason:     MergeReasons(existing.Reason, state.Reason),
 					ExpireTime: maxTime(existing.ExpireTime, state.ExpireTime),
 					ModifiedAt: maxTime(existing.ModifiedAt, state.ModifiedAt),
 				}
+				// Use State from the entry with longest expiry
+				if state.ExpireTime.After(existing.ExpireTime) {
+					mergedState.State = state.State
+				} else {
+					mergedState.State = existing.State
+				}
+				m.ipStates[ip] = mergedState
 			} else {
 				m.ipStates[ip] = state
 			}
@@ -274,7 +289,8 @@ func (m *StateSyncManager) fetchNodeState(node NodeConfig) (map[string]persisten
 	if m.config.StateSync.Incremental {
 		m.lastSyncMutex.RLock()
 		if !m.lastSyncTime.IsZero() {
-			url += "?since=" + m.lastSyncTime.Format(time.RFC3339)
+			// Use URL query parameter properly
+			url += "?since=" + m.lastSyncTime.UTC().Format(time.RFC3339)
 		}
 		m.lastSyncMutex.RUnlock()
 	}
@@ -346,11 +362,18 @@ func (m *StateSyncManager) findLeaderNode() *NodeConfig {
 	return nil
 }
 
-// GetMergedStateCache returns the cached merged state (for leader endpoint)
+// GetMergedStateCache returns a copy of the cached merged state (for leader endpoint)
 func (m *StateSyncManager) GetMergedStateCache() (map[string]persistence.IPState, time.Time) {
 	m.mergedStateCache.mu.RLock()
 	defer m.mergedStateCache.mu.RUnlock()
-	return m.mergedStateCache.state, m.mergedStateCache.ts
+
+	// Return a copy to prevent external modification
+	stateCopy := make(map[string]persistence.IPState, len(m.mergedStateCache.state))
+	for k, v := range m.mergedStateCache.state {
+		stateCopy[k] = v
+	}
+
+	return stateCopy, m.mergedStateCache.ts
 }
 
 func maxTime(a, b time.Time) time.Time {

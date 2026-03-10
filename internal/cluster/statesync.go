@@ -54,6 +54,11 @@ func AddSourceNode(reason, nodeName, nodeAddress string) string {
 		source = nodeAddress
 	}
 
+	// Validate source is not empty
+	if source == "" {
+		return reason // Return unchanged if no source available
+	}
+
 	return fmt.Sprintf("%s (%s)", reason, source)
 }
 

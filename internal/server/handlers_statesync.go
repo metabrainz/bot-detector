@@ -261,22 +261,32 @@ func collectAndMergeStates(p Provider, since time.Time) (map[string]persistence.
 
 			if existing, ok := merged[ip]; ok {
 				// Merge reasons (prevent duplication)
-				state.Reason = mergeReasons(existing.Reason, state.Reason)
-
-				// Keep longer expiry
-				if existing.ExpireTime.After(state.ExpireTime) {
-					state.ExpireTime = existing.ExpireTime
+				mergedState := persistence.IPState{
+					Reason:     mergeReasons(existing.Reason, state.Reason),
+					ExpireTime: maxTime(existing.ExpireTime, state.ExpireTime),
+					ModifiedAt: maxTime(existing.ModifiedAt, state.ModifiedAt),
 				}
-				// Keep latest modification time
-				if state.ModifiedAt.After(existing.ModifiedAt) {
-					existing.ModifiedAt = state.ModifiedAt
+				// Use State from the entry with longest expiry
+				if state.ExpireTime.After(existing.ExpireTime) {
+					mergedState.State = state.State
+				} else {
+					mergedState.State = existing.State
 				}
+				merged[ip] = mergedState
+			} else {
+				merged[ip] = state
 			}
-			merged[ip] = state
 		}
 	}
 
 	return merged, nodesQueried, nodesFailed
+}
+
+func maxTime(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+	return b
 }
 
 // addSourceNode adds source node attribution to a reason if not already present.
@@ -287,6 +297,10 @@ func addSourceNode(reason, nodeName, nodeAddress string) string {
 	source := nodeName
 	if source == "" {
 		source = nodeAddress
+	}
+	// Validate source is not empty
+	if source == "" {
+		return reason // Return unchanged if no source available
 	}
 	return reason + " (" + source + ")"
 }
