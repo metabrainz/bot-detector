@@ -29,6 +29,69 @@ type StateSyncManager struct {
 	lastSyncMutex    sync.RWMutex
 }
 
+// FetchMergedState fetches merged state from a URL and returns the states, timestamp, and metrics.
+// This is shared between initial cluster fetch and periodic sync.
+func FetchMergedState(url string, client *http.Client, requestCompression bool) (
+	states map[string]persistence.IPState,
+	timestamp time.Time,
+	compressed bool,
+	sizeKB float64,
+	rateKBps float64,
+	err error,
+) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, time.Time{}, false, 0, 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if requestCompression {
+		req.Header.Set("Accept-Encoding", "gzip")
+	}
+
+	startTime := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, time.Time{}, false, 0, 0, fmt.Errorf("failed to fetch: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, time.Time{}, false, 0, 0, fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+
+	var reader io.Reader = resp.Body
+	compressed = resp.Header.Get("Content-Encoding") == "gzip"
+	if compressed {
+		gz, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, time.Time{}, false, 0, 0, fmt.Errorf("failed to create gzip reader: %w", err)
+		}
+		defer func() { _ = gz.Close() }()
+		reader = gz
+	}
+
+	bodyBytes, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, time.Time{}, false, 0, 0, fmt.Errorf("failed to read response: %w", err)
+	}
+	duration := time.Since(startTime)
+
+	var mergedResp struct {
+		Version   string                         `json:"version"`
+		Timestamp time.Time                      `json:"timestamp"`
+		States    map[string]persistence.IPState `json:"states"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &mergedResp); err != nil {
+		return nil, time.Time{}, false, 0, 0, fmt.Errorf("failed to decode: %w", err)
+	}
+
+	sizeKB = float64(len(bodyBytes)) / 1024.0
+	rateKBps = sizeKB / duration.Seconds()
+
+	return mergedResp.States, mergedResp.Timestamp, compressed, sizeKB, rateKBps, nil
+}
+
 // SetLastSyncTime sets the last sync timestamp (used after initial cluster fetch)
 func (m *StateSyncManager) SetLastSyncTime(t time.Time) {
 	m.lastSyncMutex.Lock()
@@ -216,71 +279,21 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	url := fmt.Sprintf("%s://%s/api/v1/cluster/state/merged", m.config.Protocol, leaderNode.Address)
 
 	// Add since parameter for incremental sync
+	isIncremental := false
 	if m.config.StateSync.Incremental {
 		m.lastSyncMutex.RLock()
 		if !m.lastSyncTime.IsZero() {
 			url += "?since=" + m.lastSyncTime.UTC().Format(time.RFC3339)
+			isIncremental = true
 		}
 		m.lastSyncMutex.RUnlock()
 	}
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		m.log(logging.LevelError, "STATE_SYNC", "Failed to create request: %v", err)
-		return
-	}
-
-	// Always request gzip, let server decide
-	req.Header.Set("Accept-Encoding", "gzip")
-
-	resp, err := m.httpClient.Do(req)
+	// Fetch using shared helper
+	states, _, compressed, sizeKB, rateKBps, err := FetchMergedState(url, m.httpClient, true)
 	if err != nil {
 		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to fetch from leader: %v", err)
 		return
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		m.log(logging.LevelWarning, "STATE_SYNC", "Leader returned status %d", resp.StatusCode)
-		return
-	}
-
-	var reader io.Reader = resp.Body
-	compressed := false
-	if resp.Header.Get("Content-Encoding") == "gzip" {
-		compressed = true
-		gz, err := gzip.NewReader(resp.Body)
-		if err != nil {
-			m.log(logging.LevelError, "STATE_SYNC", "Failed to create gzip reader: %v", err)
-			return
-		}
-		defer func() { _ = gz.Close() }()
-		reader = gz
-	}
-
-	// Track response size
-	startTime := time.Now()
-	bodyBytes, err := io.ReadAll(reader)
-	if err != nil {
-		m.log(logging.LevelError, "STATE_SYNC", "Failed to read response: %v", err)
-		return
-	}
-	duration := time.Since(startTime)
-
-	var mergedResp struct {
-		Version string                         `json:"version"`
-		States  map[string]persistence.IPState `json:"states"`
-	}
-
-	if err := json.Unmarshal(bodyBytes, &mergedResp); err != nil {
-		m.log(logging.LevelError, "STATE_SYNC", "Failed to decode merged state: %v", err)
-		return
-	}
-
-	// Check version compatibility
-	if mergedResp.Version != StateSyncVersion {
-		m.log(logging.LevelWarning, "STATE_SYNC", "Version mismatch from leader: got %s, expected %s", mergedResp.Version, StateSyncVersion)
-		// Continue anyway for backward compatibility
 	}
 
 	// Update last sync time
@@ -291,7 +304,7 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	// Merge with local state
 	now := time.Now()
 	m.ipStatesMutex.Lock()
-	for ip, state := range mergedResp.States {
+	for ip, state := range states {
 		if state.ExpireTime.After(now) {
 			if existing, ok := m.ipStates[ip]; ok {
 				// Merge reasons, keep longest expiry, latest modification
@@ -314,18 +327,10 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	}
 	m.ipStatesMutex.Unlock()
 
-	// Calculate transfer rate
-	sizeKB := float64(len(bodyBytes)) / 1024.0
-	rateKBps := sizeKB / duration.Seconds()
-
+	// Format sync mode for logging
 	syncMode := "full"
-	if m.config.StateSync.Incremental {
-		m.lastSyncMutex.RLock()
-		isIncremental := !m.lastSyncTime.IsZero()
-		m.lastSyncMutex.RUnlock()
-		if isIncremental {
-			syncMode = fmt.Sprintf("incremental, delta: %d", len(mergedResp.States))
-		}
+	if isIncremental {
+		syncMode = fmt.Sprintf("incremental, delta: %d", len(states))
 	}
 	compressionStatus := "no"
 	if compressed {
@@ -333,7 +338,7 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	}
 
 	m.log(logging.LevelInfo, "STATE_SYNC", "Merged %d IPs from leader (mode: %s, compressed: %s, size: %.1f KB, rate: %.1f KB/s)",
-		len(mergedResp.States), syncMode, compressionStatus, sizeKB, rateKBps)
+		len(states), syncMode, compressionStatus, sizeKB, rateKBps)
 }
 
 // fetchNodeState fetches state from a specific node

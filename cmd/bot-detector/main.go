@@ -17,11 +17,9 @@ import (
 	"bot-detector/internal/testutil"
 	"bot-detector/internal/utils"
 	"bufio"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -201,61 +199,17 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("no leader node found in cluster configuration")
 	}
 
-	// Fetch merged state from leader
+	// Fetch merged state from leader using shared helper
 	url := fmt.Sprintf("%s://%s/api/v1/cluster/state/merged", p.Cluster.Protocol, leaderNode.Address)
 	client := &http.Client{Timeout: p.Cluster.StateSync.Timeout}
 
-	req, err := http.NewRequest("GET", url, nil)
+	states, timestamp, compressed, sizeKB, rateKBps, err := cluster.FetchMergedState(url, client, p.Cluster.StateSync.Compression)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("failed to create request: %v", err)
-	}
-
-	if p.Cluster.StateSync.Compression {
-		req.Header.Set("Accept-Encoding", "gzip")
-	}
-
-	startTime := time.Now()
-	resp, err := client.Do(req)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("failed to fetch from leader: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return time.Time{}, fmt.Errorf("leader returned status %d", resp.StatusCode)
-	}
-
-	var reader io.Reader = resp.Body
-	compressed := false
-	if resp.Header.Get("Content-Encoding") == "gzip" {
-		compressed = true
-		gz, err := gzip.NewReader(resp.Body)
-		if err != nil {
-			return time.Time{}, fmt.Errorf("failed to create gzip reader: %v", err)
-		}
-		defer func() { _ = gz.Close() }()
-		reader = gz
-	}
-
-	// Read response body
-	bodyBytes, err := io.ReadAll(reader)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("failed to read response: %v", err)
-	}
-	duration := time.Since(startTime)
-
-	var mergedResp struct {
-		Version   string                         `json:"version"`
-		Timestamp time.Time                      `json:"timestamp"`
-		States    map[string]persistence.IPState `json:"states"`
-	}
-
-	if err := json.Unmarshal(bodyBytes, &mergedResp); err != nil {
-		return time.Time{}, fmt.Errorf("failed to decode merged state: %v", err)
+		return time.Time{}, err
 	}
 
 	// Apply fetched state
-	p.IPStates = mergedResp.States
+	p.IPStates = states
 
 	// Intern all reason strings to save memory
 	for ip, state := range p.IPStates {
@@ -272,9 +226,6 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 	}
 	unblockedCount := len(p.IPStates) - blockedCount
 
-	// Calculate transfer metrics
-	sizeKB := float64(len(bodyBytes)) / 1024.0
-	rateKBps := sizeKB / duration.Seconds()
 	compressionStatus := "no"
 	if compressed {
 		compressionStatus = "yes"
@@ -283,7 +234,7 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 	p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Fetched initial state from leader %s (entries: %d blocked + %d unblocked, compressed: %s, size: %.1f KB, rate: %.1f KB/s)",
 		leaderNode.Name, blockedCount, unblockedCount, compressionStatus, sizeKB, rateKBps)
 
-	return mergedResp.Timestamp, nil
+	return timestamp, nil
 }
 
 // replayJournalAfter replays journal entries that are newer than the given timestamp.
