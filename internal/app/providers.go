@@ -472,7 +472,7 @@ func (p *Processor) GenerateMetricsReport() string {
 	return report.String()
 }
 
-// GenerateStepsMetricsReport creates a report of step execution counts as an HTML-safe string.
+// GenerateStepsMetricsReport creates a report of step execution counts grouped by website.
 func (p *Processor) GenerateStepsMetricsReport() string {
 	var report strings.Builder
 	report.WriteString(fmt.Sprintf("Generated: %s\n\n", time.Now().Format(time.RFC3339)))
@@ -482,37 +482,92 @@ func (p *Processor) GenerateStepsMetricsReport() string {
 		return report.String()
 	}
 
-	// Collect and sort step metrics for consistent output
+	// Collect step metrics and categorize by website
 	type StepMetric struct {
-		Name  string
-		Count int64
+		Name    string
+		Website string // extracted from step name (e.g., "[main_site]" or "@vhost")
+		Count   int64
 	}
 	var stepMetrics []StepMetric
 	var totalSteps int64
+
 	p.Metrics.StepExecutionCounts.Range(func(key, value interface{}) bool {
 		stepName, _ := key.(string)
 		count, _ := value.(*atomic.Int64)
 		stepCount := count.Load()
-		stepMetrics = append(stepMetrics, StepMetric{Name: stepName, Count: stepCount})
+
+		// Extract website from step name (format: "step X/Y of ChainName[website]" or "ChainName@vhost")
+		website := "global"
+		if idx := strings.Index(stepName, "["); idx != -1 {
+			if endIdx := strings.Index(stepName[idx:], "]"); endIdx != -1 {
+				website = stepName[idx+1 : idx+endIdx]
+			}
+		} else if idx := strings.Index(stepName, "@"); idx != -1 {
+			website = stepName[idx+1:]
+		}
+
+		stepMetrics = append(stepMetrics, StepMetric{Name: stepName, Website: website, Count: stepCount})
 		totalSteps += stepCount
 		return true
 	})
 
-	sort.Slice(stepMetrics, func(i, j int) bool {
-		if stepMetrics[i].Count == stepMetrics[j].Count {
-			return stepMetrics[i].Name < stepMetrics[j].Name
+	// Group by website
+	websiteSteps := make(map[string][]StepMetric)
+	for _, sm := range stepMetrics {
+		websiteSteps[sm.Website] = append(websiteSteps[sm.Website], sm)
+	}
+
+	// Sort websites (global first, then alphabetically)
+	var websites []string
+	for ws := range websiteSteps {
+		websites = append(websites, ws)
+	}
+	sort.Slice(websites, func(i, j int) bool {
+		if websites[i] == "global" {
+			return true
 		}
-		return stepMetrics[i].Count >= stepMetrics[j].Count
+		if websites[j] == "global" {
+			return false
+		}
+		return websites[i] < websites[j]
 	})
 
 	report.WriteString(fmt.Sprintf("Total Step Executions: %d\n\n", totalSteps))
-	for _, sm := range stepMetrics {
-		percentage := float64(0)
-		if totalSteps > 0 {
-			percentage = float64(sm.Count) * 100.0 / float64(totalSteps)
+
+	// Report per website
+	for _, ws := range websites {
+		steps := websiteSteps[ws]
+
+		// Calculate website total
+		var websiteTotal int64
+		for _, sm := range steps {
+			websiteTotal += sm.Count
 		}
-		report.WriteString(fmt.Sprintf("%12d  %6.2f%%  %s\n", sm.Count, percentage, utils.ForHTML(sm.Name)))
+
+		// Sort steps by count (descending), then name
+		sort.Slice(steps, func(i, j int) bool {
+			if steps[i].Count == steps[j].Count {
+				return steps[i].Name < steps[j].Name
+			}
+			return steps[i].Count > steps[j].Count
+		})
+
+		if ws == "global" {
+			report.WriteString(fmt.Sprintf("=== Global Chains (%d executions) ===\n", websiteTotal))
+		} else {
+			report.WriteString(fmt.Sprintf("=== Website: %s (%d executions) ===\n", ws, websiteTotal))
+		}
+
+		for _, sm := range steps {
+			percentage := float64(0)
+			if totalSteps > 0 {
+				percentage = float64(sm.Count) * 100.0 / float64(totalSteps)
+			}
+			report.WriteString(fmt.Sprintf("%12d  %6.2f%%  %s\n", sm.Count, percentage, utils.ForHTML(sm.Name)))
+		}
+		report.WriteString("\n")
 	}
+
 	return report.String()
 }
 

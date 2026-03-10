@@ -466,7 +466,7 @@ func matchStepFields(p *app.Processor, chain *config.BehavioralChain, step *conf
 		// If metrics are enabled, increment the StepExecutionCounts for this step.
 		if p.EnableMetrics {
 			if p.Metrics.StepExecutionCounts != nil {
-				stepIdentifier := fmt.Sprintf("step %d/%d of %s", step.Order, len(chain.Steps), chain.Name)
+				stepIdentifier := fmt.Sprintf("step %d/%d of %s", step.Order, len(chain.Steps), formatBlockReason(chain.Name, entry))
 				if counter, ok := p.Metrics.StepExecutionCounts.Load(stepIdentifier); ok {
 					if c, ok := counter.(*atomic.Int64); ok {
 						c.Add(1)
