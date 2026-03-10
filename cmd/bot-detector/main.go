@@ -187,8 +187,8 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 }
 
 // fetchInitialStateFromCluster fetches the current cluster state from the leader
-// instead of replaying the journal. This is much faster for new nodes joining a cluster.
-func fetchInitialStateFromCluster(p *app.Processor) error {
+// instead of replaying the journal. Returns the cluster state timestamp.
+func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 	// Find leader node
 	var leaderNode *cluster.NodeConfig
 	for i := range p.Cluster.Nodes {
@@ -198,7 +198,7 @@ func fetchInitialStateFromCluster(p *app.Processor) error {
 		}
 	}
 	if leaderNode == nil {
-		return fmt.Errorf("no leader node found in cluster configuration")
+		return time.Time{}, fmt.Errorf("no leader node found in cluster configuration")
 	}
 
 	// Fetch merged state from leader
@@ -207,7 +207,7 @@ func fetchInitialStateFromCluster(p *app.Processor) error {
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %v", err)
+		return time.Time{}, fmt.Errorf("failed to create request: %v", err)
 	}
 
 	if p.Cluster.StateSync.Compression {
@@ -216,31 +216,32 @@ func fetchInitialStateFromCluster(p *app.Processor) error {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to fetch from leader: %v", err)
+		return time.Time{}, fmt.Errorf("failed to fetch from leader: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("leader returned status %d", resp.StatusCode)
+		return time.Time{}, fmt.Errorf("leader returned status %d", resp.StatusCode)
 	}
 
 	var reader io.Reader = resp.Body
 	if resp.Header.Get("Content-Encoding") == "gzip" {
 		gz, err := gzip.NewReader(resp.Body)
 		if err != nil {
-			return fmt.Errorf("failed to create gzip reader: %v", err)
+			return time.Time{}, fmt.Errorf("failed to create gzip reader: %v", err)
 		}
 		defer func() { _ = gz.Close() }()
 		reader = gz
 	}
 
 	var mergedResp struct {
-		Version string                         `json:"version"`
-		States  map[string]persistence.IPState `json:"states"`
+		Version   string                         `json:"version"`
+		Timestamp time.Time                      `json:"timestamp"`
+		States    map[string]persistence.IPState `json:"states"`
 	}
 
 	if err := json.NewDecoder(reader).Decode(&mergedResp); err != nil {
-		return fmt.Errorf("failed to decode merged state: %v", err)
+		return time.Time{}, fmt.Errorf("failed to decode merged state: %v", err)
 	}
 
 	// Apply fetched state
@@ -261,8 +262,72 @@ func fetchInitialStateFromCluster(p *app.Processor) error {
 	}
 	unblockedCount := len(p.IPStates) - blockedCount
 
-	p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Fetched initial state from leader %s (version=%s, entries=%d blocked + %d unblocked)",
-		leaderNode.Name, mergedResp.Version, blockedCount, unblockedCount)
+	p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Fetched initial state from leader %s (version=%s, timestamp=%v, entries=%d blocked + %d unblocked)",
+		leaderNode.Name, mergedResp.Version, mergedResp.Timestamp, blockedCount, unblockedCount)
+
+	return mergedResp.Timestamp, nil
+}
+
+// replayJournalAfter replays journal entries that are newer than the given timestamp.
+// This ensures local changes that haven't been synced to the cluster are not lost.
+func replayJournalAfter(p *app.Processor, after time.Time) error {
+	journalPath := filepath.Join(p.StateDir, "events.log")
+	journalFile, err := os.Open(journalPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // No journal file, nothing to replay
+		}
+		return err
+	}
+	defer func() { _ = journalFile.Close() }()
+
+	blockEvents := 0
+	unblockEvents := 0
+	skippedEvents := 0
+	parseErrors := 0
+
+	scanner := bufio.NewScanner(journalFile)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+
+		var v1Entry persistence.JournalEntryV1
+		if err := json.Unmarshal(line, &v1Entry); err != nil {
+			p.LogFunc(logging.LevelWarning, "JOURNAL_PARSE_FAIL", "Failed to parse journal event: %v", err)
+			parseErrors++
+			continue
+		}
+
+		// Only replay entries newer than cluster state
+		if v1Entry.Timestamp.After(after) {
+			reason := p.InternReason(v1Entry.Event.Reason)
+
+			switch v1Entry.Event.Type {
+			case persistence.EventTypeBlock:
+				blockEvents++
+				expireTime := v1Entry.Timestamp.Add(v1Entry.Event.Duration)
+				p.IPStates[v1Entry.Event.IP] = persistence.IPState{
+					State:      persistence.BlockStateBlocked,
+					ExpireTime: expireTime,
+					Reason:     reason,
+					ModifiedAt: v1Entry.Timestamp,
+				}
+			case persistence.EventTypeUnblock:
+				unblockEvents++
+				p.IPStates[v1Entry.Event.IP] = persistence.IPState{
+					State:      persistence.BlockStateUnblocked,
+					Reason:     reason,
+					ModifiedAt: v1Entry.Timestamp,
+				}
+			}
+		} else {
+			skippedEvents++
+		}
+	}
+
+	if blockEvents > 0 || unblockEvents > 0 {
+		p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed local journal entries after cluster state (blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
+			blockEvents, unblockEvents, skippedEvents, parseErrors)
+	}
 
 	return nil
 }
@@ -275,10 +340,14 @@ func restorePersistenceState(p *app.Processor) error {
 	p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.StateDir)
 
 	// Optimization: If state sync is enabled and we're a follower, fetch state from cluster
-	// instead of replaying potentially large journal
+	// and only replay local journal entries that are newer than cluster state
 	if p.Cluster != nil && p.Cluster.StateSync.Enabled && p.NodeRole == "follower" {
-		if fetchErr := fetchInitialStateFromCluster(p); fetchErr == nil {
-			p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Successfully fetched initial state from cluster, skipping journal replay")
+		if clusterTimestamp, fetchErr := fetchInitialStateFromCluster(p); fetchErr == nil {
+			p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Successfully fetched initial state from cluster")
+			// Still need to replay local journal entries newer than cluster state
+			if err := replayJournalAfter(p, clusterTimestamp); err != nil {
+				p.LogFunc(logging.LevelWarning, "JOURNAL_REPLAY", "Failed to replay local journal: %v", err)
+			}
 			return nil
 		} else {
 			p.LogFunc(logging.LevelWarning, "STATE_SYNC", "Failed to fetch initial state from cluster, falling back to snapshot+journal: %v", fetchErr)
