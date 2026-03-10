@@ -848,7 +848,7 @@ func parseStateSyncConfig(yamlConfig *StateSyncConfigYAML) cluster.StateSyncConf
 		Interval:    60 * time.Second,
 		Compression: true, // Default: enabled
 		Timeout:     30 * time.Second,
-		Incremental: false, // Default: full sync
+		Incremental: true, // Default: incremental sync (more efficient)
 	}
 
 	if yamlConfig == nil {
