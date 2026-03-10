@@ -740,50 +740,43 @@ func parseAndNormalizeYAML(configFilePath string) (*TopLevelConfig, []byte, erro
 	return &config, data, nil
 }
 
+// parseDurationField parses a duration string with a default fallback.
+func parseDurationField(value, defaultValue, fieldName string) (time.Duration, error) {
+	durationStr := defaultValue
+	if value != "" {
+		durationStr = value
+	}
+	duration, err := time.ParseDuration(durationStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s format: %w", fieldName, err)
+	}
+	return duration, nil
+}
+
 func parseDurations(config *TopLevelConfig) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, error) {
-	pollingIntervalStr := DefaultPollingInterval
-	if config.Application.Config.PollingInterval != "" {
-		pollingIntervalStr = config.Application.Config.PollingInterval
-	}
-	pollingInterval, err := time.ParseDuration(pollingIntervalStr)
+	pollingInterval, err := parseDurationField(config.Application.Config.PollingInterval, DefaultPollingInterval, "polling_interval")
 	if err != nil {
-		return 0, 0, 0, 0, 0, fmt.Errorf("invalid polling_interval format: %w", err)
+		return 0, 0, 0, 0, 0, err
 	}
 
-	cleanupIntervalStr := DefaultCleanupInterval
-	if config.Checker.ActorCleanupInterval != "" {
-		cleanupIntervalStr = config.Checker.ActorCleanupInterval
-	}
-	cleanupInterval, err := time.ParseDuration(cleanupIntervalStr)
+	cleanupInterval, err := parseDurationField(config.Checker.ActorCleanupInterval, DefaultCleanupInterval, "cleanup_interval")
 	if err != nil {
-		return 0, 0, 0, 0, 0, fmt.Errorf("invalid cleanup_interval format: %w", err)
+		return 0, 0, 0, 0, 0, err
 	}
 
-	idleTimeoutStr := DefaultIdleTimeout
-	if config.Checker.ActorStateIdleTimeout != "" {
-		idleTimeoutStr = config.Checker.ActorStateIdleTimeout
-	}
-	idleTimeout, err := time.ParseDuration(idleTimeoutStr)
+	idleTimeout, err := parseDurationField(config.Checker.ActorStateIdleTimeout, DefaultIdleTimeout, "idle_timeout")
 	if err != nil {
-		return 0, 0, 0, 0, 0, fmt.Errorf("invalid idle_timeout format: %w", err)
+		return 0, 0, 0, 0, 0, err
 	}
 
-	outOfOrderToleranceStr := DefaultOutOfOrderTolerance
-	if config.Parser.OutOfOrderTolerance != "" {
-		outOfOrderToleranceStr = config.Parser.OutOfOrderTolerance
-	}
-	outOfOrderTolerance, err := time.ParseDuration(outOfOrderToleranceStr)
+	outOfOrderTolerance, err := parseDurationField(config.Parser.OutOfOrderTolerance, DefaultOutOfOrderTolerance, "out_of_order_tolerance")
 	if err != nil {
-		return 0, 0, 0, 0, 0, fmt.Errorf("invalid out_of_order_tolerance format: %w", err)
+		return 0, 0, 0, 0, 0, err
 	}
 
-	eofPollingDelayStr := DefaultEOFPollingDelay
-	if config.Application.EOFPollingDelay != "" {
-		eofPollingDelayStr = config.Application.EOFPollingDelay
-	}
-	eofPollingDelay, err := time.ParseDuration(eofPollingDelayStr)
+	eofPollingDelay, err := parseDurationField(config.Application.EOFPollingDelay, DefaultEOFPollingDelay, "eof_polling_delay")
 	if err != nil {
-		return 0, 0, 0, 0, 0, fmt.Errorf("invalid eof_polling_delay format: %w", err)
+		return 0, 0, 0, 0, 0, err
 	}
 
 	return pollingInterval, cleanupInterval, idleTimeout, outOfOrderTolerance, eofPollingDelay, nil
