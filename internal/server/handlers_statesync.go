@@ -44,9 +44,11 @@ func clusterPersistenceStateHandler(p Provider) http.HandlerFunc {
 		ipStates := p.GetIPStates()
 
 		for ip, state := range ipStates {
-			// Skip expired entries
-			if !state.ExpireTime.IsZero() && time.Now().After(state.ExpireTime) {
-				continue
+			// Skip expired blocked entries, but keep unblocked entries (good actors)
+			if state.State == persistence.BlockStateBlocked {
+				if !state.ExpireTime.IsZero() && time.Now().After(state.ExpireTime) {
+					continue
+				}
 			}
 			// For incremental sync, only include modified after 'since'
 			if incremental && !state.ModifiedAt.IsZero() && !state.ModifiedAt.After(since) {
@@ -175,9 +177,11 @@ func collectAndMergeStates(p Provider, since time.Time) (map[string]persistence.
 	// Add leader's own state first
 	p.GetPersistenceMutex().Lock()
 	for ip, state := range p.GetIPStates() {
-		// Skip expired entries
-		if !state.ExpireTime.IsZero() && time.Now().After(state.ExpireTime) {
-			continue
+		// Skip expired blocked entries, but keep unblocked entries (good actors)
+		if state.State == persistence.BlockStateBlocked {
+			if !state.ExpireTime.IsZero() && time.Now().After(state.ExpireTime) {
+				continue
+			}
 		}
 		// For incremental, filter by modification time
 		if incremental && !since.IsZero() && !state.ModifiedAt.IsZero() && !state.ModifiedAt.After(since) {
