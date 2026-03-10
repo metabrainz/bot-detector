@@ -321,7 +321,7 @@ func logPerChainMetrics(p *Processor, logFunc func(logging.LogLevel, string, str
 					break
 				}
 			}
-			
+
 			if validHits > 0 {
 				hitsPctStr := formatPercentage(metric.Hits, validHits)
 				completionsPctStr := formatPercentage(metric.Completions, data.TotalChainsCompleted)

@@ -56,15 +56,15 @@ func clusterStatusHandler(p Provider) http.HandlerFunc {
 
 // MetricsSnapshot represents a snapshot of node metrics in JSON format.
 type MetricsSnapshot struct {
-	Timestamp       time.Time              `json:"timestamp"`
-	ProcessingStats ProcessingStats        `json:"processing_stats"`
-	ActorStats      ActorStats             `json:"actor_stats"`
-	ChainStats      ChainStats             `json:"chain_stats"`
-	GoodActorHits   map[string]int64       `json:"good_actor_hits,omitempty"`
-	SkipsByReason   map[string]int64       `json:"skips_by_reason,omitempty"`
-	MatchKeyHits    map[string]int64       `json:"match_key_hits,omitempty"`
-	BlockDurations  map[string]int64       `json:"block_durations,omitempty"`
-	PerChainMetrics map[string]ChainMetric `json:"per_chain_metrics,omitempty"`
+	Timestamp       time.Time                `json:"timestamp"`
+	ProcessingStats ProcessingStats          `json:"processing_stats"`
+	ActorStats      ActorStats               `json:"actor_stats"`
+	ChainStats      ChainStats               `json:"chain_stats"`
+	GoodActorHits   map[string]int64         `json:"good_actor_hits,omitempty"`
+	SkipsByReason   map[string]int64         `json:"skips_by_reason,omitempty"`
+	MatchKeyHits    map[string]int64         `json:"match_key_hits,omitempty"`
+	BlockDurations  map[string]int64         `json:"block_durations,omitempty"`
+	PerChainMetrics map[string]ChainMetric   `json:"per_chain_metrics,omitempty"`
 	WebsiteMetrics  map[string]WebsiteMetric `json:"website_metrics,omitempty"` // Per-website stats (multi-website mode)
 }
 

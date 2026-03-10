@@ -132,10 +132,10 @@ func TestFilterInvalidWebsitesFromChains(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		inputWebsites   []string
-		expectedOutput  []string
-		expectWarning   bool
+		name           string
+		inputWebsites  []string
+		expectedOutput []string
+		expectWarning  bool
 	}{
 		{
 			name:           "All valid websites",
