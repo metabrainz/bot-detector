@@ -306,15 +306,16 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	}
 
 	// Fetch using shared helper
-	states, _, metrics, err := FetchMergedState(url, m.httpClient, true)
+	states, responseTimestamp, metrics, err := FetchMergedState(url, m.httpClient, true)
 	if err != nil {
 		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to fetch from leader: %v", err)
 		return
 	}
 
-	// Update last sync time
+	// Update last sync time to the response timestamp (not current time)
+	// This ensures the next incremental sync asks for changes after this response
 	m.lastSyncMutex.Lock()
-	m.lastSyncTime = time.Now()
+	m.lastSyncTime = responseTimestamp
 	m.lastSyncMutex.Unlock()
 
 	// Merge with local state
