@@ -177,7 +177,11 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 	m.mergedStateCache.ts = now
 	m.mergedStateCache.mu.Unlock()
 
-	m.log(logging.LevelInfo, "STATE_SYNC", "Cached merged state: %d IPs", len(merged))
+	compressionStatus := "disabled"
+	if m.config.StateSync.Compression {
+		compressionStatus = "enabled"
+	}
+	m.log(logging.LevelInfo, "STATE_SYNC", "Cached merged state: %d IPs (compression: %s)", len(merged), compressionStatus)
 }
 
 // fetchAndMergeFromLeader fetches merged state from leader and merges with local
@@ -221,7 +225,9 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	}
 
 	var reader io.Reader = resp.Body
+	compressed := false
 	if resp.Header.Get("Content-Encoding") == "gzip" {
+		compressed = true
 		gz, err := gzip.NewReader(resp.Body)
 		if err != nil {
 			m.log(logging.LevelError, "STATE_SYNC", "Failed to create gzip reader: %v", err)
@@ -231,12 +237,21 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 		reader = gz
 	}
 
+	// Track response size
+	startTime := time.Now()
+	bodyBytes, err := io.ReadAll(reader)
+	if err != nil {
+		m.log(logging.LevelError, "STATE_SYNC", "Failed to read response: %v", err)
+		return
+	}
+	duration := time.Since(startTime)
+
 	var mergedResp struct {
 		Version string                         `json:"version"`
 		States  map[string]persistence.IPState `json:"states"`
 	}
 
-	if err := json.NewDecoder(reader).Decode(&mergedResp); err != nil {
+	if err := json.Unmarshal(bodyBytes, &mergedResp); err != nil {
 		m.log(logging.LevelError, "STATE_SYNC", "Failed to decode merged state: %v", err)
 		return
 	}
@@ -278,7 +293,21 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	}
 	m.ipStatesMutex.Unlock()
 
-	m.log(logging.LevelInfo, "STATE_SYNC", "Merged %d IPs from leader", len(mergedResp.States))
+	// Calculate transfer rate
+	sizeKB := float64(len(bodyBytes)) / 1024.0
+	rateKBps := sizeKB / duration.Seconds()
+
+	syncMode := "full"
+	if m.config.StateSync.Incremental {
+		syncMode = "incremental"
+	}
+	compressionStatus := "no"
+	if compressed {
+		compressionStatus = "yes"
+	}
+
+	m.log(logging.LevelInfo, "STATE_SYNC", "Merged %d IPs from leader (mode: %s, compressed: %s, size: %.1f KB, rate: %.1f KB/s)",
+		len(mergedResp.States), syncMode, compressionStatus, sizeKB, rateKBps)
 }
 
 // fetchNodeState fetches state from a specific node
