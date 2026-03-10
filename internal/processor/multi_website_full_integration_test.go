@@ -138,7 +138,7 @@ func TestMultiWebsite_FullIntegration(t *testing.T) {
 		chain.MetricsResetCounter = new(atomic.Int64)
 		chain.MetricsCounter = new(atomic.Int64)
 		chain.FieldMatchCounts = &sync.Map{}
-		
+
 		for j, stepYAML := range chain.StepsYAML {
 			matchers, err := config.CompileMatchers(chain.Name, j, stepYAML.FieldMatches, testFileDependencies, "")
 			if err != nil {
@@ -186,7 +186,7 @@ func TestMultiWebsite_FullIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create empty log %s: %v", path, err)
 		}
-		f.Close()
+		_ = f.Close()
 	}
 
 	// Start multi-website tailer
@@ -273,7 +273,7 @@ func TestMultiWebsite_FullIntegration(t *testing.T) {
 
 	// Verify chain completions from log messages
 	t.Log("=== Verifying chain completions ===")
-	
+
 	logMutex.Lock()
 	globalCompletions := 0
 	site1Completions := 0
@@ -339,9 +339,9 @@ func TestMultiWebsite_FullIntegration(t *testing.T) {
 
 	// Test log rotation: rename old logs and create new ones
 	t.Log("=== Phase 2: Log rotation ===")
-	os.Rename(site1Log, site1Log+".old")
-	os.Rename(site2Log, site2Log+".old")
-	os.Rename(site3Log, site3Log+".old")
+	_ = os.Rename(site1Log, site1Log+".old")
+	_ = os.Rename(site2Log, site2Log+".old")
+	_ = os.Rename(site3Log, site3Log+".old")
 
 	// Write new content to rotated logs
 	// Use Create since these are new files after rotation
@@ -364,9 +364,9 @@ func TestMultiWebsite_FullIntegration(t *testing.T) {
 			t.Fatalf("Failed to create rotated log %s: %v", path, err)
 		}
 		for _, line := range lines {
-			fmt.Fprintln(f, line)
+			_, _ = fmt.Fprintln(f, line)
 		}
-		f.Close()
+		_ = f.Close()
 	}
 
 	// Wait for rotation detection and new content processing
@@ -442,20 +442,11 @@ func writeLog(t *testing.T, path string, lines []string) {
 	if err != nil {
 		t.Fatalf("Failed to open log %s: %v", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	for _, line := range lines {
-		fmt.Fprintln(f, line)
+		_, _ = fmt.Fprintln(f, line)
 	}
-}
-
-func findChainByName(chains []config.BehavioralChain, name string) *config.BehavioralChain {
-	for i := range chains {
-		if chains[i].Name == name {
-			return &chains[i]
-		}
-	}
-	return nil
 }
 
 func assertEventCount(t *testing.T, events *sync.Map, key string, expected int64) {
