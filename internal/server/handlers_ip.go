@@ -764,6 +764,82 @@ func clearIPHandler(p Provider) http.HandlerFunc {
 	}
 }
 
+// unblockIPHandler unblocks an IP by setting gpc0=0 in HAProxy tables (fast, lets entry expire naturally)
+func unblockIPHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ipStr := r.PathValue("ip")
+		if ipStr == "" {
+			http.Error(w, "IP address required", http.StatusBadRequest)
+			return
+		}
+
+		// Canonicalize IP
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			return
+		}
+		canonical := ip.String()
+
+		// If follower, forward to leader
+		if p.GetNodeRole() == "follower" {
+			path := fmt.Sprintf("/ip/%s/unblock", canonical)
+			resp, err := forwardToLeader(p, "POST", path, nil)
+			if err != nil {
+				p.Log(logging.LevelError, "API", "Failed to forward unblock request to leader: %v", err)
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+
+		// Leader: unblock locally and broadcast to followers
+		blockerInterface := p.GetBlocker()
+		if blockerInterface == nil {
+			http.Error(w, "Blocker not available", http.StatusServiceUnavailable)
+			return
+		}
+
+		blocker, ok := blockerInterface.(blocker.Blocker)
+		if !ok {
+			http.Error(w, "Blocker interface error", http.StatusInternalServerError)
+			return
+		}
+
+		ipInfo := utils.NewIPInfo(canonical)
+
+		// Unblock (sets gpc0=0, entry expires naturally)
+		if err := blocker.Unblock(ipInfo, "API unblock"); err != nil {
+			p.Log(logging.LevelError, "API", "Failed to unblock IP %s: %v", canonical, err)
+			http.Error(w, fmt.Sprintf("Failed to unblock IP: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Remove from persistence (writes unblock event to journal)
+		if err := p.RemoveFromPersistence(canonical); err != nil {
+			p.Log(logging.LevelError, "API", "Failed to update persistence for IP %s: %v", canonical, err)
+		}
+
+		// Clear from ActivityStore
+		clearIPFromActivityStore(p, canonical)
+
+		// Broadcast to followers
+		if p.GetNodeRole() == "leader" {
+			go broadcastUnblockToFollowers(p, canonical)
+		}
+
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "IP %s unblocked (gpc0 set to 0, entry will expire naturally)\n", canonical)
+		p.Log(logging.LevelInfo, "API", "IP %s unblocked via API", canonical)
+	}
+}
+
 // formatDuration formats a duration in human-readable format (weeks, days, hours, minutes, seconds)
 func formatDuration(d time.Duration) string {
 	if d == 0 {
@@ -1044,10 +1120,47 @@ func internalClearIPHandler(p Provider) http.HandlerFunc {
 	}
 }
 
+func internalUnblockIPHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ipStr := r.PathValue("ip")
+		if ipStr == "" {
+			http.Error(w, "IP address required", http.StatusBadRequest)
+			return
+		}
+
+		// Canonicalize IP
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			return
+		}
+		canonical := ip.String()
+
+		// Followers update local persistence state
+		// HAProxy instances are shared and already unblocked by the leader
+		if err := p.RemoveFromPersistence(canonical); err != nil {
+			p.Log(logging.LevelError, "CLUSTER_UNBLOCK", "Failed to update persistence for IP %s: %v", canonical, err)
+			http.Error(w, fmt.Sprintf("Failed to update persistence: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Clear from ActivityStore
+		clearIPFromActivityStore(p, canonical)
+
+		p.Log(logging.LevelInfo, "CLUSTER_UNBLOCK", "IP %s unblocked in local persistence", canonical)
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
 // broadcastClearToFollowers sends clear request to all follower nodes
 func broadcastClearToFollowers(p Provider, ip string) {
 	path := fmt.Sprintf("/api/v1/cluster/internal/ip/%s/clear", ip)
 	broadcastToFollowers(p, "DELETE", path, nil)
+}
+
+func broadcastUnblockToFollowers(p Provider, ip string) {
+	path := fmt.Sprintf("/api/v1/cluster/internal/ip/%s/unblock", ip)
+	broadcastToFollowers(p, "POST", path, nil)
 }
 
 // clearIPFromActivityStore removes all actors with the given IP from ActivityStore

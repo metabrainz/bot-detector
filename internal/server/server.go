@@ -130,6 +130,7 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("/config/archive", archiveHandler(p))
 		mux.HandleFunc("GET /ip/{ip}", ipLookupHandler(p))
 		mux.HandleFunc("DELETE /ip/{ip}/clear", clearIPHandler(p))
+		mux.HandleFunc("POST /ip/{ip}/unblock", unblockIPHandler(p))
 		mux.HandleFunc("GET /api/v1/ip/{ip}", apiIPLookupHandler(p))
 	}
 
@@ -140,6 +141,7 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("/cluster/metrics/aggregate", clusterMetricsAggregateHandler(p))
 		mux.HandleFunc("GET /api/v1/cluster/internal/ip/{ip}", clusterIPLookupHandler(p))
 		mux.HandleFunc("DELETE /api/v1/cluster/internal/ip/{ip}/clear", internalClearIPHandler(p))
+		mux.HandleFunc("POST /api/v1/cluster/internal/ip/{ip}/unblock", internalUnblockIPHandler(p))
 		mux.HandleFunc("GET /api/v1/cluster/internal/persistence/state", clusterPersistenceStateHandler(p))
 		mux.HandleFunc("GET /api/v1/cluster/state/merged", clusterMergedStateHandler(p))
 	}
