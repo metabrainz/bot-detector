@@ -346,8 +346,23 @@ func restorePersistenceState(p *app.Processor) error {
 		}
 	}
 
-	// 1. Load snapshot
+	// Log persistence file status for diagnostics
 	snapshotPath := filepath.Join(p.StateDir, "state.snapshot")
+	journalPath := filepath.Join(p.StateDir, "events.log")
+
+	snapshotInfo := "absent"
+	if info, statErr := os.Stat(snapshotPath); statErr == nil {
+		snapshotInfo = fmt.Sprintf("size=%d bytes, modified=%s", info.Size(), info.ModTime().Format(time.RFC3339))
+	}
+
+	journalInfo := "absent"
+	if info, statErr := os.Stat(journalPath); statErr == nil {
+		journalInfo = fmt.Sprintf("size=%d bytes, modified=%s", info.Size(), info.ModTime().Format(time.RFC3339))
+	}
+
+	p.LogFunc(logging.LevelInfo, "PERSISTENCE_FILES", "Snapshot: %s | Journal: %s", snapshotInfo, journalInfo)
+
+	// 1. Load snapshot
 	snapshot, err := persistence.LoadSnapshot(snapshotPath)
 	if err != nil {
 		p.LogFunc(logging.LevelError, "STATE_LOAD_FAIL", "Failed to load snapshot: %v", err)
@@ -380,7 +395,6 @@ func restorePersistenceState(p *app.Processor) error {
 	}
 
 	// 2. Replay Journal
-	journalPath := filepath.Join(p.StateDir, "events.log")
 	journalFile, err := os.Open(journalPath)
 	if err == nil {
 		blockEvents := 0
