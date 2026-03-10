@@ -106,6 +106,7 @@ type Processor struct {
 	NodeLeaderAddress string                    // Leader address (only set for followers)
 	MetricsCollector  *cluster.MetricsCollector // Metrics collector (only set for leaders)
 	StateSyncManager  *cluster.StateSyncManager // State sync manager (nil if not enabled)
+	InitialSyncTime   time.Time                 // Timestamp from initial cluster fetch (for setting lastSyncTime)
 
 	// Multi-website support
 	Websites         []config.WebsiteConfig // Website configurations (empty = legacy single-website mode)

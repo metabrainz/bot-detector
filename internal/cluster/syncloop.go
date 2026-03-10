@@ -29,6 +29,13 @@ type StateSyncManager struct {
 	lastSyncMutex    sync.RWMutex
 }
 
+// SetLastSyncTime sets the last sync timestamp (used after initial cluster fetch)
+func (m *StateSyncManager) SetLastSyncTime(t time.Time) {
+	m.lastSyncMutex.Lock()
+	m.lastSyncTime = t
+	m.lastSyncMutex.Unlock()
+}
+
 // MergedStateCache stores the leader's merged state
 type MergedStateCache struct {
 	mu    sync.RWMutex

@@ -345,6 +345,9 @@ func restorePersistenceState(p *app.Processor) error {
 		p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Attempting to fetch initial state from cluster...")
 		if clusterTimestamp, fetchErr := fetchInitialStateFromCluster(p); fetchErr == nil {
 			p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Successfully fetched initial state from cluster")
+			// Store timestamp for later use by StateSyncManager
+			p.InitialSyncTime = clusterTimestamp
+
 			// Still need to replay local journal entries newer than cluster state
 			if err := replayJournalAfter(p, clusterTimestamp); err != nil {
 				p.LogFunc(logging.LevelWarning, "JOURNAL_REPLAY", "Failed to replay local journal: %v", err)
@@ -1179,6 +1182,13 @@ func start(p *app.Processor) {
 					p.LogFunc,
 				)
 				p.StateSyncManager = syncMgr
+
+				// If we fetched initial state from cluster, set the lastSyncTime
+				// so the first periodic sync is incremental
+				if !p.InitialSyncTime.IsZero() {
+					syncMgr.SetLastSyncTime(p.InitialSyncTime)
+				}
+
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
 				go func() {
