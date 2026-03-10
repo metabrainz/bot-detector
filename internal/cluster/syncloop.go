@@ -177,7 +177,7 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 	m.mergedStateCache.ts = now
 	m.mergedStateCache.mu.Unlock()
 
-	m.log(logging.LevelDebug, "STATE_SYNC", "Cached merged state: %d IPs", len(merged))
+	m.log(logging.LevelInfo, "STATE_SYNC", "Cached merged state: %d IPs", len(merged))
 }
 
 // fetchAndMergeFromLeader fetches merged state from leader and merges with local
@@ -278,7 +278,7 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	}
 	m.ipStatesMutex.Unlock()
 
-	m.log(logging.LevelDebug, "STATE_SYNC", "Merged %d IPs from leader", len(mergedResp.States))
+	m.log(logging.LevelInfo, "STATE_SYNC", "Merged %d IPs from leader", len(mergedResp.States))
 }
 
 // fetchNodeState fetches state from a specific node
