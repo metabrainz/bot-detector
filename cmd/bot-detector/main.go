@@ -17,6 +17,7 @@ import (
 	"bot-detector/internal/testutil"
 	"bot-detector/internal/utils"
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -985,6 +986,27 @@ func start(p *app.Processor) {
 				// Store collector reference in processor for access by HTTP handlers
 				p.MetricsCollector = collector
 				go collector.Start()
+			}
+
+			// Start state sync manager if enabled
+			if p.Cluster != nil && p.Cluster.StateSync.Enabled && p.PersistenceEnabled {
+				syncMgr := cluster.NewStateSyncManager(
+					p.Cluster,
+					p.NodeRole,
+					p.NodeName,
+					p.NodeAddress,
+					p.IPStates,
+					&p.PersistenceMutex,
+					p.LogFunc,
+				)
+				p.StateSyncManager = syncMgr
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				go func() {
+					<-p.SignalCh
+					cancel()
+				}()
+				syncMgr.Start(ctx)
 			}
 		}
 

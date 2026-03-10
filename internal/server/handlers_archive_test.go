@@ -65,6 +65,10 @@ func (m *MockProvider) GetStateSyncConfig() (bool, bool, time.Duration, bool) {
 	return false, false, 0, false
 }
 
+func (m *MockProvider) GetStateSyncManager() interface{} {
+	return nil
+}
+
 func TestArchiveHandler_StableETag(t *testing.T) {
 	// Common setup
 	modTime := time.Now()

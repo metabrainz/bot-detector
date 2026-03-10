@@ -108,6 +108,10 @@ type Provider interface {
 	// GetStateSyncConfig returns state sync configuration values.
 	// Returns (enabled, compression, timeout, incremental).
 	GetStateSyncConfig() (bool, bool, time.Duration, bool)
+
+	// GetStateSyncManager returns the state sync manager (nil if not enabled).
+	// Returns *cluster.StateSyncManager but typed as interface{} to avoid import cycle.
+	GetStateSyncManager() interface{}
 }
 
 // StateSyncResponse is the response format for state sync endpoints.

@@ -246,6 +246,10 @@ func (m *mockIPProvider) GetStateSyncConfig() (bool, bool, time.Duration, bool) 
 	return false, false, 0, false
 }
 
+func (m *mockIPProvider) GetStateSyncManager() interface{} {
+	return nil
+}
+
 func TestAPIIPLookupHandler_JSON(t *testing.T) {
 	now := time.Now()
 	activityStore := make(map[store.Actor]*store.ActorActivity)

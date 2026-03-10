@@ -180,6 +180,10 @@ func (m *mockProvider) GetStateSyncConfig() (bool, bool, time.Duration, bool) {
 	return false, false, 0, false
 }
 
+func (m *mockProvider) GetStateSyncManager() interface{} {
+	return nil
+}
+
 // TestServer_StartAndShutdown verifies the full lifecycle of the stats server.
 func TestServer_StartAndShutdown(t *testing.T) {
 	// --- Setup ---

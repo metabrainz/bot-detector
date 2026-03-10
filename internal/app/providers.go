@@ -441,6 +441,10 @@ func (p *Processor) GetStateSyncConfig() (bool, bool, time.Duration, bool) {
 		p.Cluster.StateSync.Incremental
 }
 
+func (p *Processor) GetStateSyncManager() interface{} {
+	return p.StateSyncManager
+}
+
 func (p *Processor) GetBlockTableNameFallback() string {
 	return p.Config.Blockers.Backends.HAProxy.TableNameFallback
 }
