@@ -141,7 +141,7 @@ func renderLocalIPStatus(w http.ResponseWriter, p Provider, canonical string) {
 	}
 
 	// Aggregate status from activity store
-	status := aggregateActorStatus(actors)
+	status := aggregateActorStatus(actors, persistState, hasPersist)
 	_, _ = fmt.Fprint(w, status)
 
 	// Add HAProxy details if present
@@ -312,8 +312,18 @@ func formatPersistenceState(w http.ResponseWriter, persistState interface{}, has
 }
 
 // aggregateActorStatus combines multiple actor activities into a status string
-func aggregateActorStatus(actors []*store.ActorActivity) string {
+func aggregateActorStatus(actors []*store.ActorActivity, persistState interface{}, hasPersist bool) string {
 	var result string
+
+	// Extract ModifiedAt from persistence if available
+	var persistModifiedAt time.Time
+	if hasPersist {
+		stateVal := reflect.ValueOf(persistState)
+		modifiedAt := stateVal.FieldByName("ModifiedAt").Interface().(time.Time)
+		if !modifiedAt.IsZero() {
+			persistModifiedAt = modifiedAt
+		}
+	}
 
 	// Check if any actor is blocked
 	var blockedActors []*store.ActorActivity
@@ -339,10 +349,16 @@ func aggregateActorStatus(actors []*store.ActorActivity) string {
 				}
 			}
 
-			// Estimate block time (actual block time not stored, use BlockedUntil - duration)
-			// This is approximate since we don't store the original block time
-			if earliestBlock.IsZero() || a.BlockedUntil.Before(earliestBlock) {
-				earliestBlock = a.BlockedUntil.Add(-1 * time.Hour) // Rough estimate
+			// Use ModifiedAt from persistence if available, otherwise estimate
+			var blockTime time.Time
+			if !persistModifiedAt.IsZero() {
+				blockTime = persistModifiedAt
+			} else {
+				blockTime = a.BlockedUntil.Add(-1 * time.Hour) // Fallback estimate
+			}
+
+			if earliestBlock.IsZero() || blockTime.Before(earliestBlock) {
+				earliestBlock = blockTime
 			}
 			if latestExpiry.IsZero() || a.BlockedUntil.After(latestExpiry) {
 				latestExpiry = a.BlockedUntil
@@ -502,6 +518,7 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 	}
 
 	// Check persistence state
+	var persistModifiedAt time.Time
 	if persistState, hasPersist := p.GetPersistenceState(ip); hasPersist {
 		stateVal := reflect.ValueOf(persistState)
 		response.Persistence = stateVal.FieldByName("State").String()
@@ -512,6 +529,11 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 		reason := stateVal.FieldByName("Reason").String()
 		if reason != "" {
 			response.PersistenceReason = reason
+		}
+		// Get ModifiedAt for accurate block time
+		modifiedAt := stateVal.FieldByName("ModifiedAt").Interface().(time.Time)
+		if !modifiedAt.IsZero() {
+			persistModifiedAt = modifiedAt
 		}
 	}
 
@@ -553,8 +575,14 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 				}
 			}
 
-			// Estimate block time
-			blockTime := a.BlockedUntil.Add(-1 * time.Hour)
+			// Use ModifiedAt from persistence if available, otherwise estimate
+			var blockTime time.Time
+			if !persistModifiedAt.IsZero() {
+				blockTime = persistModifiedAt
+			} else {
+				blockTime = a.BlockedUntil.Add(-1 * time.Hour) // Fallback estimate
+			}
+
 			if earliestBlock.IsZero() || blockTime.Before(earliestBlock) {
 				earliestBlock = blockTime
 			}
