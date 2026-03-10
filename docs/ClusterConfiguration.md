@@ -394,8 +394,75 @@ cluster:
 **Note**: If your cluster nodes have different log file paths (e.g., different HAProxy instances), you should run separate bot-detector instances rather than using cluster mode.
 
 ### State Management
+
+**State Synchronization (Enabled by Default):**
+
+When cluster mode is configured, state synchronization is automatically enabled. This allows all nodes to share block reasons and persistence state without requiring shared storage.
+
+- **Automatic sync**: Enabled by default when `cluster` section is present
+- **Bidirectional**: Leader collects from followers, followers fetch from leader
+- **Incremental**: Only changed IPs are transferred (reduces bandwidth)
+- **Compressed**: Gzip compression enabled by default
+- **Fast startup**: Followers fetch current state from cluster instead of replaying large journals
+
+**Configuration:**
+```yaml
+cluster:
+  nodes:
+    - name: "leader"
+      address: "node-1:8080"
+    - name: "follower-1"
+      address: "node-2:8080"
+  
+  state_sync:
+    enabled: true          # Default: true
+    interval: "60s"        # Default: 60s - how often to sync
+    compression: true      # Default: true - use gzip
+    timeout: "30s"         # Default: 30s - HTTP timeout
+    incremental: true      # Default: true - only sync changed IPs
+```
+
+**How it works:**
+
+1. **Leader sync loop** (every `interval`):
+   - Queries all followers for their IPStates
+   - Merges states with conflict resolution
+   - Caches merged state for followers to query
+
+2. **Follower sync loop** (every `interval`):
+   - Queries leader for merged cluster state
+   - Merges with local state
+   - Result: All nodes have complete cluster-wide block reasons
+
+3. **Conflict resolution**:
+   - Merges reasons from multiple nodes: `"Reason1 (node1) | Reason2 (node2)"`
+   - Keeps longest expiry time
+   - Tracks latest modification time
+   - Prevents duplication loops
+
+**Benefits:**
+- ✅ No shared filesystem or Redis required
+- ✅ Any node can display block reasons for IPs blocked by other nodes
+- ✅ Fast follower startup (fetch from cluster vs replay 250K+ journal entries)
+- ✅ Automatic propagation of blocks across cluster
+- ✅ Graceful handling of node failures
+
+**Startup optimization:**
+
+When a follower starts with state sync enabled:
+1. Fetches current cluster state from leader (fast HTTP request)
+2. Replays only local journal entries newer than cluster state
+3. Much faster than replaying entire journal
+
+Example:
+- Traditional: Load snapshot + replay 250K journal entries (~10-30 seconds)
+- Optimized: Fetch cluster state + replay 2 local entries (~1-2 seconds)
+
+See [ClusterStateSync.md](ClusterStateSync.md) for detailed design and implementation.
+
+**Per-instance persistence:**
 - Each instance maintains its own persistence (state snapshots + journal)
-- State is NOT shared between instances
+- State sync shares block reasons, but each node has independent persistence
 - Each instance can independently recover from crashes using its local state
 - Leader does not dictate or override follower state
 
@@ -404,6 +471,81 @@ cluster:
 - Config polls and metrics reporting use reasonable timeouts
 - Failed requests are logged but don't block normal operation
 - Followers continue operating with last known configuration
+
+### Security Considerations
+- Leader API endpoints should be restricted to internal network
+- Consider using HTTPS for production deployments (configure via `cluster.http_protocol`)
+- No authentication is implemented in the initial design (rely on network isolation)
+- Future enhancement: Add API token authentication for leader/follower communication
+
+## Cluster Upgrades
+
+### Recommended Upgrade Order: Followers → Leader
+
+When deploying a new version of bot-detector to a cluster, update **followers first, then leader**:
+
+**Why this order?**
+1. **Backward compatibility**: Followers fetch from leader, so new followers should handle old leader responses
+2. **State sync direction**: Leader pulls from followers (not vice versa)
+3. **Minimal disruption**: Leader stays available while followers update
+4. **Version checking**: We log version mismatches but continue processing
+
+**Upgrade procedure:**
+
+```bash
+# 1. Update follower-1
+systemctl stop bot-detector@follower-1
+# Deploy new version
+systemctl start bot-detector@follower-1
+# Verify: check logs, test /metrics endpoint
+
+# 2. Update follower-2 (if you have more followers)
+systemctl stop bot-detector@follower-2
+# Deploy new version
+systemctl start bot-detector@follower-2
+# Verify: check logs, test /metrics endpoint
+
+# 3. Update leader (last)
+systemctl stop bot-detector@leader
+# Deploy new version
+systemctl start bot-detector@leader
+# Verify: check logs, test /cluster/metrics/aggregate
+```
+
+**During follower updates:**
+- ✅ Leader continues processing logs
+- ✅ Leader continues serving state sync requests
+- ✅ Other followers continue syncing
+- ✅ Minimal impact on cluster
+
+**During leader update:**
+- ✅ Followers continue processing logs independently
+- ⚠️ Followers can't fetch cluster state (will retry)
+- ⚠️ Brief gap in cluster-wide state visibility
+- ✅ Resumes automatically when leader comes back
+
+**Exception: Breaking protocol changes**
+
+If a new version has breaking changes to the state sync protocol:
+1. Update leader first to support both old and new protocols
+2. Then update followers to use new protocol
+3. Requires careful protocol versioning
+
+**Current implementation:** Version checking is lenient (logs warning but continues), so **followers-first is safe** for normal updates.
+
+### Zero-Downtime Upgrades
+
+For true zero-downtime upgrades in production:
+
+1. **Use multiple followers** (minimum 3 nodes)
+2. **Update one follower at a time**
+3. **Verify each update** before proceeding
+4. **Update leader last**
+
+This ensures:
+- At least 2 nodes always processing logs
+- No gap in threat detection
+- Gradual rollout with rollback capability
 
 ### Security Considerations
 - Leader API endpoints should be restricted to internal network
