@@ -36,12 +36,16 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
 
 *   **Method:** `GET`
 *   **Content-Type:** `text/plain; charset=utf-8`
-*   **Description:** Provides a plain text list of all behavioral chain steps and the number of times each has been executed. The report includes:
+*   **Description:** Provides a plain text report of behavioral chain step executions grouped by website. The report includes:
     *   Timestamp
-    *   Total step executions
-    *   Per-step counts with percentages
-    *   Steps sorted by execution count in descending order
-    *   This is useful for debugging chain performance and identifying which rules are matching most frequently.
+    *   Total step executions across all websites
+    *   Per-website sections showing:
+        *   Website name and execution count for that website
+        *   Individual step counts with percentages (calculated against overall total)
+        *   Steps sorted by execution count in descending order
+    *   Global chains shown first, then website-specific chains alphabetically
+    *   Step names include website/vhost context (e.g., `step 1/3 of ChainName[website]`)
+    *   Useful for debugging chain performance and comparing activity across websites.
 
 ### `/stats/websites`
 
