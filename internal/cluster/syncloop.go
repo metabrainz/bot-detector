@@ -87,7 +87,11 @@ func FetchMergedState(url string, client *http.Client, requestCompression bool) 
 	}
 
 	sizeKB = float64(len(bodyBytes)) / 1024.0
-	rateKBps = sizeKB / duration.Seconds()
+	if duration.Seconds() > 0 {
+		rateKBps = sizeKB / duration.Seconds()
+	} else {
+		rateKBps = 0 // Avoid division by zero for extremely fast transfers
+	}
 
 	return mergedResp.States, mergedResp.Timestamp, compressed, sizeKB, rateKBps, nil
 }
