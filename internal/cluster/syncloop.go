@@ -116,6 +116,12 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 	merged := make(map[string]persistence.IPState)
 	now := time.Now()
 
+	// Track stats
+	localCount := 0
+	remoteCount := 0
+	nodesSucceeded := 0
+	nodesFailed := 0
+
 	// Add local state
 	m.ipStatesMutex.Lock()
 	for ip, state := range m.ipStates {
@@ -125,6 +131,7 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 				ExpireTime: state.ExpireTime,
 				ModifiedAt: state.ModifiedAt,
 			}
+			localCount++
 		}
 	}
 	m.ipStatesMutex.Unlock()
@@ -138,12 +145,16 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 		nodeState, err := m.fetchNodeState(node)
 		if err != nil {
 			m.log(logging.LevelWarning, "STATE_SYNC", "Failed to fetch state from %s: %v", node.Name, err)
+			nodesFailed++
 			continue
 		}
+		nodesSucceeded++
 
 		// Merge node state
+		nodeIPCount := 0
 		for ip, state := range nodeState {
 			if state.ExpireTime.After(now) {
+				nodeIPCount++
 				if existing, ok := merged[ip]; ok {
 					// Merge reasons, keep longest expiry, latest modification
 					// Keep State from entry with longest expiry
@@ -161,6 +172,7 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 					merged[ip] = mergedState
 				} else {
 					merged[ip] = state
+					remoteCount++
 				}
 			}
 		}
@@ -181,7 +193,9 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 	if m.config.StateSync.Compression {
 		compressionStatus = "enabled"
 	}
-	m.log(logging.LevelInfo, "STATE_SYNC", "Cached merged state: %d IPs (compression: %s)", len(merged), compressionStatus)
+
+	m.log(logging.LevelInfo, "STATE_SYNC", "Cached merged state: %d IPs (local: %d, remote: %d, nodes: %d/%d, compression: %s)",
+		len(merged), localCount, remoteCount, nodesSucceeded, nodesSucceeded+nodesFailed, compressionStatus)
 }
 
 // fetchAndMergeFromLeader fetches merged state from leader and merges with local
