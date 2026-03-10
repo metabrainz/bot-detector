@@ -217,13 +217,9 @@ func TestCompaction(t *testing.T) {
 		}
 	}
 
-	// Verify the expired block (2.2.2.2) was converted to unblocked (preserves reason)
-	if state, exists := loadedSnapshot.IPStates["2.2.2.2"]; !exists {
-		t.Errorf("Expired block for 2.2.2.2 should be kept as unblocked")
-	} else if state.State != persistence.BlockStateUnblocked {
-		t.Errorf("Expired block for 2.2.2.2 should be unblocked, got: %v", state.State)
-	} else if state.Reason != "chain2" {
-		t.Errorf("Expired block reason should be preserved, got: %v", state.Reason)
+	// Verify the expired block (2.2.2.2) was removed
+	if _, exists := loadedSnapshot.IPStates["2.2.2.2"]; exists {
+		t.Errorf("Expired block for 2.2.2.2 should be removed, not kept")
 	}
 
 	// 2. Check that the journal file is now empty.
