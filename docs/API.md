@@ -23,36 +23,50 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
 ### `/` or `/stats`
 
 *   **Method:** `GET`
-*   **Content-Type:** `text/html; charset=utf-8`
-*   **Description:** Displays a comprehensive HTML report of the application's real-time metrics. This is the main dashboard for monitoring activity. The report includes:
-    *   General processing statistics (lines processed, valid hits, errors).
-    *   Actor statistics (good actors skipped, actors cleaned).
-    *   Chain and action statistics.
-    *   Per-chain metrics (hits, completions, resets).
+*   **Content-Type:** `text/plain; charset=utf-8`
+*   **Description:** Displays a comprehensive plain-text report of the application's real-time metrics. This is the main dashboard for monitoring activity. The report includes:
+    *   Timestamp and uptime information
+    *   General processing statistics (lines processed, valid hits, errors, processing rate)
+    *   Actor statistics (good actors skipped, actors cleaned)
+    *   Chain and action statistics
+    *   Per-chain metrics (hits, completions, resets) - only active chains shown
+    *   Website information for multi-website mode (shown as `[website1, website2]` after chain name)
 
 ### `/stats/steps`
 
 *   **Method:** `GET`
 *   **Content-Type:** `text/plain; charset=utf-8`
-*   **Description:** Provides a plain text list of all behavioral chain steps and the number of times each has been executed. This is useful for debugging chain performance and identifying which rules are matching most frequently. The list is sorted by execution count in descending order.
+*   **Description:** Provides a plain text list of all behavioral chain steps and the number of times each has been executed. The report includes:
+    *   Timestamp
+    *   Total step executions
+    *   Per-step counts with percentages
+    *   Steps sorted by execution count in descending order
+    *   This is useful for debugging chain performance and identifying which rules are matching most frequently.
 
 ### `/stats/websites`
 
 *   **Method:** `GET`
 *   **Content-Type:** `text/plain; charset=utf-8`
-*   **Description:** Displays multi-website statistics including configured websites, their vhosts, log paths, chain assignments, and a list of unknown vhosts encountered in logs. This endpoint is particularly useful for:
-    *   Verifying multi-website configuration
-    *   Identifying misconfigured or missing vhosts
-    *   Troubleshooting log entries that are being skipped
+*   **Description:** Displays multi-website statistics including configured websites, their vhosts, log paths, chain assignments, and a list of unknown vhosts encountered in logs. The report includes:
+    *   Timestamp
+    *   Website configuration details
+    *   Per-website metrics (lines parsed, chain matches, completions, resets)
+    *   Unknown vhosts list
+    *   This endpoint is particularly useful for:
+        *   Verifying multi-website configuration
+        *   Identifying misconfigured or missing vhosts
+        *   Troubleshooting log entries that are being skipped
 *   **Response (Multi-Website Mode):**
     ```
+    Generated: 2026-03-10T09:15:00+01:00
+
     === Multi-Website Statistics ===
     
     Total Websites: 2
     Global Chains: 1
     Website-Specific Chains: 2
     
-    --- Configured Websites ---
+    === Configured Websites ===
       main:
         VHosts: www.example.com, example.com
         Log Path: /var/log/haproxy/main.log
