@@ -1,5 +1,11 @@
 # Cluster State Synchronization
 
+## Status
+
+**Implementation:** ✅ Complete  
+**Version:** v1  
+**Commits:** 70dfef4, 9f336bd, aaa1728, 740e442, a026c6e, 0b1f0a7
+
 ## Overview
 
 In a multi-node cluster, each node processes logs independently and blocks IPs based on its own detection rules. To ensure all nodes have visibility into blocks created by other nodes (for IP lookup queries and persistence), the cluster implements **bidirectional state synchronization**.
@@ -311,37 +317,91 @@ cluster:
     interval: "60s"            # How often to sync (leader queries followers, followers query leader)
     compression: true          # Use gzip compression for state transfer
     timeout: "30s"             # HTTP timeout for state queries
-    incremental: false         # Use incremental sync (requires modification time tracking)
+    incremental: false         # Use incremental sync (not yet implemented)
 ```
+
+**Requirements:**
+- Persistence must be enabled (`--state-dir` flag)
+- Cluster mode must be configured
+- All nodes must have state sync enabled
 
 **Recommended settings:**
 - **Small clusters (<50K IPs):** `interval: 30s`, `compression: true`
-- **Large clusters (>100K IPs):** `interval: 60s`, `compression: true`, consider `incremental: true`
+- **Large clusters (>100K IPs):** `interval: 60s`, `compression: true`
 - **High block rate:** Shorter interval (30s) for faster propagation
 - **Low block rate:** Longer interval (120s) to reduce overhead
 
+**Example:**
+```yaml
+cluster:
+  nodes:
+    - name: "leader"
+      address: "leader.example.com:8080"
+    - name: "follower-1"
+      address: "follower1.example.com:8080"
+  
+  config_poll_interval: "30s"
+  metrics_report_interval: "10s"
+  protocol: "http"
+  
+  state_sync:
+    enabled: true
+    interval: "60s"
+    compression: true
+    timeout: "30s"
+    incremental: false
+```
+
 ---
 
-## Sync Loop Implementation
+## Implementation Details
+
+### Components
+
+**1. StateSyncManager** (`internal/cluster/syncloop.go`)
+- Manages periodic sync loops for leader and follower
+- Handles HTTP requests to other nodes
+- Caches merged state (leader only)
+- Implements conflict resolution
+
+**2. HTTP Endpoints** (`internal/server/handlers_statesync.go`)
+- `GET /api/v1/cluster/internal/persistence/state` - Node's local state
+- `GET /api/v1/cluster/state/merged` - Cluster-wide merged state (leader only)
+
+**3. Configuration** (`internal/config/`)
+- YAML parsing for `state_sync` section
+- Defaults: enabled=true, interval=60s, compression=true
+
+**4. Integration** (`cmd/bot-detector/main.go`)
+- Initialize StateSyncManager based on cluster config
+- Start sync loop based on node role
+- Context-based cancellation on shutdown
+
+### Sync Loop Implementation
 
 ### Leader: Collect and Merge States
 
+The leader periodically (every `interval`):
+1. Collects its own IPStates
+2. Queries all followers via HTTP
+3. Merges states with conflict resolution
+4. Caches result for followers to query
+
 ```go
-func (p *Processor) collectAndMergeStates() map[string]persistence.IPState {
+func (m *StateSyncManager) collectAndCacheMergedState() {
     merged := make(map[string]persistence.IPState)
     
-    // Add leader's own state
-    p.PersistenceMutex.Lock()
-    for ip, state := range p.IPStates {
-        // Add source node to reason
-        state.Reason = addSourceNode(state.Reason, p.NodeName)
-        merged[ip] = state
+    // Add leader's own state with source attribution
+    for ip, state := range m.ipStates {
+        merged[ip] = persistence.IPState{
+            Reason:     AddSourceNode(state.Reason, m.nodeName, m.nodeAddress),
+            ExpireTime: state.ExpireTime,
+        }
     }
-    p.PersistenceMutex.Unlock()
     
     // Query each follower
-    for _, node := range p.Cluster.Nodes {
-        if node.Name == p.NodeName {
+    for _, node := range m.config.Nodes {
+        if node.Name == m.nodeName {
             continue  // Skip self
         }
         
@@ -594,9 +654,51 @@ func (p *Processor) syncFromLeader() {
 
 ---
 
+## Future Enhancements
+
+### Incremental Sync (Not Yet Implemented)
+
+**Goal:** Only transfer IPs that changed since last sync
+
+**Requirements:**
+1. Add `ModifiedAt time.Time` to `persistence.IPState`
+2. Update `ModifiedAt` on every block/unblock
+3. Filter by `since` parameter in endpoints
+4. Track last sync timestamp per node
+
+**Benefits:**
+- Reduced bandwidth (only deltas)
+- Faster sync cycles
+- Better scalability for large clusters
+
+**Implementation notes:**
+- TODOs marked in `internal/server/handlers_statesync.go`
+- Config option `incremental: true` already exists
+- Backward compatible (falls back to full sync)
+
+### Other Potential Features
+
+**State Versioning:**
+- Detect conflicts with version numbers
+- Resolve based on vector clocks
+
+**Bloom Filters:**
+- Optimize which node to query for specific IP
+- Reduce unnecessary HTTP requests
+
+**Event-Driven Push:**
+- Real-time state updates instead of polling
+- WebSocket or SSE for instant propagation
+
+**Multi-Region Support:**
+- Handle high-latency clusters
+- Regional state aggregation
+
+---
+
 ## Migration Path
 
-### Phase 1: Full State Sync (Current)
+### Phase 1: Full State Sync (✅ Complete)
 - Implement basic full state sync with compression
 - Deploy to production
 - Monitor bandwidth and performance
