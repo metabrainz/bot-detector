@@ -2,6 +2,7 @@ package checker
 
 import (
 	"bot-detector/internal/app"
+	"bot-detector/internal/cluster"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/persistence"
@@ -9,6 +10,7 @@ import (
 	"bot-detector/internal/utils"
 	"fmt"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -16,13 +18,22 @@ import (
 // formatChainKey creates a chain key string with vhost/website context.
 // Format: "ChainName@vhost" or "ChainName[website]" or "ChainName"
 func formatChainKey(chainName string, entry *app.LogEntry) string {
+	var result string
 	if entry.VHost != "" {
-		return fmt.Sprintf("%s@%s", chainName, entry.VHost)
+		result = fmt.Sprintf("%s@%s", chainName, entry.VHost)
+	} else if entry.Website != "" {
+		result = fmt.Sprintf("%s[%s]", chainName, entry.Website)
+	} else {
+		result = chainName
 	}
-	if entry.Website != "" {
-		return fmt.Sprintf("%s[%s]", chainName, entry.Website)
+
+	// Validate: reason separator not allowed in chain keys
+	if strings.Contains(result, cluster.ReasonSeparator) {
+		// Replace separator with underscore to prevent conflicts
+		result = strings.ReplaceAll(result, cluster.ReasonSeparator, "_")
 	}
-	return chainName
+
+	return result
 }
 
 // GetActor constructs the correct store.Actor key for a given log entry based on the chain's match_key.

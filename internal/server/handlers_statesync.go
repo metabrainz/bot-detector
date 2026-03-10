@@ -15,6 +15,9 @@ import (
 const (
 	// StateSyncVersion is the current state sync protocol version.
 	StateSyncVersion = "v1"
+
+	// ReasonSeparator is used to separate multiple reasons in merged states.
+	ReasonSeparator = " | "
 )
 
 // clusterPersistenceStateHandler exposes the node's local IPStates for state sync.
@@ -299,14 +302,14 @@ func mergeReasons(existing, newReason string) string {
 
 	// Parse existing reasons into map
 	reasonMap := make(map[string]bool)
-	for _, part := range strings.Split(existing, " | ") {
+	for _, part := range strings.Split(existing, ReasonSeparator) {
 		baseReason := extractBaseReason(strings.TrimSpace(part))
 		reasonMap[baseReason] = true
 	}
 
 	newBaseReason := extractBaseReason(newReason)
 	if !reasonMap[newBaseReason] {
-		return existing + " | " + newReason
+		return existing + ReasonSeparator + newReason
 	}
 	return existing
 }

@@ -11,6 +11,9 @@ import (
 const (
 	// StateSyncVersion is the current state sync protocol version.
 	StateSyncVersion = "v1"
+
+	// ReasonSeparator is used to separate multiple reasons in merged states.
+	ReasonSeparator = " | "
 )
 
 // StateSyncResponse is the response format for state sync endpoints.
@@ -56,7 +59,7 @@ func AddSourceNode(reason, nodeName, nodeAddress string) string {
 
 // MergeReasons combines two reasons without duplication.
 // Extracts base reasons (without source nodes) and only adds if not already present.
-// Uses " | " separator to avoid conflicts with commas in reasons.
+// Uses ReasonSeparator to avoid conflicts with commas in reasons.
 func MergeReasons(existing, newReason string) string {
 	if existing == "" {
 		return newReason
@@ -67,7 +70,7 @@ func MergeReasons(existing, newReason string) string {
 
 	// Parse existing reasons into map (base reason -> true)
 	reasonMap := make(map[string]bool)
-	for _, part := range strings.Split(existing, " | ") {
+	for _, part := range strings.Split(existing, ReasonSeparator) {
 		// Extract reason without source node: "Login-Abuse[main_site] (leader)" -> "Login-Abuse[main_site]"
 		baseReason := extractBaseReason(strings.TrimSpace(part))
 		reasonMap[baseReason] = true
@@ -78,7 +81,7 @@ func MergeReasons(existing, newReason string) string {
 
 	// Only add if not already present
 	if !reasonMap[newBaseReason] {
-		return fmt.Sprintf("%s | %s", existing, newReason)
+		return existing + ReasonSeparator + newReason
 	}
 
 	return existing
