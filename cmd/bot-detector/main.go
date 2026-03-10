@@ -426,12 +426,14 @@ func restorePersistenceState(p *app.Processor) error {
 						State:      persistence.BlockStateBlocked,
 						ExpireTime: expireTime,
 						Reason:     reason,
+						ModifiedAt: v1Entry.Timestamp,
 					}
 				case persistence.EventTypeUnblock:
 					unblockEvents++
 					p.IPStates[v1Entry.Event.IP] = persistence.IPState{
-						State:  persistence.BlockStateUnblocked,
-						Reason: reason,
+						State:      persistence.BlockStateUnblocked,
+						Reason:     reason,
+						ModifiedAt: v1Entry.Timestamp,
 					}
 				}
 			} else {
