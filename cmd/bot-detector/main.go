@@ -203,7 +203,7 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 	url := fmt.Sprintf("%s://%s/api/v1/cluster/state/merged", p.Cluster.Protocol, leaderNode.Address)
 	client := &http.Client{Timeout: p.Cluster.StateSync.Timeout}
 
-	states, timestamp, compressed, sizeKB, rateKBps, err := cluster.FetchMergedState(url, client, p.Cluster.StateSync.Compression)
+	states, timestamp, m, err := cluster.FetchMergedState(url, client, p.Cluster.StateSync.Compression)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -227,12 +227,12 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 	unblockedCount := len(p.IPStates) - blockedCount
 
 	compressionStatus := "no"
-	if compressed {
+	if m.Compressed {
 		compressionStatus = "yes"
 	}
 
-	p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Fetched initial state from leader %s (entries: %d blocked + %d unblocked, compressed: %s, size: %.1f KB, rate: %.1f KB/s)",
-		leaderNode.Name, blockedCount, unblockedCount, compressionStatus, sizeKB, rateKBps)
+	p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Fetched initial state from leader %s (entries: %d blocked + %d unblocked, compressed: %s, size: %.1f KB, rate: %.1f KB/s, duration: %v)",
+		leaderNode.Name, blockedCount, unblockedCount, compressionStatus, m.SizeKB, m.RateKBps, m.Duration.Round(time.Millisecond))
 
 	return timestamp, nil
 }

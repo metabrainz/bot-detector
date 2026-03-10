@@ -29,19 +29,25 @@ type StateSyncManager struct {
 	lastSyncMutex    sync.RWMutex
 }
 
+// FetchMetrics contains metrics about a state fetch operation
+type FetchMetrics struct {
+	Compressed bool
+	SizeKB     float64
+	RateKBps   float64
+	Duration   time.Duration
+}
+
 // FetchMergedState fetches merged state from a URL and returns the states, timestamp, and metrics.
 // This is shared between initial cluster fetch and periodic sync.
 func FetchMergedState(url string, client *http.Client, requestCompression bool) (
 	states map[string]persistence.IPState,
 	timestamp time.Time,
-	compressed bool,
-	sizeKB float64,
-	rateKBps float64,
+	metrics FetchMetrics,
 	err error,
 ) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, time.Time{}, false, 0, 0, fmt.Errorf("failed to create request: %w", err)
+		return nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	if requestCompression {
@@ -51,20 +57,20 @@ func FetchMergedState(url string, client *http.Client, requestCompression bool) 
 	startTime := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, time.Time{}, false, 0, 0, fmt.Errorf("failed to fetch: %w", err)
+		return nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to fetch: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, time.Time{}, false, 0, 0, fmt.Errorf("server returned status %d", resp.StatusCode)
+		return nil, time.Time{}, FetchMetrics{}, fmt.Errorf("server returned status %d", resp.StatusCode)
 	}
 
 	var reader io.Reader = resp.Body
-	compressed = resp.Header.Get("Content-Encoding") == "gzip"
+	compressed := resp.Header.Get("Content-Encoding") == "gzip"
 	if compressed {
 		gz, err := gzip.NewReader(resp.Body)
 		if err != nil {
-			return nil, time.Time{}, false, 0, 0, fmt.Errorf("failed to create gzip reader: %w", err)
+			return nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to create gzip reader: %w", err)
 		}
 		defer func() { _ = gz.Close() }()
 		reader = gz
@@ -72,7 +78,7 @@ func FetchMergedState(url string, client *http.Client, requestCompression bool) 
 
 	bodyBytes, err := io.ReadAll(reader)
 	if err != nil {
-		return nil, time.Time{}, false, 0, 0, fmt.Errorf("failed to read response: %w", err)
+		return nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to read response: %w", err)
 	}
 	duration := time.Since(startTime)
 
@@ -83,17 +89,23 @@ func FetchMergedState(url string, client *http.Client, requestCompression bool) 
 	}
 
 	if err := json.Unmarshal(bodyBytes, &mergedResp); err != nil {
-		return nil, time.Time{}, false, 0, 0, fmt.Errorf("failed to decode: %w", err)
+		return nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to decode: %w", err)
 	}
 
-	sizeKB = float64(len(bodyBytes)) / 1024.0
+	sizeKB := float64(len(bodyBytes)) / 1024.0
+	var rateKBps float64
 	if duration.Seconds() > 0 {
 		rateKBps = sizeKB / duration.Seconds()
-	} else {
-		rateKBps = 0 // Avoid division by zero for extremely fast transfers
 	}
 
-	return mergedResp.States, mergedResp.Timestamp, compressed, sizeKB, rateKBps, nil
+	m := FetchMetrics{
+		Compressed: compressed,
+		SizeKB:     sizeKB,
+		RateKBps:   rateKBps,
+		Duration:   duration,
+	}
+
+	return mergedResp.States, mergedResp.Timestamp, m, nil
 }
 
 // SetLastSyncTime sets the last sync timestamp (used after initial cluster fetch)
@@ -294,7 +306,7 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	}
 
 	// Fetch using shared helper
-	states, _, compressed, sizeKB, rateKBps, err := FetchMergedState(url, m.httpClient, true)
+	states, _, metrics, err := FetchMergedState(url, m.httpClient, true)
 	if err != nil {
 		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to fetch from leader: %v", err)
 		return
@@ -337,12 +349,12 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 		syncMode = fmt.Sprintf("incremental, delta: %d", len(states))
 	}
 	compressionStatus := "no"
-	if compressed {
+	if metrics.Compressed {
 		compressionStatus = "yes"
 	}
 
-	m.log(logging.LevelInfo, "STATE_SYNC", "Merged %d IPs from leader (mode: %s, compressed: %s, size: %.1f KB, rate: %.1f KB/s)",
-		len(states), syncMode, compressionStatus, sizeKB, rateKBps)
+	m.log(logging.LevelInfo, "STATE_SYNC", "Merged %d IPs from leader (mode: %s, compressed: %s, size: %.1f KB, rate: %.1f KB/s, duration: %v)",
+		len(states), syncMode, compressionStatus, metrics.SizeKB, metrics.RateKBps, metrics.Duration.Round(time.Millisecond))
 }
 
 // fetchNodeState fetches state from a specific node
