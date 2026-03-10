@@ -213,9 +213,11 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 	for ip, state := range m.ipStates {
 		if state.ExpireTime.After(now) {
 			merged[ip] = persistence.IPState{
-				Reason:     AddSourceNode(state.Reason, m.nodeName, m.nodeAddress),
-				ExpireTime: state.ExpireTime,
-				ModifiedAt: state.ModifiedAt,
+				State:          state.State,
+				Reason:         AddSourceNode(state.Reason, m.nodeName, m.nodeAddress),
+				ExpireTime:     state.ExpireTime,
+				ModifiedAt:     state.ModifiedAt,
+				FirstBlockedAt: state.FirstBlockedAt,
 			}
 			localCount++
 		}
