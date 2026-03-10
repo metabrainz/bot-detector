@@ -429,14 +429,20 @@ func restorePersistenceState(p *app.Processor) error {
 		}
 
 		if fileInfo, err := os.Stat(journalPath); err == nil {
-			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=v1, size=%d bytes, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
-				fileInfo.Size(), blockEvents, unblockEvents, skippedEvents, parseErrors)
+			if fileInfo.Size() == 0 {
+				p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Journal is empty (recently compacted or no new events)")
+			} else {
+				p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=v1, size=%d bytes, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
+					fileInfo.Size(), blockEvents, unblockEvents, skippedEvents, parseErrors)
+			}
 		} else {
 			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=v1, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
 				blockEvents, unblockEvents, skippedEvents, parseErrors)
 		}
 	} else if !os.IsNotExist(err) {
 		p.LogFunc(logging.LevelWarning, "JOURNAL_OPEN_FAIL", "Could not open journal file for replay: %v", err)
+	} else {
+		p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "No journal file found (first run or recently compacted)")
 	}
 
 	// 3. State Push
