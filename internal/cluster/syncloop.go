@@ -242,12 +242,13 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 			if state.ExpireTime.After(now) {
 				nodeIPCount++
 				if existing, ok := merged[ip]; ok {
-					// Merge reasons, keep longest expiry, latest modification
+					// Merge reasons, keep longest expiry, latest modification, earliest block
 					// Keep State from entry with longest expiry
 					mergedState := persistence.IPState{
-						Reason:     MergeReasons(existing.Reason, state.Reason),
-						ExpireTime: maxTime(existing.ExpireTime, state.ExpireTime),
-						ModifiedAt: maxTime(existing.ModifiedAt, state.ModifiedAt),
+						Reason:         MergeReasons(existing.Reason, state.Reason),
+						ExpireTime:     maxTime(existing.ExpireTime, state.ExpireTime),
+						ModifiedAt:     maxTime(existing.ModifiedAt, state.ModifiedAt),
+						FirstBlockedAt: minTime(existing.FirstBlockedAt, state.FirstBlockedAt),
 					}
 					// Use State from the entry with longest expiry
 					if state.ExpireTime.After(existing.ExpireTime) {
@@ -324,11 +325,12 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	for ip, state := range states {
 		if state.ExpireTime.After(now) {
 			if existing, ok := m.ipStates[ip]; ok {
-				// Merge reasons, keep longest expiry, latest modification
+				// Merge reasons, keep longest expiry, latest modification, earliest block
 				mergedState := persistence.IPState{
-					Reason:     MergeReasons(existing.Reason, state.Reason),
-					ExpireTime: maxTime(existing.ExpireTime, state.ExpireTime),
-					ModifiedAt: maxTime(existing.ModifiedAt, state.ModifiedAt),
+					Reason:         MergeReasons(existing.Reason, state.Reason),
+					ExpireTime:     maxTime(existing.ExpireTime, state.ExpireTime),
+					ModifiedAt:     maxTime(existing.ModifiedAt, state.ModifiedAt),
+					FirstBlockedAt: minTime(existing.FirstBlockedAt, state.FirstBlockedAt),
 				}
 				// Use State from the entry with longest expiry
 				if state.ExpireTime.After(existing.ExpireTime) {
@@ -455,6 +457,19 @@ func (m *StateSyncManager) GetMergedStateCache() (map[string]persistence.IPState
 
 func maxTime(a, b time.Time) time.Time {
 	if a.After(b) {
+		return a
+	}
+	return b
+}
+
+func minTime(a, b time.Time) time.Time {
+	if a.IsZero() {
+		return b
+	}
+	if b.IsZero() {
+		return a
+	}
+	if a.Before(b) {
 		return a
 	}
 	return b

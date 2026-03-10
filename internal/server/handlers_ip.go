@@ -315,13 +315,13 @@ func formatPersistenceState(w http.ResponseWriter, persistState interface{}, has
 func aggregateActorStatus(actors []*store.ActorActivity, persistState interface{}, hasPersist bool) string {
 	var result string
 
-	// Extract ModifiedAt from persistence if available
-	var persistModifiedAt time.Time
+	// Extract FirstBlockedAt from persistence if available
+	var persistFirstBlockedAt time.Time
 	if hasPersist {
 		stateVal := reflect.ValueOf(persistState)
-		modifiedAt := stateVal.FieldByName("ModifiedAt").Interface().(time.Time)
-		if !modifiedAt.IsZero() {
-			persistModifiedAt = modifiedAt
+		firstBlockedAt := stateVal.FieldByName("FirstBlockedAt").Interface().(time.Time)
+		if !firstBlockedAt.IsZero() {
+			persistFirstBlockedAt = firstBlockedAt
 		}
 	}
 
@@ -349,10 +349,10 @@ func aggregateActorStatus(actors []*store.ActorActivity, persistState interface{
 				}
 			}
 
-			// Use ModifiedAt from persistence if available, otherwise estimate
+			// Use FirstBlockedAt from persistence (cluster-wide earliest), fallback to estimate
 			var blockTime time.Time
-			if !persistModifiedAt.IsZero() {
-				blockTime = persistModifiedAt
+			if !persistFirstBlockedAt.IsZero() {
+				blockTime = persistFirstBlockedAt
 			} else {
 				blockTime = a.BlockedUntil.Add(-1 * time.Hour) // Fallback estimate
 			}
@@ -518,7 +518,7 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 	}
 
 	// Check persistence state
-	var persistModifiedAt time.Time
+	var persistFirstBlockedAt time.Time
 	if persistState, hasPersist := p.GetPersistenceState(ip); hasPersist {
 		stateVal := reflect.ValueOf(persistState)
 		response.Persistence = stateVal.FieldByName("State").String()
@@ -530,10 +530,10 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 		if reason != "" {
 			response.PersistenceReason = reason
 		}
-		// Get ModifiedAt for accurate block time
-		modifiedAt := stateVal.FieldByName("ModifiedAt").Interface().(time.Time)
-		if !modifiedAt.IsZero() {
-			persistModifiedAt = modifiedAt
+		// Get FirstBlockedAt for cluster-wide earliest block time
+		firstBlockedAt := stateVal.FieldByName("FirstBlockedAt").Interface().(time.Time)
+		if !firstBlockedAt.IsZero() {
+			persistFirstBlockedAt = firstBlockedAt
 		}
 	}
 
@@ -575,10 +575,10 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 				}
 			}
 
-			// Use ModifiedAt from persistence if available, otherwise estimate
+			// Use FirstBlockedAt from persistence (cluster-wide earliest), fallback to estimate
 			var blockTime time.Time
-			if !persistModifiedAt.IsZero() {
-				blockTime = persistModifiedAt
+			if !persistFirstBlockedAt.IsZero() {
+				blockTime = persistFirstBlockedAt
 			} else {
 				blockTime = a.BlockedUntil.Add(-1 * time.Hour) // Fallback estimate
 			}

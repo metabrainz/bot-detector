@@ -124,8 +124,9 @@ type SnapshotV1 struct {
 
 // IPState represents the current state of an IP (blocked or unblocked).
 type IPState struct {
-	State      BlockState `json:"state"`
-	ExpireTime time.Time  `json:"expire_time"`
-	Reason     string     `json:"reason"`
-	ModifiedAt time.Time  `json:"modified_at"` // When this state was last modified
+	State          BlockState `json:"state"`
+	ExpireTime     time.Time  `json:"expire_time"`
+	Reason         string     `json:"reason"`
+	ModifiedAt     time.Time  `json:"modified_at"`      // When this state was last modified
+	FirstBlockedAt time.Time  `json:"first_blocked_at"` // When first blocked (earliest across cluster)
 }

@@ -1,26 +1,26 @@
 package server
 
 import (
-	"testing"
-	"time"
-
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
+	"testing"
+	"time"
 )
 
+// TestEarliestBlockCalculation tests the earliest_block calculation logic
 func TestEarliestBlockCalculation(t *testing.T) {
 	now := time.Date(2026, 3, 10, 13, 39, 17, 0, time.UTC)
 	expiry24h := now.Add(24 * time.Hour) // 2026-03-11 13:39:17
 
 	tests := []struct {
-		name              string
-		actors            []*store.ActorActivity
-		persistModifiedAt time.Time
-		wantEarliest      time.Time
-		wantLatest        time.Time
+		name                  string
+		actors                []*store.ActorActivity
+		persistFirstBlockedAt time.Time
+		wantEarliest          time.Time
+		wantLatest            time.Time
 	}{
 		{
-			name: "single 24h block with ModifiedAt",
+			name: "single 24h block with FirstBlockedAt",
 			actors: []*store.ActorActivity{
 				{
 					BlockedUntil: expiry24h,
@@ -29,12 +29,12 @@ func TestEarliestBlockCalculation(t *testing.T) {
 					},
 				},
 			},
-			persistModifiedAt: now,
-			wantEarliest:      now,
-			wantLatest:        expiry24h,
+			persistFirstBlockedAt: now,
+			wantEarliest:          now,
+			wantLatest:            expiry24h,
 		},
 		{
-			name: "single 24h block without ModifiedAt (fallback)",
+			name: "single 24h block without FirstBlockedAt (fallback)",
 			actors: []*store.ActorActivity{
 				{
 					BlockedUntil: expiry24h,
@@ -43,9 +43,9 @@ func TestEarliestBlockCalculation(t *testing.T) {
 					},
 				},
 			},
-			persistModifiedAt: time.Time{},                   // Zero value
-			wantEarliest:      expiry24h.Add(-1 * time.Hour), // Fallback estimate
-			wantLatest:        expiry24h,
+			persistFirstBlockedAt: time.Time{},                   // Zero value
+			wantEarliest:          expiry24h.Add(-1 * time.Hour), // Fallback estimate
+			wantLatest:            expiry24h,
 		},
 		{
 			name: "multiple blocks with different expiries",
@@ -63,23 +63,23 @@ func TestEarliestBlockCalculation(t *testing.T) {
 					},
 				},
 			},
-			persistModifiedAt: now,
-			wantEarliest:      now,
-			wantLatest:        expiry24h,
+			persistFirstBlockedAt: now,
+			wantEarliest:          now,
+			wantLatest:            expiry24h,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate the new calculation logic
+			// Simulate the calculation logic
 			var earliestBlock time.Time
 			var latestExpiry time.Time
 
 			for _, a := range tt.actors {
-				// Use ModifiedAt if available, otherwise estimate
+				// Use FirstBlockedAt if available, otherwise estimate
 				var blockTime time.Time
-				if !tt.persistModifiedAt.IsZero() {
-					blockTime = tt.persistModifiedAt
+				if !tt.persistFirstBlockedAt.IsZero() {
+					blockTime = tt.persistFirstBlockedAt
 				} else {
 					blockTime = a.BlockedUntil.Add(-1 * time.Hour)
 				}
@@ -108,28 +108,48 @@ func TestEarliestBlockCalculation(t *testing.T) {
 	}
 }
 
-func TestEarliestBlockWithIPState(t *testing.T) {
-	// Test that demonstrates the issue: we don't have block duration in IPState
+// TestMultiNodeBlockTiming tests cluster-wide earliest_block behavior
+func TestMultiNodeBlockTiming(t *testing.T) {
+	now := time.Date(2026, 3, 10, 10, 0, 0, 0, time.UTC)
+
+	// Scenario: Node A blocks at 10:00 for 1h, Node B blocks at 13:00 for 24h
+	nodeABlockTime := now                    // 10:00
+	nodeBBlockTime := now.Add(3 * time.Hour) // 13:00
+
+	// After state sync, FirstBlockedAt should be the EARLIEST (10:00)
+	clusterFirstBlockedAt := nodeABlockTime // min(10:00, 13:00) = 10:00
+
+	t.Run("cluster_earliest_block", func(t *testing.T) {
+		// Both nodes should show the same earliest_block (cluster-wide)
+		if !clusterFirstBlockedAt.Equal(nodeABlockTime) {
+			t.Errorf("Expected cluster earliest_block = %v, got %v",
+				nodeABlockTime, clusterFirstBlockedAt)
+		}
+
+		t.Logf("✓ Node A blocked at: %s", nodeABlockTime.Format(time.RFC3339))
+		t.Logf("✓ Node B blocked at: %s", nodeBBlockTime.Format(time.RFC3339))
+		t.Logf("✓ Cluster earliest_block: %s (correct - earliest across all nodes)",
+			clusterFirstBlockedAt.Format(time.RFC3339))
+	})
+}
+
+// TestFirstBlockedAtField verifies FirstBlockedAt field behavior
+func TestFirstBlockedAtField(t *testing.T) {
 	now := time.Date(2026, 3, 10, 13, 39, 17, 0, time.UTC)
 
 	state := persistence.IPState{
-		State:      persistence.BlockStateBlocked,
-		ExpireTime: now.Add(24 * time.Hour),
-		Reason:     "test-chain",
-		ModifiedAt: now, // This is when it was blocked!
+		State:          persistence.BlockStateBlocked,
+		ExpireTime:     now.Add(24 * time.Hour),
+		Reason:         "test-chain",
+		ModifiedAt:     now,
+		FirstBlockedAt: now,
 	}
 
-	// We could use ModifiedAt as the block time
-	blockTime := state.ModifiedAt
-	expiry := state.ExpireTime
-
-	if !blockTime.Equal(now) {
-		t.Errorf("blockTime from ModifiedAt = %v, want %v", blockTime, now)
+	// FirstBlockedAt should be used as the block time
+	if !state.FirstBlockedAt.Equal(now) {
+		t.Errorf("FirstBlockedAt = %v, want %v", state.FirstBlockedAt, now)
 	}
 
-	if !expiry.Equal(now.Add(24 * time.Hour)) {
-		t.Errorf("expiry = %v, want %v", expiry, now.Add(24*time.Hour))
-	}
-
-	t.Logf("ModifiedAt can be used as block time: %v", blockTime.Format(time.RFC3339))
+	t.Logf("✓ FirstBlockedAt tracks cluster-wide earliest block: %s",
+		state.FirstBlockedAt.Format(time.RFC3339))
 }

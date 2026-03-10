@@ -384,12 +384,20 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 			}
 
 			// Update in-memory state
-			p.IPStates[entry.IPInfo.Address] = persistence.IPState{
-				State:      persistence.BlockStateBlocked,
-				ExpireTime: unblockTime,
-				Reason:     reason,
-				ModifiedAt: time.Now(),
+			now := time.Now()
+			existingState, exists := p.IPStates[entry.IPInfo.Address]
+			newState := persistence.IPState{
+				State:          persistence.BlockStateBlocked,
+				ExpireTime:     unblockTime,
+				Reason:         reason,
+				ModifiedAt:     now,
+				FirstBlockedAt: now,
 			}
+			// Preserve FirstBlockedAt if already blocked
+			if exists && !existingState.FirstBlockedAt.IsZero() {
+				newState.FirstBlockedAt = existingState.FirstBlockedAt
+			}
+			p.IPStates[entry.IPInfo.Address] = newState
 		}()
 	}
 
