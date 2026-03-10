@@ -415,6 +415,32 @@ func (p *Processor) RemoveFromPersistence(ip string) error {
 	return nil
 }
 
+// GetIPStates returns the complete IPStates map for state sync.
+func (p *Processor) GetIPStates() map[string]persistence.IPState {
+	return p.IPStates
+}
+
+// GetPersistenceMutex returns the mutex for IPStates.
+func (p *Processor) GetPersistenceMutex() *sync.Mutex {
+	return &p.PersistenceMutex
+}
+
+// GetClusterConfig returns the cluster configuration (nil if not in cluster).
+func (p *Processor) GetClusterConfig() interface{} {
+	return p.Cluster
+}
+
+// GetStateSyncConfig returns state sync configuration values.
+func (p *Processor) GetStateSyncConfig() (bool, bool, time.Duration, bool) {
+	if p.Cluster == nil {
+		return false, false, 0, false
+	}
+	return p.Cluster.StateSync.Enabled,
+		p.Cluster.StateSync.Compression,
+		p.Cluster.StateSync.Timeout,
+		p.Cluster.StateSync.Incremental
+}
+
 func (p *Processor) GetBlockTableNameFallback() string {
 	return p.Config.Blockers.Backends.HAProxy.TableNameFallback
 }

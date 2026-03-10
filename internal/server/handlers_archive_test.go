@@ -1,9 +1,6 @@
 package server
 
 import (
-	"bot-detector/internal/logging"
-	"bot-detector/internal/store"
-	"bot-detector/internal/types"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +8,11 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"bot-detector/internal/logging"
+	"bot-detector/internal/persistence"
+	"bot-detector/internal/store"
+	"bot-detector/internal/types"
 )
 
 type LogFunc func(level logging.LogLevel, tag string, format string, v ...interface{})
@@ -54,6 +56,14 @@ func (m *MockProvider) GetBlocker() interface{}                                {
 func (m *MockProvider) GetDurationTables() map[time.Duration]string            { return nil }
 func (m *MockProvider) GetPersistenceState(ip string) (interface{}, bool)      { return nil, false }
 func (m *MockProvider) RemoveFromPersistence(ip string) error                  { return nil }
+func (m *MockProvider) GetIPStates() map[string]persistence.IPState {
+	return make(map[string]persistence.IPState)
+}
+func (m *MockProvider) GetPersistenceMutex() *sync.Mutex { return &sync.Mutex{} }
+func (m *MockProvider) GetClusterConfig() interface{}    { return nil }
+func (m *MockProvider) GetStateSyncConfig() (bool, bool, time.Duration, bool) {
+	return false, false, 0, false
+}
 
 func TestArchiveHandler_StableETag(t *testing.T) {
 	// Common setup

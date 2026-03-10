@@ -1,9 +1,6 @@
 package server
 
 import (
-	"bot-detector/internal/logging"
-	"bot-detector/internal/store"
-	"bot-detector/internal/types"
 	"bufio"
 	"errors"
 	"fmt"
@@ -17,6 +14,11 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"bot-detector/internal/logging"
+	"bot-detector/internal/persistence"
+	"bot-detector/internal/store"
+	"bot-detector/internal/types"
 )
 
 // mockProvider is a mock implementation of the Provider interface for testing.
@@ -160,6 +162,22 @@ func (m *mockProvider) GetPersistenceState(ip string) (interface{}, bool) {
 
 func (m *mockProvider) RemoveFromPersistence(ip string) error {
 	return nil
+}
+
+func (m *mockProvider) GetIPStates() map[string]persistence.IPState {
+	return make(map[string]persistence.IPState)
+}
+
+func (m *mockProvider) GetPersistenceMutex() *sync.Mutex {
+	return &sync.Mutex{}
+}
+
+func (m *mockProvider) GetClusterConfig() interface{} {
+	return nil
+}
+
+func (m *mockProvider) GetStateSyncConfig() (bool, bool, time.Duration, bool) {
+	return false, false, 0, false
 }
 
 // TestServer_StartAndShutdown verifies the full lifecycle of the stats server.
