@@ -211,7 +211,19 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 	// Add local state
 	m.ipStatesMutex.Lock()
 	for ip, state := range m.ipStates {
-		if state.ExpireTime.After(now) {
+		// Include if:
+		// - Blocked and not expired (ExpireTime in future)
+		// - Unblocked (kept for good actor tracking, ExpireTime is when unblocked)
+		if state.State == persistence.BlockStateBlocked && state.ExpireTime.After(now) {
+			merged[ip] = persistence.IPState{
+				State:          state.State,
+				Reason:         AddSourceNode(state.Reason, m.nodeName, m.nodeAddress),
+				ExpireTime:     state.ExpireTime,
+				ModifiedAt:     state.ModifiedAt,
+				FirstBlockedAt: state.FirstBlockedAt,
+			}
+			localCount++
+		} else if state.State == persistence.BlockStateUnblocked {
 			merged[ip] = persistence.IPState{
 				State:          state.State,
 				Reason:         AddSourceNode(state.Reason, m.nodeName, m.nodeAddress),
