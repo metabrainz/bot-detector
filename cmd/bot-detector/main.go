@@ -349,6 +349,16 @@ func restorePersistenceState(p *app.Processor) error {
 			if err := replayJournalAfter(p, clusterTimestamp); err != nil {
 				p.LogFunc(logging.LevelWarning, "JOURNAL_REPLAY", "Failed to replay local journal: %v", err)
 			}
+
+			// Open journal for appending new events
+			journalPath := filepath.Join(p.StateDir, "events.log")
+			var err error
+			p.JournalHandle, err = persistence.OpenJournalForAppend(journalPath)
+			if err != nil {
+				p.LogFunc(logging.LevelError, "JOURNAL_OPEN_FAIL", "Failed to open journal for writing: %v", err)
+				return err
+			}
+
 			return nil
 		} else {
 			p.LogFunc(logging.LevelWarning, "STATE_SYNC", "Failed to fetch initial state from cluster, falling back to snapshot+journal: %v", fetchErr)
