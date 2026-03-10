@@ -281,8 +281,19 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 		compressionStatus = "enabled"
 	}
 
-	m.log(logging.LevelInfo, "STATE_SYNC", "Cached merged state: %d IPs (local: %d, remote: %d, nodes: %d/%d, compression: %s)",
-		len(merged), localCount, remoteCount, nodesSucceeded+1, nodesSucceeded+nodesFailed+1, compressionStatus)
+	// Count blocked vs unblocked
+	blockedCount := 0
+	unblockedCount := 0
+	for _, state := range merged {
+		if state.State == persistence.BlockStateBlocked {
+			blockedCount++
+		} else {
+			unblockedCount++
+		}
+	}
+
+	m.log(logging.LevelInfo, "STATE_SYNC", "Cached merged state: %d IPs (%d blocked + %d unblocked, local: %d, remote: %d, nodes: %d/%d, compression: %s)",
+		len(merged), blockedCount, unblockedCount, localCount, remoteCount, nodesSucceeded+1, nodesSucceeded+nodesFailed+1, compressionStatus)
 }
 
 // fetchAndMergeFromLeader fetches merged state from leader and merges with local
@@ -346,6 +357,17 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	}
 	m.ipStatesMutex.Unlock()
 
+	// Count blocked vs unblocked in received states
+	blockedCount := 0
+	unblockedCount := 0
+	for _, state := range states {
+		if state.State == persistence.BlockStateBlocked {
+			blockedCount++
+		} else {
+			unblockedCount++
+		}
+	}
+
 	// Format sync mode for logging
 	syncMode := "full"
 	if isIncremental {
@@ -356,8 +378,8 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 		compressionStatus = "yes"
 	}
 
-	m.log(logging.LevelInfo, "STATE_SYNC", "Merged %d IPs from leader (mode: %s, compressed: %s, size: %.1f KB, rate: %.1f KB/s, duration: %v)",
-		len(states), syncMode, compressionStatus, metrics.SizeKB, metrics.RateKBps, metrics.Duration.Round(time.Millisecond))
+	m.log(logging.LevelInfo, "STATE_SYNC", "Merged %d IPs from leader (%d blocked + %d unblocked, mode: %s, compressed: %s, size: %.1f KB, rate: %.1f KB/s, duration: %v)",
+		len(states), blockedCount, unblockedCount, syncMode, compressionStatus, metrics.SizeKB, metrics.RateKBps, metrics.Duration.Round(time.Millisecond))
 }
 
 // fetchNodeState fetches state from a specific node
