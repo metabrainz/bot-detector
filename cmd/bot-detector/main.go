@@ -342,6 +342,7 @@ func restorePersistenceState(p *app.Processor) error {
 	// Optimization: If state sync is enabled and we're a follower, fetch state from cluster
 	// and only replay local journal entries that are newer than cluster state
 	if p.Cluster != nil && p.Cluster.StateSync.Enabled && p.NodeRole == "follower" {
+		p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Attempting to fetch initial state from cluster...")
 		if clusterTimestamp, fetchErr := fetchInitialStateFromCluster(p); fetchErr == nil {
 			p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Successfully fetched initial state from cluster")
 			// Still need to replay local journal entries newer than cluster state
@@ -351,6 +352,15 @@ func restorePersistenceState(p *app.Processor) error {
 			return nil
 		} else {
 			p.LogFunc(logging.LevelWarning, "STATE_SYNC", "Failed to fetch initial state from cluster, falling back to snapshot+journal: %v", fetchErr)
+		}
+	} else {
+		// Log why we're not using cluster fetch
+		if p.Cluster == nil {
+			p.LogFunc(logging.LevelDebug, "STATE_SYNC", "Cluster not configured, using snapshot+journal")
+		} else if !p.Cluster.StateSync.Enabled {
+			p.LogFunc(logging.LevelInfo, "STATE_SYNC", "State sync disabled, using snapshot+journal")
+		} else if p.NodeRole != "follower" {
+			p.LogFunc(logging.LevelDebug, "STATE_SYNC", "Leader node, using snapshot+journal")
 		}
 	}
 
