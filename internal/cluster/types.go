@@ -63,6 +63,9 @@ type ClusterConfig struct {
 
 	// Protocol specifies the protocol to use for cluster communication ("http" or "https").
 	Protocol string
+
+	// StateSync contains configuration for state synchronization.
+	StateSync StateSyncConfig
 }
 
 // Validate checks if the ClusterConfig is properly configured.

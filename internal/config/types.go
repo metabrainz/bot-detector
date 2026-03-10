@@ -179,10 +179,20 @@ type HAProxyConfigYAML struct {
 
 // ClusterConfigYAML represents the cluster configuration in YAML format.
 type ClusterConfigYAML struct {
-	Nodes                 []NodeConfigYAML `yaml:"nodes"`
-	ConfigPollInterval    string           `yaml:"config_poll_interval"`
-	MetricsReportInterval string           `yaml:"metrics_report_interval"`
-	Protocol              string           `yaml:"protocol"`
+	Nodes                 []NodeConfigYAML     `yaml:"nodes"`
+	ConfigPollInterval    string               `yaml:"config_poll_interval"`
+	MetricsReportInterval string               `yaml:"metrics_report_interval"`
+	Protocol              string               `yaml:"protocol"`
+	StateSync             *StateSyncConfigYAML `yaml:"state_sync"`
+}
+
+// StateSyncConfigYAML represents state sync configuration in YAML format.
+type StateSyncConfigYAML struct {
+	Enabled     *bool  `yaml:"enabled"`
+	Interval    string `yaml:"interval"`
+	Compression *bool  `yaml:"compression"`
+	Timeout     string `yaml:"timeout"`
+	Incremental *bool  `yaml:"incremental"`
 }
 
 // NodeConfigYAML represents a single node in the cluster in YAML format.

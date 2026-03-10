@@ -830,6 +830,7 @@ func parseClusterConfig(config *TopLevelConfig) (*cluster.ClusterConfig, error) 
 		ConfigPollInterval:    configPollInterval,
 		MetricsReportInterval: metricsReportInterval,
 		Protocol:              protocol,
+		StateSync:             parseStateSyncConfig(config.Cluster.StateSync),
 	}
 
 	// Validate the cluster configuration
@@ -838,6 +839,52 @@ func parseClusterConfig(config *TopLevelConfig) (*cluster.ClusterConfig, error) 
 	}
 
 	return clusterConfig, nil
+}
+
+// parseStateSyncConfig parses state sync configuration with defaults.
+func parseStateSyncConfig(yamlConfig *StateSyncConfigYAML) cluster.StateSyncConfig {
+	config := cluster.StateSyncConfig{
+		Enabled:     true, // Default: enabled
+		Interval:    60 * time.Second,
+		Compression: true, // Default: enabled
+		Timeout:     30 * time.Second,
+		Incremental: false, // Default: full sync
+	}
+
+	if yamlConfig == nil {
+		return config
+	}
+
+	// Parse enabled flag
+	if yamlConfig.Enabled != nil {
+		config.Enabled = *yamlConfig.Enabled
+	}
+
+	// Parse interval
+	if yamlConfig.Interval != "" {
+		if interval, err := time.ParseDuration(yamlConfig.Interval); err == nil {
+			config.Interval = interval
+		}
+	}
+
+	// Parse compression flag
+	if yamlConfig.Compression != nil {
+		config.Compression = *yamlConfig.Compression
+	}
+
+	// Parse timeout
+	if yamlConfig.Timeout != "" {
+		if timeout, err := time.ParseDuration(yamlConfig.Timeout); err == nil {
+			config.Timeout = timeout
+		}
+	}
+
+	// Parse incremental flag
+	if yamlConfig.Incremental != nil {
+		config.Incremental = *yamlConfig.Incremental
+	}
+
+	return config
 }
 
 func parseStringAndBoolSettings(config *TopLevelConfig) (string, string, bool, string, error) {
