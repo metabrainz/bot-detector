@@ -282,7 +282,7 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 	}
 
 	m.log(logging.LevelInfo, "STATE_SYNC", "Cached merged state: %d IPs (local: %d, remote: %d, nodes: %d/%d, compression: %s)",
-		len(merged), localCount, remoteCount, nodesSucceeded, nodesSucceeded+nodesFailed, compressionStatus)
+		len(merged), localCount, remoteCount, nodesSucceeded+1, nodesSucceeded+nodesFailed+1, compressionStatus)
 }
 
 // fetchAndMergeFromLeader fetches merged state from leader and merges with local
