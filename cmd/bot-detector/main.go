@@ -792,21 +792,23 @@ func execute(params *commandline.AppParameters) error {
 		unblockedIPs := make(map[string]string)
 
 		// Use persistence state if available, otherwise use activity store
-		if p.PersistenceEnabled && len(p.IPStates) > 0 {
+		if p.PersistenceEnabled {
 			// Resync from persistence state (more reliable)
 			p.PersistenceMutex.Lock()
-			for ip, state := range p.IPStates {
-				switch state.State {
-				case persistence.BlockStateBlocked:
-					remaining := time.Until(state.ExpireTime)
-					if remaining > 0 {
-						blockedIPs[ip] = blocker.BlockInfo{
-							Duration: remaining,
-							Reason:   state.Reason,
+			if len(p.IPStates) > 0 {
+				for ip, state := range p.IPStates {
+					switch state.State {
+					case persistence.BlockStateBlocked:
+						remaining := time.Until(state.ExpireTime)
+						if remaining > 0 {
+							blockedIPs[ip] = blocker.BlockInfo{
+								Duration: remaining,
+								Reason:   state.Reason,
+							}
 						}
+					case persistence.BlockStateUnblocked:
+						unblockedIPs[ip] = state.Reason
 					}
-				case persistence.BlockStateUnblocked:
-					unblockedIPs[ip] = state.Reason
 				}
 			}
 			p.PersistenceMutex.Unlock()
