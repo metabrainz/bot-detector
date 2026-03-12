@@ -208,7 +208,8 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 		return time.Time{}, err
 	}
 
-	// Apply fetched state
+	// Apply fetched state - must hold lock as health check may be running
+	p.PersistenceMutex.Lock()
 	p.IPStates = states
 
 	// Intern all reason strings to save memory
@@ -225,6 +226,7 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 		}
 	}
 	unblockedCount := len(p.IPStates) - blockedCount
+	p.PersistenceMutex.Unlock()
 
 	modeStr := "gz,full"
 	if !m.Compressed {
@@ -270,6 +272,8 @@ func replayJournalAfter(p *app.Processor, after time.Time) error {
 		if v1Entry.Timestamp.After(after) {
 			reason := p.InternReason(v1Entry.Event.Reason)
 
+			// Must hold lock as health check may be running
+			p.PersistenceMutex.Lock()
 			switch v1Entry.Event.Type {
 			case persistence.EventTypeBlock:
 				blockEvents++
@@ -288,6 +292,7 @@ func replayJournalAfter(p *app.Processor, after time.Time) error {
 					ModifiedAt: v1Entry.Timestamp,
 				}
 			}
+			p.PersistenceMutex.Unlock()
 		} else {
 			skippedEvents++
 		}
@@ -368,6 +373,9 @@ func restorePersistenceState(p *app.Processor) error {
 		p.LogFunc(logging.LevelError, "STATE_LOAD_FAIL", "Failed to load snapshot: %v", err)
 		return err
 	}
+
+	// Must hold lock as health check may be running
+	p.PersistenceMutex.Lock()
 	p.IPStates = snapshot.IPStates
 
 	// Intern all reason strings to save memory
@@ -384,6 +392,7 @@ func restorePersistenceState(p *app.Processor) error {
 		}
 	}
 	unblockedCount := len(p.IPStates) - blockedCount
+	p.PersistenceMutex.Unlock()
 
 	// Log snapshot details
 	if fileInfo, err := os.Stat(snapshotPath); err == nil {
@@ -418,6 +427,8 @@ func restorePersistenceState(p *app.Processor) error {
 				// Intern reason to save memory
 				reason := p.InternReason(v1Entry.Event.Reason)
 
+				// Must hold lock as health check may be running
+				p.PersistenceMutex.Lock()
 				switch v1Entry.Event.Type {
 				case persistence.EventTypeBlock:
 					blockEvents++
@@ -436,6 +447,7 @@ func restorePersistenceState(p *app.Processor) error {
 						ModifiedAt: v1Entry.Timestamp,
 					}
 				}
+				p.PersistenceMutex.Unlock()
 			} else {
 				skippedEvents++
 			}
