@@ -794,6 +794,7 @@ func execute(params *commandline.AppParameters) error {
 		// Use persistence state if available, otherwise use activity store
 		if p.PersistenceEnabled && len(p.IPStates) > 0 {
 			// Resync from persistence state (more reliable)
+			p.PersistenceMutex.Lock()
 			for ip, state := range p.IPStates {
 				switch state.State {
 				case persistence.BlockStateBlocked:
@@ -808,6 +809,7 @@ func execute(params *commandline.AppParameters) error {
 					unblockedIPs[ip] = state.Reason
 				}
 			}
+			p.PersistenceMutex.Unlock()
 		} else {
 			// Resync from activity store (in-memory only)
 			p.ActivityMutex.RLock()
