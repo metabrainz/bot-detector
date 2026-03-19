@@ -740,50 +740,43 @@ func parseAndNormalizeYAML(configFilePath string) (*TopLevelConfig, []byte, erro
 	return &config, data, nil
 }
 
+// parseDurationField parses a duration string with a default fallback.
+func parseDurationField(value, defaultValue, fieldName string) (time.Duration, error) {
+	durationStr := defaultValue
+	if value != "" {
+		durationStr = value
+	}
+	duration, err := time.ParseDuration(durationStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s format: %w", fieldName, err)
+	}
+	return duration, nil
+}
+
 func parseDurations(config *TopLevelConfig) (time.Duration, time.Duration, time.Duration, time.Duration, time.Duration, error) {
-	pollingIntervalStr := DefaultPollingInterval
-	if config.Application.Config.PollingInterval != "" {
-		pollingIntervalStr = config.Application.Config.PollingInterval
-	}
-	pollingInterval, err := time.ParseDuration(pollingIntervalStr)
+	pollingInterval, err := parseDurationField(config.Application.Config.PollingInterval, DefaultPollingInterval, "polling_interval")
 	if err != nil {
-		return 0, 0, 0, 0, 0, fmt.Errorf("invalid polling_interval format: %w", err)
+		return 0, 0, 0, 0, 0, err
 	}
 
-	cleanupIntervalStr := DefaultCleanupInterval
-	if config.Checker.ActorCleanupInterval != "" {
-		cleanupIntervalStr = config.Checker.ActorCleanupInterval
-	}
-	cleanupInterval, err := time.ParseDuration(cleanupIntervalStr)
+	cleanupInterval, err := parseDurationField(config.Checker.ActorCleanupInterval, DefaultCleanupInterval, "cleanup_interval")
 	if err != nil {
-		return 0, 0, 0, 0, 0, fmt.Errorf("invalid cleanup_interval format: %w", err)
+		return 0, 0, 0, 0, 0, err
 	}
 
-	idleTimeoutStr := DefaultIdleTimeout
-	if config.Checker.ActorStateIdleTimeout != "" {
-		idleTimeoutStr = config.Checker.ActorStateIdleTimeout
-	}
-	idleTimeout, err := time.ParseDuration(idleTimeoutStr)
+	idleTimeout, err := parseDurationField(config.Checker.ActorStateIdleTimeout, DefaultIdleTimeout, "idle_timeout")
 	if err != nil {
-		return 0, 0, 0, 0, 0, fmt.Errorf("invalid idle_timeout format: %w", err)
+		return 0, 0, 0, 0, 0, err
 	}
 
-	outOfOrderToleranceStr := DefaultOutOfOrderTolerance
-	if config.Parser.OutOfOrderTolerance != "" {
-		outOfOrderToleranceStr = config.Parser.OutOfOrderTolerance
-	}
-	outOfOrderTolerance, err := time.ParseDuration(outOfOrderToleranceStr)
+	outOfOrderTolerance, err := parseDurationField(config.Parser.OutOfOrderTolerance, DefaultOutOfOrderTolerance, "out_of_order_tolerance")
 	if err != nil {
-		return 0, 0, 0, 0, 0, fmt.Errorf("invalid out_of_order_tolerance format: %w", err)
+		return 0, 0, 0, 0, 0, err
 	}
 
-	eofPollingDelayStr := DefaultEOFPollingDelay
-	if config.Application.EOFPollingDelay != "" {
-		eofPollingDelayStr = config.Application.EOFPollingDelay
-	}
-	eofPollingDelay, err := time.ParseDuration(eofPollingDelayStr)
+	eofPollingDelay, err := parseDurationField(config.Application.EOFPollingDelay, DefaultEOFPollingDelay, "eof_polling_delay")
 	if err != nil {
-		return 0, 0, 0, 0, 0, fmt.Errorf("invalid eof_polling_delay format: %w", err)
+		return 0, 0, 0, 0, 0, err
 	}
 
 	return pollingInterval, cleanupInterval, idleTimeout, outOfOrderTolerance, eofPollingDelay, nil
@@ -837,6 +830,7 @@ func parseClusterConfig(config *TopLevelConfig) (*cluster.ClusterConfig, error) 
 		ConfigPollInterval:    configPollInterval,
 		MetricsReportInterval: metricsReportInterval,
 		Protocol:              protocol,
+		StateSync:             parseStateSyncConfig(config.Cluster.StateSync),
 	}
 
 	// Validate the cluster configuration
@@ -845,6 +839,71 @@ func parseClusterConfig(config *TopLevelConfig) (*cluster.ClusterConfig, error) 
 	}
 
 	return clusterConfig, nil
+}
+
+// parseStateSyncConfig parses state sync configuration with defaults.
+func parseStateSyncConfig(yamlConfig *StateSyncConfigYAML) cluster.StateSyncConfig {
+	config := cluster.StateSyncConfig{
+		Enabled:     true, // Default: enabled
+		Interval:    60 * time.Second,
+		Compression: true, // Default: enabled
+		Timeout:     30 * time.Second,
+		Incremental: true, // Default: incremental sync (more efficient)
+	}
+
+	if yamlConfig == nil {
+		return config
+	}
+
+	// Parse enabled flag
+	if yamlConfig.Enabled != nil {
+		config.Enabled = *yamlConfig.Enabled
+	}
+
+	// Parse interval
+	if yamlConfig.Interval != "" {
+		if interval, err := time.ParseDuration(yamlConfig.Interval); err == nil {
+			config.Interval = interval
+		}
+	}
+
+	// Parse compression flag
+	if yamlConfig.Compression != nil {
+		config.Compression = *yamlConfig.Compression
+	}
+
+	// Parse timeout
+	if yamlConfig.Timeout != "" {
+		if timeout, err := time.ParseDuration(yamlConfig.Timeout); err == nil {
+			config.Timeout = timeout
+		}
+	}
+
+	// Parse incremental flag
+	if yamlConfig.Incremental != nil {
+		config.Incremental = *yamlConfig.Incremental
+	}
+
+	return config
+}
+
+// NewClusterConfigWithDefaults creates a ClusterConfig with default values.
+// Use this when creating cluster config from environment variables or other sources
+// that don't have full YAML configuration.
+func NewClusterConfigWithDefaults(nodes []cluster.NodeConfig) *cluster.ClusterConfig {
+	return &cluster.ClusterConfig{
+		Nodes:                 nodes,
+		ConfigPollInterval:    10 * time.Second,
+		MetricsReportInterval: 30 * time.Second,
+		Protocol:              "http",
+		StateSync: cluster.StateSyncConfig{
+			Enabled:     true,
+			Interval:    60 * time.Second,
+			Compression: true,
+			Timeout:     30 * time.Second,
+			Incremental: true,
+		},
+	}
 }
 
 func parseStringAndBoolSettings(config *TopLevelConfig) (string, string, bool, string, error) {
@@ -960,6 +1019,7 @@ func parseChains(config *TopLevelConfig, fileDeps map[string]*types.FileDependen
 			UsesDefaultBlockDuration: usesDefault,
 			MatchKey:                 yamlChain.MatchKey,
 			OnMatch:                  yamlChain.OnMatch,
+			Websites:                 yamlChain.Websites,
 			StepsYAML:                yamlChain.Steps,
 			MetricsCounter:           new(atomic.Int64),
 			MetricsResetCounter:      new(atomic.Int64),
@@ -1157,6 +1217,115 @@ func parseBlockerSettings(config *TopLevelConfig) (*BlockerSettings, error) {
 	}, nil
 }
 
+// validateWebsites validates the websites configuration.
+// resolveWebsiteLogPaths resolves relative log paths using root_dir
+func resolveWebsiteLogPaths(websites []WebsiteConfig, rootDir, configFilePath string) ([]WebsiteConfig, error) {
+	if len(websites) == 0 {
+		return websites, nil
+	}
+
+	// Determine the base directory for relative paths
+	baseDir := rootDir
+	if baseDir == "" {
+		// Default to current working directory (consistent with --log-path behavior)
+		var err error
+		baseDir, err = os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get working directory: %w", err)
+		}
+	} else if !filepath.IsAbs(baseDir) {
+		// root_dir itself is relative, make it relative to working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get working directory: %w", err)
+		}
+		baseDir = filepath.Join(cwd, baseDir)
+	}
+
+	// Resolve each website's log path
+	resolved := make([]WebsiteConfig, len(websites))
+	for i, website := range websites {
+		resolved[i] = website
+		if website.LogPath != "" && !filepath.IsAbs(website.LogPath) {
+			resolved[i].LogPath = filepath.Join(baseDir, website.LogPath)
+		}
+	}
+
+	return resolved, nil
+}
+
+func validateWebsites(websites []WebsiteConfig, chains []BehavioralChain) error {
+	if len(websites) == 0 {
+		return nil // No websites configured, skip validation
+	}
+
+	// Check unique website names
+	names := make(map[string]bool)
+	vhosts := make(map[string]string)
+
+	for _, ws := range websites {
+		if ws.Name == "" {
+			return fmt.Errorf("website name cannot be empty")
+		}
+		if names[ws.Name] {
+			return fmt.Errorf("duplicate website name: %s", ws.Name)
+		}
+		names[ws.Name] = true
+
+		// Empty vhosts list is allowed (catch-all website)
+		// If vhosts are specified, validate them
+		if len(ws.VHosts) > 0 {
+			for _, vh := range ws.VHosts {
+				if vh == "" {
+					return fmt.Errorf("website '%s' has an empty vhost", ws.Name)
+				}
+				if existing, ok := vhosts[vh]; ok {
+					return fmt.Errorf("vhost '%s' defined in both '%s' and '%s'", vh, existing, ws.Name)
+				}
+				vhosts[vh] = ws.Name
+			}
+		}
+
+		if ws.LogPath == "" {
+			return fmt.Errorf("website '%s' must have a log_path", ws.Name)
+		}
+	}
+
+	return nil
+}
+
+// filterInvalidWebsitesFromChains validates chain website references and filters out invalid ones.
+// It logs warnings for invalid website references but doesn't fail the config load.
+// If a chain has all invalid websites, it's effectively disabled (won't match anything).
+func filterInvalidWebsitesFromChains(chains []BehavioralChain, validWebsites map[string]bool) {
+	for i := range chains {
+		if len(chains[i].Websites) == 0 {
+			continue // Global chain, nothing to filter
+		}
+
+		validWebsiteList := make([]string, 0, len(chains[i].Websites))
+		for _, ws := range chains[i].Websites {
+			if !validWebsites[ws] {
+				logging.LogOutput(logging.LevelWarning, "CONFIG",
+					"Chain '%s' references unknown website '%s' - ignoring this website reference",
+					chains[i].Name, ws)
+			} else {
+				validWebsiteList = append(validWebsiteList, ws)
+			}
+		}
+
+		// Update the chain's website list with only valid websites
+		chains[i].Websites = validWebsiteList
+
+		// If all websites were invalid, log additional warning
+		if len(chains[i].Websites) == 0 {
+			logging.LogOutput(logging.LevelWarning, "CONFIG",
+				"Chain '%s' has no valid website references - chain will be disabled",
+				chains[i].Name)
+		}
+	}
+}
+
 // LoadConfigFromYAML reads, parses, and pre-compiles regexes for the chains.
 func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	depGraph, err := buildDependencyGraph(opts.ConfigFilePath)
@@ -1255,6 +1424,9 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 	if persistenceConfig.CompactionInterval == 0 {
 		persistenceConfig.CompactionInterval = time.Hour
 	}
+	if persistenceConfig.RetentionPeriod == 0 {
+		persistenceConfig.RetentionPeriod = 7 * 24 * time.Hour // 1 week default
+	}
 
 	var maxTimeSinceLastHit time.Duration
 	for _, chain := range newChains {
@@ -1265,6 +1437,26 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 
 	// Validate unique names
 	if err := validateUniqueNames(newChains, newGoodActors); err != nil {
+		return nil, err
+	}
+
+	// Validate websites configuration (structure only)
+	if err := validateWebsites(config.Websites, newChains); err != nil {
+		return nil, err
+	}
+
+	// Build valid website names map
+	validWebsites := make(map[string]bool)
+	for _, ws := range config.Websites {
+		validWebsites[ws.Name] = true
+	}
+
+	// Filter invalid website references from chains (logs warnings, doesn't fail)
+	filterInvalidWebsitesFromChains(newChains, validWebsites)
+
+	// Resolve relative log paths for websites
+	resolvedWebsites, err := resolveWebsiteLogPaths(config.Websites, config.RootDir, opts.ConfigFilePath)
+	if err != nil {
 		return nil, err
 	}
 
@@ -1311,6 +1503,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 			},
 		},
 		Cluster:          clusterConfig,
+		Websites:         resolvedWebsites,
 		GoodActors:       newGoodActors,
 		Chains:           newChains,
 		FileDependencies: newFileDependencies,

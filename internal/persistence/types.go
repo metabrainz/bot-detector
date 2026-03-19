@@ -15,6 +15,7 @@ const (
 type PersistenceConfig struct {
 	Enabled            *bool         `yaml:"enabled"`
 	CompactionInterval time.Duration `yaml:"compaction_interval"`
+	RetentionPeriod    time.Duration `yaml:"retention_period"` // How long to keep unblocked entries
 }
 
 // EventType defines the type of an audit event.
@@ -123,7 +124,9 @@ type SnapshotV1 struct {
 
 // IPState represents the current state of an IP (blocked or unblocked).
 type IPState struct {
-	State      BlockState `json:"state"`
-	ExpireTime time.Time  `json:"expire_time"`
-	Reason     string     `json:"reason"`
+	State          BlockState `json:"state"`
+	ExpireTime     time.Time  `json:"expire_time"`
+	Reason         string     `json:"reason"`
+	ModifiedAt     time.Time  `json:"modified_at"`      // When this state was last modified
+	FirstBlockedAt time.Time  `json:"first_blocked_at"` // When first blocked (earliest across cluster)
 }

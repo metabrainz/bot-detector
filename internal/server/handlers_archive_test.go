@@ -1,9 +1,6 @@
 package server
 
 import (
-	"bot-detector/internal/logging"
-	"bot-detector/internal/store"
-	"bot-detector/internal/types"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +8,11 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"bot-detector/internal/logging"
+	"bot-detector/internal/persistence"
+	"bot-detector/internal/store"
+	"bot-detector/internal/types"
 )
 
 type LogFunc func(level logging.LogLevel, tag string, format string, v ...interface{})
@@ -40,7 +42,7 @@ func (m *MockProvider) GetShutdownChannel() chan os.Signal                     {
 func (m *MockProvider) GetNodeStatus() NodeStatus                              { return NodeStatus{} }
 func (m *MockProvider) GetMetricsSnapshot() MetricsSnapshot                    { return MetricsSnapshot{} }
 func (m *MockProvider) GetAggregatedMetrics() interface{}                      { return nil }
-func (m *MockProvider) GenerateHTMLMetricsReport() string                      { return "" }
+func (m *MockProvider) GenerateMetricsReport() string                          { return "" }
 func (m *MockProvider) GenerateStepsMetricsReport() string                     { return "" }
 func (m *MockProvider) GetMarshalledConfig() ([]byte, time.Time, error)        { return nil, time.Time{}, nil }
 func (m *MockProvider) GetActivityStore() map[store.Actor]*store.ActorActivity { return nil }
@@ -54,6 +56,18 @@ func (m *MockProvider) GetBlocker() interface{}                                {
 func (m *MockProvider) GetDurationTables() map[time.Duration]string            { return nil }
 func (m *MockProvider) GetPersistenceState(ip string) (interface{}, bool)      { return nil, false }
 func (m *MockProvider) RemoveFromPersistence(ip string) error                  { return nil }
+func (m *MockProvider) GetIPStates() map[string]persistence.IPState {
+	return make(map[string]persistence.IPState)
+}
+func (m *MockProvider) GetPersistenceMutex() *sync.Mutex { return &sync.Mutex{} }
+func (m *MockProvider) GetClusterConfig() interface{}    { return nil }
+func (m *MockProvider) GetStateSyncConfig() (bool, bool, time.Duration, bool) {
+	return false, false, 0, false
+}
+
+func (m *MockProvider) GetStateSyncManager() interface{} {
+	return nil
+}
 
 func TestArchiveHandler_StableETag(t *testing.T) {
 	// Common setup
@@ -171,4 +185,8 @@ func TestArchiveHandler_StableETag(t *testing.T) {
 	if etag1 == etag3 {
 		t.Errorf("ETag should have changed when config content changed, but it remained the same: %s", etag1)
 	}
+}
+
+func (m *MockProvider) GenerateWebsiteStatsReport() string {
+	return ""
 }

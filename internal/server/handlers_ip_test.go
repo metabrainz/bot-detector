@@ -13,6 +13,7 @@ import (
 
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
 	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
@@ -226,7 +227,7 @@ func (m *mockIPProvider) Log(level logging.LogLevel, tag string, format string, 
 func (m *mockIPProvider) GetConfigForArchive() ([]byte, time.Time, map[string]*types.FileDependency, string, error) {
 	return nil, time.Time{}, nil, "", nil
 }
-func (m *mockIPProvider) GenerateHTMLMetricsReport() string  { return "" }
+func (m *mockIPProvider) GenerateMetricsReport() string      { return "" }
 func (m *mockIPProvider) GenerateStepsMetricsReport() string { return "" }
 func (m *mockIPProvider) GetMarshalledConfig() ([]byte, time.Time, error) {
 	return nil, time.Time{}, nil
@@ -236,6 +237,18 @@ func (m *mockIPProvider) GetMetricsSnapshot() MetricsSnapshot               { re
 func (m *mockIPProvider) GetAggregatedMetrics() interface{}                 { return nil }
 func (m *mockIPProvider) GetPersistenceState(ip string) (interface{}, bool) { return nil, false }
 func (m *mockIPProvider) RemoveFromPersistence(ip string) error             { return nil }
+func (m *mockIPProvider) GetIPStates() map[string]persistence.IPState {
+	return make(map[string]persistence.IPState)
+}
+func (m *mockIPProvider) GetPersistenceMutex() *sync.Mutex { return &sync.Mutex{} }
+func (m *mockIPProvider) GetClusterConfig() interface{}    { return nil }
+func (m *mockIPProvider) GetStateSyncConfig() (bool, bool, time.Duration, bool) {
+	return false, false, 0, false
+}
+
+func (m *mockIPProvider) GetStateSyncManager() interface{} {
+	return nil
+}
 
 func TestAPIIPLookupHandler_JSON(t *testing.T) {
 	now := time.Now()
@@ -887,4 +900,8 @@ func TestBroadcastToFollowers_SkipsSelf(t *testing.T) {
 	if receivedRequests != 0 {
 		t.Errorf("Expected node to skip itself, but received %d requests", receivedRequests)
 	}
+}
+
+func (m *mockIPProvider) GenerateWebsiteStatsReport() string {
+	return ""
 }

@@ -44,11 +44,17 @@ type Tailer struct {
 	}
 }
 
+// logRotation logs a rotation detection event with consistent formatting.
+func (t *Tailer) logRotation(reason string, dev1, ino1, dev2, ino2 uint64) {
+	t.logger(logging.LevelInfo, "TAIL", "Detected log file rotation (Inode/Device %s: %d/%d vs %d/%d). Reopening file: %s",
+		reason, dev1, ino1, dev2, ino2, t.path)
+}
+
 // NewTailer creates and initializes a new Tailer. It opens the file, gets its
 // initial stats for rotation detection, and seeks to the end for live tailing.
-func NewTailer(p *app.Processor, seekToEnd bool) (*Tailer, error) {
+func NewTailer(p *app.Processor, logPath string, seekToEnd bool) (*Tailer, error) {
 	t := &Tailer{
-		path:   p.LogPath,
+		path:   logPath,
 		logger: p.LogFunc,
 	}
 	t.config.EOFPollingDelay = p.Config.Application.EOFPollingDelay
@@ -161,16 +167,14 @@ func (t *Tailer) checkForRotation() bool {
 			// This can happen if the original file was unlinked and a new one created,
 			// and our handle now points to the new one (less common, but possible depending on OS/fs).
 			if currentFileStatT.Dev != initialStatT.Dev || currentFileStatT.Ino != initialStatT.Ino {
-				t.logger(logging.LevelInfo, "TAIL", "Detected log file rotation (Inode/Device of open handle changed from initial: %d/%d -> %d/%d). Reopening file.",
-					initialStatT.Dev, initialStatT.Ino, currentFileStatT.Dev, currentFileStatT.Ino)
+				t.logRotation("open handle changed from initial", initialStatT.Dev, initialStatT.Ino, currentFileStatT.Dev, currentFileStatT.Ino)
 				return true
 			}
 
 			// Check if the file at the path has changed from what our open handle is pointing to.
 			// This is the primary detection for `mv` style rotations.
 			if currentFileStatT.Dev != currentPathStatT.Dev || currentFileStatT.Ino != currentPathStatT.Ino {
-				t.logger(logging.LevelInfo, "TAIL", "Detected log file rotation (Inode/Device of open handle differs from path: %d/%d vs %d/%d). Reopening file.",
-					currentFileStatT.Dev, currentFileStatT.Ino, currentPathStatT.Dev, currentPathStatT.Ino)
+				t.logRotation("open handle differs from path", currentFileStatT.Dev, currentFileStatT.Ino, currentPathStatT.Dev, currentPathStatT.Ino)
 				return true
 			}
 		} else {
@@ -450,6 +454,12 @@ func CleanupTopActors(p *app.Processor, stop <-chan struct{}) {
 
 // LiveLogTailer continuously tails a log file, handling rotation and truncation.
 func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan<- struct{}) {
+	// Read LogPath and ProcessLogLine once at the start (thread-safe in multi-website mode)
+	p.LogPathMutex.Lock()
+	logPath := p.LogPath
+	processLogLine := p.ProcessLogLine // Capture locally to avoid races
+	p.LogPathMutex.Unlock()
+
 	var (
 		firstRun = true // Flag to control initial seek behavior.
 		shutdown = false
@@ -469,7 +479,7 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 			}
 		}
 
-		p.LogFunc(logging.LevelInfo, "TAIL", "Starting log tailer on %s...", p.LogPath)
+		p.LogFunc(logging.LevelInfo, "TAIL", "Starting log tailer on %s...", logPath)
 
 		// Determine whether to seek to end on this iteration.
 		// On the very first run, seek to the end to ignore old content,
@@ -478,10 +488,10 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 		isFirstRun := firstRun // Save before modifying
 		firstRun = false
 
-		tailer, err := NewTailer(p, seekToEnd)
+		tailer, err := NewTailer(p, logPath, seekToEnd)
 		if err != nil {
 			// File not found or error on initial open, wait and retry.
-			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", p.LogPath, err, config.ErrorRetryDelay)
+			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", logPath, err, config.ErrorRetryDelay)
 			restartTailing(config.ErrorRetryDelay)
 			continue
 		}
@@ -542,7 +552,7 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 				break // Break the inner loop to force a file reopen via the outer loop.
 			}
 
-			p.ProcessLogLine(line)
+			processLogLine(line) // Use local copy to avoid race
 			p.Metrics.LinesProcessed.Add(1)
 		}
 	}

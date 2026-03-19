@@ -1,9 +1,6 @@
 package server
 
 import (
-	"bot-detector/internal/logging"
-	"bot-detector/internal/store"
-	"bot-detector/internal/types"
 	"bufio"
 	"errors"
 	"fmt"
@@ -17,6 +14,11 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"bot-detector/internal/logging"
+	"bot-detector/internal/persistence"
+	"bot-detector/internal/store"
+	"bot-detector/internal/types"
 )
 
 // mockProvider is a mock implementation of the Provider interface for testing.
@@ -46,7 +48,7 @@ func (m *mockProvider) GetListenConfigs() interface{} {
 	return []ListenConfig{&mockListenConfig{address: m.listenAddr}}
 }
 
-func (m *mockProvider) GenerateHTMLMetricsReport() string {
+func (m *mockProvider) GenerateMetricsReport() string {
 	return m.reportContent
 }
 
@@ -159,6 +161,26 @@ func (m *mockProvider) GetPersistenceState(ip string) (interface{}, bool) {
 }
 
 func (m *mockProvider) RemoveFromPersistence(ip string) error {
+	return nil
+}
+
+func (m *mockProvider) GetIPStates() map[string]persistence.IPState {
+	return make(map[string]persistence.IPState)
+}
+
+func (m *mockProvider) GetPersistenceMutex() *sync.Mutex {
+	return &sync.Mutex{}
+}
+
+func (m *mockProvider) GetClusterConfig() interface{} {
+	return nil
+}
+
+func (m *mockProvider) GetStateSyncConfig() (bool, bool, time.Duration, bool) {
+	return false, false, 0, false
+}
+
+func (m *mockProvider) GetStateSyncManager() interface{} {
 	return nil
 }
 
@@ -382,4 +404,8 @@ func TestServer_Disabled(t *testing.T) {
 	if len(mockProvider.logs) != 1 || !strings.Contains(mockProvider.logs[0], "Server is disabled") {
 		t.Errorf("Expected disabled server log message, but got: %v", mockProvider.logs)
 	}
+}
+
+func (m *mockProvider) GenerateWebsiteStatsReport() string {
+	return ""
 }

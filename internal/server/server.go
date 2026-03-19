@@ -6,6 +6,7 @@
 //   - GET /                - Plain-text metrics dashboard
 //   - GET /stats           - Plain-text metrics dashboard (alias)
 //   - GET /stats/steps     - Plain-text step execution counts
+//   - GET /stats/websites  - Multi-website statistics and unknown vhosts
 //   - GET /config          - Raw YAML configuration
 //   - GET /config/archive  - Tar.gz archive of config + dependencies
 //   - GET /ip/{ip}         - IP status (cluster-aware: aggregated on cluster, local on standalone)
@@ -120,6 +121,7 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("/", rootHandler(p))
 		mux.HandleFunc("/stats", rootHandler(p))
 		mux.HandleFunc("/stats/steps", stepsHandler(p))
+		mux.HandleFunc("/stats/websites", websitesHandler(p))
 	}
 
 	// API endpoints (role=api)
@@ -128,6 +130,7 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("/config/archive", archiveHandler(p))
 		mux.HandleFunc("GET /ip/{ip}", ipLookupHandler(p))
 		mux.HandleFunc("DELETE /ip/{ip}/clear", clearIPHandler(p))
+		mux.HandleFunc("/ip/{ip}/unblock", unblockIPHandler(p)) // Supports both GET and POST
 		mux.HandleFunc("GET /api/v1/ip/{ip}", apiIPLookupHandler(p))
 	}
 
@@ -138,6 +141,9 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("/cluster/metrics/aggregate", clusterMetricsAggregateHandler(p))
 		mux.HandleFunc("GET /api/v1/cluster/internal/ip/{ip}", clusterIPLookupHandler(p))
 		mux.HandleFunc("DELETE /api/v1/cluster/internal/ip/{ip}/clear", internalClearIPHandler(p))
+		mux.HandleFunc("/api/v1/cluster/internal/ip/{ip}/unblock", internalUnblockIPHandler(p)) // Supports both GET and POST
+		mux.HandleFunc("GET /api/v1/cluster/internal/persistence/state", clusterPersistenceStateHandler(p))
+		mux.HandleFunc("GET /api/v1/cluster/state/merged", clusterMergedStateHandler(p))
 	}
 
 	// Wrap with logging middleware

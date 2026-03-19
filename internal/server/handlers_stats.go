@@ -12,7 +12,7 @@ import (
 func rootHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, err := fmt.Fprint(w, p.GenerateHTMLMetricsReport())
+		_, err := fmt.Fprint(w, p.GenerateMetricsReport())
 		if err != nil {
 			logging.LogOutput(logging.LevelError, "metricsHandler", "Error writing metrics report: %v", err)
 		}
@@ -27,6 +27,18 @@ func stepsHandler(p Provider) http.HandlerFunc {
 		_, err := fmt.Fprint(w, p.GenerateStepsMetricsReport())
 		if err != nil {
 			logging.LogOutput(logging.LevelError, "stepsHandler", "Error writing steps report: %v", err)
+		}
+	}
+}
+
+// websitesHandler returns an HTTP handler that serves multi-website statistics.
+// This handler is registered for the "/stats/websites" endpoint.
+func websitesHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, err := fmt.Fprint(w, p.GenerateWebsiteStatsReport())
+		if err != nil {
+			logging.LogOutput(logging.LevelError, "websitesHandler", "Error writing website stats: %v", err)
 		}
 	}
 }

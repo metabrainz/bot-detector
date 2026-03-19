@@ -217,9 +217,9 @@ func TestCompaction(t *testing.T) {
 		}
 	}
 
-	// Verify the expired block (2.2.2.2) was filtered out
+	// Verify the expired block (2.2.2.2) was removed
 	if _, exists := loadedSnapshot.IPStates["2.2.2.2"]; exists {
-		t.Errorf("Expired block for 2.2.2.2 should not be in snapshot")
+		t.Errorf("Expired block for 2.2.2.2 should be removed, not kept")
 	}
 
 	// 2. Check that the journal file is now empty.

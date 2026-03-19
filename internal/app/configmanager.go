@@ -310,10 +310,42 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	// The LastModTime is already set correctly in newAppConfig, no need to update here.
 	p.LogRegex = loadedCfg.LogFormatRegex
 	p.EnableMetrics = loadedCfg.Application.EnableMetrics // Set the processor's EnableMetrics field
+
+	// Update website configuration (if changed)
+	oldWebsitesCount := len(p.Websites)
+	p.Websites = loadedCfg.Websites
+	if len(p.Websites) > 0 {
+		p.VHostToWebsite, p.CatchAllWebsite = BuildVHostMap(p.Websites)
+		p.WebsiteChains, p.GlobalChains = CategorizeChains(p.Chains)
+	} else {
+		p.VHostToWebsite = nil
+		p.CatchAllWebsite = ""
+		p.WebsiteChains = nil
+		p.GlobalChains = nil
+	}
+
 	InitializeMetrics(p, loadedCfg)
 
 	logging.SetLogLevel(loadedCfg.Application.LogLevel)
 	p.ConfigMutex.Unlock()
+
+	// Update website tailers if in multi-website mode
+	if p.WebsiteTailerMgr != nil {
+		// Type assert to the manager (we know the type but use interface{} to avoid import cycle)
+		if mgr, ok := p.WebsiteTailerMgr.(interface{ UpdateWebsites([]config.WebsiteConfig) }); ok {
+			// Check if transitioning from single to multi-website mode
+			if len(p.Websites) > 0 && oldWebsitesCount == 0 && p.LogPath != "" {
+				p.LogFunc(logging.LevelWarning, "CONFIG", "--log-path flag ignored: multi-website mode is enabled. Log paths are defined per-website in config.")
+			}
+			mgr.UpdateWebsites(p.Websites)
+			if len(p.Websites) > 0 {
+				p.LogFunc(logging.LevelInfo, "CONFIG", "Updated multi-website tailers: %d websites, %d global chains",
+					len(p.Websites), len(p.GlobalChains))
+			} else {
+				p.LogFunc(logging.LevelInfo, "CONFIG", "Switched to single-website mode")
+			}
+		}
+	}
 
 	// --- Compare and log general config changes ---
 	configChanged := config.CompareConfigs(*oldConfig, *loadedCfg) ||

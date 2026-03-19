@@ -34,29 +34,46 @@ type TestSignals struct {
 type Actor struct {
 	IPInfo utils.IPInfo
 	UA     string
+	VHost  string // VHost from log entry (empty for logs without vhost)
 }
 
 // String provides a clean, readable representation of the Actor for logging.
 func (a Actor) String() string {
+	if a.VHost != "" {
+		if a.UA != "" {
+			return fmt.Sprintf("%s@%s | %s", a.IPInfo.Address, a.VHost, a.UA)
+		}
+		return fmt.Sprintf("%s@%s", a.IPInfo.Address, a.VHost)
+	}
+	// No vhost (backward compat or logs without vhost field)
 	if a.UA != "" {
 		return fmt.Sprintf("%s | %s", a.IPInfo.Address, a.UA)
 	}
 	return a.IPInfo.Address
 }
 
-// NewActorFromString parses an actor string (e.g., "192.168.1.1 | Mozilla/5.0") into an Actor struct.
+// NewActorFromString parses an actor string (e.g., "192.168.1.1@vhost.com | Mozilla/5.0") into an Actor struct.
+// Supports both old format ("IP | UA") and new format ("IP@vhost | UA") for backward compatibility.
 func NewActorFromString(actorStr string) (Actor, error) {
-	parts := strings.SplitN(actorStr, " | ", 2) // Note the " | " separator
+	parts := strings.SplitN(actorStr, " | ", 2)
 	if len(parts) == 0 {
 		return Actor{}, fmt.Errorf("invalid actor string: %s", actorStr)
 	}
 
-	ipInfo := utils.NewIPInfo(parts[0])
+	// Parse IP@vhost or just IP
+	ipPart := parts[0]
+	var vhost string
+	if idx := strings.Index(ipPart, "@"); idx != -1 {
+		vhost = ipPart[idx+1:]
+		ipPart = ipPart[:idx]
+	}
+
+	ipInfo := utils.NewIPInfo(ipPart)
 	if ipInfo.Version == utils.VersionInvalid {
 		return Actor{}, fmt.Errorf("invalid IP in actor string '%s'", actorStr)
 	}
 
-	actor := Actor{IPInfo: ipInfo}
+	actor := Actor{IPInfo: ipInfo, VHost: vhost}
 	if len(parts) == 2 {
 		actor.UA = parts[1]
 	}

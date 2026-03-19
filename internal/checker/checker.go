@@ -2,6 +2,7 @@ package checker
 
 import (
 	"bot-detector/internal/app"
+	"bot-detector/internal/cluster"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/persistence"
@@ -9,9 +10,31 @@ import (
 	"bot-detector/internal/utils"
 	"fmt"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"time"
 )
+
+// formatChainKey creates a chain key string with vhost/website context.
+// Format: "ChainName@vhost" or "ChainName[website]" or "ChainName"
+func formatChainKey(chainName string, entry *app.LogEntry) string {
+	var result string
+	if entry.VHost != "" {
+		result = fmt.Sprintf("%s@%s", chainName, entry.VHost)
+	} else if entry.Website != "" {
+		result = fmt.Sprintf("%s[%s]", chainName, entry.Website)
+	} else {
+		result = chainName
+	}
+
+	// Validate: reason separator not allowed in chain keys
+	if strings.Contains(result, cluster.ReasonSeparator) {
+		// Replace separator with underscore to prevent conflicts
+		result = strings.ReplaceAll(result, cluster.ReasonSeparator, "_")
+	}
+
+	return result
+}
 
 // GetActor constructs the correct store.Actor key for a given log entry based on the chain's match_key.
 // It handles IP version filtering and decides whether to include the User-Agent in the key.
@@ -45,10 +68,11 @@ func GetActor(chain *config.BehavioralChain, entry *app.LogEntry) store.Actor {
 		useUA = true
 	}
 
+	actor := store.Actor{IPInfo: entry.IPInfo, VHost: entry.VHost}
 	if useUA {
-		return store.Actor{IPInfo: entry.IPInfo, UA: entry.UserAgent}
+		actor.UA = entry.UserAgent
 	}
-	return store.Actor{IPInfo: entry.IPInfo}
+	return actor
 }
 
 // GetMatchValue retrieves the field value from a LogEntry based on the field name.
@@ -69,7 +93,11 @@ func PreCheckActivity(p *app.Processor, entry *app.LogEntry, actor store.Actor) 
 	if activity.IsBlocked {
 		if time.Now().After(activity.BlockedUntil) {
 			// Block has expired, clear it and proceed.
-			p.LogFunc(logging.LevelDebug, "EXPIRE", "Chain-specific block expired for actor %s (UA: %s).", actor.IPInfo.Address, actor.UA)
+			websiteCtx := ""
+			if entry.Website != "" {
+				websiteCtx = fmt.Sprintf(" on website '%s'", entry.Website)
+			}
+			p.LogFunc(logging.LevelDebug, "EXPIRE", "Chain-specific block expired for actor %s (UA: %s)%s.", actor.IPInfo.Address, actor.UA, websiteCtx)
 			activity.IsBlocked = false
 			activity.SkipInfo = store.SkipInfo{} // Clear the skip info.
 			activity.BlockedUntil = time.Time{}
@@ -81,7 +109,11 @@ func PreCheckActivity(p *app.Processor, entry *app.LogEntry, actor store.Actor) 
 			// Only log the skip message the first time.
 			if activity.SkipInfo.Type != utils.SkipTypeBlocked { // This ensures we only log once per block.
 				// The source is already set when the block was applied.
-				p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (blocked:%s).", actor.IPInfo.Address, entry.UserAgent, activity.SkipInfo.Source)
+				websiteCtx := ""
+				if entry.Website != "" {
+					websiteCtx = fmt.Sprintf(" on website '%s'", entry.Website)
+				}
+				p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (blocked:%s)%s.", actor.IPInfo.Address, entry.UserAgent, activity.SkipInfo.Source, websiteCtx)
 			}
 			return activity, true, activity.SkipInfo
 		}
@@ -229,6 +261,11 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 				}
 			}
 		}
+		// Track per-website completion
+		if entry.Website != "" {
+			val, _ := p.Metrics.WebsiteChainsComplete.LoadOrStore(entry.Website, new(atomic.Int64))
+			val.(*atomic.Int64).Add(1)
+		}
 	}
 
 	// --- 1. Log the completion event ---
@@ -238,15 +275,40 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 	// 	logLevel = logging.LevelDebug
 	// }
 
+	// Determine website context for logging
+	// In multi-website mode, use the website from the log entry (set by tailer)
+	websiteName := entry.Website
+	if websiteName == "" && len(p.Websites) > 0 && entry.VHost != "" {
+		// Fallback: lookup by vhost (for backward compat or if Website not set)
+		if ws, ok := p.VHostToWebsite[entry.VHost]; ok {
+			websiteName = ws
+		} else if p.CatchAllWebsite != "" {
+			websiteName = p.CatchAllWebsite
+		}
+	}
+
 	if p.DryRun {
-		logDryRunCompletion(p, chain, entry)
+		logDryRunCompletion(p, chain, entry, websiteName)
 	} else {
-		// In live mode, log the action taken.
+		// In live mode, log the action taken with formatted chain reason
+		formattedReason := formatChainKey(chain.Name, entry)
 		switch chain.Action {
 		case "block":
-			p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v%s", chain.Name, entry.IPInfo.Address, chain.BlockDuration, getOnMatchSuffix(chain))
+			if websiteName != "" {
+				p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s on website '%s'. Blocking for %v%s",
+					formattedReason, entry.IPInfo.Address, websiteName, chain.BlockDuration, getOnMatchSuffix(chain))
+			} else {
+				p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v%s",
+					formattedReason, entry.IPInfo.Address, chain.BlockDuration, getOnMatchSuffix(chain))
+			}
 		case "log":
-			p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s. Action set to 'log'%s", chain.Name, entry.IPInfo.Address, getOnMatchSuffix(chain))
+			if websiteName != "" {
+				p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s on website '%s'. Action set to 'log'%s",
+					formattedReason, entry.IPInfo.Address, websiteName, getOnMatchSuffix(chain))
+			} else {
+				p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s. Action set to 'log'%s",
+					formattedReason, entry.IPInfo.Address, getOnMatchSuffix(chain))
+			}
 		}
 	}
 
@@ -279,13 +341,15 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 		// Update the in-memory state to reflect the block for both live and dry runs.
 		ipOnlyActor := store.Actor(store.Actor{IPInfo: entry.IPInfo, UA: ""})
 		ipActivity := store.GetOrCreateUnsafe(p.ActivityStore, ipOnlyActor)
-		internedChainName := p.InternReason(chain.Name)
-		ipActivity.IsBlocked = true                                                                  // Mark as blocked_
-		ipActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedChainName} // Set SkipInfo
+
+		internedReason := p.InternReason(formatChainKey(chain.Name, entry))
+
+		ipActivity.IsBlocked = true                                                               // Mark as blocked_
+		ipActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedReason} // Set SkipInfo
 		ipActivity.BlockedUntil = time.Now().Add(chain.BlockDuration)
 
-		currentActivity.IsBlocked = true                                                                  // Mark as blocked
-		currentActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedChainName} // Set SkipInfo
+		currentActivity.IsBlocked = true                                                               // Mark as blocked
+		currentActivity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: internedReason} // Set SkipInfo
 		currentActivity.BlockedUntil = ipActivity.BlockedUntil
 	case "log":
 		if p.EnableMetrics {
@@ -307,7 +371,7 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 			defer p.PersistenceMutex.Unlock()
 
 			unblockTime := p.NowFunc().Add(chain.BlockDuration)
-			reason := p.InternReason(chain.Name)
+			reason := p.InternReason(formatChainKey(chain.Name, entry))
 			event := &persistence.AuditEvent{
 				Timestamp: p.NowFunc(),
 				Event:     persistence.EventTypeBlock,
@@ -320,11 +384,20 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 			}
 
 			// Update in-memory state
-			p.IPStates[entry.IPInfo.Address] = persistence.IPState{
-				State:      persistence.BlockStateBlocked,
-				ExpireTime: unblockTime,
-				Reason:     reason,
+			now := time.Now()
+			existingState, exists := p.IPStates[entry.IPInfo.Address]
+			newState := persistence.IPState{
+				State:          persistence.BlockStateBlocked,
+				ExpireTime:     unblockTime,
+				Reason:         reason,
+				ModifiedAt:     now,
+				FirstBlockedAt: now,
 			}
+			// Preserve FirstBlockedAt if already blocked
+			if exists && !existingState.FirstBlockedAt.IsZero() {
+				newState.FirstBlockedAt = existingState.FirstBlockedAt
+			}
+			p.IPStates[entry.IPInfo.Address] = newState
 		}()
 	}
 
@@ -380,15 +453,25 @@ func FlushGivenEntries(p *app.Processor, entries []*app.LogEntry) {
 // in chronological order, respecting the out-of-order tolerance.
 
 // logDryRunCompletion handles logging for completed chains in dry-run mode.
-func logDryRunCompletion(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry) {
+func logDryRunCompletion(p *app.Processor, chain *config.BehavioralChain, entry *app.LogEntry, websiteName string) {
 	onMatchSuffix := getOnMatchSuffix(chain)
+
+	// Build website context string
+	websiteContext := ""
+	if websiteName != "" {
+		websiteContext = fmt.Sprintf(" on website '%s' (vhost: %s)", websiteName, entry.VHost)
+	}
+
 	switch chain.Action {
 	case "block":
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s. Blocking for %v (DryRun)%s", chain.Name, entry.IPInfo.Address, chain.BlockDuration, onMatchSuffix)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s%s. Blocking for %v (DryRun)%s",
+			chain.Name, entry.IPInfo.Address, websiteContext, chain.BlockDuration, onMatchSuffix)
 	case "log":
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s. Action set to 'log' (DryRun)%s", chain.Name, entry.IPInfo.Address, onMatchSuffix)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s%s. Action set to 'log' (DryRun)%s",
+			chain.Name, entry.IPInfo.Address, websiteContext, onMatchSuffix)
 	default:
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s. Unrecognized action '%s' (DryRun)%s", chain.Name, entry.IPInfo.Address, chain.Action, onMatchSuffix)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s%s. Unrecognized action '%s' (DryRun)%s",
+			chain.Name, entry.IPInfo.Address, websiteContext, chain.Action, onMatchSuffix)
 	}
 }
 
@@ -403,7 +486,7 @@ func matchStepFields(p *app.Processor, chain *config.BehavioralChain, step *conf
 		// If metrics are enabled, increment the StepExecutionCounts for this step.
 		if p.EnableMetrics {
 			if p.Metrics.StepExecutionCounts != nil {
-				stepIdentifier := fmt.Sprintf("step %d/%d of %s", step.Order, len(chain.Steps), chain.Name)
+				stepIdentifier := fmt.Sprintf("step %d/%d of %s", step.Order, len(chain.Steps), formatChainKey(chain.Name, entry))
 				if counter, ok := p.Metrics.StepExecutionCounts.Load(stepIdentifier); ok {
 					if c, ok := counter.(*atomic.Int64); ok {
 						c.Add(1)
@@ -460,6 +543,11 @@ func handleTimeRuleReset(p *app.Processor, chain *config.BehavioralChain, entry 
 				counter.Add(1)
 			}
 		}
+		// Track per-website reset
+		if entry.Website != "" {
+			val, _ := p.Metrics.WebsiteChainsReset.LoadOrStore(entry.Website, new(atomic.Int64))
+			val.(*atomic.Int64).Add(1)
+		}
 	}
 	if p.TopN > 0 {
 		actor := GetActor(chain, entry)
@@ -509,7 +597,9 @@ func ProcessChainForEntry(p *app.Processor, chain *config.BehavioralChain, entry
 	}
 
 	// Get the current state for this chain.
-	state, exists := currentActivity.ChainProgress[chain.Name]
+	// Use formatChainKey to include website/vhost context in the key
+	chainKey := formatChainKey(chain.Name, entry)
+	state, exists := currentActivity.ChainProgress[chainKey]
 	if !exists {
 		// Initialize state if it's the first time we're seeing this actor for this chain.
 		state = store.StepState{CurrentStep: 0, LastMatchTime: time.Time{}}
@@ -557,6 +647,11 @@ func ProcessChainForEntry(p *app.Processor, chain *config.BehavioralChain, entry
 					counter.Add(1)
 				}
 			}
+			// Track per-website match
+			if entry.Website != "" {
+				val, _ := p.Metrics.WebsiteChainsMatched.LoadOrStore(entry.Website, new(atomic.Int64))
+				val.(*atomic.Int64).Add(1)
+			}
 		}
 
 		// If in dry-run mode, record the actor hit for top actors summary.
@@ -586,7 +681,7 @@ func ProcessChainForEntry(p *app.Processor, chain *config.BehavioralChain, entry
 			state.CurrentStep = 0
 			// We must also delete the progress here because the function returns early.
 			// The cleanup logic at the end of the function will not be reached.
-			delete(currentActivity.ChainProgress, chain.Name)
+			delete(currentActivity.ChainProgress, chainKey)
 			return stopProcessing
 		}
 
@@ -599,11 +694,11 @@ func ProcessChainForEntry(p *app.Processor, chain *config.BehavioralChain, entry
 	// Only store the state if the actor is actively progressing (CurrentStep > 0).
 	// This saves memory by not storing state for actors that are at step 0.
 	if state.CurrentStep > 0 {
-		currentActivity.ChainProgress[chain.Name] = state
+		currentActivity.ChainProgress[chainKey] = state
 	} else {
 		// If CurrentStep is 0 (due to reset or completion), clean up the state to save memory.
 		// It's safe to call delete even if the key doesn't exist.
-		delete(currentActivity.ChainProgress, chain.Name)
+		delete(currentActivity.ChainProgress, chainKey)
 	}
 	return false
 }
@@ -626,9 +721,45 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 	// even if multiple chains map to the same actor.
 	processedActivities := make(map[*store.ActorActivity]struct{})
 
-	// 2. Iterate over all configured chains.
-	for _, chain := range p.Chains {
-		actor := GetActor(&chain, entry)
+	// Determine which chains to process based on website configuration
+	var chainIndices []int
+	if len(p.Websites) > 0 {
+		// Multi-website mode: filter chains by vhost
+		chainIndices = p.GlobalChains // Start with global chains
+
+		if websiteName, ok := p.VHostToWebsite[entry.VHost]; ok {
+			// Add website-specific chains
+			if siteChains, ok := p.WebsiteChains[websiteName]; ok {
+				chainIndices = append(chainIndices, siteChains...)
+			}
+		} else if p.CatchAllWebsite != "" {
+			// No vhost match, but we have a catch-all website
+			if siteChains, ok := p.WebsiteChains[p.CatchAllWebsite]; ok {
+				chainIndices = append(chainIndices, siteChains...)
+			}
+		} else if entry.VHost != "" {
+			// Unknown vhost and no catch-all - log warning once per vhost
+			p.UnknownVHostsMux.Lock()
+			if !p.UnknownVHosts[entry.VHost] {
+				p.LogFunc(logging.LevelWarning, "UNKNOWN_VHOST",
+					"Unknown vhost '%s' for IP %s - only global chains will be processed",
+					entry.VHost, entry.IPInfo.Address)
+				p.UnknownVHosts[entry.VHost] = true
+			}
+			p.UnknownVHostsMux.Unlock()
+		}
+	} else {
+		// Legacy single-website mode: process all chains
+		chainIndices = make([]int, len(p.Chains))
+		for i := range p.Chains {
+			chainIndices[i] = i
+		}
+	}
+
+	// 2. Iterate over applicable chains.
+	for _, idx := range chainIndices {
+		chain := &p.Chains[idx]
+		actor := GetActor(chain, entry)
 		if actor.IPInfo.Address == "" {
 			continue // Skip chain if actor could not be determined (e.g., IP version mismatch).
 		}
@@ -644,7 +775,7 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 		// This is the correct value to use for all time-based checks for this entry.
 		previousRequestTime := currentActivity.LastRequestTime
 
-		stop := ProcessChainForEntry(p, &chain, entry, currentActivity, previousRequestTime)
+		stop := ProcessChainForEntry(p, chain, entry, currentActivity, previousRequestTime)
 
 		// Mark this activity as processed for this entry.
 		processedActivities[currentActivity] = struct{}{}
@@ -692,7 +823,11 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 		// Only log the skip message and set the state the first time.
 		if activity.SkipInfo.Type == utils.SkipTypeNone {
 			activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeGoodActor, Source: p.InternReason(goodActorRuleName)}
-			p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (good_actor:%s).", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName)
+			websiteCtx := ""
+			if entry.Website != "" {
+				websiteCtx = fmt.Sprintf(" on website '%s'", entry.Website)
+			}
+			p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (good_actor:%s)%s.", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName, websiteCtx)
 		}
 
 		// --- UNBLOCK ON GOOD ACTOR LOGIC ---
@@ -708,8 +843,25 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 			// The lock is already held by the caller (CheckChains).
 			activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 
-			// Check if the cooldown has passed or if it has never been unblocked.
-			if activity.LastUnblockTime.IsZero() || time.Since(activity.LastUnblockTime) > unblockCooldown {
+			// Check if IP is blocked in persistence
+			var isBlocked bool
+			if p.PersistenceEnabled {
+				p.PersistenceMutex.Lock()
+				ipState, exists := p.IPStates[entry.IPInfo.Address]
+				isBlocked = exists && ipState.State == persistence.BlockStateBlocked
+				p.PersistenceMutex.Unlock()
+			}
+
+			// Determine if we should unblock:
+			// - Always unblock if IP is blocked (immediate safety)
+			// - Unblock on first appearance (handles pre-existing blocks)
+			// - Apply cooldown for subsequent non-blocked appearances (prevents spam)
+			shouldUnblock := isBlocked || activity.LastUnblockTime.IsZero()
+			if !isBlocked && !activity.LastUnblockTime.IsZero() {
+				shouldUnblock = time.Since(activity.LastUnblockTime) > unblockCooldown
+			}
+
+			if shouldUnblock {
 				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s (rule: %s). Issuing unblock command.", entry.IPInfo.Address, goodActorRuleName)
 
 				// Create detailed unblock reason with good actor name
@@ -732,8 +884,10 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 
 						// Update in-memory state
 						p.IPStates[entry.IPInfo.Address] = persistence.IPState{
-							State:  persistence.BlockStateUnblocked,
-							Reason: unblockReason,
+							State:      persistence.BlockStateUnblocked,
+							ExpireTime: p.NowFunc(), // Set to now so retention period starts from unblock time
+							Reason:     unblockReason,
+							ModifiedAt: time.Now(),
 						}
 					}()
 				}
@@ -744,8 +898,10 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 					Version: entry.IPInfo.Version,
 				}
 				// The blocker's Unblock method is non-blocking and rate-limited.
-				if err := p.Blocker.Unblock(blockerIPInfo, unblockReason); err != nil {
-					p.LogFunc(logging.LevelError, "UNBLOCK_FAIL", "Failed to queue unblock command for %s: %v", entry.IPInfo.Address, err)
+				if !p.DryRun && p.Blocker != nil {
+					if err := p.Blocker.Unblock(blockerIPInfo, unblockReason); err != nil {
+						p.LogFunc(logging.LevelError, "UNBLOCK_FAIL", "Failed to queue unblock command for %s: %v", entry.IPInfo.Address, err)
+					}
 				}
 				activity.LastUnblockTime = time.Now()
 				activity.LastUnblockReason = unblockReason

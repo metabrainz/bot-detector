@@ -105,6 +105,20 @@ type Processor struct {
 	NodeAddress       string                    // Node address from cluster config (empty if not configured)
 	NodeLeaderAddress string                    // Leader address (only set for followers)
 	MetricsCollector  *cluster.MetricsCollector // Metrics collector (only set for leaders)
+	StateSyncManager  *cluster.StateSyncManager // State sync manager (nil if not enabled)
+	InitialSyncTime   time.Time                 // Timestamp from initial cluster fetch (for setting lastSyncTime)
+
+	// Multi-website support
+	Websites         []config.WebsiteConfig // Website configurations (empty = legacy single-website mode)
+	VHostToWebsite   map[string]string      // vhost -> website name mapping
+	CatchAllWebsite  string                 // website name for entries with unmatched vhosts (empty if none)
+	WebsiteChains    map[string][]int       // website name -> chain indices
+	GlobalChains     []int                  // indices of chains that apply to all websites
+	LogPathMutex     sync.Mutex             // Protects LogPath in multi-website mode
+	CurrentWebsite   string                 // Current website being processed (set by tailer in multi-website mode)
+	UnknownVHosts    map[string]bool        // Track unknown vhosts to avoid log spam
+	UnknownVHostsMux sync.Mutex             // Protects UnknownVHosts map
+	WebsiteTailerMgr interface{}            // Multi-website tailer manager (type is *processor.MultiWebsiteTailerManager, using interface{} to avoid import cycle)
 }
 
 // GetTimestampFormat returns the timestamp format from the config.

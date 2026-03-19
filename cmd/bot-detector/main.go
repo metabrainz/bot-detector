@@ -17,9 +17,11 @@ import (
 	"bot-detector/internal/testutil"
 	"bot-detector/internal/utils"
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -172,7 +174,136 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		NodeName:          "",
 		NodeAddress:       "",
 		NodeLeaderAddress: "",
+
+		// Initialize multi-website fields
+		Websites:       loadedCfg.Websites,
+		VHostToWebsite: make(map[string]string),
+		WebsiteChains:  make(map[string][]int),
+		GlobalChains:   []int{},
+		UnknownVHosts:  make(map[string]bool),
 	}
+}
+
+// fetchInitialStateFromCluster fetches the current cluster state from the leader
+// instead of replaying the journal. Returns the cluster state timestamp.
+func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
+	// Find leader node
+	var leaderNode *cluster.NodeConfig
+	for i := range p.Cluster.Nodes {
+		if p.Cluster.Nodes[i].Name != p.NodeName {
+			leaderNode = &p.Cluster.Nodes[i]
+			break
+		}
+	}
+	if leaderNode == nil {
+		return time.Time{}, fmt.Errorf("no leader node found in cluster configuration")
+	}
+
+	// Fetch merged state from leader using shared helper
+	url := fmt.Sprintf("%s://%s/api/v1/cluster/state/merged", p.Cluster.Protocol, leaderNode.Address)
+	client := &http.Client{Timeout: p.Cluster.StateSync.Timeout}
+
+	states, timestamp, m, err := cluster.FetchMergedState(url, client, p.Cluster.StateSync.Compression)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	// Apply fetched state - must hold lock as health check may be running
+	p.PersistenceMutex.Lock()
+	p.IPStates = states
+
+	// Intern all reason strings to save memory
+	for ip, state := range p.IPStates {
+		state.Reason = p.InternReason(state.Reason)
+		p.IPStates[ip] = state
+	}
+
+	// Count for logging
+	blockedCount := 0
+	for _, state := range p.IPStates {
+		if state.State == persistence.BlockStateBlocked {
+			blockedCount++
+		}
+	}
+	unblockedCount := len(p.IPStates) - blockedCount
+	p.PersistenceMutex.Unlock()
+
+	modeStr := "gz,full"
+	if !m.Compressed {
+		modeStr = "plain,full"
+	}
+
+	p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Fetched initial state from leader: %d IPs (%d blocked + %d unblocked), size: %.1f KB, rate: %.1f KB/s, duration: %v, mode: %s",
+		len(p.IPStates), blockedCount, unblockedCount, m.SizeKB, m.RateKBps, m.Duration.Round(time.Millisecond), modeStr)
+
+	return timestamp, nil
+}
+
+// replayJournalAfter replays journal entries that are newer than the given timestamp.
+// This ensures local changes that haven't been synced to the cluster are not lost.
+func replayJournalAfter(p *app.Processor, after time.Time) error {
+	journalPath := filepath.Join(p.StateDir, "events.log")
+	journalFile, err := os.Open(journalPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // No journal file, nothing to replay
+		}
+		return err
+	}
+	defer func() { _ = journalFile.Close() }()
+
+	blockEvents := 0
+	unblockEvents := 0
+	skippedEvents := 0
+	parseErrors := 0
+
+	scanner := bufio.NewScanner(journalFile)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+
+		var v1Entry persistence.JournalEntryV1
+		if err := json.Unmarshal(line, &v1Entry); err != nil {
+			p.LogFunc(logging.LevelWarning, "JOURNAL_PARSE_FAIL", "Failed to parse journal event: %v", err)
+			parseErrors++
+			continue
+		}
+
+		// Only replay entries newer than cluster state
+		if v1Entry.Timestamp.After(after) {
+			reason := p.InternReason(v1Entry.Event.Reason)
+
+			// Must hold lock as health check may be running
+			p.PersistenceMutex.Lock()
+			switch v1Entry.Event.Type {
+			case persistence.EventTypeBlock:
+				blockEvents++
+				expireTime := v1Entry.Timestamp.Add(v1Entry.Event.Duration)
+				p.IPStates[v1Entry.Event.IP] = persistence.IPState{
+					State:      persistence.BlockStateBlocked,
+					ExpireTime: expireTime,
+					Reason:     reason,
+					ModifiedAt: v1Entry.Timestamp,
+				}
+			case persistence.EventTypeUnblock:
+				unblockEvents++
+				p.IPStates[v1Entry.Event.IP] = persistence.IPState{
+					State:      persistence.BlockStateUnblocked,
+					Reason:     reason,
+					ModifiedAt: v1Entry.Timestamp,
+				}
+			}
+			p.PersistenceMutex.Unlock()
+		} else {
+			skippedEvents++
+		}
+	}
+
+	if blockEvents > 0 || unblockEvents > 0 {
+		p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed local journal entries after cluster state (blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
+			blockEvents, unblockEvents, skippedEvents, parseErrors)
+	}
+
+	return nil
 }
 
 func restorePersistenceState(p *app.Processor) error {
@@ -182,13 +313,69 @@ func restorePersistenceState(p *app.Processor) error {
 	}
 	p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.StateDir)
 
-	// 1. Load snapshot
+	// Log persistence file status for diagnostics
 	snapshotPath := filepath.Join(p.StateDir, "state.snapshot")
+	journalPath := filepath.Join(p.StateDir, "events.log")
+
+	snapshotInfo := "absent"
+	if info, statErr := os.Stat(snapshotPath); statErr == nil {
+		snapshotInfo = fmt.Sprintf("size=%d bytes, modified=%s", info.Size(), info.ModTime().Format(time.RFC3339))
+	}
+
+	journalInfo := "absent"
+	if info, statErr := os.Stat(journalPath); statErr == nil {
+		journalInfo = fmt.Sprintf("size=%d bytes, modified=%s", info.Size(), info.ModTime().Format(time.RFC3339))
+	}
+
+	p.LogFunc(logging.LevelInfo, "PERSISTENCE_FILES", "Snapshot: %s | Journal: %s", snapshotInfo, journalInfo)
+
+	// Optimization: If state sync is enabled and we're a follower, fetch state from cluster
+	// and only replay local journal entries that are newer than cluster state
+	if p.Cluster != nil && p.Cluster.StateSync.Enabled && p.NodeRole == "follower" {
+		p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Attempting to fetch initial state from cluster...")
+		if clusterTimestamp, fetchErr := fetchInitialStateFromCluster(p); fetchErr == nil {
+			p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Successfully fetched initial state from cluster")
+			// Store timestamp for later use by StateSyncManager
+			p.InitialSyncTime = clusterTimestamp
+
+			// Still need to replay local journal entries newer than cluster state
+			if err := replayJournalAfter(p, clusterTimestamp); err != nil {
+				p.LogFunc(logging.LevelWarning, "JOURNAL_REPLAY", "Failed to replay local journal: %v", err)
+			}
+
+			// Open journal for appending new events
+			journalPath := filepath.Join(p.StateDir, "events.log")
+			var err error
+			p.JournalHandle, err = persistence.OpenJournalForAppend(journalPath)
+			if err != nil {
+				p.LogFunc(logging.LevelError, "JOURNAL_OPEN_FAIL", "Failed to open journal for writing: %v", err)
+				return err
+			}
+
+			return nil
+		} else {
+			p.LogFunc(logging.LevelWarning, "STATE_SYNC", "Failed to fetch initial state from cluster, falling back to snapshot+journal: %v", fetchErr)
+		}
+	} else {
+		// Log why we're not using cluster fetch
+		if p.Cluster == nil {
+			p.LogFunc(logging.LevelDebug, "STATE_SYNC", "Cluster not configured, using snapshot+journal")
+		} else if !p.Cluster.StateSync.Enabled {
+			p.LogFunc(logging.LevelInfo, "STATE_SYNC", "State sync disabled, using snapshot+journal")
+		} else if p.NodeRole != "follower" {
+			p.LogFunc(logging.LevelDebug, "STATE_SYNC", "Leader node, using snapshot+journal")
+		}
+	}
+
+	// 1. Load snapshot
 	snapshot, err := persistence.LoadSnapshot(snapshotPath)
 	if err != nil {
 		p.LogFunc(logging.LevelError, "STATE_LOAD_FAIL", "Failed to load snapshot: %v", err)
 		return err
 	}
+
+	// Must hold lock as health check may be running
+	p.PersistenceMutex.Lock()
 	p.IPStates = snapshot.IPStates
 
 	// Intern all reason strings to save memory
@@ -205,6 +392,7 @@ func restorePersistenceState(p *app.Processor) error {
 		}
 	}
 	unblockedCount := len(p.IPStates) - blockedCount
+	p.PersistenceMutex.Unlock()
 
 	// Log snapshot details
 	if fileInfo, err := os.Stat(snapshotPath); err == nil {
@@ -216,7 +404,6 @@ func restorePersistenceState(p *app.Processor) error {
 	}
 
 	// 2. Replay Journal
-	journalPath := filepath.Join(p.StateDir, "events.log")
 	journalFile, err := os.Open(journalPath)
 	if err == nil {
 		blockEvents := 0
@@ -240,6 +427,8 @@ func restorePersistenceState(p *app.Processor) error {
 				// Intern reason to save memory
 				reason := p.InternReason(v1Entry.Event.Reason)
 
+				// Must hold lock as health check may be running
+				p.PersistenceMutex.Lock()
 				switch v1Entry.Event.Type {
 				case persistence.EventTypeBlock:
 					blockEvents++
@@ -248,14 +437,17 @@ func restorePersistenceState(p *app.Processor) error {
 						State:      persistence.BlockStateBlocked,
 						ExpireTime: expireTime,
 						Reason:     reason,
+						ModifiedAt: v1Entry.Timestamp,
 					}
 				case persistence.EventTypeUnblock:
 					unblockEvents++
 					p.IPStates[v1Entry.Event.IP] = persistence.IPState{
-						State:  persistence.BlockStateUnblocked,
-						Reason: reason,
+						State:      persistence.BlockStateUnblocked,
+						Reason:     reason,
+						ModifiedAt: v1Entry.Timestamp,
 					}
 				}
+				p.PersistenceMutex.Unlock()
 			} else {
 				skippedEvents++
 			}
@@ -265,14 +457,20 @@ func restorePersistenceState(p *app.Processor) error {
 		}
 
 		if fileInfo, err := os.Stat(journalPath); err == nil {
-			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=v1, size=%d bytes, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
-				fileInfo.Size(), blockEvents, unblockEvents, skippedEvents, parseErrors)
+			if fileInfo.Size() == 0 {
+				p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Journal is empty (recently compacted or no new events)")
+			} else {
+				p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=v1, size=%d bytes, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
+					fileInfo.Size(), blockEvents, unblockEvents, skippedEvents, parseErrors)
+			}
 		} else {
 			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=v1, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
 				blockEvents, unblockEvents, skippedEvents, parseErrors)
 		}
 	} else if !os.IsNotExist(err) {
 		p.LogFunc(logging.LevelWarning, "JOURNAL_OPEN_FAIL", "Could not open journal file for replay: %v", err)
+	} else {
+		p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "No journal file found (first run or recently compacted)")
 	}
 
 	// 3. State Push
@@ -521,18 +719,26 @@ func execute(params *commandline.AppParameters) error {
 			logging.LogOutput(logging.LevelInfo, "CONFIG",
 				"Cluster configuration created from BOT_DETECTOR_NODES environment variable (%d nodes)",
 				len(params.Envs.ClusterNodes))
-			loadedCfg.Cluster = &cluster.ClusterConfig{
-				Nodes:                 params.Envs.ClusterNodes,
-				ConfigPollInterval:    10 * time.Second, // Default value
-				MetricsReportInterval: 30 * time.Second, // Default value
-				Protocol:              "http",           // Default value
-			}
+			loadedCfg.Cluster = config.NewClusterConfigWithDefaults(params.Envs.ClusterNodes)
 		}
 	}
 
 	// Runtime validation: if cluster is configured, it must have at least one node
 	if loadedCfg.Cluster != nil && len(loadedCfg.Cluster.Nodes) == 0 {
 		return fmt.Errorf("cluster configuration is present but has no nodes. Either add nodes to cluster.nodes in config.yaml or set BOT_DETECTOR_NODES environment variable")
+	}
+
+	// Runtime validation: multi-website mode vs --log-path flag
+	if len(loadedCfg.Websites) > 0 {
+		if params.LogPath != "" {
+			logging.LogOutput(logging.LevelWarning, "CONFIG",
+				"--log-path flag is ignored in multi-website mode. Log paths are defined in config.yaml")
+		}
+	} else {
+		// Legacy single-website mode requires --log-path
+		if params.LogPath == "" && !params.DryRun {
+			return fmt.Errorf("--log-path is required in single-website mode (no 'websites' section in config)")
+		}
 	}
 
 	logging.SetLogLevel(loadedCfg.Application.LogLevel)
@@ -582,6 +788,14 @@ func execute(params *commandline.AppParameters) error {
 	p.SignalOooBufferFlush = func() { checker.DoSignalOooBufferFlush(p) }
 	app.InitializeMetrics(p, loadedCfg)
 
+	// Initialize multi-website support if configured
+	if len(p.Websites) > 0 {
+		p.VHostToWebsite, p.CatchAllWebsite = app.BuildVHostMap(p.Websites)
+		p.WebsiteChains, p.GlobalChains = app.CategorizeChains(p.Chains)
+		p.LogFunc(logging.LevelInfo, "SETUP", "Multi-website mode: %d websites, %d global chains",
+			len(p.Websites), len(p.GlobalChains))
+	}
+
 	haproxyBlocker := blocker.NewHAProxyBlocker(p, p.DryRun)
 
 	// Set up resync callback to handle backend restarts/recoveries
@@ -590,22 +804,26 @@ func execute(params *commandline.AppParameters) error {
 		unblockedIPs := make(map[string]string)
 
 		// Use persistence state if available, otherwise use activity store
-		if p.PersistenceEnabled && len(p.IPStates) > 0 {
+		if p.PersistenceEnabled {
 			// Resync from persistence state (more reliable)
-			for ip, state := range p.IPStates {
-				switch state.State {
-				case persistence.BlockStateBlocked:
-					remaining := time.Until(state.ExpireTime)
-					if remaining > 0 {
-						blockedIPs[ip] = blocker.BlockInfo{
-							Duration: remaining,
-							Reason:   state.Reason,
+			p.PersistenceMutex.Lock()
+			if len(p.IPStates) > 0 {
+				for ip, state := range p.IPStates {
+					switch state.State {
+					case persistence.BlockStateBlocked:
+						remaining := time.Until(state.ExpireTime)
+						if remaining > 0 {
+							blockedIPs[ip] = blocker.BlockInfo{
+								Duration: remaining,
+								Reason:   state.Reason,
+							}
 						}
+					case persistence.BlockStateUnblocked:
+						unblockedIPs[ip] = state.Reason
 					}
-				case persistence.BlockStateUnblocked:
-					unblockedIPs[ip] = state.Reason
 				}
 			}
+			p.PersistenceMutex.Unlock()
 		} else {
 			// Resync from activity store (in-memory only)
 			p.ActivityMutex.RLock()
@@ -738,11 +956,18 @@ func runCompaction(p *app.Processor) {
 	// Filter out expired entries in-place
 	now := p.NowFunc()
 	expiredBlocks := 0
+	cleanedUnblocked := 0
+	retentionPeriod := p.Config.Application.Persistence.RetentionPeriod
 
 	for ip, state := range p.IPStates {
 		if state.State == persistence.BlockStateBlocked && !now.Before(state.ExpireTime) {
+			// Remove expired blocks
 			delete(p.IPStates, ip)
 			expiredBlocks++
+		} else if state.State == persistence.BlockStateUnblocked && now.After(state.ExpireTime.Add(retentionPeriod)) {
+			// Remove old unblocked entries after retention period
+			delete(p.IPStates, ip)
+			cleanedUnblocked++
 		}
 	}
 
@@ -778,11 +1003,11 @@ func runCompaction(p *app.Processor) {
 
 	// Log snapshot write details
 	if fileInfo, err := os.Stat(snapshotPath); err == nil {
-		p.LogFunc(logging.LevelInfo, "COMPACTION", "Snapshot written (size=%d bytes, entries=%d blocked + %d unblocked, expired=%d)",
-			fileInfo.Size(), blockedCount, unblockedCount, expiredBlocks)
+		p.LogFunc(logging.LevelInfo, "COMPACTION", "Snapshot written (size=%d bytes, entries=%d blocked + %d unblocked, expired=%d, cleaned=%d)",
+			fileInfo.Size(), blockedCount, unblockedCount, expiredBlocks, cleanedUnblocked)
 	} else {
-		p.LogFunc(logging.LevelInfo, "COMPACTION", "Snapshot written (entries=%d blocked + %d unblocked, expired=%d)",
-			blockedCount, unblockedCount, expiredBlocks)
+		p.LogFunc(logging.LevelInfo, "COMPACTION", "Snapshot written (entries=%d blocked + %d unblocked, expired=%d, cleaned=%d)",
+			blockedCount, unblockedCount, expiredBlocks, cleanedUnblocked)
 	}
 
 	// Truncate and re-open journal
@@ -947,9 +1172,53 @@ func start(p *app.Processor) {
 				p.MetricsCollector = collector
 				go collector.Start()
 			}
+
+			// Start state sync manager if enabled
+			if p.Cluster != nil && p.Cluster.StateSync.Enabled && p.PersistenceEnabled {
+				syncMgr := cluster.NewStateSyncManager(
+					p.Cluster,
+					p.NodeRole,
+					p.NodeName,
+					p.NodeAddress,
+					p.IPStates,
+					&p.PersistenceMutex,
+					p.LogFunc,
+				)
+				p.StateSyncManager = syncMgr
+
+				// If we fetched initial state from cluster, set the lastSyncTime
+				// so the first periodic sync is incremental
+				if !p.InitialSyncTime.IsZero() {
+					syncMgr.SetLastSyncTime(p.InitialSyncTime)
+				}
+
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				go func() {
+					<-p.SignalCh
+					cancel()
+				}()
+				syncMgr.Start(ctx)
+			}
 		}
 
-		// LiveLogTailer is the blocking main loop
-		processor.LiveLogTailer(p, p.SignalCh, nil) // Pass the processor's channel to the tailer
+		// Main log tailing loop - always use dynamic manager for seamless config reload
+		if processor.IsMultiWebsiteMode(p) {
+			// Multi-website mode: tail multiple log files concurrently
+			if p.LogPath != "" {
+				p.LogFunc(logging.LevelWarning, "SETUP", "--log-path flag ignored: multi-website mode is enabled. Log paths are defined per-website in config.")
+			}
+			p.LogFunc(logging.LevelInfo, "SETUP", "Starting multi-website mode with %d websites", len(p.Websites))
+		} else {
+			// Single-website mode: create a catch-all website from --log-path
+			// This allows seamless transition to multi-website mode on config reload
+			p.Websites = []config.WebsiteConfig{{
+				Name:    p.LogPath, // Use log path as website name
+				LogPath: p.LogPath,
+				VHosts:  []string{}, // Empty = catch-all
+			}}
+			p.LogFunc(logging.LevelInfo, "SETUP", "Starting single-website mode on %s", p.LogPath)
+		}
+		processor.MultiLogTailer(p, p.SignalCh)
 	}
 }

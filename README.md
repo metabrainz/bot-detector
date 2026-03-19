@@ -6,7 +6,7 @@ Bot-Detector is a high-performance Go application designed to monitor live acces
 
 The application operates in a continuous loop:
 
-1.  **Tails a log file** (like an HAProxy or Nginx access log) in real-time.
+1.  **Tails log files** (like HAProxy or Nginx access logs) in real-time - supports both single and multi-website modes.
 2.  **Parses each new log line** against a configurable regex format defined in the config file.
 3.  **Checks the entry** against a series of behavioral chains defined in the YAML configuration file.
 4.  **Tracks the state** of each IP address (or IP+User-Agent) as it progresses through these chains.
@@ -15,6 +15,7 @@ The application operates in a continuous loop:
 
 ## Features
 
+*   **Multi-Website Support:** Monitor multiple websites with separate log files, each with global and website-specific detection rules.
 *   **Real-Time Behavioral Analysis:** Uses flexible YAML configurations to detect sequential patterns.
 *   **Blocker Integration:** Executes immediate IP blocking via the configured backend (e.g., HAProxy Runtime API, TCP or Unix Socket).
 *   **High Resilience:** Handles backend instance unavailability by logging the failure and continuing operation.
@@ -125,7 +126,7 @@ See [Cluster Configuration](docs/ClusterConfiguration.md) and [Cluster and Docke
 | **`--exit-on-eof`** | | Exits after processing the log file to EOF instead of tailing. |
 | **`--help`** | | Display command-line help. |
 | **`--listen`** | string | Starts a web server on this address (e.g., `:8080` or `:8080,role=api`). Can be specified multiple times for multiple listeners. |
-| **`--log-path`** | filepath | Path to the access log file to tail (or to read in dry-run mode). |
+| **`--log-path`** | filepath | Path to the access log file to tail (or to read in dry-run mode). Ignored in multi-website mode where log paths are defined in `config.yaml`. |
 | **`--reload-on`** | string | Controls config reloading: `watcher`, `HUP`, `USR1`, or `USR2`. |
 | **`--state-dir`** | dirpath | Path to the state directory. Enables persistence if set. |
 | **`--top-n`** | number | In dry-run mode, show top N actors per chain. |
@@ -221,6 +222,7 @@ graph TD;
 ### Configuration and Setup
 
 - [Configuration.md](docs/Configuration.md) - Complete configuration reference including all YAML options, matcher syntax, and examples
+- [MultiWebsite.md](docs/MultiWebsite.md) - Multi-website mode setup and configuration
 - [HaproxySetup.md](docs/HaproxySetup.md) - HAProxy configuration guide for stick tables, ACLs, and runtime API setup
 
 ### Deployment

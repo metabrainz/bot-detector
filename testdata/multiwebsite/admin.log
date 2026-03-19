@@ -1,0 +1,10 @@
+# Admin website logs
+admin.example.com 10.2.1.1 - - [01/Jan/2026:12:00:00 +0000] "GET /admin/dashboard HTTP/1.1" 200 8192 "-" "Mozilla/5.0"
+admin.example.com 10.2.1.2 - - [01/Jan/2026:12:00:01 +0000] "GET /admin/users HTTP/1.1" 200 4096 "-" "Chrome/90.0"
+
+# Unauthorized access - should trigger Admin-Unauthorized-Access chain
+admin.example.com 10.2.2.1 - - [01/Jan/2026:12:01:00 +0000] "GET /admin/settings HTTP/1.1" 401 128 "-" "UnauthorizedBot"
+
+# Global scanner on admin - should trigger Global-Aggressive-Scanner chain
+admin.example.com 10.2.3.1 - - [01/Jan/2026:12:02:00 +0000] "HEAD /admin/config HTTP/1.1" 403 0 "-" "Scanner/1.0"
+admin.example.com 10.2.3.1 - - [01/Jan/2026:12:02:01 +0000] "GET /admin/config HTTP/1.1" 403 64 "-" "Scanner/1.0"

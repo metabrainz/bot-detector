@@ -231,3 +231,57 @@ func TestCleanUpIdleActors_ImmediateShutdown(t *testing.T) {
 		t.Fatal("Timed out waiting for cleanup goroutine to shut down.")
 	}
 }
+
+func TestActorStringAndParsing(t *testing.T) {
+	tests := []struct {
+		name     string
+		actor    Actor
+		expected string
+	}{
+		{
+			name:     "IP only",
+			actor:    Actor{IPInfo: utils.NewIPInfo("192.0.2.1")},
+			expected: "192.0.2.1",
+		},
+		{
+			name:     "IP with UA",
+			actor:    Actor{IPInfo: utils.NewIPInfo("192.0.2.1"), UA: "Mozilla/5.0"},
+			expected: "192.0.2.1 | Mozilla/5.0",
+		},
+		{
+			name:     "IP with VHost",
+			actor:    Actor{IPInfo: utils.NewIPInfo("192.0.2.1"), VHost: "example.com"},
+			expected: "192.0.2.1@example.com",
+		},
+		{
+			name:     "IP with VHost and UA",
+			actor:    Actor{IPInfo: utils.NewIPInfo("192.0.2.1"), VHost: "example.com", UA: "Mozilla/5.0"},
+			expected: "192.0.2.1@example.com | Mozilla/5.0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test String()
+			result := tt.actor.String()
+			if result != tt.expected {
+				t.Errorf("String() = %q, want %q", result, tt.expected)
+			}
+
+			// Test round-trip parsing
+			parsed, err := NewActorFromString(result)
+			if err != nil {
+				t.Fatalf("NewActorFromString(%q) error: %v", result, err)
+			}
+			if parsed.IPInfo.Address != tt.actor.IPInfo.Address {
+				t.Errorf("Parsed IP = %q, want %q", parsed.IPInfo.Address, tt.actor.IPInfo.Address)
+			}
+			if parsed.VHost != tt.actor.VHost {
+				t.Errorf("Parsed VHost = %q, want %q", parsed.VHost, tt.actor.VHost)
+			}
+			if parsed.UA != tt.actor.UA {
+				t.Errorf("Parsed UA = %q, want %q", parsed.UA, tt.actor.UA)
+			}
+		})
+	}
+}

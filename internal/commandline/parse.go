@@ -154,8 +154,9 @@ func ParseParameters(args []string) (*AppParameters, error) {
 		params.StateDir = absPath
 	}
 
-	// Dry run don't require a log path
-	requireLogPath := true
+	// --log-path is optional (validated later based on config)
+	// Only required for special modes that don't load config
+	requireLogPath := false
 	requireConfigDir := true
 
 	if params.Check || params.DumpBackends || params.DryRun {

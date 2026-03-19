@@ -11,7 +11,6 @@ func TestParseParameters(t *testing.T) {
 	logPath := "/var/log/access.log"
 	stateDir := "/var/lib/bot-detector/state"
 	expectConfigDir := "--config-dir <path> is required"
-	expectLogPath := "--log-path <path> is required"
 	tests := []struct {
 		name        string
 		args        []string
@@ -68,12 +67,6 @@ func TestParseParameters(t *testing.T) {
 			args:    []string{"bot-detector", "--version"},
 			want:    &AppParameters{ShowVersion: true, Envs: &EnvParameters{}},
 			wantErr: false,
-		},
-		{
-			name:        "missing required log-path in live mode",
-			args:        []string{"bot-detector", "--config-dir", configDir},
-			wantErr:     true,
-			errContains: expectLogPath,
 		},
 		{
 			name:        "missing required config for live mode",

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"bot-detector/internal/logging"
+	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
 	"bot-detector/internal/types"
 )
@@ -38,11 +39,14 @@ type Provider interface {
 	// for creating a configuration archive.
 	GetConfigForArchive() (mainConfig []byte, modTime time.Time, deps map[string]*types.FileDependency, configDir string, err error)
 
-	// GenerateHTMLMetricsReport generates an HTML-formatted metrics report.
-	GenerateHTMLMetricsReport() string
+	// GenerateMetricsReport generates a plain-text metrics report.
+	GenerateMetricsReport() string
 
 	// GenerateStepsMetricsReport generates a plain-text step execution metrics report.
 	GenerateStepsMetricsReport() string
+
+	// GenerateWebsiteStatsReport generates a plain-text multi-website statistics report.
+	GenerateWebsiteStatsReport() string
 
 	// GetMarshalledConfig retrieves the raw YAML configuration bytes and its modification time.
 	GetMarshalledConfig() ([]byte, time.Time, error)
@@ -90,4 +94,38 @@ type Provider interface {
 
 	// RemoveFromPersistence removes an IP from persistence state and writes unblock event to journal.
 	RemoveFromPersistence(ip string) error
+
+	// GetIPStates returns the complete IPStates map for state sync.
+	GetIPStates() map[string]persistence.IPState
+
+	// GetPersistenceMutex returns the mutex for IPStates.
+	GetPersistenceMutex() *sync.Mutex
+
+	// GetClusterConfig returns the cluster configuration (nil if not in cluster).
+	// Returns *cluster.ClusterConfig but typed as interface{} to avoid import cycle.
+	GetClusterConfig() interface{}
+
+	// GetStateSyncConfig returns state sync configuration values.
+	// Returns (enabled, compression, timeout, incremental).
+	GetStateSyncConfig() (bool, bool, time.Duration, bool)
+
+	// GetStateSyncManager returns the state sync manager (nil if not enabled).
+	// Returns *cluster.StateSyncManager but typed as interface{} to avoid import cycle.
+	GetStateSyncManager() interface{}
+}
+
+// StateSyncResponse is the response format for state sync endpoints.
+type StateSyncResponse struct {
+	Version   string                         `json:"version"`
+	Timestamp time.Time                      `json:"timestamp"`
+	States    map[string]persistence.IPState `json:"states"`
+}
+
+// MergedStateResponse is the response format for merged cluster state.
+type MergedStateResponse struct {
+	Version      string                         `json:"version"`
+	Timestamp    time.Time                      `json:"timestamp"`
+	NodesQueried []string                       `json:"nodes_queried"`
+	NodesFailed  []string                       `json:"nodes_failed"`
+	States       map[string]persistence.IPState `json:"states"`
 }

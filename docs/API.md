@@ -23,18 +23,76 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
 ### `/` or `/stats`
 
 *   **Method:** `GET`
-*   **Content-Type:** `text/html; charset=utf-8`
-*   **Description:** Displays a comprehensive HTML report of the application's real-time metrics. This is the main dashboard for monitoring activity. The report includes:
-    *   General processing statistics (lines processed, valid hits, errors).
-    *   Actor statistics (good actors skipped, actors cleaned).
-    *   Chain and action statistics.
-    *   Per-chain metrics (hits, completions, resets).
+*   **Content-Type:** `text/plain; charset=utf-8`
+*   **Description:** Displays a comprehensive plain-text report of the application's real-time metrics. This is the main dashboard for monitoring activity. The report includes:
+    *   Timestamp and uptime information
+    *   General processing statistics (lines processed, valid hits, errors, processing rate)
+    *   Actor statistics (good actors skipped, actors cleaned)
+    *   Chain and action statistics
+    *   Per-chain metrics (hits, completions, resets) - only active chains shown
+    *   Website information for multi-website mode (shown as `[website1, website2]` after chain name)
 
 ### `/stats/steps`
 
 *   **Method:** `GET`
 *   **Content-Type:** `text/plain; charset=utf-8`
-*   **Description:** Provides a plain text list of all behavioral chain steps and the number of times each has been executed. This is useful for debugging chain performance and identifying which rules are matching most frequently. The list is sorted by execution count in descending order.
+*   **Description:** Provides a plain text report of behavioral chain step executions grouped by website. The report includes:
+    *   Timestamp
+    *   Total step executions across all websites
+    *   Per-website sections showing:
+        *   Website name and execution count for that website
+        *   Individual step counts with percentages (calculated against overall total)
+        *   Steps sorted by execution count in descending order
+    *   Global chains shown first, then website-specific chains alphabetically
+    *   Step names include website/vhost context (e.g., `step 1/3 of ChainName[website]`)
+    *   Useful for debugging chain performance and comparing activity across websites.
+
+### `/stats/websites`
+
+*   **Method:** `GET`
+*   **Content-Type:** `text/plain; charset=utf-8`
+*   **Description:** Displays multi-website statistics including configured websites, their vhosts, log paths, chain assignments, and a list of unknown vhosts encountered in logs. The report includes:
+    *   Timestamp
+    *   Website configuration details
+    *   Per-website metrics (lines parsed, chain matches, completions, resets)
+    *   Unknown vhosts list
+    *   This endpoint is particularly useful for:
+        *   Verifying multi-website configuration
+        *   Identifying misconfigured or missing vhosts
+        *   Troubleshooting log entries that are being skipped
+*   **Response (Multi-Website Mode):**
+    ```
+    Generated: 2026-03-10T09:15:00+01:00
+
+    === Multi-Website Statistics ===
+    
+    Total Websites: 2
+    Global Chains: 1
+    Website-Specific Chains: 2
+    
+    === Configured Websites ===
+      main:
+        VHosts: www.example.com, example.com
+        Log Path: /var/log/haproxy/main.log
+        Chains: 1
+      api:
+        VHosts: api.example.com
+        Log Path: /var/log/haproxy/api.log
+        Chains: 1
+    
+    --- Unknown VHosts ---
+      Total: 1
+      VHosts:
+        - unknown.example.com
+    
+      Note: Unknown vhosts are logged once and their entries are skipped.
+      To fix: Add the vhost to a website's 'vhosts' list in config.yaml
+    ```
+*   **Response (Single-Website Mode):**
+    ```
+    Multi-website mode is not enabled.
+    To enable, add a 'websites' section to your config.yaml
+    ```
 
 ### `/config`
 
@@ -89,7 +147,7 @@ These endpoints are available when cluster mode is enabled. They provide cluster
 
 *   **Method:** `GET`
 *   **Content-Type:** `application/json`
-*   **Description:** Returns this node's current metrics snapshot in JSON format. This endpoint is used by leader nodes to collect metrics from follower nodes, but can also be queried directly for monitoring individual nodes. The metrics include processing statistics, actor statistics, chain execution statistics, and various performance counters.
+*   **Description:** Returns this node's current metrics snapshot in JSON format. This endpoint is used by leader nodes to collect metrics from follower nodes, but can also be queried directly for monitoring individual nodes. The metrics include processing statistics, actor statistics, chain execution statistics, per-website statistics (in multi-website mode), and various performance counters.
 *   **Response Format:**
     ```json
     {
@@ -142,9 +200,24 @@ These endpoints are available when cluster mode is enabled. They provide cluster
           "completed": 2,
           "resets": 0
         }
+      },
+      "website_metrics": {
+        "main_site": {
+          "lines_parsed": 450,
+          "chains_matched": 12,
+          "chains_reset": 1,
+          "chains_completed": 8
+        },
+        "api_site": {
+          "lines_parsed": 550,
+          "chains_matched": 30,
+          "chains_reset": 0,
+          "chains_completed": 34
+        }
       }
     }
     ```
+*   **Note:** The `website_metrics` field is only present when multi-website mode is enabled.
 *   **Responses:**
     *   `200 OK`: Successfully returns the metrics snapshot.
     *   `500 Internal Server Error`: If the server fails to generate the metrics snapshot.
@@ -153,7 +226,7 @@ These endpoints are available when cluster mode is enabled. They provide cluster
 
 *   **Method:** `GET`
 *   **Content-Type:** `application/json`
-*   **Description:** Returns cluster-wide aggregated metrics from all nodes (leader only). This endpoint provides a comprehensive view of the entire cluster's performance, including per-node health status and cluster-wide metric summation. Only available on leader nodes; follower nodes will return a 404 error.
+*   **Description:** Returns cluster-wide aggregated metrics from all nodes (leader only). This endpoint provides a comprehensive view of the entire cluster's performance, including per-node health status, cluster-wide metric summation, and per-website aggregates (in multi-website mode). Only available on leader nodes; follower nodes will return a 404 error.
 *   **Response Format:**
     ```json
     {
@@ -193,6 +266,20 @@ These endpoints are available when cluster mode is enabled. They provide cluster
             "hits": 6,
             "completed": 3,
             "resets": 0
+          }
+        },
+        "website_metrics": {
+          "main_site": {
+            "lines_parsed": 1350,
+            "chains_matched": 36,
+            "chains_reset": 3,
+            "chains_completed": 24
+          },
+          "api_site": {
+            "lines_parsed": 1650,
+            "chains_matched": 90,
+            "chains_reset": 0,
+            "chains_completed": 102
           }
         }
       },
@@ -453,9 +540,12 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   **Leader node:** Clear locally, then broadcast to all followers asynchronously
     *   **Standalone node:** Clear locally only
 *   **What gets cleared:**
-    *   All HAProxy stick table entries for the IP (across all duration tables)
+    *   All HAProxy stick table entries for the IP (across all duration tables) - **removed completely**
     *   IP from persistence state (`IPStates` map)
     *   Unblock event written to journal with reason "manual_clear"
+*   **Performance Note:**
+    *   Removing entries from HAProxy tables is **slow** for large tables
+    *   For quick unblocking, use `/ip/{ip}/unblock` instead (sets `gpc0=0`, much faster)
 *   **Notes:**
     *   The IP address is canonicalized before processing (e.g., `2001:0db8::1` → `2001:db8::1`)
     *   Clears from all configured HAProxy instances and all duration tables
@@ -470,6 +560,61 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `500 Internal Server Error`: Failed to clear the IP from HAProxy or persistence.
     *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
     *   `503 Service Unavailable`: Blocker is not available (e.g., dry-run mode).
+
+### `/ip/{ip}/unblock` (GET or POST)
+
+*   **Method:** `GET` or `POST`
+*   **Content-Type:** `text/plain; charset=utf-8` (POST) or cluster status format (GET)
+*   **Description:** Fast unblock operation that sets `gpc0=0` in HAProxy stick tables without removing the entry. The entry remains in the table and expires naturally. This is **much faster** than `/clear` for large tables. Cluster-aware - forwards to leader if called on follower, then broadcasts to all nodes.
+*   **Parameters:**
+    *   `ip` - IPv4 or IPv6 address (will be canonicalized)
+*   **Response Format (POST - Simple confirmation):**
+    ```
+    IP 192.168.1.100 unblocked (gpc0 set to 0, entry will expire naturally)
+    ```
+*   **Response Format (GET - Unblock + Status):**
+    ```
+    cluster_status: unblocked
+    nodes:
+      - name: node1
+        status: unblocked
+        last_unblock: 2026-03-10T15:09:00Z
+        reason: API unblock
+      - name: node2
+        status: unblocked
+        last_unblock: 2026-03-10T15:09:00Z
+        reason: API unblock
+    ```
+*   **Cluster Behavior:**
+    *   **Follower nodes:** Forward the request to the leader (preserves GET/POST method)
+    *   **Leader node:** Unblock locally, then broadcast to all followers asynchronously
+    *   **Standalone node:** Unblock locally only
+*   **What gets updated:**
+    *   HAProxy stick tables: `gpc0` set to 0 (entry remains, expires naturally)
+    *   Persistence state: Unblock event written to journal with reason "API unblock"
+    *   Activity store: IP removed from in-memory chain progress
+*   **Performance:**
+    *   **Fast:** Only updates `gpc0` value, doesn't remove entry from table
+    *   Recommended for day-to-day unblocking operations
+    *   Entry will be removed by HAProxy when it naturally expires
+*   **Usage Examples:**
+    ```bash
+    # Quick unblock with status confirmation (GET)
+    curl http://localhost:8092/ip/192.168.1.100/unblock
+    
+    # Simple unblock (POST)
+    curl -X POST http://localhost:8092/ip/192.168.1.100/unblock
+    ```
+*   **Comparison with `/clear`:**
+    *   `/unblock`: Sets `gpc0=0`, entry expires naturally (fast)
+    *   `/clear`: Removes entry completely from table (slow)
+*   **Responses:**
+    *   `200 OK`: Successfully unblocked the IP.
+    *   `400 Bad Request`: Invalid IP address format.
+    *   `500 Internal Server Error`: Failed to unblock the IP.
+    *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
+    *   `503 Service Unavailable`: Blocker is not available (e.g., dry-run mode).
+
 
 ### `/api/v1/cluster/internal/ip/{ip}` (Internal Use)
 
