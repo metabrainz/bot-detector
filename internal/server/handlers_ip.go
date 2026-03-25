@@ -163,7 +163,11 @@ func renderClusterIPStatus(w http.ResponseWriter, p Provider, canonical string) 
 	_, _ = fmt.Fprintf(w, "cluster_status: %s\n", response.ClusterStatus)
 	_, _ = fmt.Fprint(w, "nodes:\n")
 	for _, node := range response.Nodes {
-		_, _ = fmt.Fprintf(w, "  - name: %s\n", node.Name)
+		if node.Address != "" {
+			_, _ = fmt.Fprintf(w, "  - name: %s (%s)\n", node.Name, node.Address)
+		} else {
+			_, _ = fmt.Fprintf(w, "  - name: %s\n", node.Name)
+		}
 		_, _ = fmt.Fprintf(w, "    status: %s\n", node.Status)
 		if node.Error != "" {
 			_, _ = fmt.Fprintf(w, "    error: %s\n", node.Error)
@@ -968,6 +972,7 @@ type ClusterIPAggregateResponse struct {
 // NodeIPStatusResponse is the IP status for a single node
 type NodeIPStatusResponse struct {
 	Name               string            `json:"name"`
+	Address            string            `json:"address,omitempty"`
 	Status             string            `json:"status"` // "blocked", "unblocked", "unknown", "error"
 	Error              string            `json:"error,omitempty"`
 	Actors             int               `json:"actors,omitempty"`
@@ -1067,9 +1072,10 @@ func queryNodeIPStatus(p Provider, nodeName, nodeAddr, protocol, ip string) Node
 	if err != nil {
 		p.Log(logging.LevelWarning, "CLUSTER", "Failed to query node %s: %v", nodeName, err)
 		return NodeIPStatusResponse{
-			Name:   nodeName,
-			Status: "error",
-			Error:  err.Error(),
+			Name:    nodeName,
+			Address: nodeAddr,
+			Status:  "error",
+			Error:   err.Error(),
 		}
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -1077,9 +1083,10 @@ func queryNodeIPStatus(p Provider, nodeName, nodeAddr, protocol, ip string) Node
 	if resp.StatusCode != http.StatusOK {
 		p.Log(logging.LevelWarning, "CLUSTER", "Node %s returned status %d", nodeName, resp.StatusCode)
 		return NodeIPStatusResponse{
-			Name:   nodeName,
-			Status: "error",
-			Error:  fmt.Sprintf("HTTP %d", resp.StatusCode),
+			Name:    nodeName,
+			Address: nodeAddr,
+			Status:  "error",
+			Error:   fmt.Sprintf("HTTP %d", resp.StatusCode),
 		}
 	}
 
@@ -1087,15 +1094,17 @@ func queryNodeIPStatus(p Provider, nodeName, nodeAddr, protocol, ip string) Node
 	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
 		p.Log(logging.LevelWarning, "CLUSTER", "Failed to decode response from node %s: %v", nodeName, err)
 		return NodeIPStatusResponse{
-			Name:   nodeName,
-			Status: "error",
-			Error:  "decode error",
+			Name:    nodeName,
+			Address: nodeAddr,
+			Status:  "error",
+			Error:   "decode error",
 		}
 	}
 
 	// Convert to NodeIPStatusResponse
 	return NodeIPStatusResponse{
 		Name:          nodeName,
+		Address:       nodeAddr,
 		Status:        status.Status,
 		Actors:        status.Actors,
 		Chains:        status.Chains,
