@@ -454,8 +454,10 @@ func (b *HAProxyBlocker) executeCommandImpl(addr, ip, command string) error {
 			continue
 		}
 
-		reader := bufio.NewReader(conn)
 		_ = conn.SetReadDeadline(time.Now().Add(b.P.GetBlockerDialTimeout()))
+
+		// Read first response line to check for errors
+		reader := bufio.NewReader(conn)
 		response, err := reader.ReadString('\n')
 
 		if err == nil || (errors.Is(err, io.EOF) && response != "") {
@@ -463,6 +465,9 @@ func (b *HAProxyBlocker) executeCommandImpl(addr, ip, command string) error {
 			if trimmedResponse != "" {
 				return fmt.Errorf("HAProxy command execution failed for IP %s (Response: %s)", ip, trimmedResponse)
 			}
+			// Drain remaining responses to ensure HAProxy processes all
+			// batched commands before the connection is closed.
+			_, _ = io.ReadAll(reader)
 			b.P.IncrementCmdsPerBlocker(addr)
 			return nil
 		}
