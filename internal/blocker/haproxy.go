@@ -182,32 +182,29 @@ func (b *HAProxyBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reas
 	return b.executeCommandsConcurrently(ipInfo.Address, targets, "block")
 }
 
-// Unblock removes an IP from all configured HAProxy stick tables.
+// Unblock sets gpc0=0 for an IP in all version-matching HAProxy stick tables.
+// This includes configured tables (where the entry is created if absent) and any
+// other tables where the IP may have been blocked under a previous configuration.
 func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 	if b.IsDryRun {
 		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would unblock IP %s from all tables/maps (Reason: %s).", ipInfo.Address, reason)
 		return nil
 	}
 
-	if ipInfo.Version != 4 && ipInfo.Version != 6 {
-		b.P.Log(logging.LevelError, "SKIP_UNBLOCK", "Cannot unblock IP %s: unrecognized IP version", ipInfo.Address)
+	relevantTables, addresses, err := b.getRelevantTables(ipInfo)
+	if err != nil {
+		b.P.Log(logging.LevelError, "SKIP_UNBLOCK", "Cannot unblock IP %s: %v", ipInfo.Address, err)
+		return nil
+	}
+	if len(relevantTables) == 0 {
 		return nil
 	}
 
-	baseTables := make(map[string]struct{})
-	for _, baseName := range b.P.GetDurationTables() {
-		baseTables[baseName] = struct{}{}
-	}
-	if fallback := b.P.GetBlockTableNameFallback(); fallback != "" {
-		baseTables[fallback] = struct{}{}
-	}
-
 	targets := make(map[string]map[string]string)
-	for baseName := range baseTables {
-		tableName := getTableNameWithSuffix(baseName, ipInfo.Version)
+	for _, tableName := range relevantTables {
 		targets[tableName] = make(map[string]string)
 		command := makeUnblockCommand(tableName, ipInfo.Address)
-		for _, addr := range b.P.GetBlockerAddresses() {
+		for _, addr := range addresses {
 			targets[tableName][addr] = command
 		}
 	}
@@ -1266,13 +1263,10 @@ func (b *HAProxyBlocker) ResyncUnblockedIPs(addr string, unblockedIPs map[string
 	successCount := 0
 	errorCount := 0
 
-	// Get all table names for unblocking
-	baseTables := make(map[string]struct{})
-	for _, baseName := range b.P.GetDurationTables() {
-		baseTables[baseName] = struct{}{}
-	}
-	if fallback := b.P.GetBlockTableNameFallback(); fallback != "" {
-		baseTables[fallback] = struct{}{}
+	// Discover all tables from this backend
+	allTableNames, err := b.getHAProxyTableNames(addr)
+	if err != nil {
+		return fmt.Errorf("failed to get table names from %s: %w", addr, err)
 	}
 
 	for ip := range unblockedIPs {
@@ -1287,9 +1281,12 @@ func (b *HAProxyBlocker) ResyncUnblockedIPs(addr string, unblockedIPs map[string
 			continue
 		}
 
-		// Unblock in all tables
-		for baseName := range baseTables {
-			tableName := getTableNameWithSuffix(baseName, ipInfo.Version)
+		// Unblock in all version-matching tables
+		suffix := getIPVersionSuffix(ipInfo.Version)
+		for _, tableName := range allTableNames {
+			if !strings.HasSuffix(tableName, suffix) {
+				continue
+			}
 
 			command := makeUnblockCommand(tableName, ipInfo.Address)
 
