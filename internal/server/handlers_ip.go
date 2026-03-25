@@ -813,10 +813,19 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 
 		ipInfo := utils.NewIPInfo(canonical)
 
-		// Unblock (sets gpc0=0, entry expires naturally)
-		if err := blocker.Unblock(ipInfo, "API unblock"); err != nil {
-			p.Log(logging.LevelError, "API", "Failed to unblock IP %s: %v", canonical, err)
-			http.Error(w, fmt.Sprintf("Failed to unblock IP: %v", err), http.StatusInternalServerError)
+		// Unblock directly (bypass rate-limited queue for immediate effect)
+		type directUnblocker interface {
+			UnblockDirect(ipInfo utils.IPInfo, reason string) error
+		}
+		var unblockErr error
+		if du, ok := blockerInterface.(directUnblocker); ok {
+			unblockErr = du.UnblockDirect(ipInfo, "API unblock")
+		} else {
+			unblockErr = blocker.Unblock(ipInfo, "API unblock")
+		}
+		if unblockErr != nil {
+			p.Log(logging.LevelError, "API", "Failed to unblock IP %s: %v", canonical, unblockErr)
+			http.Error(w, fmt.Sprintf("Failed to unblock IP: %v", unblockErr), http.StatusInternalServerError)
 			return
 		}
 
