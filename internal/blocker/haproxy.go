@@ -197,8 +197,11 @@ func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 		return nil
 	}
 	if len(relevantTables) == 0 {
+		b.P.Log(logging.LevelWarning, "SKIP_UNBLOCK", "No relevant tables found for IP %s", ipInfo.Address)
 		return nil
 	}
+
+	b.P.Log(logging.LevelInfo, "UNBLOCK", "Unblocking IP %s in %d tables: %v (Reason: %s)", ipInfo.Address, len(relevantTables), relevantTables, reason)
 
 	targets := make(map[string]map[string]string)
 	for _, tableName := range relevantTables {
