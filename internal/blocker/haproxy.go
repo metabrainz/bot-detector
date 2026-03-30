@@ -182,32 +182,32 @@ func (b *HAProxyBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reas
 	return b.executeCommandsConcurrently(ipInfo.Address, targets, "block")
 }
 
-// Unblock removes an IP from all configured HAProxy stick tables.
+// Unblock sets gpc0=0 for an IP in all version-matching HAProxy stick tables.
+// This includes configured tables (where the entry is created if absent) and any
+// other tables where the IP may have been blocked under a previous configuration.
 func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 	if b.IsDryRun {
 		b.P.Log(logging.LevelInfo, "DRY_RUN", "Would unblock IP %s from all tables/maps (Reason: %s).", ipInfo.Address, reason)
 		return nil
 	}
 
-	if ipInfo.Version != 4 && ipInfo.Version != 6 {
-		b.P.Log(logging.LevelError, "SKIP_UNBLOCK", "Cannot unblock IP %s: unrecognized IP version", ipInfo.Address)
+	relevantTables, addresses, err := b.getRelevantTables(ipInfo)
+	if err != nil {
+		b.P.Log(logging.LevelError, "SKIP_UNBLOCK", "Cannot unblock IP %s: %v", ipInfo.Address, err)
+		return nil
+	}
+	if len(relevantTables) == 0 {
+		b.P.Log(logging.LevelWarning, "SKIP_UNBLOCK", "No relevant tables found for IP %s", ipInfo.Address)
 		return nil
 	}
 
-	baseTables := make(map[string]struct{})
-	for _, baseName := range b.P.GetDurationTables() {
-		baseTables[baseName] = struct{}{}
-	}
-	if fallback := b.P.GetBlockTableNameFallback(); fallback != "" {
-		baseTables[fallback] = struct{}{}
-	}
+	b.P.Log(logging.LevelInfo, "UNBLOCK", "Unblocking IP %s in %d tables: %v (Reason: %s)", ipInfo.Address, len(relevantTables), relevantTables, reason)
 
 	targets := make(map[string]map[string]string)
-	for baseName := range baseTables {
-		tableName := getTableNameWithSuffix(baseName, ipInfo.Version)
+	for _, tableName := range relevantTables {
 		targets[tableName] = make(map[string]string)
 		command := makeUnblockCommand(tableName, ipInfo.Address)
-		for _, addr := range b.P.GetBlockerAddresses() {
+		for _, addr := range addresses {
 			targets[tableName][addr] = command
 		}
 	}
@@ -454,8 +454,10 @@ func (b *HAProxyBlocker) executeCommandImpl(addr, ip, command string) error {
 			continue
 		}
 
-		reader := bufio.NewReader(conn)
 		_ = conn.SetReadDeadline(time.Now().Add(b.P.GetBlockerDialTimeout()))
+
+		// Read first response line to check for errors
+		reader := bufio.NewReader(conn)
 		response, err := reader.ReadString('\n')
 
 		if err == nil || (errors.Is(err, io.EOF) && response != "") {
@@ -463,6 +465,9 @@ func (b *HAProxyBlocker) executeCommandImpl(addr, ip, command string) error {
 			if trimmedResponse != "" {
 				return fmt.Errorf("HAProxy command execution failed for IP %s (Response: %s)", ip, trimmedResponse)
 			}
+			// Drain remaining responses to ensure HAProxy processes all
+			// batched commands before the connection is closed.
+			_, _ = io.ReadAll(reader)
 			b.P.IncrementCmdsPerBlocker(addr)
 			return nil
 		}
@@ -1266,13 +1271,10 @@ func (b *HAProxyBlocker) ResyncUnblockedIPs(addr string, unblockedIPs map[string
 	successCount := 0
 	errorCount := 0
 
-	// Get all table names for unblocking
-	baseTables := make(map[string]struct{})
-	for _, baseName := range b.P.GetDurationTables() {
-		baseTables[baseName] = struct{}{}
-	}
-	if fallback := b.P.GetBlockTableNameFallback(); fallback != "" {
-		baseTables[fallback] = struct{}{}
+	// Discover all tables from this backend
+	allTableNames, err := b.getHAProxyTableNames(addr)
+	if err != nil {
+		return fmt.Errorf("failed to get table names from %s: %w", addr, err)
 	}
 
 	for ip := range unblockedIPs {
@@ -1287,9 +1289,12 @@ func (b *HAProxyBlocker) ResyncUnblockedIPs(addr string, unblockedIPs map[string
 			continue
 		}
 
-		// Unblock in all tables
-		for baseName := range baseTables {
-			tableName := getTableNameWithSuffix(baseName, ipInfo.Version)
+		// Unblock in all version-matching tables
+		suffix := getIPVersionSuffix(ipInfo.Version)
+		for _, tableName := range allTableNames {
+			if !strings.HasSuffix(tableName, suffix) {
+				continue
+			}
 
 			command := makeUnblockCommand(tableName, ipInfo.Address)
 
