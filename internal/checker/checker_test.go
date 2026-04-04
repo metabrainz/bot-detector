@@ -1418,10 +1418,10 @@ func (h *CheckerTestHarness) assertChainProgressCleared(chainName string, entry 
 
 // TestGoodActorNotBlockedByChain_WithVHost verifies that a good actor with a
 // VHost set is not blocked by a chain that matches the same UA pattern.
-// This is a regression test for a bug where CheckChains created actors without
-// VHost while checkChainsInternal (via GetActor) included VHost, causing the
-// good_actor SkipInfo to be stored on a different actor key than the one used
-// by chain processing.
+// This is a regression test for a bug where a good actor that was previously
+// blocked (e.g., before good_actors config was loaded) would remain in
+// SkipTypeBlocked state because IsGoodActor only set SkipInfo when it was
+// SkipTypeNone, not when it was SkipTypeBlocked.
 func TestGoodActorNotBlockedByChain_WithVHost(t *testing.T) {
 	const goodIP = "66.249.70.101"
 	const botUA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
@@ -1492,10 +1492,10 @@ func TestGoodActorNotBlockedByChain_WithVHost(t *testing.T) {
 	}
 
 	// Step 3: Process a new entry from the same IP. The good_actor check should
-	// match and the actor should be recognized as good, preventing further blocks.
-	// With the VHost mismatch bug, the SkipInfo would be set on a VHost-less actor
-	// while the chain's PreCheckActivity looks up a VHost-included actor, so the
-	// chain would fire again.
+	// recognize this as a good actor and clear the stale blocked state.
+	// Before the fix, SkipInfo stayed as SkipTypeBlocked because the code only
+	// set it when Type == SkipTypeNone, so PreCheckActivity would skip the entry
+	// as "blocked" even though IsGoodActor returned true.
 	entry2 := &app.LogEntry{
 		IPInfo:    utils.NewIPInfo(goodIP),
 		UserAgent: botUA,
@@ -1507,6 +1507,21 @@ func TestGoodActorNotBlockedByChain_WithVHost(t *testing.T) {
 
 	if h.blockCalled {
 		t.Fatal("Good actor was blocked again after good_actors was configured. " +
-			"This indicates the VHost-keyed actor in chain processing did not see the good_actor SkipInfo.")
+			"The good_actor match should clear stale SkipTypeBlocked state.")
+	}
+
+	// Verify the actor is now marked as good_actor, not blocked
+	h.processor.ActivityMutex.RLock()
+	actor := store.Actor{IPInfo: utils.NewIPInfo(goodIP), VHost: vhost}
+	activity, exists := h.processor.ActivityStore[actor]
+	h.processor.ActivityMutex.RUnlock()
+	if !exists {
+		t.Fatal("Expected activity to exist for the good actor")
+	}
+	if activity.SkipInfo.Type != utils.SkipTypeGoodActor {
+		t.Fatalf("Expected SkipInfo.Type to be GoodActor, got %v", activity.SkipInfo.Type)
+	}
+	if activity.IsBlocked {
+		t.Fatal("Expected IsBlocked to be false after good_actor promotion")
 	}
 }

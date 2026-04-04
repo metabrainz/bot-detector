@@ -824,9 +824,16 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 	// 1. First, check if the entry is a good actor. This will set the SkipInfo on the actor's activity.
 	isGood, goodActorRuleName := IsGoodActor(p, entry)
 	if isGood {
-		// Only log the skip message and set the state the first time.
-		if activity.SkipInfo.Type == utils.SkipTypeNone {
+		// Always promote to good_actor status, even if previously blocked.
+		// Without this, an IP that was blocked before being recognized as a
+		// good actor (e.g., due to a temporary file load failure) would remain
+		// in SkipTypeBlocked state, causing PreCheckActivity to skip it as
+		// blocked until the block duration expires — even though the unblock
+		// command was sent to HAProxy.
+		if activity.SkipInfo.Type != utils.SkipTypeGoodActor {
 			activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeGoodActor, Source: p.InternReason(goodActorRuleName)}
+			activity.IsBlocked = false
+			activity.BlockedUntil = time.Time{}
 			websiteCtx := ""
 			if entry.Website != "" {
 				websiteCtx = fmt.Sprintf(" on website '%s'", entry.Website)
