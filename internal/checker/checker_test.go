@@ -1415,3 +1415,98 @@ func (h *CheckerTestHarness) assertChainProgressCleared(chainName string, entry 
 		h.t.Errorf("Expected ChainProgress to be cleared for key %+v, but it has %d entries: %v", key, len(activity.ChainProgress), activity.ChainProgress)
 	}
 }
+
+// TestGoodActorNotBlockedByChain_WithVHost verifies that a good actor with a
+// VHost set is not blocked by a chain that matches the same UA pattern.
+// This is a regression test for a bug where CheckChains created actors without
+// VHost while checkChainsInternal (via GetActor) included VHost, causing the
+// good_actor SkipInfo to be stored on a different actor key than the one used
+// by chain processing.
+func TestGoodActorNotBlockedByChain_WithVHost(t *testing.T) {
+	const goodIP = "66.249.70.101"
+	const botUA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+	const vhost = "musicbrainz.org"
+
+	h := NewCheckerTestHarness(t, &config.AppConfig{
+		Checker: config.CheckerConfig{
+			UnblockOnGoodActor: true,
+			UnblockCooldown:    5 * time.Minute,
+		},
+	})
+
+	// Define good_actor: IP match + UA match (both must match)
+	ipCtx := config.MatcherContext{
+		ChainName:          "good_actor_test",
+		CanonicalFieldName: "IP",
+		FileDependencies:   map[string]*types.FileDependency{},
+	}
+	ipMatcher, err := config.CompileStringMatcher(ipCtx, goodIP)
+	if err != nil {
+		t.Fatalf("Failed to compile IP matcher: %v", err)
+	}
+	uaCtx := config.MatcherContext{
+		ChainName:          "good_actor_test",
+		CanonicalFieldName: "UserAgent",
+		FileDependencies:   map[string]*types.FileDependency{},
+	}
+	uaMatcher, err := config.CompileStringMatcher(uaCtx, "regex:(?i)googlebot")
+	if err != nil {
+		t.Fatalf("Failed to compile UA matcher: %v", err)
+	}
+
+	// Define a chain that would block the same UA (like fake_google_bot)
+	h.addChain(config.BehavioralChain{
+		Name:          "fake_google_bot",
+		Action:        "block",
+		BlockDuration: time.Hour,
+		MatchKey:      "ip",
+		OnMatch:       "stop",
+		StepsYAML: []config.StepDefYAML{
+			{FieldMatches: map[string]interface{}{"useragent": "regex:(?i)googlebot"}},
+		},
+	})
+
+	entry := &app.LogEntry{
+		IPInfo:    utils.NewIPInfo(goodIP),
+		UserAgent: botUA,
+		VHost:     vhost,
+		Timestamp: time.Now(),
+		Path:      "/artist/some-uuid",
+	}
+
+	// Step 1: Process entry WITHOUT good_actors configured (simulates file load failure).
+	// The chain should block the IP.
+	h.processEntry(entry)
+	if !h.blockCalled {
+		t.Fatal("Expected block when good_actors is empty")
+	}
+	h.blockCalled = false
+
+	// Step 2: Now configure good_actors (simulates successful config reload).
+	h.processor.Config.GoodActors = []config.GoodActorDef{
+		{
+			Name:       "google_bot",
+			IPMatchers: []config.FieldMatcher{ipMatcher},
+			UAMatchers: []config.FieldMatcher{uaMatcher},
+		},
+	}
+
+	// Step 3: Process a new entry from the same IP. The good_actor check should
+	// match and the actor should be recognized as good, preventing further blocks.
+	// With the VHost mismatch bug, the SkipInfo would be set on a VHost-less actor
+	// while the chain's PreCheckActivity looks up a VHost-included actor, so the
+	// chain would fire again.
+	entry2 := &app.LogEntry{
+		IPInfo:    utils.NewIPInfo(goodIP),
+		UserAgent: botUA,
+		VHost:     vhost,
+		Timestamp: time.Now().Add(time.Second),
+		Path:      "/recording/some-uuid",
+	}
+	h.processEntry(entry2)
+
+	if h.blockCalled {
+		t.Fatal("Good actor was blocked again after good_actors was configured. " +
+			"This indicates the VHost-keyed actor in chain processing did not see the good_actor SkipInfo.")
+	}
+}
