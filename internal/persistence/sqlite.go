@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"path/filepath"
@@ -11,7 +12,7 @@ import (
 )
 
 // SchemaVersion is the current database schema version.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // OpenDB opens (or creates) the SQLite database with WAL mode.
 // In dry-run mode, uses an in-memory database.
@@ -88,6 +89,12 @@ func ApplyMigrations(db *sql.DB) error {
 		}
 	}
 
+	if currentVersion < 2 {
+		if err := migrateV2(db); err != nil {
+			return fmt.Errorf("migration v2 failed: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -139,6 +146,205 @@ func migrateV1(db *sql.DB) error {
 	}
 
 	return tx.Commit()
+}
+
+func migrateV2(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmts := []string{
+		`CREATE TABLE ip_scores (
+			ip TEXT PRIMARY KEY,
+			score REAL NOT NULL DEFAULT 0.0,
+			block_count INTEGER NOT NULL DEFAULT 0,
+			last_block_time TIMESTAMP NOT NULL
+		)`,
+		`CREATE INDEX idx_ip_scores_score ON ip_scores(score)`,
+		`CREATE INDEX idx_ip_scores_last_block_time ON ip_scores(last_block_time)`,
+
+		`CREATE TABLE bad_actors (
+			ip TEXT PRIMARY KEY,
+			promoted_at TIMESTAMP NOT NULL,
+			total_score REAL NOT NULL,
+			block_count INTEGER NOT NULL,
+			history_json TEXT
+		)`,
+		`CREATE INDEX idx_bad_actors_promoted_at ON bad_actors(promoted_at)`,
+
+		`INSERT INTO schema_version (version, description) VALUES (2, 'Add bad actors tables')`,
+	}
+
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("failed to execute %q: %w", stmt[:min(len(stmt), 60)], err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// --- Bad Actor Operations ---
+
+// BadActorInfo represents a bad actor entry.
+type BadActorInfo struct {
+	IP          string
+	PromotedAt  time.Time
+	TotalScore  float64
+	BlockCount  int
+	HistoryJSON string
+}
+
+// ScoreInfo represents an IP's current score.
+type ScoreInfo struct {
+	Score         float64
+	BlockCount    int
+	LastBlockTime time.Time
+}
+
+// IncrementScore adds weight to an IP's score and returns the new score.
+func IncrementScore(db *sql.DB, ip string, weight float64, timestamp time.Time) (float64, int, error) {
+	var score float64
+	var blockCount int
+	err := db.QueryRow(`INSERT INTO ip_scores (ip, score, block_count, last_block_time)
+		VALUES (?, ?, 1, ?)
+		ON CONFLICT(ip) DO UPDATE SET
+			score = ip_scores.score + excluded.score,
+			block_count = ip_scores.block_count + 1,
+			last_block_time = excluded.last_block_time
+		RETURNING score, block_count`,
+		ip, weight, timestamp).Scan(&score, &blockCount)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to increment score: %w", err)
+	}
+	return score, blockCount, nil
+}
+
+// GetScore returns the score info for an IP, or nil if not found.
+func GetScore(db *sql.DB, ip string) (*ScoreInfo, error) {
+	var s ScoreInfo
+	err := db.QueryRow("SELECT score, block_count, last_block_time FROM ip_scores WHERE ip = ?", ip).
+		Scan(&s.Score, &s.BlockCount, &s.LastBlockTime)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get score: %w", err)
+	}
+	return &s, nil
+}
+
+// PromoteToBadActor inserts an IP into the bad_actors table with history from recent events.
+func PromoteToBadActor(db *sql.DB, ip string, score float64, blockCount int, timestamp time.Time) error {
+	// Build history from recent events
+	rows, err := db.Query(`
+		SELECT e.timestamp, r.reason
+		FROM events e LEFT JOIN reasons r ON r.id = e.reason_id
+		WHERE e.ip = ? AND e.event_type = 'block'
+		ORDER BY e.timestamp DESC LIMIT 50`, ip)
+	if err != nil {
+		return fmt.Errorf("failed to query event history: %w", err)
+	}
+	defer rows.Close()
+
+	type histEntry struct {
+		Timestamp string `json:"ts"`
+		Reason    string `json:"r"`
+	}
+	var history []histEntry
+	for rows.Next() {
+		var ts time.Time
+		var reason sql.NullString
+		if err := rows.Scan(&ts, &reason); err != nil {
+			continue
+		}
+		history = append(history, histEntry{Timestamp: ts.Format(time.RFC3339), Reason: nullStringValue(reason)})
+	}
+
+	historyJSON, _ := json.Marshal(history)
+
+	_, err = db.Exec(`INSERT OR REPLACE INTO bad_actors (ip, promoted_at, total_score, block_count, history_json)
+		VALUES (?, ?, ?, ?, ?)`, ip, timestamp, score, blockCount, string(historyJSON))
+	if err != nil {
+		return fmt.Errorf("failed to promote to bad actor: %w", err)
+	}
+	return nil
+}
+
+// IsBadActor returns true if the IP is in the bad_actors table.
+func IsBadActor(db *sql.DB, ip string) (bool, error) {
+	var count int
+	err := db.QueryRow("SELECT 1 FROM bad_actors WHERE ip = ?", ip).Scan(&count)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check bad actor: %w", err)
+	}
+	return true, nil
+}
+
+// GetBadActor returns bad actor info for an IP, or nil if not found.
+func GetBadActor(db *sql.DB, ip string) (*BadActorInfo, error) {
+	var ba BadActorInfo
+	var histJSON sql.NullString
+	err := db.QueryRow("SELECT ip, promoted_at, total_score, block_count, history_json FROM bad_actors WHERE ip = ?", ip).
+		Scan(&ba.IP, &ba.PromotedAt, &ba.TotalScore, &ba.BlockCount, &histJSON)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bad actor: %w", err)
+	}
+	ba.HistoryJSON = nullStringValue(histJSON)
+	return &ba, nil
+}
+
+// GetAllBadActors returns all bad actors.
+func GetAllBadActors(db *sql.DB) ([]BadActorInfo, error) {
+	rows, err := db.Query("SELECT ip, promoted_at, total_score, block_count, history_json FROM bad_actors ORDER BY promoted_at DESC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query bad actors: %w", err)
+	}
+	defer rows.Close()
+
+	var result []BadActorInfo
+	for rows.Next() {
+		var ba BadActorInfo
+		var histJSON sql.NullString
+		if err := rows.Scan(&ba.IP, &ba.PromotedAt, &ba.TotalScore, &ba.BlockCount, &histJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan bad actor: %w", err)
+		}
+		ba.HistoryJSON = nullStringValue(histJSON)
+		result = append(result, ba)
+	}
+	return result, rows.Err()
+}
+
+// RemoveBadActor removes an IP from bad_actors and resets its score.
+func RemoveBadActor(db *sql.DB, ip string) error {
+	_, err := db.Exec("DELETE FROM bad_actors WHERE ip = ?", ip)
+	if err != nil {
+		return fmt.Errorf("failed to remove bad actor: %w", err)
+	}
+	_, err = db.Exec("DELETE FROM ip_scores WHERE ip = ?", ip)
+	if err != nil {
+		return fmt.Errorf("failed to reset score: %w", err)
+	}
+	return nil
+}
+
+// CleanupLowScores removes old low-score entries from ip_scores.
+func CleanupLowScores(db *sql.DB, maxAge time.Duration, minScore float64) (int, error) {
+	cutoff := time.Now().Add(-maxAge)
+	res, err := db.Exec("DELETE FROM ip_scores WHERE score < ? AND last_block_time < ?", minScore, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("failed to cleanup low scores: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // reasonHash returns a deterministic FNV-1a 64-bit hash for a reason string.

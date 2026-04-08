@@ -49,13 +49,13 @@ func TestApplyMigrations_Idempotent(t *testing.T) {
 	var version int
 	err = db.QueryRow("SELECT MAX(version) FROM schema_version").Scan(&version)
 	require.NoError(t, err)
-	assert.Equal(t, 1, version)
+	assert.Equal(t, 2, version)
 }
 
 func TestApplyMigrations_TablesExist(t *testing.T) {
 	db := openTestDB(t)
 
-	tables := []string{"schema_version", "reasons", "ips", "events"}
+	tables := []string{"schema_version", "reasons", "ips", "events", "ip_scores", "bad_actors"}
 	for _, table := range tables {
 		var name string
 		err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)
@@ -385,4 +385,128 @@ func TestReasonHash_Deterministic(t *testing.T) {
 
 	h3 := reasonHash("different")
 	assert.NotEqual(t, h1, h3)
+}
+
+func TestIncrementScore(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().Truncate(time.Second)
+
+	score, count, err := IncrementScore(db, "1.1.1.1", 1.0, now)
+	require.NoError(t, err)
+	assert.Equal(t, 1.0, score)
+	assert.Equal(t, 1, count)
+
+	score, count, err = IncrementScore(db, "1.1.1.1", 0.5, now.Add(1*time.Second))
+	require.NoError(t, err)
+	assert.Equal(t, 1.5, score)
+	assert.Equal(t, 2, count)
+}
+
+func TestGetScore(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().Truncate(time.Second)
+
+	// Not found
+	s, err := GetScore(db, "9.9.9.9")
+	require.NoError(t, err)
+	assert.Nil(t, s)
+
+	// After increment
+	_, _, _ = IncrementScore(db, "1.1.1.1", 0.7, now)
+	s, err = GetScore(db, "1.1.1.1")
+	require.NoError(t, err)
+	require.NotNil(t, s)
+	assert.Equal(t, 0.7, s.Score)
+	assert.Equal(t, 1, s.BlockCount)
+}
+
+func TestPromoteToBadActor(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().Truncate(time.Second)
+
+	// Insert some events for history
+	require.NoError(t, InsertEvent(db, now.Add(-2*time.Hour), EventTypeBlock, "1.1.1.1", "chain1", 1*time.Hour, ""))
+	require.NoError(t, InsertEvent(db, now.Add(-1*time.Hour), EventTypeBlock, "1.1.1.1", "chain2", 1*time.Hour, ""))
+
+	err := PromoteToBadActor(db, "1.1.1.1", 5.0, 5, now)
+	require.NoError(t, err)
+
+	ba, err := GetBadActor(db, "1.1.1.1")
+	require.NoError(t, err)
+	require.NotNil(t, ba)
+	assert.Equal(t, "1.1.1.1", ba.IP)
+	assert.Equal(t, 5.0, ba.TotalScore)
+	assert.Equal(t, 5, ba.BlockCount)
+	assert.NotEmpty(t, ba.HistoryJSON)
+}
+
+func TestIsBadActor(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().Truncate(time.Second)
+
+	is, err := IsBadActor(db, "1.1.1.1")
+	require.NoError(t, err)
+	assert.False(t, is)
+
+	require.NoError(t, PromoteToBadActor(db, "1.1.1.1", 5.0, 5, now))
+
+	is, err = IsBadActor(db, "1.1.1.1")
+	require.NoError(t, err)
+	assert.True(t, is)
+}
+
+func TestGetAllBadActors(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().Truncate(time.Second)
+
+	require.NoError(t, PromoteToBadActor(db, "1.1.1.1", 5.0, 5, now))
+	require.NoError(t, PromoteToBadActor(db, "2.2.2.2", 7.0, 10, now.Add(1*time.Second)))
+
+	all, err := GetAllBadActors(db)
+	require.NoError(t, err)
+	assert.Len(t, all, 2)
+	// Ordered by promoted_at DESC
+	assert.Equal(t, "2.2.2.2", all[0].IP)
+	assert.Equal(t, "1.1.1.1", all[1].IP)
+}
+
+func TestRemoveBadActor(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().Truncate(time.Second)
+
+	_, _, _ = IncrementScore(db, "1.1.1.1", 5.0, now)
+	require.NoError(t, PromoteToBadActor(db, "1.1.1.1", 5.0, 5, now))
+
+	require.NoError(t, RemoveBadActor(db, "1.1.1.1"))
+
+	is, _ := IsBadActor(db, "1.1.1.1")
+	assert.False(t, is)
+
+	s, _ := GetScore(db, "1.1.1.1")
+	assert.Nil(t, s)
+}
+
+func TestCleanupLowScores(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().Truncate(time.Second)
+
+	// Old low score (should be cleaned)
+	_, _, _ = IncrementScore(db, "1.1.1.1", 0.5, now.Add(-60*24*time.Hour))
+	// Recent low score (should be kept)
+	_, _, _ = IncrementScore(db, "2.2.2.2", 0.5, now.Add(-1*time.Hour))
+	// Old high score (should be kept)
+	_, _, _ = IncrementScore(db, "3.3.3.3", 3.0, now.Add(-60*24*time.Hour))
+
+	deleted, err := CleanupLowScores(db, 30*24*time.Hour, 2.0)
+	require.NoError(t, err)
+	assert.Equal(t, 1, deleted)
+
+	s, _ := GetScore(db, "1.1.1.1")
+	assert.Nil(t, s, "old low score should be cleaned")
+
+	s, _ = GetScore(db, "2.2.2.2")
+	assert.NotNil(t, s, "recent low score should be kept")
+
+	s, _ = GetScore(db, "3.3.3.3")
+	assert.NotNil(t, s, "old high score should be kept")
 }
