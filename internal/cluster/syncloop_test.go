@@ -22,7 +22,7 @@ func testDB(t *testing.T, states map[string]persistence.IPState) *sql.DB {
 	if err != nil {
 		t.Fatalf("Failed to open test DB: %v", err)
 	}
-	t.Cleanup(func() { persistence.CloseDB(db) })
+	t.Cleanup(func() { _ = persistence.CloseDB(db) })
 	for ip, state := range states {
 		if err := persistence.UpsertIPState(db, ip, state.State, state.ExpireTime, state.Reason, state.ModifiedAt, state.FirstBlockedAt); err != nil {
 			t.Fatalf("Failed to insert test state for %s: %v", ip, err)

@@ -1807,7 +1807,7 @@ chains:
 	if dbErr != nil {
 		t.Fatalf("Failed to open test DB: %v", dbErr)
 	}
-	defer persistence.CloseDB(testDB)
+	defer func() { _ = persistence.CloseDB(testDB) }()
 	processor.DB = testDB
 	processor.PersistenceEnabled = true
 

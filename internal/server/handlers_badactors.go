@@ -43,7 +43,7 @@ func badActorsListHandler(p Provider) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(result)
+		json.NewEncoder(w).Encode(result) //nolint:errcheck
 	}
 }
 
@@ -60,7 +60,7 @@ func badActorsExportHandler(p Provider) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/plain")
 		for _, a := range actors {
 			if ba, ok := a.(persistence.BadActorInfo); ok {
-				fmt.Fprintln(w, ba.IP)
+				fmt.Fprintln(w, ba.IP) //nolint:errcheck
 			}
 		}
 	}

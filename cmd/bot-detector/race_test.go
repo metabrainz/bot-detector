@@ -20,7 +20,7 @@ func TestSQLiteRaceConditions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test DB: %v", err)
 	}
-	defer persistence.CloseDB(db)
+	defer func() { _ = persistence.CloseDB(db) }()
 
 	p := &app.Processor{
 		DB:                 db,

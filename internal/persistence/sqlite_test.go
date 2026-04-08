@@ -13,7 +13,7 @@ func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db, err := OpenDB("", true) // in-memory
 	require.NoError(t, err)
-	t.Cleanup(func() { CloseDB(db) })
+	t.Cleanup(func() { _ = CloseDB(db) })
 	return db
 }
 
@@ -30,7 +30,7 @@ func TestOpenDB_OnDisk_WALMode(t *testing.T) {
 	dir := t.TempDir()
 	db, err := OpenDB(dir, false)
 	require.NoError(t, err)
-	defer CloseDB(db)
+	defer func() { _ = CloseDB(db) }()
 
 	var journalMode string
 	err = db.QueryRow("PRAGMA journal_mode").Scan(&journalMode)
@@ -370,7 +370,7 @@ func TestCloseDB_OnDisk(t *testing.T) {
 	// Reopen and verify data survived
 	db2, err := OpenDB(dir, false)
 	require.NoError(t, err)
-	defer CloseDB(db2)
+	defer func() { _ = CloseDB(db2) }()
 
 	state, err := GetIPState(db2, "1.1.1.1")
 	require.NoError(t, err)

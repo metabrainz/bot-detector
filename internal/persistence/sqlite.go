@@ -31,7 +31,7 @@ func OpenDB(stateDir string, dryRun bool) (*sql.DB, error) {
 
 	// Verify connection
 	if err := db.Ping(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
@@ -43,13 +43,13 @@ func OpenDB(stateDir string, dryRun bool) (*sql.DB, error) {
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("failed to set pragma %q: %w", p, err)
 		}
 	}
 
 	if err := ApplyMigrations(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to apply migrations: %w", err)
 	}
 
@@ -103,7 +103,7 @@ func migrateV1(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmts := []string{
 		`CREATE TABLE reasons (
@@ -153,7 +153,7 @@ func migrateV2(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmts := []string{
 		`CREATE TABLE ip_scores (
@@ -247,7 +247,7 @@ func PromoteToBadActor(db *sql.DB, ip string, score float64, blockCount int, tim
 	if err != nil {
 		return fmt.Errorf("failed to query event history: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type histEntry struct {
 		Timestamp string `json:"ts"`
@@ -308,7 +308,7 @@ func GetAllBadActors(db *sql.DB) ([]BadActorInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query bad actors: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []BadActorInfo
 	for rows.Next() {
@@ -433,7 +433,7 @@ func GetAllIPStates(db *sql.DB) (map[string]IPState, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query IP states: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return scanIPStates(rows)
 }
@@ -447,7 +447,7 @@ func GetBlockedIPs(db *sql.DB, now time.Time) (map[string]IPState, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query blocked IPs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return scanIPStates(rows)
 }

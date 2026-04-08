@@ -568,7 +568,7 @@ func TestCheckChains_UnblockOnGoodActor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test DB: %v", err)
 	}
-	defer persistence.CloseDB(db)
+	defer func() { _ = persistence.CloseDB(db) }()
 	h.processor.DB = db
 	_ = persistence.UpsertIPState(db, goodIP, persistence.BlockStateBlocked, time.Now().Add(1*time.Hour), "test-block", time.Now(), time.Now())
 

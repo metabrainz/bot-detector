@@ -162,7 +162,7 @@ func TestCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open test DB: %v", err)
 	}
-	defer persistence.CloseDB(db)
+	defer func() { _ = persistence.CloseDB(db) }()
 	p.DB = db
 
 	now := p.NowFunc()
@@ -230,7 +230,7 @@ func TestCorruptedJournalMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open DB: %v", err)
 	}
-	defer persistence.CloseDB(db)
+	defer func() { _ = persistence.CloseDB(db) }()
 
 	err = persistence.MigrateFromLegacy(db, tempDir)
 	if err != nil {

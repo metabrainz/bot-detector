@@ -202,7 +202,7 @@ func writeTestJournal(t *testing.T, dir string, entries []JournalEntryV1) {
 	path := filepath.Join(dir, "events.log")
 	f, err := os.Create(path)
 	require.NoError(t, err)
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	for _, entry := range entries {
 		data, err := json.Marshal(entry)
 		require.NoError(t, err)

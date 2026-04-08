@@ -135,10 +135,10 @@ type TopLevelConfig struct {
 
 // BadActorsConfigYAML represents the bad_actors configuration in YAML format.
 type BadActorsConfigYAML struct {
-	Enabled        *bool  `yaml:"enabled"`
-	Threshold      float64 `yaml:"threshold"`
-	BlockDuration  string  `yaml:"block_duration"`
-	MaxScoreEntries int    `yaml:"max_score_entries"`
+	Enabled         *bool   `yaml:"enabled"`
+	Threshold       float64 `yaml:"threshold"`
+	BlockDuration   string  `yaml:"block_duration"`
+	MaxScoreEntries int     `yaml:"max_score_entries"`
 }
 
 // BadActorsConfig holds the runtime bad actors configuration.
@@ -235,7 +235,7 @@ type BehavioralChainYAML struct {
 	BlockDuration  string        `yaml:"block_duration"`
 	MatchKey       string        `yaml:"match_key"`
 	OnMatch        string        `yaml:"on_match"`
-	Websites       []string      `yaml:"websites"`        // Optional: restrict chain to specific websites
+	Websites       []string      `yaml:"websites"`         // Optional: restrict chain to specific websites
 	BadActorWeight *float64      `yaml:"bad_actor_weight"` // Optional: weight for bad actor scoring (default 1.0)
 	Steps          []StepDefYAML `yaml:"steps"`
 }

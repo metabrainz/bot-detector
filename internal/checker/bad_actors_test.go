@@ -38,7 +38,7 @@ func newBAHarness(t *testing.T, threshold float64) *baHarness {
 
 	db, err := persistence.OpenDB("", true)
 	require.NoError(t, err)
-	t.Cleanup(func() { persistence.CloseDB(db) })
+	t.Cleanup(func() { _ = persistence.CloseDB(db) })
 
 	cfg := &config.AppConfig{
 		BadActors: config.BadActorsConfig{
@@ -100,7 +100,7 @@ func (h *baHarness) process(ip string) {
 	entry := &app.LogEntry{
 		IPInfo:    utils.NewIPInfo(ip),
 		Timestamp: time.Now(),
-		Path: "/",
+		Path:      "/",
 	}
 	checker.CheckChains(h.p, entry)
 }
@@ -141,13 +141,15 @@ type baMockBlocker struct {
 	unblockFunc func(utils.IPInfo, string) error
 }
 
-func (m *baMockBlocker) Block(ip utils.IPInfo, d time.Duration, r string) error { return m.blockFunc(ip, d, r) }
-func (m *baMockBlocker) Unblock(ip utils.IPInfo, r string) error                { return m.unblockFunc(ip, r) }
-func (m *baMockBlocker) Shutdown()                                               {}
-func (m *baMockBlocker) IsIPBlocked(utils.IPInfo) (bool, error)                  { return false, nil }
-func (m *baMockBlocker) DumpBackends() ([]string, error)                         { return nil, nil }
-func (m *baMockBlocker) GetCurrentState() (map[string]int, error)                { return nil, nil }
-func (m *baMockBlocker) ClearIP(utils.IPInfo) ([]interface{}, error)             { return nil, nil }
+func (m *baMockBlocker) Block(ip utils.IPInfo, d time.Duration, r string) error {
+	return m.blockFunc(ip, d, r)
+}
+func (m *baMockBlocker) Unblock(ip utils.IPInfo, r string) error     { return m.unblockFunc(ip, r) }
+func (m *baMockBlocker) Shutdown()                                   {}
+func (m *baMockBlocker) IsIPBlocked(utils.IPInfo) (bool, error)      { return false, nil }
+func (m *baMockBlocker) DumpBackends() ([]string, error)             { return nil, nil }
+func (m *baMockBlocker) GetCurrentState() (map[string]int, error)    { return nil, nil }
+func (m *baMockBlocker) ClearIP(utils.IPInfo) ([]interface{}, error) { return nil, nil }
 func (m *baMockBlocker) CompareHAProxyBackends(time.Duration) ([]blocker.SyncDiscrepancy, error) {
 	return nil, nil
 }
@@ -267,7 +269,7 @@ func TestBadActor_GoodActorTakesPriority(t *testing.T) {
 func TestBadActor_Removal(t *testing.T) {
 	db, err := persistence.OpenDB("", true)
 	require.NoError(t, err)
-	defer persistence.CloseDB(db)
+	defer func() { _ = persistence.CloseDB(db) }()
 
 	now := time.Now()
 	_, _, _ = persistence.IncrementScore(db, "10.0.0.6", 5.0, now)
@@ -290,7 +292,7 @@ func TestBadActor_DisabledConfig(t *testing.T) {
 	testutil.ResetGlobalState()
 	db, err := persistence.OpenDB("", true)
 	require.NoError(t, err)
-	defer persistence.CloseDB(db)
+	defer func() { _ = persistence.CloseDB(db) }()
 
 	p := testutil.NewTestProcessor(&config.AppConfig{
 		BadActors: config.BadActorsConfig{Enabled: false},

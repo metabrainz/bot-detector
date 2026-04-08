@@ -74,7 +74,7 @@ func importSnapshot(db *sql.DB, snapshot *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	for ip, state := range snapshot.IPStates {
 		reasonID, err := getOrCreateReasonIDTx(tx, state.Reason)
@@ -103,13 +103,13 @@ func importJournal(db *sql.DB, journalPath string, after time.Time) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
