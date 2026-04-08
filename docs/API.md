@@ -113,6 +113,24 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
     *   `500 Internal Server Error`: If the server fails to access the configuration or its dependencies to create the archive.
 
 
+## Bad Actors Endpoints
+
+### `GET /api/v1/bad-actors`
+
+*   **Method:** `GET`
+*   **Content-Type:** `application/json`
+*   **Description:** Returns all IPs that have been promoted to bad actor status. Each entry includes the IP, promotion timestamp, total score, block count, and a JSON history of the block events that led to promotion.
+*   **Role:** `api`
+
+### `GET /api/v1/bad-actors/export`
+
+*   **Method:** `GET`
+*   **Content-Type:** `text/plain`
+*   **Description:** Returns all bad actor IPs as plain text, one per line. Useful for integration with external firewalls, blocklists, or other security tools.
+*   **Role:** `api`
+
+See [BAD_ACTORS.md](BAD_ACTORS.md) for full documentation of the bad actors feature, including configuration, scoring, and removal.
+
 ## Cluster Endpoints
 
 These endpoints are available when cluster mode is enabled. They provide cluster status, metrics collection, and aggregation capabilities.

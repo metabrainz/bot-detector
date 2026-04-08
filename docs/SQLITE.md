@@ -4,7 +4,7 @@
 
 Replace the journal/snapshot persistence system with SQLite. This is a clean break — no backward compatibility with the old format.
 
-Bad actor scoring is a separate future effort built on top of this foundation (see [BAD_ACTORS.md](BAD_ACTORS.md)).
+Bad actor scoring is built on top of this SQLite foundation (see [BAD_ACTORS.md](BAD_ACTORS.md)).
 
 ## Motivation
 
@@ -21,7 +21,7 @@ Bad actor scoring is a separate future effort built on top of this foundation (s
 - No compaction logic — cleanup is just `DELETE` + periodic `VACUUM`
 - Synchronous writes (WAL mode is fast enough, eliminates async goroutine complexity)
 - `PersistenceWg` and `JournalHandle` eliminated entirely
-- Rich queries for future features (bad actors, analytics)
+- Rich queries for bad actors, analytics
 
 ## Architecture
 
@@ -78,7 +78,7 @@ CREATE INDEX idx_events_timestamp ON events(timestamp);
 - **IP as TEXT primary key** — no AUTOINCREMENT conflicts across cluster nodes, natural key
 - **Reason ID as FNV-1a 64-bit hash** — deterministic, cluster-safe, no coordination needed
 - **Events table** — replaces `events.log` journal, queryable, with UNIQUE constraint for dedup during cluster sync
-- **Schema versioning** — `schema_version` table with migration hooks for future additions (bad actors tables will be migration v2)
+- **Schema versioning** — `schema_version` table with migration hooks (v1: core tables, v2: bad actors tables)
 
 ### Dry-Run Mode
 

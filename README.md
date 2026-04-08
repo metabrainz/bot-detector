@@ -25,6 +25,7 @@ The application operates in a continuous loop:
 *   **Graceful Shutdown:** Implements signal handlers (SIGINT, SIGTERM) for safe, controlled process termination.
 *   **Dry Run Mode:** Allows testing behavioral chains against static log files without affecting a live blocking backend.
 *   **Memory Optimization:** Automatically purges state for IPs that are no longer relevant, minimizing memory footprint.
+*   **Bad Actor Tracking:** Automatically identifies IPs that are blocked repeatedly across chains, promoting them to permanent "bad actor" status with configurable scoring thresholds. See [BAD_ACTORS.md](docs/BAD_ACTORS.md) for details.
 *   **Metrics & Configuration API:** An optional embedded web server (enabled with `--listen`) provides live performance metrics and allows for inspecting and archiving the running configuration. See [API.md](docs/API.md) for details.
 
 ## Building the Application
@@ -235,3 +236,4 @@ graph TD;
 
 - [API.md](docs/API.md) - HTTP API endpoints for metrics, configuration inspection, and cluster management
 - [Persistence.md](docs/Persistence.md) - State persistence configuration for maintaining blocks across restarts
+- [BAD_ACTORS.md](docs/BAD_ACTORS.md) - Bad actor tracking with weighted scoring and automatic promotion

@@ -49,6 +49,10 @@ The database runs in **WAL (Write-Ahead Logging) mode** for crash safety and bet
 
 **reasons** — Deduplicated reason strings with FNV-1a hash-based IDs (cluster-safe, deterministic).
 
+**ip_scores** — Bad actor score tracking per IP (see [BAD_ACTORS.md](BAD_ACTORS.md)).
+
+**bad_actors** — Permanent bad actor records with promotion history.
+
 **schema_version** — Tracks applied migrations for future schema upgrades.
 
 ## Guiding Principles

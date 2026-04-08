@@ -168,6 +168,7 @@ Chains are processed in the order they are defined. Each chain definition must i
 | **block_duration** | string | No | The duration for which the IP should be blocked if `action` is `block`. Format: Go duration string (e.g., `5m`, `1h`, `30m`, `1h30m`). If not specified, uses `blockers.default_duration`. |
 | **match_key** | string | Yes | The key used to track activity. Determines if behavior is tracked per IP, per IP version, or per unique client (IP + User-Agent). See [`match_key` values](#match_key-values) below. |
 | **on_match** | string | No | If set to `stop`, no further chains will be processed for the current log entry after this chain completes. |
+| **bad_actor_weight** | float | No | Weight added to the bad actor score when this chain blocks an IP (0.0–1.0). Default: `1.0`. Only relevant when `bad_actors` is enabled. See [BAD_ACTORS.md](BAD_ACTORS.md). |
 | **websites** | list of strings | No | **Multi-website mode only.** List of website names (from `websites` section) where this chain applies. If omitted or empty, the chain applies to all websites (global chain). Example: `["main_site", "api_site"]`. |
 | **steps** | list of objects | Yes | The sequential list of steps that define the malicious pattern. See table [`chains[].steps[].fields`](#chainsstepsfields). |
 
@@ -446,6 +447,27 @@ good_actors:
       - "203.0.113.11"
 ```
 
+
+### Bad Actors
+
+The `bad_actors` section enables automatic tracking and permanent blocking of IPs that are blocked repeatedly. See [BAD_ACTORS.md](BAD_ACTORS.md) for full details.
+
+```yaml
+bad_actors:
+  enabled: true
+  threshold: 5.0           # Score needed to become a bad actor (required)
+  block_duration: "168h"   # Block duration for bad actors (default: 168h)
+  max_score_entries: 100000 # Max IPs in scoring table (default: 100000)
+```
+
+| Field | Type | Default | Description |
+| :---- | :---- | :---- | :---- |
+| **enabled** | bool | `true` if section present | Enable/disable bad actor tracking |
+| **threshold** | float | required | Cumulative score needed for promotion to bad actor |
+| **block_duration** | duration | `168h` | How long to block promoted bad actors |
+| **max_score_entries** | int | `100000` | Maximum number of IPs tracked in the scoring table |
+
+Each chain contributes to the score via its `bad_actor_weight` field (default 1.0). When an IP's cumulative score reaches the threshold, it is permanently blocked until manually cleared via `DELETE /ip/{ip}/clear`.
 
 ## Advanced Topics
 
