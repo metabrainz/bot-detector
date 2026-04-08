@@ -856,24 +856,36 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 		p.ConfigMutex.RUnlock()
 
 		if unblockEnabled {
-			// Use the existing activity for the IP-only actor.
-			// The lock is already held by the caller (CheckChains).
-			activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
-
-			// Check if IP is blocked in persistence
+			// Check if IP is blocked and determine last unblock time for cooldown.
+			// When persistence is enabled, use the DB as source of truth since
+			// in-memory actors get cleaned up by idle cleanup, resetting the
+			// cooldown. Fall back to in-memory tracking without persistence.
 			var isBlocked bool
+			var lastUnblockTime time.Time
 			if p.PersistenceEnabled {
 				ipState, err := persistence.GetIPState(p.DB, entry.IPInfo.Address)
-				isBlocked = err == nil && ipState != nil && ipState.State == persistence.BlockStateBlocked
+				if err == nil && ipState != nil {
+					isBlocked = ipState.State == persistence.BlockStateBlocked
+					if ipState.State == persistence.BlockStateUnblocked {
+						lastUnblockTime = ipState.ModifiedAt
+					}
+				}
+			} else {
+				ipOnlyActor := store.Actor{IPInfo: entry.IPInfo}
+				act := store.GetOrCreateUnsafe(p.ActivityStore, ipOnlyActor)
+				lastUnblockTime = act.LastUnblockTime
 			}
 
 			// Determine if we should unblock:
 			// - Always unblock if IP is blocked (immediate safety)
 			// - Unblock on first appearance (handles pre-existing blocks)
 			// - Apply cooldown for subsequent non-blocked appearances (prevents spam)
-			shouldUnblock := isBlocked || activity.LastUnblockTime.IsZero()
-			if !isBlocked && !activity.LastUnblockTime.IsZero() {
-				shouldUnblock = time.Since(activity.LastUnblockTime) > unblockCooldown
+			// Use the DB-persisted unblock time for cooldown. The in-memory
+			// actor's LastUnblockTime is unreliable because idle cleanup
+			// deletes actors after MaxTimeSinceLastHit, resetting the cooldown.
+			shouldUnblock := isBlocked || lastUnblockTime.IsZero()
+			if !isBlocked && !lastUnblockTime.IsZero() {
+				shouldUnblock = time.Since(lastUnblockTime) > unblockCooldown
 			}
 
 			if shouldUnblock {
@@ -905,8 +917,14 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 						p.LogFunc(logging.LevelError, "UNBLOCK_FAIL", "Failed to queue unblock command for %s: %v", entry.IPInfo.Address, err)
 					}
 				}
-				activity.LastUnblockTime = time.Now()
-				activity.LastUnblockReason = unblockReason
+
+				// Update in-memory cooldown for non-persistence mode.
+				if !p.PersistenceEnabled {
+					ipOnlyActor := store.Actor{IPInfo: entry.IPInfo}
+					act := store.GetOrCreateUnsafe(p.ActivityStore, ipOnlyActor)
+					act.LastUnblockTime = time.Now()
+					act.LastUnblockReason = unblockReason
+				}
 			}
 		}
 	}
