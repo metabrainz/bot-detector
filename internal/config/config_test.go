@@ -1878,7 +1878,6 @@ chains:
 	unblockMutex.Unlock()
 
 	// Check IPStates via SQLite
-	processor.PersistenceMutex.Lock()
 	state124, _ := persistence.GetIPState(testDB, "1.2.3.4")
 	if state124 != nil && state124.State == persistence.BlockStateBlocked {
 		t.Error("Expected 1.2.3.4 to be unblocked or removed from IPStates")
@@ -1887,7 +1886,6 @@ chains:
 	if state568 == nil || state568.State != persistence.BlockStateBlocked {
 		t.Error("Expected 5.6.7.8 to remain blocked in IPStates")
 	}
-	processor.PersistenceMutex.Unlock()
 }
 
 // --- Cluster Configuration Tests ---

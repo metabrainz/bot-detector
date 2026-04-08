@@ -184,9 +184,7 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 	}
 
 	// Count blocked IPs
-	p.PersistenceMutex.Lock()
 	blockedIPs, err := persistence.GetBlockedIPs(p.DB, time.Now())
-	p.PersistenceMutex.Unlock()
 	if err != nil {
 		p.LogFunc(logging.LevelError, "UNBLOCK_WHITELIST", "Failed to query blocked IPs: %v", err)
 		return

@@ -340,9 +340,7 @@ func restorePersistenceState(p *app.Processor) error {
 		return nil
 	}
 
-	p.PersistenceMutex.Lock()
 	allStates, err := persistence.GetAllIPStates(p.DB)
-	p.PersistenceMutex.Unlock()
 	if err != nil {
 		p.LogFunc(logging.LevelError, "STATE_LOAD_FAIL", "Failed to load IP states from database: %v", err)
 		return err
@@ -699,9 +697,7 @@ func execute(params *commandline.AppParameters) error {
 		// Use persistence state if available, otherwise use activity store
 		if p.PersistenceEnabled {
 			// Resync from persistence state (more reliable)
-			p.PersistenceMutex.Lock()
 			allStates, err := persistence.GetAllIPStates(p.DB)
-			p.PersistenceMutex.Unlock()
 			if err != nil {
 				p.LogFunc(logging.LevelError, "RESYNC", "Failed to query IP states for resync: %v", err)
 			} else {

@@ -376,8 +376,6 @@ func (p *Processor) GetPersistenceState(ip string) (interface{}, bool) {
 	if !p.PersistenceEnabled {
 		return nil, false
 	}
-	p.PersistenceMutex.Lock()
-	defer p.PersistenceMutex.Unlock()
 	state, err := persistence.GetIPState(p.DB, ip)
 	if err != nil || state == nil {
 		return nil, false
