@@ -12,6 +12,7 @@ import (
 
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
 )
@@ -123,7 +124,7 @@ func renderLocalIPStatus(w http.ResponseWriter, p Provider, canonical string) {
 
 	if len(actors) == 0 && len(backendInfo) == 0 {
 		_, _ = fmt.Fprint(w, "status: unknown\n")
-		formatPersistenceState(w, persistState, hasPersist)
+		formatPersistenceState(w, p, canonical, persistState, hasPersist)
 		return
 	}
 
@@ -132,7 +133,7 @@ func renderLocalIPStatus(w http.ResponseWriter, p Provider, canonical string) {
 		_, _ = fmt.Fprint(w, "status: blocked\n")
 		_, _ = fmt.Fprint(w, "source: backend\n")
 		formatBackendInfo(w, backendInfo, p.GetDurationTables())
-		formatPersistenceState(w, persistState, hasPersist)
+		formatPersistenceState(w, p, canonical, persistState, hasPersist)
 		// If no persistence reason available, add note
 		if !hasPersist || reflect.ValueOf(persistState).FieldByName("Reason").String() == "" {
 			_, _ = fmt.Fprint(w, "note: Block reason unavailable (IP may have been manually added to HAProxy or blocked before persistence was enabled)\n")
@@ -150,7 +151,7 @@ func renderLocalIPStatus(w http.ResponseWriter, p Provider, canonical string) {
 		formatBackendInfo(w, backendInfo, p.GetDurationTables())
 	}
 
-	formatPersistenceState(w, persistState, hasPersist)
+	formatPersistenceState(w, p, canonical, persistState, hasPersist)
 }
 
 // renderClusterIPStatus renders cluster-wide aggregated IP status in plain text
@@ -297,21 +298,39 @@ func formatBackendInfo(w http.ResponseWriter, backendInfo []interface{}, duratio
 }
 
 // formatPersistenceState displays persistence state information if available
-func formatPersistenceState(w http.ResponseWriter, persistState interface{}, hasPersist bool) {
-	if !hasPersist {
-		return
-	}
-	stateVal := reflect.ValueOf(persistState)
-	state := stateVal.FieldByName("State").String()
-	expireTime := stateVal.FieldByName("ExpireTime").Interface().(time.Time)
-	reason := stateVal.FieldByName("Reason").String()
+func formatPersistenceState(w http.ResponseWriter, p Provider, canonical string, persistState interface{}, hasPersist bool) {
+	if hasPersist {
+		stateVal := reflect.ValueOf(persistState)
+		state := stateVal.FieldByName("State").String()
+		expireTime := stateVal.FieldByName("ExpireTime").Interface().(time.Time)
+		reason := stateVal.FieldByName("Reason").String()
 
-	_, _ = fmt.Fprintf(w, "persistence: %s\n", state)
-	if !expireTime.IsZero() {
-		_, _ = fmt.Fprintf(w, "persistence_expires: %s\n", expireTime.Format(time.RFC3339))
+		_, _ = fmt.Fprintf(w, "persistence: %s\n", state)
+		if !expireTime.IsZero() {
+			_, _ = fmt.Fprintf(w, "persistence_expires: %s\n", expireTime.Format(time.RFC3339))
+		}
+		if reason != "" {
+			_, _ = fmt.Fprintf(w, "persistence_reason: %s\n", reason)
+		}
 	}
-	if reason != "" {
-		_, _ = fmt.Fprintf(w, "persistence_reason: %s\n", reason)
+
+	// Bad actor / score info
+	baInfo, scoreInfo := p.GetBadActorInfo(canonical)
+	if baInfo != nil {
+		if ba, ok := baInfo.(*persistence.BadActorInfo); ok && ba != nil {
+			_, _ = fmt.Fprintf(w, "bad_actor: yes\n")
+			_, _ = fmt.Fprintf(w, "bad_actor_promoted_at: %s\n", ba.PromotedAt.Format(time.RFC3339))
+			_, _ = fmt.Fprintf(w, "bad_actor_score: %.1f\n", ba.TotalScore)
+			_, _ = fmt.Fprintf(w, "bad_actor_block_count: %d\n", ba.BlockCount)
+		}
+	} else if scoreInfo != nil {
+		if s, ok := scoreInfo.(*persistence.ScoreInfo); ok && s != nil {
+			threshold := p.GetBadActorsThreshold()
+			if threshold > 0 {
+				_, _ = fmt.Fprintf(w, "score: %.1f / %.1f\n", s.Score, threshold)
+				_, _ = fmt.Fprintf(w, "score_block_count: %d\n", s.BlockCount)
+			}
+		}
 	}
 }
 
@@ -422,6 +441,23 @@ type IPStatusResponse struct {
 	Persistence        string            `json:"persistence,omitempty"`
 	PersistenceExpires string            `json:"persistence_expires,omitempty"`
 	PersistenceReason  string            `json:"persistence_reason,omitempty"`
+	BadActor           *BadActorStatus   `json:"bad_actor,omitempty"`
+	Score              *ScoreStatus      `json:"score,omitempty"`
+}
+
+// BadActorStatus is included in IP lookup when the IP is a bad actor.
+type BadActorStatus struct {
+	PromotedAt string  `json:"promoted_at"`
+	TotalScore float64 `json:"total_score"`
+	BlockCount int     `json:"block_count"`
+	History    string  `json:"history,omitempty"`
+}
+
+// ScoreStatus is included in IP lookup when the IP has a score but is not yet a bad actor.
+type ScoreStatus struct {
+	CurrentScore float64 `json:"current_score"`
+	BlockCount   int     `json:"block_count"`
+	Threshold    float64 `json:"threshold"`
 }
 
 // apiIPLookupHandler returns IP status as JSON (cluster-aware)
@@ -631,7 +667,38 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 		}
 	}
 
+	// Add bad actor / score info
+	populateBadActorInfo(p, &response, ip)
+
 	return response
+}
+
+// populateBadActorInfo adds bad actor and score sections to the response.
+func populateBadActorInfo(p Provider, response *IPStatusResponse, ip string) {
+	baInfo, scoreInfo := p.GetBadActorInfo(ip)
+	if baInfo != nil {
+		if ba, ok := baInfo.(*persistence.BadActorInfo); ok && ba != nil {
+			response.BadActor = &BadActorStatus{
+				PromotedAt: ba.PromotedAt.Format(time.RFC3339),
+				TotalScore: ba.TotalScore,
+				BlockCount: ba.BlockCount,
+				History:    ba.HistoryJSON,
+			}
+		}
+	}
+	if scoreInfo != nil && response.BadActor == nil {
+		// Only show score if NOT already a bad actor (score is redundant once promoted)
+		if s, ok := scoreInfo.(*persistence.ScoreInfo); ok && s != nil {
+			threshold := p.GetBadActorsThreshold()
+			if threshold > 0 {
+				response.Score = &ScoreStatus{
+					CurrentScore: s.Score,
+					BlockCount:   s.BlockCount,
+					Threshold:    threshold,
+				}
+			}
+		}
+	}
 }
 
 // parseRFC3339 is a helper to parse RFC3339 time strings
