@@ -192,7 +192,11 @@ func findFileDirectives(path string, isMainConfig bool) ([]string, error) {
 		}
 	}
 
-	logging.LogOutput(logging.LevelInfo, "FILE_SCAN", "Successfully scanned '%s' for file directives. Found %d dependencies.", path, len(dependencies))
+	if len(dependencies) > 0 {
+		logging.LogOutput(logging.LevelInfo, "FILE_SCAN", "Successfully scanned '%s' for file directives. Found %d dependencies.", path, len(dependencies))
+	} else {
+		logging.LogOutput(logging.LevelInfo, "FILE_SCAN", "Successfully scanned '%s' for file directives.", path)
+	}
 	return dependencies, nil
 }
 
@@ -369,7 +373,11 @@ func CompileStringMatcher(ctx MatcherContext, value string) (FieldMatcher, error
 			} else {
 				// Successfully loaded, cache the content for the matcher.
 				fileDep.Content = lines
-				logging.LogOutput(logging.LevelInfo, "FILE_DEP", "Successfully loaded content from file dependency '%s' for chain '%s', step %d, field '%s'", absoluteFilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName)
+				stepInfo := ""
+				if ctx.StepIndex > 0 {
+					stepInfo = fmt.Sprintf(", step %d", ctx.StepIndex+1)
+				}
+				logging.LogOutput(logging.LevelInfo, "FILE_DEP", "Successfully loaded content from file dependency '%s' for chain '%s'%s, field '%s'", absoluteFilePath, ctx.ChainName, stepInfo, ctx.CanonicalFieldName)
 			}
 		case types.FileStatusMissing, types.FileStatusError:
 			// If the file is missing or in error, log a warning and treat it as empty.
