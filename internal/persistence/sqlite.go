@@ -679,36 +679,51 @@ func InsertEvent(db *sql.DB, timestamp time.Time, eventType EventType, ip string
 	return nil
 }
 
+// cleanupBatch deletes rows in batches to avoid holding the write lock for too long.
+func cleanupBatch(db *sql.DB, table, where string, args ...interface{}) (int, error) {
+	const batchSize = 1000
+	query := fmt.Sprintf("DELETE FROM %s WHERE rowid IN (SELECT rowid FROM %s WHERE %s LIMIT %d)", table, table, where, batchSize)
+	total := 0
+	for {
+		res, err := db.Exec(query, args...)
+		if err != nil {
+			return total, err
+		}
+		n, _ := res.RowsAffected()
+		total += int(n)
+		if n < batchSize {
+			return total, nil
+		}
+	}
+}
+
 // CleanupExpiredBlocks removes blocked IPs whose expire_time has passed.
 func CleanupExpiredBlocks(db *sql.DB, now time.Time) (int, error) {
-	res, err := db.Exec("DELETE FROM ips WHERE state = 'blocked' AND expire_time < ?", timeToUnix(now))
+	n, err := cleanupBatch(db, "ips", "state = 'blocked' AND expire_time < ?", timeToUnix(now))
 	if err != nil {
-		return 0, fmt.Errorf("failed to cleanup expired blocks: %w", err)
+		return n, fmt.Errorf("failed to cleanup expired blocks: %w", err)
 	}
-	n, _ := res.RowsAffected()
-	return int(n), nil
+	return n, nil
 }
 
 // CleanupOldUnblocked removes unblocked IPs older than the retention period.
 func CleanupOldUnblocked(db *sql.DB, now time.Time, retentionPeriod time.Duration) (int, error) {
 	cutoff := now.Add(-retentionPeriod)
-	res, err := db.Exec("DELETE FROM ips WHERE state = 'unblocked' AND expire_time < ?", timeToUnix(cutoff))
+	n, err := cleanupBatch(db, "ips", "state = 'unblocked' AND expire_time < ?", timeToUnix(cutoff))
 	if err != nil {
-		return 0, fmt.Errorf("failed to cleanup old unblocked: %w", err)
+		return n, fmt.Errorf("failed to cleanup old unblocked: %w", err)
 	}
-	n, _ := res.RowsAffected()
-	return int(n), nil
+	return n, nil
 }
 
 // CleanupOldEvents removes events older than the retention period.
 func CleanupOldEvents(db *sql.DB, retentionPeriod time.Duration) (int, error) {
 	cutoff := time.Now().Add(-retentionPeriod)
-	res, err := db.Exec("DELETE FROM events WHERE timestamp < ?", timeToUnix(cutoff))
+	n, err := cleanupBatch(db, "events", "timestamp < ?", timeToUnix(cutoff))
 	if err != nil {
-		return 0, fmt.Errorf("failed to cleanup old events: %w", err)
+		return n, fmt.Errorf("failed to cleanup old events: %w", err)
 	}
-	n, _ := res.RowsAffected()
-	return int(n), nil
+	return n, nil
 }
 
 // CleanupOrphanedReasons removes reasons not referenced by any IP or event.
