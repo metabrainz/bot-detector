@@ -211,6 +211,7 @@ func renderClusterIPStatus(w http.ResponseWriter, p Provider, canonical string) 
 			_, _ = fmt.Fprintf(w, "    bad_actor_promoted_at: %s\n", node.BadActor.PromotedAt)
 			_, _ = fmt.Fprintf(w, "    bad_actor_score: %.1f\n", node.BadActor.TotalScore)
 			_, _ = fmt.Fprintf(w, "    bad_actor_block_count: %d\n", node.BadActor.BlockCount)
+			formatBadActorHistory(w, node.BadActor.History, "    ")
 		} else if node.Score != nil {
 			_, _ = fmt.Fprintf(w, "    score: %.1f / %.1f\n", node.Score.CurrentScore, node.Score.Threshold)
 			_, _ = fmt.Fprintf(w, "    score_block_count: %d\n", node.Score.BlockCount)
@@ -307,6 +308,23 @@ func formatBackendInfo(w http.ResponseWriter, backendInfo []interface{}, duratio
 }
 
 // formatPersistenceState displays persistence state information if available
+
+func formatBadActorHistory(w http.ResponseWriter, historyJSON string, indent string) {
+	if historyJSON == "" {
+		return
+	}
+	var history []struct {
+		Timestamp string `json:"ts"`
+		Reason    string `json:"r"`
+	}
+	if err := json.Unmarshal([]byte(historyJSON), &history); err != nil || len(history) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "%sbad_actor_history:\n", indent)
+	for _, h := range history {
+		_, _ = fmt.Fprintf(w, "%s  - %s %s\n", indent, h.Timestamp, h.Reason)
+	}
+}
 func formatPersistenceState(w http.ResponseWriter, p Provider, canonical string, persistState interface{}, hasPersist bool) {
 	if hasPersist {
 		stateVal := reflect.ValueOf(persistState)
@@ -331,6 +349,7 @@ func formatPersistenceState(w http.ResponseWriter, p Provider, canonical string,
 			_, _ = fmt.Fprintf(w, "bad_actor_promoted_at: %s\n", ba.PromotedAt.Format(time.RFC3339))
 			_, _ = fmt.Fprintf(w, "bad_actor_score: %.1f\n", ba.TotalScore)
 			_, _ = fmt.Fprintf(w, "bad_actor_block_count: %d\n", ba.BlockCount)
+			formatBadActorHistory(w, ba.HistoryJSON, "")
 		}
 	} else if scoreInfo != nil {
 		if s, ok := scoreInfo.(*persistence.ScoreInfo); ok && s != nil {
