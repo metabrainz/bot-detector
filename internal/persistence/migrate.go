@@ -89,7 +89,7 @@ func importSnapshot(db *sql.DB, snapshot *Snapshot) error {
 
 		_, err = tx.Exec(`INSERT OR REPLACE INTO ips (ip, state, expire_time, reason_id, modified_at, first_blocked_at)
 			VALUES (?, ?, ?, ?, ?, ?)`,
-			ip, state.State.String(), state.ExpireTime, reasonID, modifiedAt, state.FirstBlockedAt)
+			ip, state.State.String(), timeToUnix(state.ExpireTime), reasonID, timeToUnix(modifiedAt), timeToUnix(state.FirstBlockedAt))
 		if err != nil {
 			return fmt.Errorf("failed to insert IP %s: %w", ip, err)
 		}
@@ -135,7 +135,7 @@ func importJournal(db *sql.DB, journalPath string, after time.Time) error {
 		}
 		_, err = tx.Exec(`INSERT OR IGNORE INTO events (timestamp, event_type, ip, reason_id, duration, node_name)
 			VALUES (?, ?, ?, ?, ?, NULL)`,
-			entry.Timestamp, string(entry.Event.Type), entry.Event.IP, reasonID, durNanos)
+			timeToUnix(entry.Timestamp), string(entry.Event.Type), entry.Event.IP, reasonID, durNanos)
 		if err != nil {
 			return fmt.Errorf("failed to insert event: %w", err)
 		}
@@ -152,11 +152,11 @@ func importJournal(db *sql.DB, journalPath string, after time.Time) error {
 					reason_id = excluded.reason_id,
 					modified_at = excluded.modified_at,
 					first_blocked_at = CASE
-						WHEN ips.first_blocked_at IS NOT NULL AND ips.first_blocked_at != '' AND ips.first_blocked_at < excluded.first_blocked_at
+						WHEN ips.first_blocked_at IS NOT NULL AND ips.first_blocked_at > 0 AND ips.first_blocked_at < excluded.first_blocked_at
 						THEN ips.first_blocked_at
 						ELSE excluded.first_blocked_at
 					END`,
-				entry.Event.IP, expireTime, reasonID, entry.Timestamp, entry.Timestamp)
+				entry.Event.IP, timeToUnix(expireTime), reasonID, timeToUnix(entry.Timestamp), timeToUnix(entry.Timestamp))
 		case EventTypeUnblock:
 			_, err = tx.Exec(`INSERT INTO ips (ip, state, expire_time, reason_id, modified_at)
 				VALUES (?, 'unblocked', ?, ?, ?)
@@ -165,7 +165,7 @@ func importJournal(db *sql.DB, journalPath string, after time.Time) error {
 					expire_time = excluded.expire_time,
 					reason_id = excluded.reason_id,
 					modified_at = excluded.modified_at`,
-				entry.Event.IP, entry.Timestamp, reasonID, entry.Timestamp)
+				entry.Event.IP, timeToUnix(entry.Timestamp), reasonID, timeToUnix(entry.Timestamp))
 		}
 		if err != nil {
 			return fmt.Errorf("failed to update IP state: %w", err)

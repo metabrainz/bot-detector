@@ -121,7 +121,7 @@ Useful for integration with external firewalls or blocklists.
 
 ## Database Schema
 
-Two tables are added via schema migration v2:
+Two tables are added via schema migration v2 (timestamps converted to Unix seconds in v4):
 
 **ip_scores** — tracks cumulative score per IP (cleaned up periodically):
 ```sql
@@ -129,7 +129,7 @@ CREATE TABLE ip_scores (
     ip TEXT PRIMARY KEY,
     score REAL NOT NULL DEFAULT 0.0,
     block_count INTEGER NOT NULL DEFAULT 0,
-    last_block_time TIMESTAMP NOT NULL
+    last_block_time INTEGER NOT NULL  -- Unix seconds
 );
 ```
 
@@ -137,7 +137,7 @@ CREATE TABLE ip_scores (
 ```sql
 CREATE TABLE bad_actors (
     ip TEXT PRIMARY KEY,
-    promoted_at TIMESTAMP NOT NULL,
+    promoted_at INTEGER NOT NULL,  -- Unix seconds
     total_score REAL NOT NULL,
     block_count INTEGER NOT NULL,
     history_json TEXT

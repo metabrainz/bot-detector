@@ -873,6 +873,15 @@ func runCleanup(p *app.Processor) {
 		p.LogFunc(logging.LevelInfo, "CLEANUP", "Cleanup completed: expired_blocks=%d, old_unblocked=%d, old_events=%d, orphaned_reasons=%d, low_scores=%d",
 			expiredBlocks, cleanedUnblocked, cleanedEvents, cleanedReasons, cleanedScores)
 	}
+
+	if err := persistence.CheckpointWAL(p.DB); err != nil {
+		p.LogFunc(logging.LevelError, "CLEANUP_FAIL", "Failed to checkpoint WAL: %v", err)
+	}
+
+	// Reclaim freed pages from deletions above.
+	if _, err := p.DB.Exec("PRAGMA incremental_vacuum"); err != nil {
+		p.LogFunc(logging.LevelError, "CLEANUP_FAIL", "Failed to run incremental vacuum: %v", err)
+	}
 }
 
 // start is the unexported function that contains the main application logic,

@@ -18,7 +18,7 @@ Bad actor scoring is built on top of this SQLite foundation (see [BAD_ACTORS.md]
 ### SQLite Benefits
 - Single file (`state.db`), WAL mode for crash safety
 - Indexed queries, no linear scans
-- No compaction logic — cleanup is just `DELETE` + periodic `VACUUM`
+- No compaction logic — cleanup is just `DELETE` + WAL checkpoint
 - Synchronous writes (WAL mode is fast enough, eliminates async goroutine complexity)
 - `PersistenceWg` and `JournalHandle` eliminated entirely
 - Rich queries for bad actors, analytics
@@ -34,6 +34,8 @@ Bad actor scoring is built on top of this SQLite foundation (see [BAD_ACTORS.md]
 - Automatic checkpointing
 
 ### Schema
+
+All timestamps are stored as **Unix seconds** (INTEGER) for compact storage (~8 bytes vs ~45 bytes for text format).
 
 ```sql
 CREATE TABLE schema_version (
@@ -51,17 +53,16 @@ CREATE INDEX idx_reason_text ON reasons(reason);
 CREATE TABLE ips (
     ip TEXT PRIMARY KEY,
     state TEXT CHECK(state IN ('blocked', 'unblocked')),
-    expire_time TIMESTAMP,
+    expire_time INTEGER,      -- Unix seconds
     reason_id INTEGER REFERENCES reasons(id),
-    modified_at TIMESTAMP,
-    first_blocked_at TIMESTAMP
+    modified_at INTEGER,      -- Unix seconds
+    first_blocked_at INTEGER  -- Unix seconds
 );
-CREATE INDEX idx_ips_state ON ips(state);
-CREATE INDEX idx_ips_expire_time ON ips(expire_time);
+CREATE INDEX idx_ips_state_expire ON ips(state, expire_time);
 
 CREATE TABLE events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp TIMESTAMP NOT NULL,
+    timestamp INTEGER NOT NULL,  -- Unix seconds
     event_type TEXT NOT NULL CHECK(event_type IN ('block', 'unblock')),
     ip TEXT NOT NULL,
     reason_id INTEGER REFERENCES reasons(id),
@@ -78,7 +79,7 @@ CREATE INDEX idx_events_timestamp ON events(timestamp);
 - **IP as TEXT primary key** — no AUTOINCREMENT conflicts across cluster nodes, natural key
 - **Reason ID as FNV-1a 64-bit hash** — deterministic, cluster-safe, no coordination needed
 - **Events table** — replaces `events.log` journal, queryable, with UNIQUE constraint for dedup during cluster sync
-- **Schema versioning** — `schema_version` table with migration hooks (v1: core tables, v2: bad actors tables)
+- **Schema versioning** — `schema_version` table with migration hooks (v1: core tables, v2: bad actors tables, v3: compound index optimization, v4: timestamps to Unix seconds)
 
 ### Dry-Run Mode
 
@@ -270,9 +271,11 @@ Currently reads `events.log` and writes to `p.IPStates`. Will instead call `Inse
 2. `DELETE FROM ips WHERE state = 'unblocked' AND expire_time < ?` (now - retention)
 3. `DELETE FROM events WHERE timestamp < ?` (now - retention)
 4. `DELETE FROM reasons WHERE id NOT IN (SELECT reason_id FROM ips UNION SELECT reason_id FROM events)`
-5. Log stats
+5. `DELETE FROM ip_scores WHERE score < 2.0 AND last_block_time < ?` (now - 30 days)
+6. WAL checkpoint (`PRAGMA wal_checkpoint(TRUNCATE)`)
+7. Log stats
 
-No snapshot, no journal truncation. Periodic `VACUUM` can run weekly.
+No snapshot, no journal truncation. `VACUUM` runs automatically after schema migrations on startup.
 
 ## Graceful Shutdown
 

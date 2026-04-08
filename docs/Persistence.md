@@ -35,16 +35,20 @@ The database runs in **WAL (Write-Ahead Logging) mode** for crash safety and bet
 
 ### Schema
 
+All timestamps are stored as **Unix seconds** (INTEGER) for compact storage. The current schema version is **4**.
+
 **ips** — Current state per IP address:
 - `ip` (TEXT PRIMARY KEY) — IP address
 - `state` — "blocked" or "unblocked"
-- `expire_time` — When the block expires
+- `expire_time` — When the block expires (Unix seconds)
 - `reason_id` — Foreign key to reasons table
-- `modified_at` — Last modification timestamp
-- `first_blocked_at` — Earliest block timestamp (preserved across re-blocks)
+- `modified_at` — Last modification timestamp (Unix seconds)
+- `first_blocked_at` — Earliest block timestamp, preserved across re-blocks (Unix seconds)
+
+**Indexes:** `idx_ips_state_expire(state, expire_time)` — compound index covering all cleanup and lookup queries.
 
 **events** — Audit log of all block/unblock actions:
-- `timestamp`, `event_type`, `ip`, `reason_id`, `duration`, `node_name`
+- `timestamp` (Unix seconds), `event_type`, `ip`, `reason_id`, `duration`, `node_name`
 - UNIQUE constraint on `(timestamp, ip, node_name, event_type)` for cluster deduplication
 
 **reasons** — Deduplicated reason strings with FNV-1a hash-based IDs (cluster-safe, deterministic).
@@ -66,7 +70,7 @@ The database runs in **WAL (Write-Ahead Logging) mode** for crash safety and bet
 
 ### Startup and State Restoration
 
-1. **Open Database:** Open or create `state.db`, apply any pending schema migrations.
+1. **Open Database:** Open or create `state.db`, apply any pending schema migrations. If migrations were applied, a `VACUUM` is performed to reclaim space.
 2. **Legacy Migration:** If `state.snapshot` or `events.log` exist and the database is empty, migrate the legacy data into SQLite and rename the old files to `.migrated`.
 3. **Query State:** Read all IP states from the `ips` table.
 4. **State Push:** Issue block/unblock commands to HAProxy for each IP, respecting good actor configuration and checking for already-synced entries.
@@ -88,6 +92,7 @@ A background goroutine runs at the configured `compaction_interval` (default: 1 
 2. Delete old unblocked entries past the retention period
 3. Delete old events past the retention period
 4. Delete orphaned reason strings
+5. WAL checkpoint (flush WAL to main database file)
 
 No snapshots, no journal truncation — just SQL DELETE queries.
 
@@ -144,6 +149,12 @@ SELECT 'Reasons:', COUNT(*) FROM reasons;
 SELECT 'DB Size:', page_count * page_size / 1024 / 1024 || ' MB'
 FROM pragma_page_count(), pragma_page_size();
 EOF
+```
+
+Note: Timestamps are stored as Unix seconds (integers). To view them as human-readable dates:
+```bash
+sqlite3 /var/lib/bot-detector/state/state.db \
+  "SELECT ip, state, datetime(expire_time, 'unixepoch') AS expires, datetime(modified_at, 'unixepoch') AS modified FROM ips LIMIT 10;"
 ```
 
 ### Manual Vacuum

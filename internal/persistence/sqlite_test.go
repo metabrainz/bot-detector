@@ -42,14 +42,15 @@ func TestApplyMigrations_Idempotent(t *testing.T) {
 	db := openTestDB(t)
 
 	// Run migrations again — should be a no-op
-	err := ApplyMigrations(db)
+	migrated, err := ApplyMigrations(db)
 	require.NoError(t, err)
+	assert.False(t, migrated)
 
 	// Verify schema version
 	var version int
 	err = db.QueryRow("SELECT MAX(version) FROM schema_version").Scan(&version)
 	require.NoError(t, err)
-	assert.Equal(t, 2, version)
+	assert.Equal(t, 4, version)
 }
 
 func TestApplyMigrations_TablesExist(t *testing.T) {
