@@ -591,6 +591,8 @@ func execute(params *commandline.AppParameters) error {
 		return fmt.Errorf("could not stat file: %q  - %v", configFilePath, err)
 	}
 
+	logging.LogOutput(logging.LevelInfo, "CONFIG", "Configuration directory: %s", params.ConfigDir)
+
 	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: configFilePath})
 	if err != nil {
 		return fmt.Errorf("configuration Load Error: %v", err)

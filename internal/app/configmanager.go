@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -59,7 +60,7 @@ func LogConfigurationSummary(p *Processor, oldChains []config.BehavioralChain, o
 	p.ConfigMutex.RUnlock()
 
 	if p.ConfigReloaded {
-		p.LogFunc(logging.LevelInfo, "CONFIG_RELOAD", "Successfully reloaded main configuration from '%s'", p.ConfigFilePath)
+		p.LogFunc(logging.LevelInfo, "CONFIG_RELOAD", "Successfully reloaded main configuration from '%s'", filepath.Base(p.ConfigFilePath))
 
 		// Show changes on reload
 		if len(oldChains) != len(newChains) || len(oldGoodActors) != len(newGoodActors) {
@@ -73,7 +74,7 @@ func LogConfigurationSummary(p *Processor, oldChains []config.BehavioralChain, o
 		}
 	} else {
 		p.ConfigReloaded = true
-		p.LogFunc(logging.LevelInfo, "CONFIG", "Successfully loaded main configuration from '%s'", p.ConfigFilePath)
+		p.LogFunc(logging.LevelInfo, "CONFIG", "Successfully loaded main configuration from '%s'", filepath.Base(p.ConfigFilePath))
 		p.LogFunc(logging.LevelInfo, "CONFIG", "Chains: %d, Good Actors: %d, Log Level: %s",
 			len(newChains), len(newGoodActors), currentLogLevel)
 	}
