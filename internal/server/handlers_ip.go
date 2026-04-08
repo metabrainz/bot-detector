@@ -331,6 +331,8 @@ func formatPersistenceState(w http.ResponseWriter, p Provider, canonical string,
 		state := stateVal.FieldByName("State").String()
 		expireTime := stateVal.FieldByName("ExpireTime").Interface().(time.Time)
 		reason := stateVal.FieldByName("Reason").String()
+		modifiedAt := stateVal.FieldByName("ModifiedAt").Interface().(time.Time)
+		firstBlockedAt := stateVal.FieldByName("FirstBlockedAt").Interface().(time.Time)
 
 		_, _ = fmt.Fprintf(w, "persistence: %s\n", state)
 		if !expireTime.IsZero() {
@@ -338,6 +340,12 @@ func formatPersistenceState(w http.ResponseWriter, p Provider, canonical string,
 		}
 		if reason != "" {
 			_, _ = fmt.Fprintf(w, "persistence_reason: %s\n", reason)
+		}
+		if !firstBlockedAt.IsZero() {
+			_, _ = fmt.Fprintf(w, "persistence_first_blocked: %s\n", firstBlockedAt.Format(time.RFC3339))
+		}
+		if !modifiedAt.IsZero() {
+			_, _ = fmt.Fprintf(w, "persistence_modified: %s\n", modifiedAt.Format(time.RFC3339))
 		}
 	}
 
@@ -615,6 +623,9 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 	if inBackend && len(actors) == 0 {
 		response.Status = "blocked"
 		response.Backend = "present"
+		if !persistFirstBlockedAt.IsZero() {
+			response.EarliestBlock = persistFirstBlockedAt.Format(time.RFC3339)
+		}
 		populateBadActorInfo(p, &response, ip)
 		return response
 	}
@@ -1201,18 +1212,21 @@ func queryNodeIPStatus(p Provider, nodeName, nodeAddr, protocol, ip string) Node
 
 	// Convert to NodeIPStatusResponse
 	return NodeIPStatusResponse{
-		Name:          nodeName,
-		Address:       nodeAddr,
-		Status:        status.Status,
-		Actors:        status.Actors,
-		Chains:        status.Chains,
-		EarliestBlock: status.EarliestBlock,
-		LatestExpiry:  status.LatestExpiry,
-		LastSeen:      status.LastSeen,
-		LastUnblock:   status.LastUnblock,
-		UnblockReason: status.UnblockReason,
-		BadActor:      status.BadActor,
-		Score:         status.Score,
+		Name:               nodeName,
+		Address:            nodeAddr,
+		Status:             status.Status,
+		Actors:             status.Actors,
+		Chains:             status.Chains,
+		EarliestBlock:      status.EarliestBlock,
+		LatestExpiry:       status.LatestExpiry,
+		LastSeen:           status.LastSeen,
+		LastUnblock:        status.LastUnblock,
+		UnblockReason:      status.UnblockReason,
+		Persistence:        status.Persistence,
+		PersistenceExpires: status.PersistenceExpires,
+		PersistenceReason:  status.PersistenceReason,
+		BadActor:           status.BadActor,
+		Score:              status.Score,
 	}
 }
 
