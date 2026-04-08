@@ -307,8 +307,8 @@ func restorePersistenceState(p *app.Processor) error {
 	}
 	p.DB = db
 
-	// 2. Migrate from legacy format if needed
-	if persistence.ShouldMigrate(p.StateDir) {
+	// 2. Migrate from legacy format if needed (skip in dry-run to avoid modifying files)
+	if !p.DryRun && persistence.ShouldMigrate(p.StateDir) {
 		p.LogFunc(logging.LevelInfo, "MIGRATION", "Legacy persistence files detected, migrating to SQLite...")
 		if err := persistence.MigrateFromLegacy(p.DB, p.StateDir); err != nil {
 			p.LogFunc(logging.LevelError, "MIGRATION_FAIL", "Failed to migrate legacy persistence: %v", err)
@@ -334,7 +334,12 @@ func restorePersistenceState(p *app.Processor) error {
 		}
 	}
 
-	// 4. Restore state to HAProxy
+	// 4. Restore state to HAProxy (skip in dry-run mode)
+	if p.DryRun {
+		p.LogFunc(logging.LevelInfo, "SETUP", "Dry-run mode: skipping HAProxy state restoration")
+		return nil
+	}
+
 	p.PersistenceMutex.Lock()
 	allStates, err := persistence.GetAllIPStates(p.DB)
 	p.PersistenceMutex.Unlock()
