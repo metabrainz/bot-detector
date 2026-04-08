@@ -39,7 +39,7 @@ func OpenDB(stateDir string, dryRun bool) (*sql.DB, error) {
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA synchronous=NORMAL",
-		"PRAGMA busy_timeout=5000",
+		"PRAGMA busy_timeout=30000",
 		"PRAGMA auto_vacuum=INCREMENTAL",
 	}
 	for _, p := range pragmas {
