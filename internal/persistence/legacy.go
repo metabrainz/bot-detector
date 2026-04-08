@@ -1,5 +1,9 @@
 package persistence
 
+// Legacy snapshot reader/writer — kept for migration from old format.
+// These functions are used by migrate.go and migration tests only.
+// Do not use for new code.
+
 import (
 	"bytes"
 	"compress/gzip"
@@ -7,17 +11,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 )
 
-// GetJournalPath returns the journal file path (always events.log for v1).
-func GetJournalPath(stateDir, version string) string {
-	return filepath.Join(stateDir, "events.log")
-}
-
-// LoadSnapshot reads and unmarshals the v1 snapshot file.
+// LoadSnapshot reads and unmarshals a legacy v1 snapshot file.
 // It automatically detects whether the file is gzipped or plain JSON.
 func LoadSnapshot(path string) (*Snapshot, error) {
 	data, err := os.ReadFile(path)
@@ -31,10 +29,8 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 		return nil, fmt.Errorf("failed to read snapshot file: %w", err)
 	}
 
-	// Detect if the data is gzipped by checking the magic number
 	var jsonData []byte
 	if len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b {
-		// File is gzipped, decompress it
 		gzReader, err := gzip.NewReader(bytes.NewReader(data))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
@@ -50,19 +46,15 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 			return nil, fmt.Errorf("failed to decompress snapshot: %w", err)
 		}
 	} else {
-		// File is plain JSON (backward compatibility)
 		jsonData = data
 	}
 
-	// Parse v1 format
 	var snapV1 SnapshotV1
 	if err := json.Unmarshal(jsonData, &snapV1); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal v1 snapshot: %w", err)
 	}
 
-	// Convert entries array to IPStates map
 	ipStates := make(map[string]IPState)
-	// Use snapshot timestamp as ModifiedAt fallback for old snapshots without this field
 	fallbackTime := snapV1.Timestamp
 	if fallbackTime.IsZero() {
 		fallbackTime = time.Now()
@@ -73,7 +65,7 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 			State:      entry.State,
 			ExpireTime: entry.ExpireTime,
 			Reason:     entry.Reason,
-			ModifiedAt: fallbackTime, // Use snapshot timestamp, not ExpireTime
+			ModifiedAt: fallbackTime,
 		}
 	}
 
@@ -85,8 +77,8 @@ func LoadSnapshot(path string) (*Snapshot, error) {
 }
 
 // WriteSnapshot atomically writes a gzipped v1 snapshot file.
+// Kept for migration tests that need to create legacy fixture files.
 func WriteSnapshot(path string, snap *Snapshot) error {
-	// Use v1 wrapper format with sorted entries from IPStates
 	entries := make([]BlockStateEntryV1, 0, len(snap.IPStates))
 	for ip, state := range snap.IPStates {
 		entries = append(entries, BlockStateEntryV1{
@@ -96,7 +88,6 @@ func WriteSnapshot(path string, snap *Snapshot) error {
 			Reason:     state.Reason,
 		})
 	}
-	// Sort by ExpireTime (chronological order)
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].ExpireTime.Before(entries[j].ExpireTime)
 	})
@@ -112,7 +103,6 @@ func WriteSnapshot(path string, snap *Snapshot) error {
 		return fmt.Errorf("failed to marshal snapshot: %w", err)
 	}
 
-	// Compress the JSON data with BestSpeed for faster writes
 	var buf bytes.Buffer
 	gzWriter, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
 	if err != nil {
@@ -130,42 +120,5 @@ func WriteSnapshot(path string, snap *Snapshot) error {
 		return fmt.Errorf("failed to write temporary snapshot: %w", err)
 	}
 
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("failed to rename snapshot: %w", err)
-	}
-
-	return nil
-}
-
-// OpenJournalForAppend opens the events.log file for appending.
-func OpenJournalForAppend(path string) (*os.File, error) {
-	return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-}
-
-// WriteEventToJournal marshals and writes a single event to an open file handle.
-func WriteEventToJournal(handle *os.File, event *AuditEvent) error {
-	// Use v1 wrapper format
-	entry := JournalEntryV1{
-		Timestamp: event.Timestamp,
-		Event: AuditEventDataV1{
-			Type:     event.Event,
-			IP:       event.IP,
-			Duration: event.Duration,
-			Reason:   event.Reason,
-		},
-	}
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return fmt.Errorf("failed to marshal audit event: %w", err)
-	}
-
-	if _, err := handle.Write(append(data, '\n')); err != nil {
-		return fmt.Errorf("failed to write to journal: %w", err)
-	}
-
-	if err := handle.Sync(); err != nil {
-		return fmt.Errorf("failed to sync journal: %w", err)
-	}
-
-	return nil
+	return os.Rename(tmpPath, path)
 }
