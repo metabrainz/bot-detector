@@ -395,6 +395,26 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     backend_tables:
       - thirty_min_blocks_v4 on /var/run/haproxy/admin.sock (status: blocked, duration: 30m, expires in: 15m)
     ```
+*   **Response Format (Standalone - Bad Actor):**
+    ```
+    node: standalone
+    status: blocked
+    persistence: blocked
+    persistence_reason: bad-actor
+    bad_actor: yes
+    bad_actor_promoted_at: 2026-03-12T16:00:00Z
+    bad_actor_score: 5.5
+    bad_actor_block_count: 7
+    ```
+*   **Response Format (Standalone - IP with Score):**
+    ```
+    node: standalone
+    status: blocked
+    persistence: blocked
+    persistence_reason: SQL-Injection
+    score: 2.3 / 5.0
+    score_block_count: 4
+    ```
 *   **Response Format (Unknown IP):**
     ```
     cluster_status: unknown
@@ -469,6 +489,35 @@ These endpoints allow you to query the block/unblock status of specific IP addre
       "persistence_expires": "2025-11-22T02:00:00Z"
     }
     ```
+*   **Response Format (Standalone - Bad Actor):**
+    ```json
+    {
+      "node": "standalone",
+      "status": "blocked",
+      "persistence": "blocked",
+      "persistence_reason": "bad-actor",
+      "bad_actor": {
+        "promoted_at": "2026-03-12T16:00:00Z",
+        "total_score": 5.5,
+        "block_count": 7,
+        "history": "[{\"ts\":\"2026-03-12T16:00:00Z\",\"r\":\"SQL-Injection\"}]"
+      }
+    }
+    ```
+*   **Response Format (Standalone - IP with Score, not yet bad actor):**
+    ```json
+    {
+      "node": "standalone",
+      "status": "blocked",
+      "persistence": "blocked",
+      "persistence_reason": "SQL-Injection",
+      "score": {
+        "current_score": 2.3,
+        "block_count": 4,
+        "threshold": 5.0
+      }
+    }
+    ```
 *   **Response Format (Standalone - Unblocked IP):**
     ```json
     {
@@ -515,6 +564,8 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   All timestamps are in RFC3339 format (ISO 8601)
     *   IPv6 addresses are canonicalized (e.g., `2001:0db8::1` → `2001:db8::1`)
     *   The `chains` object maps chain names to their expiry times
+    *   The `bad_actor` object is present only when the IP has been promoted to bad actor status
+    *   The `score` object is present only when the IP has a score but is not yet a bad actor
     *   The `cluster_hint` field (on followers) provides the URL to query for cluster-wide status
 *   **Responses:**
     *   `200 OK`: Successfully returns IP status.
@@ -524,7 +575,7 @@ These endpoints allow you to query the block/unblock status of specific IP addre
 
 *   **Method:** `DELETE`
 *   **Content-Type:** `text/plain; charset=utf-8`
-*   **Description:** Clears an IP address from all state: HAProxy stick tables, activity store, and persistence (journal/snapshot). This is a cluster-aware operation - if called on a follower, the request is forwarded to the leader, which then broadcasts the clear command to all nodes. Each node independently clears the IP from its local HAProxy tables and persistence state. An unblock event is written to the journal with reason "manual_clear".
+*   **Description:** Clears an IP address from all state: HAProxy stick tables, activity store, persistence, bad actor status, and score. This is a cluster-aware operation - if called on a follower, the request is forwarded to the leader, which then broadcasts the clear command to all nodes. Each node independently clears the IP from its local HAProxy tables and persistence state.
 *   **Parameters:**
     *   `ip` - IPv4 or IPv6 address (will be canonicalized)
 *   **Response Format (Success - IP found):**
