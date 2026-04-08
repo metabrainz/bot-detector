@@ -927,6 +927,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 					activity.IsBlocked = true
 					activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: p.InternReason("bad-actor")}
 					activity.BlockedUntil = time.Now().Add(baConfig.BlockDuration)
+					p.LogFunc(logging.LevelInfo, "BAD_ACTOR", "Re-blocking known bad actor %s for %v", entry.IPInfo.Address, baConfig.BlockDuration)
 				}
 
 				if p.EnableMetrics {
