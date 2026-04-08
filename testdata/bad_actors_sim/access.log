@@ -1,0 +1,20 @@
+# === ATTACKER: 192.168.1.50 - hits multiple different chains ===
+# SQL injection → score +1.0
+example.com 192.168.1.50 - - [08/Apr/2026:10:00:01 +0000] "GET /search?q='+UNION+SELECT+1-- HTTP/1.1" 200 500 "-" "Mozilla/5.0"
+# Suspicious UA (different chain, not blocked by SQL-Injection chain) → score +0.3
+# Wait - this IP is already blocked from SQL-Injection, so it will be skipped.
+# The only way to accumulate score in a single pass is if the block expires between entries.
+# In dry-run, blocks don't expire during processing.
+
+# === Realistic scenario: different IPs, checking scoring works ===
+# IP 10.1.1.1: SQL injection (weight 1.0)
+example.com 10.1.1.1 - - [08/Apr/2026:10:00:01 +0000] "GET /q='+OR+'1'='1 HTTP/1.1" 200 100 "-" "Mozilla/5.0"
+# IP 10.1.1.2: Suspicious UA (weight 0.3)
+example.com 10.1.1.2 - - [08/Apr/2026:10:00:02 +0000] "GET / HTTP/1.1" 200 100 "-" "sqlmap/1.5"
+# IP 10.1.1.3: Path scanner (weight 1.0 default)
+example.com 10.1.1.3 - - [08/Apr/2026:10:00:03 +0000] "GET /wp-admin HTTP/1.1" 404 100 "-" "Mozilla/5.0"
+example.com 10.1.1.3 - - [08/Apr/2026:10:00:04 +0000] "GET /.env HTTP/1.1" 404 100 "-" "Mozilla/5.0"
+# Good actor - should be skipped
+example.com 10.0.0.100 - - [08/Apr/2026:10:00:05 +0000] "GET /q='+OR+'1'='1 HTTP/1.1" 200 100 "-" "Monitor"
+# Normal user - no chain match
+example.com 10.0.0.200 - - [08/Apr/2026:10:00:06 +0000] "GET /about HTTP/1.1" 200 5000 "-" "Chrome/120"

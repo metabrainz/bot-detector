@@ -1,0 +1,94 @@
+version: "1.0"
+
+application:
+  log_level: "info"
+  enable_metrics: true
+  persistence:
+    compaction_interval: "1h"
+    retention_period: "168h"
+
+parser:
+  line_ending: "lf"
+  log_format_regex: '(?P<VHost>\S+) (?P<IP>\S+) \S+ \S+ \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) (?P<Protocol>[^"]*)" (?P<StatusCode>\d+) (?P<Size>\d+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"'
+  timestamp_format: "02/Jan/2006:15:04:05 -0700"
+
+checker:
+  unblock_on_good_actor: true
+  unblock_cooldown: "1m"
+  actor_cleanup_interval: "5m"
+  actor_state_idle_timeout: "30m"
+
+blockers:
+  default_duration: "30m"
+  commands_per_second: 100
+  command_queue_size: 10000
+  backends:
+    haproxy:
+      addresses:
+        - "/var/run/haproxy/admin.sock"
+      duration_tables:
+        "30m": "thirty_min_blocks"
+        "1h": "one_hour_blocks"
+        "168h": "one_week_blocks"
+
+bad_actors:
+  enabled: true
+  threshold: 3.0
+  block_duration: "168h"
+
+good_actors:
+  - name: "trusted_monitor"
+    ip: "10.0.0.100"
+
+chains:
+  # High severity - SQL injection attempts (weight 1.0)
+  - name: "SQL-Injection"
+    action: block
+    block_duration: "1h"
+    match_key: ip
+    bad_actor_weight: 1.0
+    steps:
+      - field_matches:
+          path: "regex:(?i)(union.*select|drop.*table|;.*--|'.*or.*')"
+
+  # Medium severity - login brute force (weight 0.5)
+  - name: "Login-Brute-Force"
+    action: block
+    block_duration: "30m"
+    match_key: ip
+    bad_actor_weight: 0.5
+    steps:
+      - field_matches:
+          path: "/login"
+          method: "POST"
+          status_code: "401"
+        repeated: 5
+
+  # Low severity - suspicious user agent (weight 0.3)
+  - name: "Suspicious-UA"
+    action: block
+    block_duration: "30m"
+    match_key: ip
+    bad_actor_weight: 0.3
+    steps:
+      - field_matches:
+          useragent: "regex:(?i)(sqlmap|nikto|nmap|masscan)"
+
+  # Normal chain - path scanning (weight 1.0 default)
+  - name: "Path-Scanner"
+    action: block
+    block_duration: "30m"
+    match_key: ip
+    steps:
+      - field_matches:
+          path: "regex:^/(wp-admin|phpmyadmin|.env|.git)"
+      - field_matches:
+          path: "regex:^/(wp-admin|phpmyadmin|.env|.git)"
+
+  # Log-only chain (should not affect scoring since action is log)
+  - name: "404-Monitor"
+    action: log
+    match_key: ip
+    steps:
+      - field_matches:
+          status_code: "404"
