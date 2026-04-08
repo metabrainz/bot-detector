@@ -256,7 +256,7 @@ func renderClusterIPStatus(w http.ResponseWriter, p Provider, canonical string) 
 							elapsedSec := tableDuration.Seconds() - float64(expSec)
 							addedAt := time.Now().Add(-time.Duration(elapsedSec) * time.Second)
 							_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, duration: %v, expires in: %s, added: %s)\n",
-								tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format("2006-01-02 15:04:05"))
+								tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format(time.RFC3339))
 						} else {
 							_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %s)\n",
 								tableName, backend, status, formatDuration(expiresDuration))
@@ -298,7 +298,7 @@ func formatBackendInfo(w http.ResponseWriter, backendInfo []interface{}, duratio
 			elapsedSec := tableDuration.Seconds() - float64(expSec)
 			addedAt := time.Now().Add(-time.Duration(elapsedSec) * time.Second)
 			_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, duration: %v, expires in: %s, added: %s)\n",
-				tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format("2006-01-02 15:04:05"))
+				tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format(time.RFC3339))
 		} else {
 			_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %s)\n",
 				tableName, backend, status, formatDuration(expiresDuration))
@@ -833,7 +833,7 @@ func clearIPHandler(p Provider) http.HandlerFunc {
 				elapsedSec := tableDuration.Seconds() - float64(expSec)
 				addedAt := time.Now().Add(-time.Duration(elapsedSec) * time.Second)
 				_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, duration: %v, expires in: %s, added: %s)\n",
-					tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format("2006-01-02 15:04:05"))
+					tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format(time.RFC3339))
 			} else {
 				_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %s)\n",
 					tableName, backend, status, formatDuration(expiresDuration))
