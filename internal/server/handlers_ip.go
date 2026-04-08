@@ -607,6 +607,7 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 
 	if len(actors) == 0 && !inBackend {
 		response.Status = "unknown"
+		populateBadActorInfo(p, &response, ip)
 		return response
 	}
 
@@ -614,7 +615,7 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 	if inBackend && len(actors) == 0 {
 		response.Status = "blocked"
 		response.Backend = "present"
-		// Note: PersistenceReason already set above if available
+		populateBadActorInfo(p, &response, ip)
 		return response
 	}
 
