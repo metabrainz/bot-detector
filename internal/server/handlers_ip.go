@@ -206,6 +206,15 @@ func renderClusterIPStatus(w http.ResponseWriter, p Provider, canonical string) 
 		if node.PersistenceReason != "" {
 			_, _ = fmt.Fprintf(w, "    persistence_reason: %s\n", node.PersistenceReason)
 		}
+		if node.BadActor != nil {
+			_, _ = fmt.Fprintf(w, "    bad_actor: yes\n")
+			_, _ = fmt.Fprintf(w, "    bad_actor_promoted_at: %s\n", node.BadActor.PromotedAt)
+			_, _ = fmt.Fprintf(w, "    bad_actor_score: %.1f\n", node.BadActor.TotalScore)
+			_, _ = fmt.Fprintf(w, "    bad_actor_block_count: %d\n", node.BadActor.BlockCount)
+		} else if node.Score != nil {
+			_, _ = fmt.Fprintf(w, "    score: %.1f / %.1f\n", node.Score.CurrentScore, node.Score.Threshold)
+			_, _ = fmt.Fprintf(w, "    score_block_count: %d\n", node.Score.BlockCount)
+		}
 	}
 
 	// Add backend table details from leader node
@@ -1052,6 +1061,8 @@ type NodeIPStatusResponse struct {
 	Persistence        string            `json:"persistence,omitempty"`
 	PersistenceExpires string            `json:"persistence_expires,omitempty"`
 	PersistenceReason  string            `json:"persistence_reason,omitempty"`
+	BadActor           *BadActorStatus   `json:"bad_actor,omitempty"`
+	Score              *ScoreStatus      `json:"score,omitempty"`
 }
 
 // NodeInfo is a minimal representation of cluster node to avoid import cycles
@@ -1180,6 +1191,8 @@ func queryNodeIPStatus(p Provider, nodeName, nodeAddr, protocol, ip string) Node
 		LastSeen:      status.LastSeen,
 		LastUnblock:   status.LastUnblock,
 		UnblockReason: status.UnblockReason,
+		BadActor:      status.BadActor,
+		Score:         status.Score,
 	}
 }
 
