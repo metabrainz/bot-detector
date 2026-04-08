@@ -879,7 +879,8 @@ func runCleanup(p *app.Processor) {
 	}
 
 	// Reclaim freed pages from deletions above.
-	if _, err := p.DB.Exec("PRAGMA incremental_vacuum"); err != nil {
+	// Pass a large page count to ensure all free pages are reclaimed.
+	if _, err := p.DB.Exec("PRAGMA incremental_vacuum(1000000)"); err != nil {
 		p.LogFunc(logging.LevelError, "CLEANUP_FAIL", "Failed to run incremental vacuum: %v", err)
 	}
 }
