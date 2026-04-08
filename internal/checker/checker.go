@@ -889,7 +889,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 			}
 
 			if shouldUnblock {
-				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s (rule: %s). Issuing unblock command.", entry.IPInfo.Address, goodActorRuleName)
+				p.LogFunc(logging.LevelDebug, "UNBLOCK", "Good actor match for %s (rule: %s). Issuing unblock command.", entry.IPInfo.Address, goodActorRuleName)
 
 				// Create detailed unblock reason with good actor name
 				unblockReason := p.InternReason("good-actor:" + goodActorRuleName)
