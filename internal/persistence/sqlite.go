@@ -29,6 +29,13 @@ func OpenDB(stateDir string, dryRun bool) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
+	// Force a single connection. modernc.org/sqlite does not support DSN-based
+	// PRAGMAs, so they are set via Exec after opening. With the default pool,
+	// new connections would not inherit these PRAGMAs (notably busy_timeout),
+	// causing immediate SQLITE_BUSY errors under concurrent write load.
+	// A single connection also ensures :memory: databases (dry-run) stay alive.
+	db.SetMaxOpenConns(1)
+
 	// Verify connection
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
