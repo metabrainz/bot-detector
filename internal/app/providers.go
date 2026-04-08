@@ -385,7 +385,7 @@ func (p *Processor) GetPersistenceState(ip string) (interface{}, bool) {
 	return *state, true
 }
 
-// RemoveFromPersistence removes an IP from persistence state and writes unblock event to journal.
+// RemoveFromPersistence removes an IP from persistence state, bad actors, and scores.
 func (p *Processor) RemoveFromPersistence(ip string) error {
 	if !p.PersistenceEnabled {
 		return nil
@@ -394,7 +394,10 @@ func (p *Processor) RemoveFromPersistence(ip string) error {
 	p.PersistenceMutex.Lock()
 	defer p.PersistenceMutex.Unlock()
 
-	// Check if IP exists
+	// Remove from bad actors and scores
+	_ = persistence.RemoveBadActor(p.DB, ip)
+
+	// Check if IP exists in ips table
 	state, err := persistence.GetIPState(p.DB, ip)
 	if err != nil {
 		return fmt.Errorf("failed to query IP state: %w", err)
@@ -407,7 +410,6 @@ func (p *Processor) RemoveFromPersistence(ip string) error {
 		return fmt.Errorf("failed to delete IP state: %w", err)
 	}
 
-	// Record audit event
 	if err := persistence.InsertEvent(p.DB, time.Now(), persistence.EventTypeUnblock, ip, "manual_clear", 0, ""); err != nil {
 		return fmt.Errorf("failed to insert unblock event: %w", err)
 	}

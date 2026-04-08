@@ -455,6 +455,25 @@ func restorePersistenceState(p *app.Processor) error {
 		p.LogFunc(logging.LevelWarning, "STATE_RESTORE", "Restored %d IPs. Verify HAProxy stick table capacity.", restored)
 	}
 
+	// Restore bad actors
+	if p.Config.BadActors.Enabled {
+		badActors, baErr := persistence.GetAllBadActors(p.DB)
+		if baErr != nil {
+			p.LogFunc(logging.LevelError, "STATE_RESTORE", "Failed to load bad actors: %v", baErr)
+		} else if len(badActors) > 0 {
+			baRestored := 0
+			for _, ba := range badActors {
+				if !p.DryRun && p.Blocker != nil {
+					ipInfo := utils.NewIPInfo(ba.IP)
+					if blockErr := p.Blocker.Block(ipInfo, p.Config.BadActors.BlockDuration, "bad-actor"); blockErr == nil {
+						baRestored++
+					}
+				}
+			}
+			p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Restored %d bad actors (%d total in database)", baRestored, len(badActors))
+		}
+	}
+
 	return nil
 }
 
@@ -840,9 +859,18 @@ func runCleanup(p *app.Processor) {
 		p.LogFunc(logging.LevelError, "CLEANUP_FAIL", "Failed to cleanup orphaned reasons: %v", err)
 	}
 
-	if expiredBlocks > 0 || cleanedUnblocked > 0 || cleanedEvents > 0 || cleanedReasons > 0 {
-		p.LogFunc(logging.LevelInfo, "CLEANUP", "Cleanup completed: expired_blocks=%d, old_unblocked=%d, old_events=%d, orphaned_reasons=%d",
-			expiredBlocks, cleanedUnblocked, cleanedEvents, cleanedReasons)
+	// Cleanup low bad actor scores (> 30 days old, score < 2.0)
+	cleanedScores := 0
+	if p.Config.BadActors.Enabled {
+		cleanedScores, err = persistence.CleanupLowScores(p.DB, 30*24*time.Hour, 2.0)
+		if err != nil {
+			p.LogFunc(logging.LevelError, "CLEANUP_FAIL", "Failed to cleanup low scores: %v", err)
+		}
+	}
+
+	if expiredBlocks > 0 || cleanedUnblocked > 0 || cleanedEvents > 0 || cleanedReasons > 0 || cleanedScores > 0 {
+		p.LogFunc(logging.LevelInfo, "CLEANUP", "Cleanup completed: expired_blocks=%d, old_unblocked=%d, old_events=%d, orphaned_reasons=%d, low_scores=%d",
+			expiredBlocks, cleanedUnblocked, cleanedEvents, cleanedReasons, cleanedScores)
 	}
 }
 

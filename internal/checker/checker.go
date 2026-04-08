@@ -375,6 +375,37 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 		if err := persistence.UpsertIPState(p.DB, entry.IPInfo.Address, persistence.BlockStateBlocked, unblockTime, reason, now, now); err != nil {
 			p.LogFunc(logging.LevelError, "PERSIST_FAIL", "Failed to upsert IP state for %s: %v", entry.IPInfo.Address, err)
 		}
+
+		// Bad actor scoring
+		p.ConfigMutex.RLock()
+		baConfig := p.Config.BadActors
+		p.ConfigMutex.RUnlock()
+
+		if baConfig.Enabled && chain.BadActorWeight > 0 {
+			score, blockCount, err := persistence.IncrementScore(p.DB, entry.IPInfo.Address, chain.BadActorWeight, now)
+			if err != nil {
+				p.LogFunc(logging.LevelError, "BAD_ACTOR", "Failed to increment score for %s: %v", entry.IPInfo.Address, err)
+			} else if score >= baConfig.Threshold {
+				// Check if already a bad actor
+				already, _ := persistence.IsBadActor(p.DB, entry.IPInfo.Address)
+				if !already {
+					if err := persistence.PromoteToBadActor(p.DB, entry.IPInfo.Address, score, blockCount, now); err != nil {
+						p.LogFunc(logging.LevelError, "BAD_ACTOR", "Failed to promote %s to bad actor: %v", entry.IPInfo.Address, err)
+					} else {
+						p.LogFunc(logging.LevelCritical, "BAD_ACTOR", "IP %s promoted to bad actor (score=%.1f, blocks=%d, chain=%s, weight=%.1f)",
+							entry.IPInfo.Address, score, blockCount, chain.Name, chain.BadActorWeight)
+						// Issue max-duration block
+						if !p.DryRun && p.Blocker != nil {
+							blockerIPInfo := utils.IPInfo{Address: entry.IPInfo.Address, Version: entry.IPInfo.Version}
+							_ = p.Blocker.Block(blockerIPInfo, baConfig.BlockDuration, "bad-actor")
+						}
+						if err := persistence.UpsertIPState(p.DB, entry.IPInfo.Address, persistence.BlockStateBlocked, now.Add(baConfig.BlockDuration), "bad-actor", now, now); err != nil {
+							p.LogFunc(logging.LevelError, "BAD_ACTOR", "Failed to update state for promoted bad actor %s: %v", entry.IPInfo.Address, err)
+						}
+					}
+				}
+			}
+		}
 		p.PersistenceMutex.Unlock()
 	}
 
@@ -879,6 +910,40 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 				activity.LastUnblockTime = time.Now()
 				activity.LastUnblockReason = unblockReason
 			}
+		}
+	}
+
+	// 1b. Check if the entry is a bad actor (only if not a good actor).
+	if !isGood && p.PersistenceEnabled {
+		p.ConfigMutex.RLock()
+		baConfig := p.Config.BadActors
+		p.ConfigMutex.RUnlock()
+
+		if baConfig.Enabled {
+			p.PersistenceMutex.Lock()
+			isBad, _ := persistence.IsBadActor(p.DB, entry.IPInfo.Address)
+			if isBad {
+				// Good actor vs bad actor conflict: if IP was just recognized as good actor
+				// in a config reload, remove from bad actors
+				// (This is handled above — isGood would be true, so we don't reach here)
+
+				// Ensure block is active
+				if !activity.IsBlocked {
+					activity.IsBlocked = true
+					activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: p.InternReason("bad-actor")}
+					activity.BlockedUntil = time.Now().Add(baConfig.BlockDuration)
+				}
+				p.PersistenceMutex.Unlock()
+
+				if p.EnableMetrics {
+					val, _ := p.Metrics.SkipsByReason.LoadOrStore("bad-actor", new(atomic.Int64))
+					if counter, ok := val.(*atomic.Int64); ok {
+						counter.Add(1)
+					}
+				}
+				return
+			}
+			p.PersistenceMutex.Unlock()
 		}
 	}
 
