@@ -328,7 +328,7 @@ func formatBadActorHistory(w http.ResponseWriter, historyJSON string, indent str
 func formatPersistenceState(w http.ResponseWriter, p Provider, canonical string, persistState interface{}, hasPersist bool) {
 	if hasPersist {
 		stateVal := reflect.ValueOf(persistState)
-		state := stateVal.FieldByName("State").String()
+		state := fmt.Sprintf("%s", stateVal.FieldByName("State").Interface())
 		expireTime := stateVal.FieldByName("ExpireTime").Interface().(time.Time)
 		reason := stateVal.FieldByName("Reason").String()
 		modifiedAt := stateVal.FieldByName("ModifiedAt").Interface().(time.Time)
@@ -597,7 +597,7 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 	var persistFirstBlockedAt time.Time
 	if persistState, hasPersist := p.GetPersistenceState(ip); hasPersist {
 		stateVal := reflect.ValueOf(persistState)
-		response.Persistence = stateVal.FieldByName("State").String()
+		response.Persistence = fmt.Sprintf("%s", stateVal.FieldByName("State").Interface())
 		expireTime := stateVal.FieldByName("ExpireTime").Interface().(time.Time)
 		if !expireTime.IsZero() {
 			response.PersistenceExpires = expireTime.Format(time.RFC3339)
