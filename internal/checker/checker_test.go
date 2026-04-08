@@ -893,14 +893,14 @@ regex:NastyBot`), 0644); err != nil {
 			// Example: "SKIP: app.store.Actor 10.0.0.2 (UA: TestAgent): Skipped (blocked:SimpleBlockChain)."
 			// We want to normalize this to "SKIP: app.store.Actor 10.0.0.2 (blocked:SimpleBlockChain)"
 			// to check for uniqueness, ignoring the UA part for this specific check.
-			re := regexp.MustCompile(`SKIP: app.store.Actor (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[0-9a-fA-F:]+) \(UA: .*?\): Skipped \((blocked|good_actor):(.+?)\)\.?`)
+			re := regexp.MustCompile(`SKIP: Actor (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[0-9a-fA-F:]+) \(UA: .*?\): Skipped \((blocked|good_actor):(.+?)\)\.?`)
 			matches := re.FindStringSubmatch(formattedExpectedLog)
 
 			if len(matches) == 4 {
 				ip := matches[1]
 				skipType := matches[2]
 				source := matches[3]
-				uniqueSkipKey := fmt.Sprintf("SKIP: app.store.Actor %s (%s:%s)", ip, skipType, source)
+				uniqueSkipKey := fmt.Sprintf("SKIP: Actor %s (%s:%s)", ip, skipType, source)
 
 				if foundUniqueSkipLogs[uniqueSkipKey] {
 					// This unique skip message has already been found, so we don't expect it again.

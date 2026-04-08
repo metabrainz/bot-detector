@@ -168,7 +168,7 @@ func (b *HAProxyBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reas
 
 	tableName := getTableNameWithSuffix(baseTableName, ipInfo.Version)
 	if tableName == baseTableName && ipInfo.Version != 4 && ipInfo.Version != 6 {
-		b.P.Log(logging.LevelError, "SKIP_BLOCK", "cannot block IP %s: invalid IP version", ipInfo.Address)
+		b.P.Log(logging.LevelError, "SKIP_BLOCK", "Cannot block IP %s: invalid IP version", ipInfo.Address)
 		return nil
 	}
 

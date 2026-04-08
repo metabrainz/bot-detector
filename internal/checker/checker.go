@@ -113,7 +113,7 @@ func PreCheckActivity(p *app.Processor, entry *app.LogEntry, actor store.Actor) 
 				if entry.Website != "" {
 					websiteCtx = fmt.Sprintf(" on website '%s'", entry.Website)
 				}
-				p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (blocked:%s)%s.", actor.IPInfo.Address, entry.UserAgent, activity.SkipInfo.Source, websiteCtx)
+				p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (blocked:%s)%s.", actor.IPInfo.Address, entry.UserAgent, activity.SkipInfo.Source, websiteCtx)
 			}
 			return activity, true, activity.SkipInfo
 		}
@@ -844,7 +844,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 			if entry.Website != "" {
 				websiteCtx = fmt.Sprintf(" on website '%s'", entry.Website)
 			}
-			p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (good_actor:%s)%s.", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName, websiteCtx)
+			p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (good_actor:%s)%s.", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName, websiteCtx)
 		}
 
 		// --- UNBLOCK ON GOOD ACTOR LOGIC ---
