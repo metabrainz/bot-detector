@@ -1009,11 +1009,29 @@ func parseBadActorsConfig(config *TopLevelConfig) (BadActorsConfig, error) {
 		maxEntries = 100000
 	}
 
+	var scoreMaxAge time.Duration
+	if ba.ScoreMaxAge != "" {
+		var err error
+		scoreMaxAge, err = utils.ParseDuration(ba.ScoreMaxAge)
+		if err != nil {
+			return BadActorsConfig{}, fmt.Errorf("bad_actors.score_max_age: %w", err)
+		}
+	} else {
+		scoreMaxAge = 30 * 24 * time.Hour // default 30 days
+	}
+
+	scoreMinCleanup := ba.ScoreMinCleanup
+	if scoreMinCleanup <= 0 {
+		scoreMinCleanup = 2.0
+	}
+
 	return BadActorsConfig{
 		Enabled:         true,
 		Threshold:       threshold,
 		BlockDuration:   blockDuration,
 		MaxScoreEntries: maxEntries,
+		ScoreMaxAge:     scoreMaxAge,
+		ScoreMinCleanup: scoreMinCleanup,
 	}, nil
 }
 

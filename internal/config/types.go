@@ -139,6 +139,8 @@ type BadActorsConfigYAML struct {
 	Threshold       float64 `yaml:"threshold"`
 	BlockDuration   string  `yaml:"block_duration"`
 	MaxScoreEntries int     `yaml:"max_score_entries"`
+	ScoreMaxAge     string  `yaml:"score_max_age"`
+	ScoreMinCleanup float64 `yaml:"score_min_cleanup"`
 }
 
 // BadActorsConfig holds the runtime bad actors configuration.
@@ -147,6 +149,8 @@ type BadActorsConfig struct {
 	Threshold       float64
 	BlockDuration   time.Duration
 	MaxScoreEntries int
+	ScoreMaxAge     time.Duration // How long to keep low scores before cleanup
+	ScoreMinCleanup float64       // Minimum score to keep during cleanup
 }
 
 type ApplicationConfigYAML struct {

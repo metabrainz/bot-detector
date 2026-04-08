@@ -455,9 +455,11 @@ The `bad_actors` section enables automatic tracking and permanent blocking of IP
 ```yaml
 bad_actors:
   enabled: true
-  threshold: 5.0           # Score needed to become a bad actor (required)
-  block_duration: "168h"   # Block duration for bad actors (default: 168h)
-  max_score_entries: 100000 # Max IPs in scoring table (default: 100000)
+  threshold: 5.0             # Score needed to become a bad actor (required)
+  block_duration: "168h"     # Block duration for bad actors (default: 168h)
+  max_score_entries: 100000  # Max IPs in scoring table (default: 100000)
+  score_max_age: "30d"       # Remove low scores older than this (default: 30d)
+  score_min_cleanup: 2.0     # Only remove scores below this during cleanup (default: 2.0)
 ```
 
 | Field | Type | Default | Description |
@@ -466,6 +468,8 @@ bad_actors:
 | **threshold** | float | required | Cumulative score needed for promotion to bad actor |
 | **block_duration** | duration | `168h` | How long to block promoted bad actors |
 | **max_score_entries** | int | `100000` | Maximum number of IPs tracked in the scoring table |
+| **score_max_age** | duration | `30d` | Remove scores below `score_min_cleanup` older than this |
+| **score_min_cleanup** | float | `2.0` | During cleanup, only remove scores below this value |
 
 Each chain contributes to the score via its `bad_actor_weight` field (default 1.0). When an IP's cumulative score reaches the threshold, it is permanently blocked until manually cleared via `DELETE /ip/{ip}/clear`.
 

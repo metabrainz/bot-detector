@@ -863,7 +863,7 @@ func runCleanup(p *app.Processor) {
 	// Cleanup low bad actor scores (> 30 days old, score < 2.0)
 	cleanedScores := 0
 	if p.Config.BadActors.Enabled {
-		cleanedScores, err = persistence.CleanupLowScores(p.DB, 30*24*time.Hour, 2.0)
+		cleanedScores, err = persistence.CleanupLowScores(p.DB, p.Config.BadActors.ScoreMaxAge, p.Config.BadActors.ScoreMinCleanup)
 		if err != nil {
 			p.LogFunc(logging.LevelError, "CLEANUP_FAIL", "Failed to cleanup low scores: %v", err)
 		}

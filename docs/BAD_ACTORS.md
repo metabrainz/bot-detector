@@ -19,9 +19,11 @@ Each behavioral chain has a `bad_actor_weight` (0.0–1.0, default 1.0). Every t
 ```yaml
 bad_actors:
   enabled: true
-  threshold: 5.0           # Score needed to become a bad actor
-  block_duration: "168h"   # Block duration for bad actors (default: 1 week)
-  max_score_entries: 100000 # Max IPs tracked in scoring table
+  threshold: 5.0             # Score needed to become a bad actor
+  block_duration: "168h"     # Block duration for bad actors (default: 1 week)
+  max_score_entries: 100000  # Max IPs tracked in scoring table
+  score_max_age: "30d"       # Remove low scores older than this (default: 30 days)
+  score_min_cleanup: 2.0     # Only remove scores below this value (default: 2.0)
 
 chains:
   - name: "SQL-Injection"
@@ -147,7 +149,7 @@ CREATE TABLE bad_actors (
 ## Cleanup
 
 During periodic cleanup (configured via `compaction_interval`):
-- Low scores (< 2.0) older than 30 days are removed from `ip_scores`
+- Scores below `score_min_cleanup` (default: 2.0) older than `score_max_age` (default: 30 days) are removed from `ip_scores`
 - Bad actors are **never** automatically removed
 
 ## State Restoration
