@@ -112,6 +112,16 @@ type Provider interface {
 	// GetStateSyncManager returns the state sync manager (nil if not enabled).
 	// Returns *cluster.StateSyncManager but typed as interface{} to avoid import cycle.
 	GetStateSyncManager() interface{}
+
+	// GetBadActorInfo returns bad actor info and score for an IP.
+	// Returns (badActorInfo, scoreInfo) — either can be nil.
+	GetBadActorInfo(ip string) (interface{}, interface{})
+
+	// GetAllBadActors returns all bad actors.
+	GetAllBadActors() ([]interface{}, error)
+
+	// GetBadActorsThreshold returns the configured bad actor threshold (0 if disabled).
+	GetBadActorsThreshold() float64
 }
 
 // StateSyncResponse is the response format for state sync endpoints.

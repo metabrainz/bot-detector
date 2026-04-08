@@ -452,6 +452,39 @@ func (p *Processor) GetStateSyncManager() interface{} {
 	return p.StateSyncManager
 }
 
+func (p *Processor) GetBadActorInfo(ip string) (interface{}, interface{}) {
+	if !p.PersistenceEnabled {
+		return nil, nil
+	}
+	ba, _ := persistence.GetBadActor(p.DB, ip)
+	score, _ := persistence.GetScore(p.DB, ip)
+	return ba, score
+}
+
+func (p *Processor) GetAllBadActors() ([]interface{}, error) {
+	if !p.PersistenceEnabled {
+		return nil, nil
+	}
+	actors, err := persistence.GetAllBadActors(p.DB)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]interface{}, len(actors))
+	for i, a := range actors {
+		result[i] = a
+	}
+	return result, nil
+}
+
+func (p *Processor) GetBadActorsThreshold() float64 {
+	p.ConfigMutex.RLock()
+	defer p.ConfigMutex.RUnlock()
+	if !p.Config.BadActors.Enabled {
+		return 0
+	}
+	return p.Config.BadActors.Threshold
+}
+
 func (p *Processor) GetBlockTableNameFallback() string {
 	return p.Config.Blockers.Backends.HAProxy.TableNameFallback
 }

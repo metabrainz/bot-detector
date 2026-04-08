@@ -132,6 +132,8 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("DELETE /ip/{ip}/clear", clearIPHandler(p))
 		mux.HandleFunc("/ip/{ip}/unblock", unblockIPHandler(p)) // Supports both GET and POST
 		mux.HandleFunc("GET /api/v1/ip/{ip}", apiIPLookupHandler(p))
+		mux.HandleFunc("GET /api/v1/bad-actors", badActorsListHandler(p))
+		mux.HandleFunc("GET /api/v1/bad-actors/export", badActorsExportHandler(p))
 	}
 
 	// Cluster endpoints (role=cluster)
