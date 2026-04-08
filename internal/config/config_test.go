@@ -1783,8 +1783,7 @@ chains:
 				UnblockOnGoodActor: true,
 			},
 		},
-		DryRun:   false,
-		IPStates: make(map[string]persistence.IPState),
+		DryRun: false,
 		Blocker: &testutil.MockBlocker{
 			UnblockFunc: func(ipInfo utils.IPInfo, reason string) error {
 				unblockMutex.Lock()
@@ -1803,6 +1802,15 @@ chains:
 		ConfigFilePath: tmpConfigFilePath,
 	}
 
+	// Set up SQLite DB for persistence
+	testDB, dbErr := persistence.OpenDB("", true)
+	if dbErr != nil {
+		t.Fatalf("Failed to open test DB: %v", dbErr)
+	}
+	defer persistence.CloseDB(testDB)
+	processor.DB = testDB
+	processor.PersistenceEnabled = true
+
 	// Set LastModTime
 	initialFileInfo, err := os.Stat(tmpConfigFilePath)
 	if err != nil {
@@ -1811,16 +1819,9 @@ chains:
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
 	// Add some blocked IPs
-	processor.IPStates["1.2.3.4"] = persistence.IPState{
-		State:      persistence.BlockStateBlocked,
-		Reason:     "test-chain",
-		ExpireTime: time.Now().Add(1 * time.Hour),
-	}
-	processor.IPStates["5.6.7.8"] = persistence.IPState{
-		State:      persistence.BlockStateBlocked,
-		Reason:     "test-chain",
-		ExpireTime: time.Now().Add(1 * time.Hour),
-	}
+	now := time.Now()
+	_ = persistence.UpsertIPState(testDB, "1.2.3.4", persistence.BlockStateBlocked, now.Add(1*time.Hour), "test-chain", now, now)
+	_ = persistence.UpsertIPState(testDB, "5.6.7.8", persistence.BlockStateBlocked, now.Add(1*time.Hour), "test-chain", now, now)
 
 	// Start app.ConfigWatcher
 	stopWatcher := make(chan struct{})
@@ -1876,12 +1877,14 @@ chains:
 	}
 	unblockMutex.Unlock()
 
-	// Check IPStates
+	// Check IPStates via SQLite
 	processor.PersistenceMutex.Lock()
-	if state, exists := processor.IPStates["1.2.3.4"]; exists && state.State == persistence.BlockStateBlocked {
+	state124, _ := persistence.GetIPState(testDB, "1.2.3.4")
+	if state124 != nil && state124.State == persistence.BlockStateBlocked {
 		t.Error("Expected 1.2.3.4 to be unblocked or removed from IPStates")
 	}
-	if state, exists := processor.IPStates["5.6.7.8"]; !exists || state.State != persistence.BlockStateBlocked {
+	state568, _ := persistence.GetIPState(testDB, "5.6.7.8")
+	if state568 == nil || state568.State != persistence.BlockStateBlocked {
 		t.Error("Expected 5.6.7.8 to remain blocked in IPStates")
 	}
 	processor.PersistenceMutex.Unlock()

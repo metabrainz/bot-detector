@@ -185,14 +185,14 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 
 	// Count blocked IPs
 	p.PersistenceMutex.Lock()
-	blockedCount := 0
-	for _, state := range p.IPStates {
-		if state.State == persistence.BlockStateBlocked {
-			blockedCount++
-		}
-	}
+	blockedIPs, err := persistence.GetBlockedIPs(p.DB, time.Now())
 	p.PersistenceMutex.Unlock()
+	if err != nil {
+		p.LogFunc(logging.LevelError, "UNBLOCK_WHITELIST", "Failed to query blocked IPs: %v", err)
+		return
+	}
 
+	blockedCount := len(blockedIPs)
 	if blockedCount == 0 {
 		return
 	}
@@ -207,13 +207,7 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 		}
 
 		// Iterate through blocked IPs for pattern matching (CIDR/regex)
-		p.PersistenceMutex.Lock()
-		for ip, state := range p.IPStates {
-			// Skip if not blocked
-			if state.State != persistence.BlockStateBlocked {
-				continue
-			}
-
+		for ip, state := range blockedIPs {
 			// Create a minimal LogEntry with just the IP set
 			testEntry := &LogEntry{
 				IPInfo: utils.NewIPInfo(ip),
@@ -222,11 +216,9 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 			// Test if this IP matches the good actor's IP matcher
 			if goodActor.IPMatchers[0](testEntry) {
 				// Match found - need to unblock
-				// Update state to unblocked
-				p.IPStates[ip] = persistence.IPState{
-					State:  persistence.BlockStateUnblocked,
-					Reason: "added-to-good-actors",
-				}
+				p.PersistenceMutex.Lock()
+				_ = persistence.UpsertIPState(p.DB, ip, persistence.BlockStateUnblocked, time.Now(), "added-to-good-actors", time.Now(), time.Time{})
+				p.PersistenceMutex.Unlock()
 
 				// Issue unblock command to HAProxy
 				if !p.DryRun && p.Blocker != nil {
@@ -240,7 +232,6 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 				unblocked++
 			}
 		}
-		p.PersistenceMutex.Unlock()
 		slowPathCount++
 	}
 

@@ -564,11 +564,13 @@ func TestCheckChains_UnblockOnGoodActor(t *testing.T) {
 	// --- Act 4: Simulate IP Getting Blocked ---
 	// Enable persistence and mark IP as blocked
 	h.processor.PersistenceEnabled = true
-	h.processor.IPStates = make(map[string]persistence.IPState)
-	h.processor.IPStates[goodIP] = persistence.IPState{
-		State:  persistence.BlockStateBlocked,
-		Reason: "test-block",
+	db, err := persistence.OpenDB("", true)
+	if err != nil {
+		t.Fatalf("Failed to open test DB: %v", err)
 	}
+	defer persistence.CloseDB(db)
+	h.processor.DB = db
+	_ = persistence.UpsertIPState(db, goodIP, persistence.BlockStateBlocked, time.Now().Add(1*time.Hour), "test-block", time.Now(), time.Now())
 
 	// Process entry immediately (within cooldown period)
 	h.processEntry(goodEntry)

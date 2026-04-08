@@ -3,6 +3,7 @@ package cluster
 import (
 	"compress/gzip"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,8 +21,8 @@ type StateSyncManager struct {
 	role             string
 	nodeName         string
 	nodeAddress      string
-	ipStates         map[string]persistence.IPState
-	ipStatesMutex    *sync.Mutex
+	db               *sql.DB
+	dbMutex          *sync.Mutex
 	log              func(level logging.LogLevel, tag string, format string, args ...interface{})
 	httpClient       *http.Client
 	mergedStateCache *MergedStateCache
@@ -128,18 +129,18 @@ func NewStateSyncManager(
 	role string,
 	nodeName string,
 	nodeAddress string,
-	ipStates map[string]persistence.IPState,
-	ipStatesMutex *sync.Mutex,
+	db *sql.DB,
+	dbMutex *sync.Mutex,
 	logFunc func(level logging.LogLevel, tag string, format string, args ...interface{}),
 ) *StateSyncManager {
 	return &StateSyncManager{
-		config:        config,
-		role:          role,
-		nodeName:      nodeName,
-		nodeAddress:   nodeAddress,
-		ipStates:      ipStates,
-		ipStatesMutex: ipStatesMutex,
-		log:           logFunc,
+		config:      config,
+		role:        role,
+		nodeName:    nodeName,
+		nodeAddress: nodeAddress,
+		db:          db,
+		dbMutex:     dbMutex,
+		log:         logFunc,
 		httpClient: &http.Client{
 			Timeout: config.StateSync.Timeout,
 		},
@@ -209,32 +210,34 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 	nodesFailed := 0
 
 	// Add local state
-	m.ipStatesMutex.Lock()
-	for ip, state := range m.ipStates {
-		// Include if:
-		// - Blocked and not expired (ExpireTime in future)
-		// - Unblocked (kept for good actor tracking, ExpireTime is when unblocked)
-		if state.State == persistence.BlockStateBlocked && state.ExpireTime.After(now) {
-			merged[ip] = persistence.IPState{
-				State:          state.State,
-				Reason:         AddSourceNode(state.Reason, m.nodeName, m.nodeAddress),
-				ExpireTime:     state.ExpireTime,
-				ModifiedAt:     state.ModifiedAt,
-				FirstBlockedAt: state.FirstBlockedAt,
+	m.dbMutex.Lock()
+	localStates, err := persistence.GetAllIPStates(m.db)
+	m.dbMutex.Unlock()
+	if err != nil {
+		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to query local states: %v", err)
+	} else {
+		for ip, state := range localStates {
+			if state.State == persistence.BlockStateBlocked && state.ExpireTime.After(now) {
+				merged[ip] = persistence.IPState{
+					State:          state.State,
+					Reason:         AddSourceNode(state.Reason, m.nodeName, m.nodeAddress),
+					ExpireTime:     state.ExpireTime,
+					ModifiedAt:     state.ModifiedAt,
+					FirstBlockedAt: state.FirstBlockedAt,
+				}
+				localCount++
+			} else if state.State == persistence.BlockStateUnblocked {
+				merged[ip] = persistence.IPState{
+					State:          state.State,
+					Reason:         AddSourceNode(state.Reason, m.nodeName, m.nodeAddress),
+					ExpireTime:     state.ExpireTime,
+					ModifiedAt:     state.ModifiedAt,
+					FirstBlockedAt: state.FirstBlockedAt,
+				}
+				localCount++
 			}
-			localCount++
-		} else if state.State == persistence.BlockStateUnblocked {
-			merged[ip] = persistence.IPState{
-				State:          state.State,
-				Reason:         AddSourceNode(state.Reason, m.nodeName, m.nodeAddress),
-				ExpireTime:     state.ExpireTime,
-				ModifiedAt:     state.ModifiedAt,
-				FirstBlockedAt: state.FirstBlockedAt,
-			}
-			localCount++
 		}
 	}
-	m.ipStatesMutex.Unlock()
 
 	// Collect from other nodes
 	for _, node := range m.config.Nodes {
@@ -346,10 +349,11 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 
 	// Merge with local state
 	now := time.Now()
-	m.ipStatesMutex.Lock()
+	m.dbMutex.Lock()
 	for ip, state := range states {
 		if state.ExpireTime.After(now) {
-			if existing, ok := m.ipStates[ip]; ok {
+			existing, err := persistence.GetIPState(m.db, ip)
+			if err == nil && existing != nil {
 				// Merge reasons, keep longest expiry, latest modification, earliest block
 				mergedState := persistence.IPState{
 					Reason:         MergeReasons(existing.Reason, state.Reason),
@@ -357,19 +361,18 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 					ModifiedAt:     maxTime(existing.ModifiedAt, state.ModifiedAt),
 					FirstBlockedAt: minTime(existing.FirstBlockedAt, state.FirstBlockedAt),
 				}
-				// Use State from the entry with longest expiry
 				if state.ExpireTime.After(existing.ExpireTime) {
 					mergedState.State = state.State
 				} else {
 					mergedState.State = existing.State
 				}
-				m.ipStates[ip] = mergedState
+				_ = persistence.UpsertIPState(m.db, ip, mergedState.State, mergedState.ExpireTime, mergedState.Reason, mergedState.ModifiedAt, mergedState.FirstBlockedAt)
 			} else {
-				m.ipStates[ip] = state
+				_ = persistence.UpsertIPState(m.db, ip, state.State, state.ExpireTime, state.Reason, state.ModifiedAt, state.FirstBlockedAt)
 			}
 		}
 	}
-	m.ipStatesMutex.Unlock()
+	m.dbMutex.Unlock()
 
 	// Count blocked vs unblocked in received states
 	blockedCount := 0

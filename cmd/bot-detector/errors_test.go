@@ -75,8 +75,8 @@ func TestCorruptedSnapshot(t *testing.T) {
 	}
 
 	expectedError := "failed to unmarshal v1 snapshot"
-	if !strings.Contains(err.Error(), expectedError) {
-		t.Errorf("Expected error message to contain '%s', but got: %v", expectedError, err)
+	if !strings.Contains(err.Error(), expectedError) && !strings.Contains(err.Error(), "Failed to migrate legacy persistence") {
+		t.Errorf("Expected error message to contain '%s' or migration failure, but got: %v", expectedError, err)
 	}
 }
 
@@ -162,7 +162,7 @@ func TestUnwritableStateDir(t *testing.T) {
 	}
 
 	expectedError := "permission denied"
-	if !strings.Contains(err.Error(), expectedError) {
-		t.Errorf("Expected error message to contain '%s', but got: %v", expectedError, err)
+	if !strings.Contains(err.Error(), expectedError) && !strings.Contains(err.Error(), "unable to open database") && !strings.Contains(err.Error(), "Failed to initialize SQLite") {
+		t.Errorf("Expected error message to contain '%s' or SQLite open failure, but got: %v", expectedError, err)
 	}
 }

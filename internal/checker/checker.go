@@ -364,53 +364,28 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 // executeBlock calls the external blocker unless in DryRun mode.
 func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.BehavioralChain) {
 	if p.PersistenceEnabled {
-		p.PersistenceWg.Add(1)
-		go func() {
-			defer p.PersistenceWg.Done()
-			p.PersistenceMutex.Lock()
-			defer p.PersistenceMutex.Unlock()
+		p.PersistenceMutex.Lock()
+		now := p.NowFunc()
+		reason := p.InternReason(formatChainKey(chain.Name, entry))
+		unblockTime := now.Add(chain.BlockDuration)
 
-			unblockTime := p.NowFunc().Add(chain.BlockDuration)
-			reason := p.InternReason(formatChainKey(chain.Name, entry))
-			event := &persistence.AuditEvent{
-				Timestamp: p.NowFunc(),
-				Event:     persistence.EventTypeBlock,
-				IP:        entry.IPInfo.Address,
-				Duration:  chain.BlockDuration,
-				Reason:    reason,
-			}
-			if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
-				p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write block event to journal for %s: %v", entry.IPInfo.Address, err)
-			}
-
-			// Update in-memory state
-			now := time.Now()
-			existingState, exists := p.IPStates[entry.IPInfo.Address]
-			newState := persistence.IPState{
-				State:          persistence.BlockStateBlocked,
-				ExpireTime:     unblockTime,
-				Reason:         reason,
-				ModifiedAt:     now,
-				FirstBlockedAt: now,
-			}
-			// Preserve FirstBlockedAt if already blocked
-			if exists && !existingState.FirstBlockedAt.IsZero() {
-				newState.FirstBlockedAt = existingState.FirstBlockedAt
-			}
-			p.IPStates[entry.IPInfo.Address] = newState
-		}()
+		if err := persistence.InsertEvent(p.DB, now, persistence.EventTypeBlock, entry.IPInfo.Address, reason, chain.BlockDuration, ""); err != nil {
+			p.LogFunc(logging.LevelError, "PERSIST_FAIL", "Failed to insert block event for %s: %v", entry.IPInfo.Address, err)
+		}
+		if err := persistence.UpsertIPState(p.DB, entry.IPInfo.Address, persistence.BlockStateBlocked, unblockTime, reason, now, now); err != nil {
+			p.LogFunc(logging.LevelError, "PERSIST_FAIL", "Failed to upsert IP state for %s: %v", entry.IPInfo.Address, err)
+		}
+		p.PersistenceMutex.Unlock()
 	}
 
-	if p.DryRun { // Should not happen due to caller check, but safe to keep.
-		return // Do not execute block in dry-run mode.
+	if p.DryRun {
+		return
 	}
-	// Convert main.IPInfo to utils.IPInfo before calling the blocker.
 	blockerIPInfo := utils.IPInfo{
 		Address: entry.IPInfo.Address,
 		Version: entry.IPInfo.Version,
 	}
 	if err := p.Blocker.Block(blockerIPInfo, chain.BlockDuration, chain.Name); err != nil {
-		// The error is logged inside the HAProxyBlocker, but not the RateLimitedBlocker. Log it here for safety.
 		p.LogFunc(logging.LevelError, "BLOCK_FAIL", "Failed to queue block command for %s: %v", entry.IPInfo.Address, err)
 	}
 }
@@ -858,8 +833,8 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 			var isBlocked bool
 			if p.PersistenceEnabled {
 				p.PersistenceMutex.Lock()
-				ipState, exists := p.IPStates[entry.IPInfo.Address]
-				isBlocked = exists && ipState.State == persistence.BlockStateBlocked
+				ipState, err := persistence.GetIPState(p.DB, entry.IPInfo.Address)
+				isBlocked = err == nil && ipState != nil && ipState.State == persistence.BlockStateBlocked
 				p.PersistenceMutex.Unlock()
 			}
 
@@ -879,28 +854,15 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 				unblockReason := p.InternReason("good-actor:" + goodActorRuleName)
 
 				if p.PersistenceEnabled {
-					func() {
-						p.PersistenceMutex.Lock()
-						defer p.PersistenceMutex.Unlock()
-
-						event := &persistence.AuditEvent{
-							Timestamp: p.NowFunc(),
-							Event:     persistence.EventTypeUnblock,
-							IP:        entry.IPInfo.Address,
-							Reason:    unblockReason,
-						}
-						if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
-							p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write unblock event to journal for %s: %v", entry.IPInfo.Address, err)
-						}
-
-						// Update in-memory state
-						p.IPStates[entry.IPInfo.Address] = persistence.IPState{
-							State:      persistence.BlockStateUnblocked,
-							ExpireTime: p.NowFunc(), // Set to now so retention period starts from unblock time
-							Reason:     unblockReason,
-							ModifiedAt: time.Now(),
-						}
-					}()
+					now := p.NowFunc()
+					p.PersistenceMutex.Lock()
+					if err := persistence.InsertEvent(p.DB, now, persistence.EventTypeUnblock, entry.IPInfo.Address, unblockReason, 0, ""); err != nil {
+						p.LogFunc(logging.LevelError, "PERSIST_FAIL", "Failed to insert unblock event for %s: %v", entry.IPInfo.Address, err)
+					}
+					if err := persistence.UpsertIPState(p.DB, entry.IPInfo.Address, persistence.BlockStateUnblocked, now, unblockReason, now, time.Time{}); err != nil {
+						p.LogFunc(logging.LevelError, "PERSIST_FAIL", "Failed to upsert unblock state for %s: %v", entry.IPInfo.Address, err)
+					}
+					p.PersistenceMutex.Unlock()
 				}
 
 				// Convert main.IPInfo to utils.IPInfo before calling the blocker.

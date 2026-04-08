@@ -6,8 +6,6 @@ import (
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/processor"
 	"bot-detector/internal/testutil"
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -151,101 +149,59 @@ func TestStart_LiveMode(t *testing.T) {
 
 // TestSignalReloader_Reload verifies that the signal-based configuration reloading works correctly.
 
-func TestCompaction(t *testing.T) {
+func TestCleanup(t *testing.T) {
 	// --- Setup ---
 	testutil.ResetGlobalState()
-	tempDir := t.TempDir()
 
-	// Create a processor with persistence enabled.
 	p := testutil.NewTestProcessor(&config.AppConfig{}, nil)
 	p.PersistenceEnabled = true
-	p.StateDir = tempDir
-	p.NowFunc = func() time.Time { return time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC) } // Mock time
+	p.NowFunc = func() time.Time { return time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC) }
+	p.Config.Application.Persistence.RetentionPeriod = 24 * time.Hour
 
-	// Manually create an events.log to be truncated.
-	journalPath := filepath.Join(tempDir, "events.log")
-	journalHandle, err := os.OpenFile(journalPath, os.O_CREATE|os.O_WRONLY, 0644)
+	db, err := persistence.OpenDB("", true)
 	if err != nil {
-		t.Fatalf("Failed to create dummy journal file: %v", err)
+		t.Fatalf("Failed to open test DB: %v", err)
 	}
-	p.JournalHandle = journalHandle
-	_, _ = p.JournalHandle.WriteString("some old event\n")
+	defer persistence.CloseDB(db)
+	p.DB = db
 
-	// Add some blocked IPs to the processor's state.
-	p.IPStates = map[string]persistence.IPState{
-		"1.1.1.1": {State: persistence.BlockStateBlocked, ExpireTime: p.NowFunc().Add(1 * time.Hour), Reason: "chain1"},
-		"2.2.2.2": {State: persistence.BlockStateBlocked, ExpireTime: p.NowFunc().Add(-1 * time.Minute), Reason: "chain2"}, // Expired
-	}
+	now := p.NowFunc()
+	// Active block
+	_ = persistence.UpsertIPState(db, "1.1.1.1", persistence.BlockStateBlocked, now.Add(1*time.Hour), "chain1", now, now)
+	// Expired block
+	_ = persistence.UpsertIPState(db, "2.2.2.2", persistence.BlockStateBlocked, now.Add(-1*time.Minute), "chain2", now, now)
+	// Old unblocked (past retention)
+	_ = persistence.UpsertIPState(db, "3.3.3.3", persistence.BlockStateUnblocked, now.Add(-48*time.Hour), "good-actor", now, time.Time{})
 
 	// --- Act ---
-	runCompaction(p)
+	runCleanup(p)
 
 	// --- Assert ---
-	// 1. Check that the snapshot file was created with the correct content.
-	snapshotPath := filepath.Join(tempDir, "state.snapshot")
-	loadedSnapshot, err := persistence.LoadSnapshot(snapshotPath)
+	states, err := persistence.GetAllIPStates(db)
 	if err != nil {
-		t.Fatalf("Failed to load snapshot file: %v", err)
+		t.Fatalf("Failed to get states: %v", err)
 	}
 
-	// Verify the snapshot timestamp
-	expectedTime := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
-	if !loadedSnapshot.Timestamp.Equal(expectedTime) {
-		t.Errorf("Snapshot timestamp mismatch. Got: %v, Expected: %v", loadedSnapshot.Timestamp, expectedTime)
+	if _, exists := states["1.1.1.1"]; !exists {
+		t.Error("Expected active block 1.1.1.1 to be kept")
 	}
-
-	// Verify only the non-expired block is in the snapshot
-	blockedCount := 0
-	for _, state := range loadedSnapshot.IPStates {
-		if state.State == persistence.BlockStateBlocked {
-			blockedCount++
-		}
+	if _, exists := states["2.2.2.2"]; exists {
+		t.Error("Expected expired block 2.2.2.2 to be cleaned up")
 	}
-	if blockedCount != 1 {
-		t.Errorf("Expected 1 blocked IP in snapshot, got %d", blockedCount)
-	}
-
-	if state, exists := loadedSnapshot.IPStates["1.1.1.1"]; !exists {
-		t.Errorf("Expected block for 1.1.1.1 not found in snapshot")
-	} else {
-		expectedExpireTime := time.Date(2025, 1, 1, 13, 0, 0, 0, time.UTC)
-		if !state.ExpireTime.Equal(expectedExpireTime) {
-			t.Errorf("Block expire time mismatch. Got: %v, Expected: %v", state.ExpireTime, expectedExpireTime)
-		}
-		if state.Reason != "chain1" {
-			t.Errorf("Block reason mismatch. Got: %v, Expected: chain1", state.Reason)
-		}
-	}
-
-	// Verify the expired block (2.2.2.2) was removed
-	if _, exists := loadedSnapshot.IPStates["2.2.2.2"]; exists {
-		t.Errorf("Expired block for 2.2.2.2 should be removed, not kept")
-	}
-
-	// 2. Check that the journal file is now empty.
-	journalInfo, err := os.Stat(journalPath)
-	if err != nil {
-		t.Fatalf("Failed to stat journal file after compaction: %v", err)
-	}
-	if journalInfo.Size() != 0 {
-		t.Errorf("Expected journal file to be empty after compaction, but size is %d", journalInfo.Size())
+	if _, exists := states["3.3.3.3"]; exists {
+		t.Error("Expected old unblocked 3.3.3.3 to be cleaned up")
 	}
 }
 
-func TestCorruptedJournalHandling(t *testing.T) {
-	// --- Arrange ---
-	tempDir, err := os.MkdirTemp("", "bot_detector_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer func() {
-		_ = os.RemoveAll(tempDir)
-	}()
+func TestCorruptedJournalMigration(t *testing.T) {
+	// Test that migration handles a corrupted journal gracefully,
+	// processing valid entries and skipping corrupted ones.
+	tempDir := t.TempDir()
 
-	// Create a snapshot
+	// Create a snapshot via the legacy writer
 	snapshotPath := filepath.Join(tempDir, "state.snapshot")
 	snapshot := &persistence.Snapshot{
-		Version:   "v0",
+		Version:   "v1",
 		Timestamp: time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC),
 		IPStates: map[string]persistence.IPState{
 			"1.1.1.1": {
@@ -259,105 +215,48 @@ func TestCorruptedJournalHandling(t *testing.T) {
 		t.Fatalf("Failed to write snapshot: %v", err)
 	}
 
-	// Create a journal with valid entries and a corrupted entry at the end
+	// Create a journal with valid v1 entries and a corrupted entry
 	journalPath := filepath.Join(tempDir, "events.log")
-	journalContent := `{"version":"v0","ts":"2025-01-01T12:00:01Z","event":"block","ip":"2.2.2.2","duration":3600000000000,"reason":"valid-block-1"}
-{"version":"v0","ts":"2025-01-01T12:00:02Z","event":"unblock","ip":"1.1.1.1","reason":"good-actor"}
-{"version":"v0","ts":"2025-01-01T12:00:03Z","event":"block","ip":"3.3.3.3","duration":7200000000000,"reason":"valid-block-2"}
-{"version":"v0","ts":"2025-01-01T12:00:04Z","event":"block","ip":"4.4.4.4","duration":1800000000000,"reason":"truncated
+	journalContent := `{"ts":"2025-01-01T12:00:01Z","event":{"type":"block","ip":"2.2.2.2","duration":3600000000000,"reason":"valid-block"}}
+{"ts":"2025-01-01T12:00:02Z","event":{"type":"unblock","ip":"1.1.1.1","reason":"good-actor"}}
+{"ts":"2025-01-01T12:00:03Z","event":{"type":"block","ip":"4.4.4.4","duration":1800000000000,"reason":"truncated
 `
 	if err := os.WriteFile(journalPath, []byte(journalContent), 0644); err != nil {
 		t.Fatalf("Failed to write journal: %v", err)
 	}
 
-	// --- Act: Manually replay journal to test parsing ---
-	loadedSnapshot, err := persistence.LoadSnapshot(snapshotPath)
+	// Migrate to SQLite
+	db, err := persistence.OpenDB("", true)
 	if err != nil {
-		t.Fatalf("Failed to load snapshot: %v", err)
+		t.Fatalf("Failed to open DB: %v", err)
 	}
+	defer persistence.CloseDB(db)
 
-	ipStates := make(map[string]persistence.IPState)
-	for ip, state := range loadedSnapshot.IPStates {
-		ipStates[ip] = state
-	}
-
-	journalFile, err := os.Open(journalPath)
+	err = persistence.MigrateFromLegacy(db, tempDir)
 	if err != nil {
-		t.Fatalf("Failed to open journal: %v", err)
-	}
-	defer func() {
-		_ = journalFile.Close()
-	}()
-
-	blockEvents := 0
-	unblockEvents := 0
-	parseErrors := 0
-
-	scanner := bufio.NewScanner(journalFile)
-	for scanner.Scan() {
-		var event persistence.AuditEvent
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			t.Logf("Parse error (expected): %v", err)
-			parseErrors++
-			continue
-		}
-		if event.Timestamp.After(loadedSnapshot.Timestamp) {
-			switch event.Event {
-			case persistence.EventTypeBlock:
-				blockEvents++
-				expireTime := event.Timestamp.Add(event.Duration)
-				ipStates[event.IP] = persistence.IPState{
-					State:      persistence.BlockStateBlocked,
-					ExpireTime: expireTime,
-					Reason:     event.Reason,
-				}
-			case persistence.EventTypeUnblock:
-				unblockEvents++
-				ipStates[event.IP] = persistence.IPState{
-					State:  persistence.BlockStateUnblocked,
-					Reason: event.Reason,
-				}
-			}
-		}
+		t.Fatalf("Migration should succeed despite corrupted journal entry: %v", err)
 	}
 
-	// --- Assert ---
-	if parseErrors != 1 {
-		t.Errorf("Expected 1 parse error, got %d", parseErrors)
+	// Verify valid entries were migrated
+	states, err := persistence.GetAllIPStates(db)
+	if err != nil {
+		t.Fatalf("Failed to get states: %v", err)
 	}
 
-	if blockEvents != 2 {
-		t.Errorf("Expected 2 block events, got %d", blockEvents)
-	}
-
-	if unblockEvents != 1 {
-		t.Errorf("Expected 1 unblock event, got %d", unblockEvents)
-	}
-
-	// Verify that valid entries were processed despite the corrupted one
-	if len(ipStates) != 3 {
-		t.Errorf("Expected 3 IP states (2 blocked + 1 unblocked), got %d", len(ipStates))
-	}
-
-	// Check that the valid blocks were loaded
-	if _, exists := ipStates["2.2.2.2"]; !exists {
-		t.Errorf("Expected IP 2.2.2.2 to be in state (valid-block-1)")
-	}
-	if _, exists := ipStates["3.3.3.3"]; !exists {
-		t.Errorf("Expected IP 3.3.3.3 to be in state (valid-block-2)")
-	}
-
-	// Check that the unblock was processed
-	if state, exists := ipStates["1.1.1.1"]; !exists {
-		t.Errorf("Expected IP 1.1.1.1 to be in state (unblocked)")
+	// 1.1.1.1 should be unblocked (journal overrides snapshot)
+	if state, exists := states["1.1.1.1"]; !exists {
+		t.Error("Expected 1.1.1.1 in state")
 	} else if state.State != persistence.BlockStateUnblocked {
-		t.Errorf("Expected IP 1.1.1.1 to be unblocked, got state %s", state.State)
+		t.Errorf("Expected 1.1.1.1 to be unblocked, got %s", state.State)
 	}
 
-	// Verify the corrupted entry was NOT processed
-	if _, exists := ipStates["4.4.4.4"]; exists {
-		t.Errorf("Corrupted entry for IP 4.4.4.4 should not have been processed")
+	// 2.2.2.2 should be blocked
+	if _, exists := states["2.2.2.2"]; !exists {
+		t.Error("Expected 2.2.2.2 in state (valid block)")
 	}
 
-	t.Logf("✓ Corrupted journal handled correctly: 2 blocks + 1 unblock processed, 1 corrupted entry skipped")
+	// 4.4.4.4 should NOT be present (corrupted entry)
+	if _, exists := states["4.4.4.4"]; exists {
+		t.Error("Corrupted entry for 4.4.4.4 should not have been processed")
+	}
 }

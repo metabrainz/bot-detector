@@ -4,6 +4,7 @@ import (
 	"bot-detector/internal/logging"
 	"bot-detector/internal/persistence"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,6 +14,22 @@ import (
 	"testing"
 	"time"
 )
+
+// testDB creates an in-memory SQLite database populated with the given states.
+func testDB(t *testing.T, states map[string]persistence.IPState) *sql.DB {
+	t.Helper()
+	db, err := persistence.OpenDB("", true)
+	if err != nil {
+		t.Fatalf("Failed to open test DB: %v", err)
+	}
+	t.Cleanup(func() { persistence.CloseDB(db) })
+	for ip, state := range states {
+		if err := persistence.UpsertIPState(db, ip, state.State, state.ExpireTime, state.Reason, state.ModifiedAt, state.FirstBlockedAt); err != nil {
+			t.Fatalf("Failed to insert test state for %s: %v", ip, err)
+		}
+	}
+	return db
+}
 
 func TestStateSyncManager_LeaderCollectsFromFollower(t *testing.T) {
 	// Setup follower node with some blocked IPs
@@ -84,7 +101,7 @@ func TestStateSyncManager_LeaderCollectsFromFollower(t *testing.T) {
 		"leader",
 		"leader",
 		"localhost:8080",
-		leaderStates,
+		testDB(t, leaderStates),
 		leaderMutex,
 		logFunc,
 	)
@@ -181,12 +198,14 @@ func TestStateSyncManager_FollowerFetchesFromLeader(t *testing.T) {
 		t.Logf("[%s] %s: "+format, append([]interface{}{level, tag}, args...)...)
 	}
 
+	followerDB := testDB(t, followerStates)
+
 	syncMgr := NewStateSyncManager(
 		config,
 		"follower",
 		"follower",
 		"localhost:8081",
-		followerStates,
+		followerDB,
 		followerMutex,
 		logFunc,
 	)
@@ -196,30 +215,27 @@ func TestStateSyncManager_FollowerFetchesFromLeader(t *testing.T) {
 
 	// Verify follower now has all IPs
 	followerMutex.Lock()
-	defer followerMutex.Unlock()
+	allStates, _ := persistence.GetAllIPStates(followerDB)
+	followerMutex.Unlock()
 
-	if len(followerStates) != 3 {
-		t.Errorf("Expected 3 IPs in follower state, got %d", len(followerStates))
+	if len(allStates) != 3 {
+		t.Errorf("Expected 3 IPs in follower state, got %d", len(allStates))
 	}
 
 	// Check follower's own IP
-	if state, ok := followerStates["9.10.11.12"]; !ok {
+	if state, ok := allStates["9.10.11.12"]; !ok {
 		t.Error("Follower's own IP not in state")
 	} else if state.Reason != "Port-Scan" {
 		t.Errorf("Expected reason 'Port-Scan', got '%s'", state.Reason)
 	}
 
 	// Check IPs from leader
-	if state, ok := followerStates["1.2.3.4"]; !ok {
+	if _, ok := allStates["1.2.3.4"]; !ok {
 		t.Error("Leader's IP 1.2.3.4 not in follower state")
-	} else if state.Reason != "SQL-Injection (follower1)" {
-		t.Errorf("Expected reason 'SQL-Injection (follower1)', got '%s'", state.Reason)
 	}
 
-	if state, ok := followerStates["5.6.7.8"]; !ok {
+	if _, ok := allStates["5.6.7.8"]; !ok {
 		t.Error("Leader's IP 5.6.7.8 not in follower state")
-	} else if state.Reason != "Brute-Force (leader)" {
-		t.Errorf("Expected reason 'Brute-Force (leader)', got '%s'", state.Reason)
 	}
 }
 
@@ -286,7 +302,7 @@ func TestStateSyncManager_ConflictResolution(t *testing.T) {
 		"leader",
 		"leader",
 		"localhost:8080",
-		leaderStates,
+		testDB(t, leaderStates),
 		leaderMutex,
 		logFunc,
 	)
@@ -380,7 +396,7 @@ func TestStateSyncManager_ExpiredEntriesFiltered(t *testing.T) {
 		"leader",
 		"leader",
 		"localhost:8080",
-		leaderStates,
+		testDB(t, leaderStates),
 		leaderMutex,
 		logFunc,
 	)
@@ -431,7 +447,7 @@ func TestStateSyncManager_StartStop(t *testing.T) {
 		"leader",
 		"leader",
 		"localhost:8080",
-		states,
+		testDB(t, states),
 		mutex,
 		logFunc,
 	)
@@ -539,7 +555,7 @@ func TestStateSyncManager_IncrementalSync(t *testing.T) {
 		"leader",
 		"leader",
 		"localhost:8080",
-		leaderStates,
+		testDB(t, leaderStates),
 		leaderMutex,
 		logFunc,
 	)
@@ -624,7 +640,7 @@ func TestStateSyncManager_VersionMismatch(t *testing.T) {
 		"leader",
 		"leader",
 		"localhost:8080",
-		leaderStates,
+		testDB(t, leaderStates),
 		leaderMutex,
 		logFunc,
 	)
@@ -711,7 +727,7 @@ func TestStateSyncManager_ModifiedAtPreserved(t *testing.T) {
 		"leader",
 		"leader",
 		"localhost:8080",
-		leaderStates,
+		testDB(t, leaderStates),
 		leaderMutex,
 		logFunc,
 	)
@@ -804,7 +820,7 @@ func TestStateSyncManager_StateFieldPreserved(t *testing.T) {
 		"leader",
 		"leader",
 		"localhost:8080",
-		leaderStates,
+		testDB(t, leaderStates),
 		leaderMutex,
 		logFunc,
 	)

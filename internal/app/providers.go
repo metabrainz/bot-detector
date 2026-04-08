@@ -378,8 +378,11 @@ func (p *Processor) GetPersistenceState(ip string) (interface{}, bool) {
 	}
 	p.PersistenceMutex.Lock()
 	defer p.PersistenceMutex.Unlock()
-	state, exists := p.IPStates[ip]
-	return state, exists
+	state, err := persistence.GetIPState(p.DB, ip)
+	if err != nil || state == nil {
+		return nil, false
+	}
+	return *state, true
 }
 
 // RemoveFromPersistence removes an IP from persistence state and writes unblock event to journal.
@@ -391,25 +394,22 @@ func (p *Processor) RemoveFromPersistence(ip string) error {
 	p.PersistenceMutex.Lock()
 	defer p.PersistenceMutex.Unlock()
 
-	// Check if IP exists in persistence
-	if _, exists := p.IPStates[ip]; !exists {
-		return nil // Not in persistence, nothing to do
+	// Check if IP exists
+	state, err := persistence.GetIPState(p.DB, ip)
+	if err != nil {
+		return fmt.Errorf("failed to query IP state: %w", err)
+	}
+	if state == nil {
+		return nil
 	}
 
-	// Remove from IPStates map
-	delete(p.IPStates, ip)
+	if err := persistence.DeleteIPState(p.DB, ip); err != nil {
+		return fmt.Errorf("failed to delete IP state: %w", err)
+	}
 
-	// Write unblock event to journal
-	if p.JournalHandle != nil {
-		event := &persistence.AuditEvent{
-			Timestamp: time.Now(),
-			Event:     persistence.EventTypeUnblock,
-			IP:        ip,
-			Reason:    "manual_clear",
-		}
-		if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
-			return fmt.Errorf("failed to write unblock event to journal: %w", err)
-		}
+	// Record audit event
+	if err := persistence.InsertEvent(p.DB, time.Now(), persistence.EventTypeUnblock, ip, "manual_clear", 0, ""); err != nil {
+		return fmt.Errorf("failed to insert unblock event: %w", err)
 	}
 
 	return nil
@@ -417,7 +417,12 @@ func (p *Processor) RemoveFromPersistence(ip string) error {
 
 // GetIPStates returns the complete IPStates map for state sync.
 func (p *Processor) GetIPStates() map[string]persistence.IPState {
-	return p.IPStates
+	states, err := persistence.GetAllIPStates(p.DB)
+	if err != nil {
+		p.LogFunc(logging.LevelError, "PERSISTENCE", "Failed to get all IP states: %v", err)
+		return make(map[string]persistence.IPState)
+	}
+	return states
 }
 
 // GetPersistenceMutex returns the mutex for IPStates.

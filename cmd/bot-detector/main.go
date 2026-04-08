@@ -165,7 +165,6 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		// If --state-dir is set, persistence is enabled by default unless explicitly disabled in config
 		PersistenceEnabled: params.StateDir != "" && (loadedCfg.Application.Persistence.Enabled == nil || *loadedCfg.Application.Persistence.Enabled),
 		CompactionInterval: loadedCfg.Application.Persistence.CompactionInterval,
-		IPStates:           make(map[string]persistence.IPState),
 		ReasonCache:        make(map[string]*string),
 
 		// Initialize cluster fields with defaults (will be set properly in later phases)
@@ -208,24 +207,19 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 		return time.Time{}, err
 	}
 
-	// Apply fetched state - must hold lock as health check may be running
+	// Apply fetched state to SQLite
 	p.PersistenceMutex.Lock()
-	p.IPStates = states
-
-	// Intern all reason strings to save memory
-	for ip, state := range p.IPStates {
-		state.Reason = p.InternReason(state.Reason)
-		p.IPStates[ip] = state
-	}
-
-	// Count for logging
 	blockedCount := 0
-	for _, state := range p.IPStates {
+	for ip, state := range states {
+		reason := p.InternReason(state.Reason)
+		if err := persistence.UpsertIPState(p.DB, ip, state.State, state.ExpireTime, reason, state.ModifiedAt, state.FirstBlockedAt); err != nil {
+			p.LogFunc(logging.LevelError, "STATE_SYNC", "Failed to upsert state for %s: %v", ip, err)
+		}
 		if state.State == persistence.BlockStateBlocked {
 			blockedCount++
 		}
 	}
-	unblockedCount := len(p.IPStates) - blockedCount
+	unblockedCount := len(states) - blockedCount
 	p.PersistenceMutex.Unlock()
 
 	modeStr := "gz,full"
@@ -234,7 +228,7 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 	}
 
 	p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Fetched initial state from leader: %d IPs (%d blocked + %d unblocked), size: %.1f KB, rate: %.1f KB/s, duration: %v, mode: %s",
-		len(p.IPStates), blockedCount, unblockedCount, m.SizeKB, m.RateKBps, m.Duration.Round(time.Millisecond), modeStr)
+		len(states), blockedCount, unblockedCount, m.SizeKB, m.RateKBps, m.Duration.Round(time.Millisecond), modeStr)
 
 	return timestamp, nil
 }
@@ -272,25 +266,17 @@ func replayJournalAfter(p *app.Processor, after time.Time) error {
 		if v1Entry.Timestamp.After(after) {
 			reason := p.InternReason(v1Entry.Event.Reason)
 
-			// Must hold lock as health check may be running
 			p.PersistenceMutex.Lock()
 			switch v1Entry.Event.Type {
 			case persistence.EventTypeBlock:
 				blockEvents++
 				expireTime := v1Entry.Timestamp.Add(v1Entry.Event.Duration)
-				p.IPStates[v1Entry.Event.IP] = persistence.IPState{
-					State:      persistence.BlockStateBlocked,
-					ExpireTime: expireTime,
-					Reason:     reason,
-					ModifiedAt: v1Entry.Timestamp,
-				}
+				_ = persistence.InsertEvent(p.DB, v1Entry.Timestamp, persistence.EventTypeBlock, v1Entry.Event.IP, reason, v1Entry.Event.Duration, "")
+				_ = persistence.UpsertIPState(p.DB, v1Entry.Event.IP, persistence.BlockStateBlocked, expireTime, reason, v1Entry.Timestamp, v1Entry.Timestamp)
 			case persistence.EventTypeUnblock:
 				unblockEvents++
-				p.IPStates[v1Entry.Event.IP] = persistence.IPState{
-					State:      persistence.BlockStateUnblocked,
-					Reason:     reason,
-					ModifiedAt: v1Entry.Timestamp,
-				}
+				_ = persistence.InsertEvent(p.DB, v1Entry.Timestamp, persistence.EventTypeUnblock, v1Entry.Event.IP, reason, 0, "")
+				_ = persistence.UpsertIPState(p.DB, v1Entry.Event.IP, persistence.BlockStateUnblocked, v1Entry.Timestamp, reason, v1Entry.Timestamp, time.Time{})
 			}
 			p.PersistenceMutex.Unlock()
 		} else {
@@ -313,167 +299,62 @@ func restorePersistenceState(p *app.Processor) error {
 	}
 	p.LogFunc(logging.LevelInfo, "SETUP", "Persistence enabled. Loading state from '%s'...", p.StateDir)
 
-	// Log persistence file status for diagnostics
-	snapshotPath := filepath.Join(p.StateDir, "state.snapshot")
-	journalPath := filepath.Join(p.StateDir, "events.log")
+	// 1. Open (or create) SQLite database
+	db, err := persistence.OpenDB(p.StateDir, p.DryRun)
+	if err != nil {
+		p.LogFunc(logging.LevelError, "SQLITE_INIT_FAIL", "Failed to initialize SQLite: %v", err)
+		return err
+	}
+	p.DB = db
 
-	snapshotInfo := "absent"
-	if info, statErr := os.Stat(snapshotPath); statErr == nil {
-		snapshotInfo = fmt.Sprintf("size=%d bytes, modified=%s", info.Size(), info.ModTime().Format(time.RFC3339))
+	// 2. Migrate from legacy format if needed
+	if persistence.ShouldMigrate(p.StateDir) {
+		p.LogFunc(logging.LevelInfo, "MIGRATION", "Legacy persistence files detected, migrating to SQLite...")
+		if err := persistence.MigrateFromLegacy(p.DB, p.StateDir); err != nil {
+			p.LogFunc(logging.LevelError, "MIGRATION_FAIL", "Failed to migrate legacy persistence: %v", err)
+			return err
+		}
+		p.LogFunc(logging.LevelInfo, "MIGRATION", "Legacy persistence migration completed successfully")
 	}
 
-	journalInfo := "absent"
-	if info, statErr := os.Stat(journalPath); statErr == nil {
-		journalInfo = fmt.Sprintf("size=%d bytes, modified=%s", info.Size(), info.ModTime().Format(time.RFC3339))
-	}
-
-	p.LogFunc(logging.LevelInfo, "PERSISTENCE_FILES", "Snapshot: %s | Journal: %s", snapshotInfo, journalInfo)
-
-	// Optimization: If state sync is enabled and we're a follower, fetch state from cluster
-	// and only replay local journal entries that are newer than cluster state
+	// 3. Cluster state sync (follower optimization)
 	if p.Cluster != nil && p.Cluster.StateSync.Enabled && p.NodeRole == "follower" {
 		p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Attempting to fetch initial state from cluster...")
 		if clusterTimestamp, fetchErr := fetchInitialStateFromCluster(p); fetchErr == nil {
 			p.LogFunc(logging.LevelInfo, "STATE_SYNC", "Successfully fetched initial state from cluster")
-			// Store timestamp for later use by StateSyncManager
 			p.InitialSyncTime = clusterTimestamp
 
-			// Still need to replay local journal entries newer than cluster state
+			// Replay local journal entries newer than cluster state (only during migration transition)
 			if err := replayJournalAfter(p, clusterTimestamp); err != nil {
 				p.LogFunc(logging.LevelWarning, "JOURNAL_REPLAY", "Failed to replay local journal: %v", err)
 			}
-
-			// Open journal for appending new events
-			journalPath := filepath.Join(p.StateDir, "events.log")
-			var err error
-			p.JournalHandle, err = persistence.OpenJournalForAppend(journalPath)
-			if err != nil {
-				p.LogFunc(logging.LevelError, "JOURNAL_OPEN_FAIL", "Failed to open journal for writing: %v", err)
-				return err
-			}
-
 			return nil
 		} else {
-			p.LogFunc(logging.LevelWarning, "STATE_SYNC", "Failed to fetch initial state from cluster, falling back to snapshot+journal: %v", fetchErr)
-		}
-	} else {
-		// Log why we're not using cluster fetch
-		if p.Cluster == nil {
-			p.LogFunc(logging.LevelDebug, "STATE_SYNC", "Cluster not configured, using snapshot+journal")
-		} else if !p.Cluster.StateSync.Enabled {
-			p.LogFunc(logging.LevelInfo, "STATE_SYNC", "State sync disabled, using snapshot+journal")
-		} else if p.NodeRole != "follower" {
-			p.LogFunc(logging.LevelDebug, "STATE_SYNC", "Leader node, using snapshot+journal")
+			p.LogFunc(logging.LevelWarning, "STATE_SYNC", "Failed to fetch initial state from cluster, using local database: %v", fetchErr)
 		}
 	}
 
-	// 1. Load snapshot
-	snapshot, err := persistence.LoadSnapshot(snapshotPath)
+	// 4. Restore state to HAProxy
+	p.PersistenceMutex.Lock()
+	allStates, err := persistence.GetAllIPStates(p.DB)
+	p.PersistenceMutex.Unlock()
 	if err != nil {
-		p.LogFunc(logging.LevelError, "STATE_LOAD_FAIL", "Failed to load snapshot: %v", err)
+		p.LogFunc(logging.LevelError, "STATE_LOAD_FAIL", "Failed to load IP states from database: %v", err)
 		return err
 	}
 
-	// Must hold lock as health check may be running
-	p.PersistenceMutex.Lock()
-	p.IPStates = snapshot.IPStates
-
-	// Intern all reason strings to save memory
-	for ip, state := range p.IPStates {
-		state.Reason = p.InternReason(state.Reason)
-		p.IPStates[ip] = state
-	}
-
-	// Count blocked IPs for logging
 	blockedCount := 0
-	for _, state := range p.IPStates {
+	unblockedCount := 0
+	for _, state := range allStates {
 		if state.State == persistence.BlockStateBlocked {
 			blockedCount++
-		}
-	}
-	unblockedCount := len(p.IPStates) - blockedCount
-	p.PersistenceMutex.Unlock()
-
-	// Log snapshot details
-	if fileInfo, err := os.Stat(snapshotPath); err == nil {
-		p.LogFunc(logging.LevelInfo, "STATE_LOAD", "Loaded snapshot (version=%s, size=%d bytes, entries=%d blocked + %d unblocked, timestamp=%v)",
-			snapshot.Version, fileInfo.Size(), blockedCount, unblockedCount, snapshot.Timestamp)
-	} else {
-		p.LogFunc(logging.LevelInfo, "STATE_LOAD", "Loaded snapshot (version=%s, entries=%d blocked + %d unblocked, timestamp=%v)",
-			snapshot.Version, blockedCount, unblockedCount, snapshot.Timestamp)
-	}
-
-	// 2. Replay Journal
-	journalFile, err := os.Open(journalPath)
-	if err == nil {
-		blockEvents := 0
-		unblockEvents := 0
-		skippedEvents := 0
-		parseErrors := 0
-
-		scanner := bufio.NewScanner(journalFile)
-		for scanner.Scan() {
-			line := scanner.Bytes()
-
-			// Parse v1 format
-			var v1Entry persistence.JournalEntryV1
-			if err := json.Unmarshal(line, &v1Entry); err != nil {
-				p.LogFunc(logging.LevelWarning, "JOURNAL_PARSE_FAIL", "Failed to parse journal event: %v", err)
-				parseErrors++
-				continue
-			}
-
-			if v1Entry.Timestamp.After(snapshot.Timestamp) {
-				// Intern reason to save memory
-				reason := p.InternReason(v1Entry.Event.Reason)
-
-				// Must hold lock as health check may be running
-				p.PersistenceMutex.Lock()
-				switch v1Entry.Event.Type {
-				case persistence.EventTypeBlock:
-					blockEvents++
-					expireTime := v1Entry.Timestamp.Add(v1Entry.Event.Duration)
-					p.IPStates[v1Entry.Event.IP] = persistence.IPState{
-						State:      persistence.BlockStateBlocked,
-						ExpireTime: expireTime,
-						Reason:     reason,
-						ModifiedAt: v1Entry.Timestamp,
-					}
-				case persistence.EventTypeUnblock:
-					unblockEvents++
-					p.IPStates[v1Entry.Event.IP] = persistence.IPState{
-						State:      persistence.BlockStateUnblocked,
-						Reason:     reason,
-						ModifiedAt: v1Entry.Timestamp,
-					}
-				}
-				p.PersistenceMutex.Unlock()
-			} else {
-				skippedEvents++
-			}
-		}
-		if err := journalFile.Close(); err != nil {
-			p.LogFunc(logging.LevelWarning, "JOURNAL_CLOSE_FAIL", "Failed to close journal file: %v", err)
-		}
-
-		if fileInfo, err := os.Stat(journalPath); err == nil {
-			if fileInfo.Size() == 0 {
-				p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Journal is empty (recently compacted or no new events)")
-			} else {
-				p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=v1, size=%d bytes, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
-					fileInfo.Size(), blockEvents, unblockEvents, skippedEvents, parseErrors)
-			}
 		} else {
-			p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "Replayed journal (version=v1, blocks=%d, unblocks=%d, skipped=%d, errors=%d)",
-				blockEvents, unblockEvents, skippedEvents, parseErrors)
+			unblockedCount++
 		}
-	} else if !os.IsNotExist(err) {
-		p.LogFunc(logging.LevelWarning, "JOURNAL_OPEN_FAIL", "Could not open journal file for replay: %v", err)
-	} else {
-		p.LogFunc(logging.LevelInfo, "JOURNAL_REPLAY", "No journal file found (first run or recently compacted)")
 	}
+	p.LogFunc(logging.LevelInfo, "STATE_LOAD", "Loaded %d IP states from database (%d blocked + %d unblocked)",
+		len(allStates), blockedCount, unblockedCount)
 
-	// 3. State Push
 	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Querying HAProxy current state...")
 	currentState, err := p.Blocker.GetCurrentState()
 	if err != nil {
@@ -481,7 +362,6 @@ func restorePersistenceState(p *app.Processor) error {
 		currentState = make(map[string]int)
 	}
 
-	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Restoring %d IP states to backend...", len(p.IPStates))
 	// Create a sorted list of table durations for best-fit matching
 	type tableInfo struct {
 		duration time.Duration
@@ -495,7 +375,6 @@ func restorePersistenceState(p *app.Processor) error {
 		return sortedTables[i].duration < sortedTables[j].duration
 	})
 
-	// Cast to RateLimitedBlocker to access BlockDirect/UnblockDirect
 	type directBlocker interface {
 		BlockDirect(ipInfo utils.IPInfo, duration time.Duration, reason string) error
 		UnblockDirect(ipInfo utils.IPInfo, reason string) error
@@ -508,18 +387,16 @@ func restorePersistenceState(p *app.Processor) error {
 	skippedAlreadyUnblocked := 0
 	skippedExpired := 0
 	restored := 0
-	for ip, state := range p.IPStates {
-		// Before restoring, check if the IP is now a good actor.
+	for ip, state := range allStates {
 		tempEntry := &app.LogEntry{IPInfo: utils.NewIPInfo(ip)}
 		if isGood, reason := checker.IsGoodActor(p, tempEntry); isGood {
 			p.LogFunc(logging.LevelInfo, "STATE_RESTORE_SKIP", "Skipping restore for %s (good_actor: %s)", ip, reason)
 			skipped++
 			skippedGoodActor++
-			continue // Don't restore blocks for good actors.
+			continue
 		}
 
 		if state.State == persistence.BlockStateBlocked {
-			// Check if already blocked in HAProxy
 			if gpc0, exists := currentState[ip]; exists && gpc0 > 0 {
 				skipped++
 				skippedAlreadyBlocked++
@@ -551,14 +428,12 @@ func restorePersistenceState(p *app.Processor) error {
 				skippedExpired++
 			}
 		} else if state.State == persistence.BlockStateUnblocked {
-			// Check if already unblocked in HAProxy
 			if gpc0, exists := currentState[ip]; exists && gpc0 == 0 {
 				skipped++
 				skippedAlreadyUnblocked++
 				continue
 			}
 
-			// Restore unblock state (good actor protection)
 			var unblockErr error
 			if hasDirectMethods {
 				unblockErr = directB.UnblockDirect(utils.NewIPInfo(ip), state.Reason)
@@ -576,17 +451,10 @@ func restorePersistenceState(p *app.Processor) error {
 	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "State restoration complete: %d restored, %d skipped (already_blocked=%d, already_unblocked=%d, expired=%d, good_actors=%d)",
 		restored, skipped, skippedAlreadyBlocked, skippedAlreadyUnblocked, skippedExpired, skippedGoodActor)
 
-	// Warn if we restored a large number of IPs that might exceed HAProxy table capacity
 	if restored > 50000 {
-		p.LogFunc(logging.LevelWarning, "STATE_RESTORE", "Restored %d IPs. Verify HAProxy stick table capacity (tune.bufsize, table size). HAProxy silently drops entries when tables are full.", restored)
+		p.LogFunc(logging.LevelWarning, "STATE_RESTORE", "Restored %d IPs. Verify HAProxy stick table capacity.", restored)
 	}
 
-	// 4. Open journal for appending
-	p.JournalHandle, err = persistence.OpenJournalForAppend(journalPath)
-	if err != nil {
-		p.LogFunc(logging.LevelError, "JOURNAL_OPEN_FAIL", "Failed to open journal for writing: %v", err)
-		return err
-	}
 	return nil
 }
 
@@ -807,8 +675,12 @@ func execute(params *commandline.AppParameters) error {
 		if p.PersistenceEnabled {
 			// Resync from persistence state (more reliable)
 			p.PersistenceMutex.Lock()
-			if len(p.IPStates) > 0 {
-				for ip, state := range p.IPStates {
+			allStates, err := persistence.GetAllIPStates(p.DB)
+			p.PersistenceMutex.Unlock()
+			if err != nil {
+				p.LogFunc(logging.LevelError, "RESYNC", "Failed to query IP states for resync: %v", err)
+			} else {
+				for ip, state := range allStates {
 					switch state.State {
 					case persistence.BlockStateBlocked:
 						remaining := time.Until(state.ExpireTime)
@@ -823,7 +695,6 @@ func execute(params *commandline.AppParameters) error {
 					}
 				}
 			}
-			p.PersistenceMutex.Unlock()
 		} else {
 			// Resync from activity store (in-memory only)
 			p.ActivityMutex.RLock()
@@ -931,102 +802,47 @@ func performGracefulShutdown(p *app.Processor) {
 	}
 
 	if p.PersistenceEnabled {
-		p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Waiting for persistence operations to complete...")
-		p.PersistenceWg.Wait()
-
 		if p.CompactionInterval > 0 {
-			p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Performing final state compaction...")
-			runCompaction(p)
+			p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Performing final cleanup...")
+			runCleanup(p)
 		}
 
-		p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Closing journal file.")
-		if p.JournalHandle != nil {
-			if err := p.JournalHandle.Close(); err != nil {
-				p.LogFunc(logging.LevelError, "PERSISTENCE", "Error closing journal file: %v", err)
-			}
+		p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Closing database.")
+		if err := persistence.CloseDB(p.DB); err != nil {
+			p.LogFunc(logging.LevelError, "PERSISTENCE", "Error closing database: %v", err)
 		}
 	}
 	fmt.Fprintln(os.Stderr, "[SHUTDOWN] Shutdown complete.")
 }
 
-func runCompaction(p *app.Processor) {
-	p.PersistenceMutex.Lock()
-	defer p.PersistenceMutex.Unlock()
-
-	// Filter out expired entries in-place
+func runCleanup(p *app.Processor) {
 	now := p.NowFunc()
-	expiredBlocks := 0
-	cleanedUnblocked := 0
 	retentionPeriod := p.Config.Application.Persistence.RetentionPeriod
 
-	for ip, state := range p.IPStates {
-		if state.State == persistence.BlockStateBlocked && !now.Before(state.ExpireTime) {
-			// Remove expired blocks
-			delete(p.IPStates, ip)
-			expiredBlocks++
-		} else if state.State == persistence.BlockStateUnblocked && now.After(state.ExpireTime.Add(retentionPeriod)) {
-			// Remove old unblocked entries after retention period
-			delete(p.IPStates, ip)
-			cleanedUnblocked++
-		}
-	}
-
-	// Recreate map if it's shrunk significantly to free memory
-	ipStatesLen := len(p.IPStates)
-	if expiredBlocks > ipStatesLen {
-		newIPStates := make(map[string]persistence.IPState, ipStatesLen)
-		for ip, state := range p.IPStates {
-			newIPStates[ip] = state
-		}
-		p.IPStates = newIPStates
-	}
-
-	// Count blocked vs unblocked for logging
-	blockedCount := 0
-	for _, state := range p.IPStates {
-		if state.State == persistence.BlockStateBlocked {
-			blockedCount++
-		}
-	}
-	unblockedCount := ipStatesLen - blockedCount
-
-	snapshot := &persistence.Snapshot{
-		Timestamp: now,
-		IPStates:  p.IPStates,
-	}
-
-	snapshotPath := filepath.Join(p.StateDir, "state.snapshot")
-	if err := persistence.WriteSnapshot(snapshotPath, snapshot); err != nil {
-		p.LogFunc(logging.LevelError, "COMPACTION_FAIL", "Failed to write snapshot: %v", err)
-		return
-	}
-
-	// Log snapshot write details
-	if fileInfo, err := os.Stat(snapshotPath); err == nil {
-		p.LogFunc(logging.LevelInfo, "COMPACTION", "Snapshot written (size=%d bytes, entries=%d blocked + %d unblocked, expired=%d, cleaned=%d)",
-			fileInfo.Size(), blockedCount, unblockedCount, expiredBlocks, cleanedUnblocked)
-	} else {
-		p.LogFunc(logging.LevelInfo, "COMPACTION", "Snapshot written (entries=%d blocked + %d unblocked, expired=%d, cleaned=%d)",
-			blockedCount, unblockedCount, expiredBlocks, cleanedUnblocked)
-	}
-
-	// Truncate and re-open journal
-	journalPath := filepath.Join(p.StateDir, "events.log")
-	if err := p.JournalHandle.Close(); err != nil {
-		p.LogFunc(logging.LevelError, "COMPACTION_FAIL", "Failed to close journal for truncation: %v", err)
-	}
-
-	// Re-open with truncation
-	handle, err := os.OpenFile(journalPath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
+	expiredBlocks, err := persistence.CleanupExpiredBlocks(p.DB, now)
 	if err != nil {
-		p.LogFunc(logging.LevelError, "COMPACTION_FAIL", "Failed to truncate and re-open journal: %v", err)
-		// Attempt to re-open in append mode as a fallback
-		handle, _ = persistence.OpenJournalForAppend(journalPath)
-	} else {
-		p.LogFunc(logging.LevelInfo, "COMPACTION", "Journal truncated and reset")
+		p.LogFunc(logging.LevelError, "CLEANUP_FAIL", "Failed to cleanup expired blocks: %v", err)
 	}
-	p.JournalHandle = handle
-	p.LogFunc(logging.LevelInfo, "COMPACTION", "State snapshot and journal compaction completed successfully.")
+
+	cleanedUnblocked, err := persistence.CleanupOldUnblocked(p.DB, now, retentionPeriod)
+	if err != nil {
+		p.LogFunc(logging.LevelError, "CLEANUP_FAIL", "Failed to cleanup old unblocked: %v", err)
+	}
+
+	cleanedEvents, err := persistence.CleanupOldEvents(p.DB, retentionPeriod)
+	if err != nil {
+		p.LogFunc(logging.LevelError, "CLEANUP_FAIL", "Failed to cleanup old events: %v", err)
+	}
+
+	cleanedReasons, err := persistence.CleanupOrphanedReasons(p.DB)
+	if err != nil {
+		p.LogFunc(logging.LevelError, "CLEANUP_FAIL", "Failed to cleanup orphaned reasons: %v", err)
+	}
+
+	if expiredBlocks > 0 || cleanedUnblocked > 0 || cleanedEvents > 0 || cleanedReasons > 0 {
+		p.LogFunc(logging.LevelInfo, "CLEANUP", "Cleanup completed: expired_blocks=%d, old_unblocked=%d, old_events=%d, orphaned_reasons=%d",
+			expiredBlocks, cleanedUnblocked, cleanedEvents, cleanedReasons)
+	}
 }
 
 // start is the unexported function that contains the main application logic,
@@ -1082,13 +898,13 @@ func start(p *app.Processor) {
 				go func() {
 					ticker := time.NewTicker(p.CompactionInterval)
 					defer ticker.Stop()
-					p.LogFunc(logging.LevelInfo, "SETUP", "State compaction enabled, running every %v.", p.CompactionInterval)
+					p.LogFunc(logging.LevelInfo, "SETUP", "Database cleanup enabled, running every %v.", p.CompactionInterval)
 					for {
 						select {
 						case <-ticker.C:
-							runCompaction(p)
+							runCleanup(p)
 						case <-stopWatcher:
-							p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Compaction goroutine shutting down.")
+							p.LogFunc(logging.LevelInfo, "SHUTDOWN", "Cleanup goroutine shutting down.")
 							return
 						}
 					}
@@ -1180,7 +996,7 @@ func start(p *app.Processor) {
 					p.NodeRole,
 					p.NodeName,
 					p.NodeAddress,
-					p.IPStates,
+					p.DB,
 					&p.PersistenceMutex,
 					p.LogFunc,
 				)
