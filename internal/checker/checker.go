@@ -295,18 +295,18 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 		switch chain.Action {
 		case "block":
 			if websiteName != "" {
-				p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s on website '%s'. Blocking for %v%s",
+				p.LogFunc(logLevel, "BLOCK", "Chain: %s completed by IP %s on website '%s'. Blocking for %v%s",
 					formattedReason, entry.IPInfo.Address, websiteName, chain.BlockDuration, getOnMatchSuffix(chain))
 			} else {
-				p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v%s",
+				p.LogFunc(logLevel, "BLOCK", "Chain: %s completed by IP %s. Blocking for %v%s",
 					formattedReason, entry.IPInfo.Address, chain.BlockDuration, getOnMatchSuffix(chain))
 			}
 		case "log":
 			if websiteName != "" {
-				p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s on website '%s'. Action set to 'log'%s",
+				p.LogFunc(logLevel, "LOG", "Chain: %s completed by IP %s on website '%s'. Action set to 'log'%s",
 					formattedReason, entry.IPInfo.Address, websiteName, getOnMatchSuffix(chain))
 			} else {
-				p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s. Action set to 'log'%s",
+				p.LogFunc(logLevel, "LOG", "Chain: %s completed by IP %s. Action set to 'log'%s",
 					formattedReason, entry.IPInfo.Address, getOnMatchSuffix(chain))
 			}
 		}
@@ -470,10 +470,10 @@ func logDryRunCompletion(p *app.Processor, chain *config.BehavioralChain, entry 
 
 	switch chain.Action {
 	case "block":
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s%s. Blocking for %v (DryRun)%s",
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK: Chain: %s completed by IP %s%s. Blocking for %v (DryRun)%s",
 			chain.Name, entry.IPInfo.Address, websiteContext, chain.BlockDuration, onMatchSuffix)
 	case "log":
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s%s. Action set to 'log' (DryRun)%s",
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG: Chain: %s completed by IP %s%s. Action set to 'log' (DryRun)%s",
 			chain.Name, entry.IPInfo.Address, websiteContext, onMatchSuffix)
 	default:
 		p.LogFunc(logging.LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s%s. Unrecognized action '%s' (DryRun)%s",
