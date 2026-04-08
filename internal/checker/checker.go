@@ -863,10 +863,8 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 			// Check if IP is blocked in persistence
 			var isBlocked bool
 			if p.PersistenceEnabled {
-				p.PersistenceMutex.Lock()
 				ipState, err := persistence.GetIPState(p.DB, entry.IPInfo.Address)
 				isBlocked = err == nil && ipState != nil && ipState.State == persistence.BlockStateBlocked
-				p.PersistenceMutex.Unlock()
 			}
 
 			// Determine if we should unblock:
@@ -920,20 +918,16 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 		p.ConfigMutex.RUnlock()
 
 		if baConfig.Enabled {
-			p.PersistenceMutex.Lock()
+			// SQLite WAL mode allows concurrent reads — no exclusive lock needed for SELECT.
+			// The ActivityStore caches the result, so this only hits SQLite once per unique IP.
 			isBad, _ := persistence.IsBadActor(p.DB, entry.IPInfo.Address)
 			if isBad {
-				// Good actor vs bad actor conflict: if IP was just recognized as good actor
-				// in a config reload, remove from bad actors
-				// (This is handled above — isGood would be true, so we don't reach here)
-
-				// Ensure block is active
+				// Ensure block is active in ActivityStore (cached for subsequent lines)
 				if !activity.IsBlocked {
 					activity.IsBlocked = true
 					activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: p.InternReason("bad-actor")}
 					activity.BlockedUntil = time.Now().Add(baConfig.BlockDuration)
 				}
-				p.PersistenceMutex.Unlock()
 
 				if p.EnableMetrics {
 					val, _ := p.Metrics.SkipsByReason.LoadOrStore("bad-actor", new(atomic.Int64))
@@ -943,7 +937,6 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 				}
 				return
 			}
-			p.PersistenceMutex.Unlock()
 		}
 	}
 
