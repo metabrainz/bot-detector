@@ -962,6 +962,61 @@ func parseCustomLogRegex(config *TopLevelConfig) (*regexp.Regexp, error) {
 	return re, nil
 }
 
+// parseBadActorWeight returns the weight from YAML, defaulting to 1.0.
+func parseBadActorWeight(w *float64) float64 {
+	if w == nil {
+		return 1.0
+	}
+	if *w < 0.0 {
+		return 0.0
+	}
+	if *w > 1.0 {
+		return 1.0
+	}
+	return *w
+}
+
+// parseBadActorsConfig parses the bad_actors YAML section into runtime config.
+func parseBadActorsConfig(config *TopLevelConfig) (BadActorsConfig, error) {
+	if config.BadActors == nil {
+		return BadActorsConfig{}, nil
+	}
+	ba := config.BadActors
+
+	enabled := ba.Enabled == nil || *ba.Enabled // default true if section present
+	if !enabled {
+		return BadActorsConfig{Enabled: false}, nil
+	}
+
+	threshold := ba.Threshold
+	if threshold <= 0 {
+		return BadActorsConfig{}, fmt.Errorf("bad_actors.threshold must be > 0, got %v", threshold)
+	}
+
+	var blockDuration time.Duration
+	if ba.BlockDuration != "" {
+		var err error
+		blockDuration, err = utils.ParseDuration(ba.BlockDuration)
+		if err != nil {
+			return BadActorsConfig{}, fmt.Errorf("bad_actors.block_duration: %w", err)
+		}
+	} else {
+		blockDuration = 168 * time.Hour // default 1 week
+	}
+
+	maxEntries := ba.MaxScoreEntries
+	if maxEntries <= 0 {
+		maxEntries = 100000
+	}
+
+	return BadActorsConfig{
+		Enabled:         true,
+		Threshold:       threshold,
+		BlockDuration:   blockDuration,
+		MaxScoreEntries: maxEntries,
+	}, nil
+}
+
 func parseChains(config *TopLevelConfig, fileDeps map[string]*types.FileDependency, configFilePath string, durationTables map[time.Duration]string) ([]BehavioralChain, error) {
 	var newChains []BehavioralChain
 	var defaultBlockDuration time.Duration
@@ -1020,6 +1075,7 @@ func parseChains(config *TopLevelConfig, fileDeps map[string]*types.FileDependen
 			MatchKey:                 yamlChain.MatchKey,
 			OnMatch:                  yamlChain.OnMatch,
 			Websites:                 yamlChain.Websites,
+			BadActorWeight:           parseBadActorWeight(yamlChain.BadActorWeight),
 			StepsYAML:                yamlChain.Steps,
 			MetricsCounter:           new(atomic.Int64),
 			MetricsResetCounter:      new(atomic.Int64),
@@ -1420,6 +1476,11 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		return nil, err
 	}
 
+	badActorsConfig, err := parseBadActorsConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
 	persistenceConfig := config.Application.Persistence
 	if persistenceConfig.CompactionInterval == 0 {
 		persistenceConfig.CompactionInterval = time.Hour
@@ -1503,6 +1564,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 			},
 		},
 		Cluster:          clusterConfig,
+		BadActors:        badActorsConfig,
 		Websites:         resolvedWebsites,
 		GoodActors:       newGoodActors,
 		Chains:           newChains,

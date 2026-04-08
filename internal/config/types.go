@@ -29,6 +29,7 @@ type AppConfig struct {
 	Checker          CheckerConfig                     `config:"compare"`
 	Blockers         BlockersConfig                    `config:"compare"`
 	Cluster          *cluster.ClusterConfig            `config:"compare"` // Cluster configuration (optional)
+	BadActors        BadActorsConfig                   `config:"compare"` // Bad actors configuration
 	GoodActors       []GoodActorDef                    `config:"compare"`
 	FileDependencies map[string]*types.FileDependency  // Map of file paths to their dependency status.
 	LastModTime      time.Time                         // Not compared
@@ -102,6 +103,7 @@ type LoadedConfig struct {
 	Checker          CheckerConfig
 	Blockers         BlockersConfig
 	Cluster          *cluster.ClusterConfig // Cluster configuration (optional)
+	BadActors        BadActorsConfig        // Bad actors configuration
 	Websites         []WebsiteConfig        // Optional: multi-website configuration
 	GoodActors       []GoodActorDef         `config:"compare"`
 	Chains           []BehavioralChain      // Not compared here
@@ -125,9 +127,26 @@ type TopLevelConfig struct {
 	Parser      ParserConfigYAML         `yaml:"parser"`
 	Checker     CheckerConfigYAML        `yaml:"checker"`
 	Blockers    BlockersConfigYAML       `yaml:"blockers"`
-	Cluster     *ClusterConfigYAML       `yaml:"cluster"` // Optional cluster configuration
+	Cluster     *ClusterConfigYAML       `yaml:"cluster"`    // Optional cluster configuration
+	BadActors   *BadActorsConfigYAML     `yaml:"bad_actors"` // Optional bad actors configuration
 	GoodActors  []map[string]interface{} `yaml:"good_actors"`
 	Chains      []BehavioralChainYAML    `yaml:"chains"`
+}
+
+// BadActorsConfigYAML represents the bad_actors configuration in YAML format.
+type BadActorsConfigYAML struct {
+	Enabled        *bool  `yaml:"enabled"`
+	Threshold      float64 `yaml:"threshold"`
+	BlockDuration  string  `yaml:"block_duration"`
+	MaxScoreEntries int    `yaml:"max_score_entries"`
+}
+
+// BadActorsConfig holds the runtime bad actors configuration.
+type BadActorsConfig struct {
+	Enabled         bool
+	Threshold       float64
+	BlockDuration   time.Duration
+	MaxScoreEntries int
 }
 
 type ApplicationConfigYAML struct {
@@ -211,13 +230,14 @@ type StepDefYAML struct {
 }
 
 type BehavioralChainYAML struct {
-	Name          string        `yaml:"name"`
-	Action        string        `yaml:"action"`
-	BlockDuration string        `yaml:"block_duration"`
-	MatchKey      string        `yaml:"match_key"`
-	OnMatch       string        `yaml:"on_match"`
-	Websites      []string      `yaml:"websites"` // Optional: restrict chain to specific websites
-	Steps         []StepDefYAML `yaml:"steps"`
+	Name           string        `yaml:"name"`
+	Action         string        `yaml:"action"`
+	BlockDuration  string        `yaml:"block_duration"`
+	MatchKey       string        `yaml:"match_key"`
+	OnMatch        string        `yaml:"on_match"`
+	Websites       []string      `yaml:"websites"`        // Optional: restrict chain to specific websites
+	BadActorWeight *float64      `yaml:"bad_actor_weight"` // Optional: weight for bad actor scoring (default 1.0)
+	Steps          []StepDefYAML `yaml:"steps"`
 }
 
 // --- RUNTIME DATA STRUCTURES ---
@@ -242,6 +262,7 @@ type BehavioralChain struct {
 	MatchKey                 string        // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
 	OnMatch                  string        // "stop" to halt processing of other chains on match.
 	Websites                 []string      // Optional: restrict chain to specific websites (empty = global)
+	BadActorWeight           float64       // Weight for bad actor scoring (0.0-1.0, default 1.0)
 	StepsYAML                []StepDefYAML // Store original YAML for accurate comparison
 	Steps                    []StepDef
 	MetricsHitsCounter       *atomic.Int64 // Counter for hits on this specific chain.
