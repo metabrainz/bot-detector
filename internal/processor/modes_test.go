@@ -895,7 +895,7 @@ func TestLiveLogTailer_ErrorHandling(t *testing.T) {
 		logOutput := strings.Join(harness.capturedLogs, "\n")
 		harness.logMutex.Unlock()
 
-		if !strings.Contains(logOutput, "TAIL_ERROR: Failed to open log file") {
+		if !strings.Contains(logOutput, "TAIL_FAIL: Failed to open log file") {
 			t.Errorf("Expected 'Failed to open log file' error, but none was logged. Logs:\n%s", logOutput)
 		}
 	})
@@ -925,13 +925,13 @@ func TestLiveLogTailer_ErrorHandling(t *testing.T) {
 		// For now, we'll just assert that the code path exists and is what we expect.
 		// A more advanced test would use a mock reader.
 		// Let's assume a hypothetical error was injected.
-		harness.processor.LogFunc(logging.LevelError, "TAIL_ERROR", "Read error while tailing log file: injected error. Reopening in %v.", config.ErrorRetryDelay)
+		harness.processor.LogFunc(logging.LevelError, "TAIL_FAIL", "Read error while tailing log file: injected error. Reopening in %v.", config.ErrorRetryDelay)
 
 		harness.logMutex.Lock()
 		logOutput := strings.Join(harness.capturedLogs, "\n")
 		harness.logMutex.Unlock()
 
-		if !strings.Contains(logOutput, "TAIL_ERROR: Read error while tailing") {
+		if !strings.Contains(logOutput, "TAIL_FAIL: Read error while tailing") {
 			t.Error("This is a placeholder to show the expected log for a read error.")
 		}
 	})
@@ -965,7 +965,7 @@ func TestLiveLogTailer_InitialOpenErrorAndShutdown(t *testing.T) {
 
 	// --- Assert ---
 	logOutput := strings.Join(harness.capturedLogs, "\n")
-	if !strings.Contains(logOutput, "TAIL_ERROR: Failed to open log file") {
+	if !strings.Contains(logOutput, "TAIL_FAIL: Failed to open log file") {
 		t.Error("Expected a 'Failed to open log file' error, but none was logged.")
 	}
 	if !strings.Contains(logOutput, "SHUTDOWN: Received signal") {
@@ -1013,7 +1013,7 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 	originalLogFunc := harness.processor.LogFunc
 	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		originalLogFunc(level, tag, format, args...)
-		if tag == "TAIL_ERROR" && strings.Contains(fmt.Sprintf(format, args...), "Read error while tailing") {
+		if tag == "TAIL_FAIL" && strings.Contains(fmt.Sprintf(format, args...), "Read error while tailing") {
 			select {
 			case readErrorLogged <- struct{}{}:
 			default:
@@ -1055,7 +1055,7 @@ func TestLiveLogTailer_ReadError(t *testing.T) {
 
 	// --- Assert ---
 	logOutput := strings.Join(harness.capturedLogs, "\n")
-	if !strings.Contains(logOutput, "TAIL_ERROR: Read error while tailing log file") {
+	if !strings.Contains(logOutput, "TAIL_FAIL: Read error while tailing log file") {
 		t.Errorf("Expected a 'Read error while tailing' message, but none was logged. Logs:\n%s", logOutput)
 	}
 }
@@ -1100,7 +1100,7 @@ func TestLiveLogTailer_ShutdownDuringRetryDelay(t *testing.T) {
 	harness.processor.LogFunc = func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 		harness.logMutex.Lock()
 		defer harness.logMutex.Unlock()
-		if tag == "TAIL_ERROR" && strings.Contains(format, "Failed to open log file") {
+		if tag == "TAIL_FAIL" && strings.Contains(format, "Failed to open log file") {
 			openFailCount++
 		}
 		harness.capturedLogs = append(harness.capturedLogs, fmt.Sprintf(tag+": "+format, args...))
@@ -1153,7 +1153,7 @@ func TestLiveLogTailer_InitialStatError(t *testing.T) {
 		defer harness.logMutex.Unlock()
 		logLine := fmt.Sprintf("%s: %s", tag, logMsg)
 		harness.capturedLogs = append(harness.capturedLogs, logLine)
-		if tag == "TAIL_ERROR" && strings.Contains(logMsg, "Failed to open log file") && strings.Contains(logMsg, "failed to get initial file stat") {
+		if tag == "TAIL_FAIL" && strings.Contains(logMsg, "Failed to open log file") && strings.Contains(logMsg, "failed to get initial file stat") {
 			statErrorLogged <- struct{}{}
 		}
 	}
@@ -1214,7 +1214,7 @@ func TestLiveLogTailer_StatError(t *testing.T) {
 		defer logMutex.Unlock()
 		logLine := fmt.Sprintf(tag+": "+format, args...)
 		capturedLogs = append(capturedLogs, logLine)
-		if tag == "TAIL_ERROR" && strings.Contains(logLine, "Failed to stat log path during EOF check") {
+		if tag == "TAIL_FAIL" && strings.Contains(logLine, "Failed to stat log path during EOF check") {
 			// Use a non-blocking send in case the channel is already full.
 			select {
 			case statErrorLogged <- struct{}{}:

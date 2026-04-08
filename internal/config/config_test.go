@@ -1421,7 +1421,7 @@ chains:
 		logMutex.Lock()
 		capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
 		logMutex.Unlock()
-		if tag == "LOAD_ERROR" {
+		if tag == "LOAD_FAIL" {
 			logReceived <- true
 		}
 	}
@@ -1459,9 +1459,9 @@ chains:
 	// we triggered the check manually.
 	select {
 	case <-logReceived:
-		// The LOAD_ERROR was logged as expected.
+		// The LOAD_FAIL was logged as expected.
 	case <-time.After(1 * time.Second):
-		t.Fatal("Timed out waiting for LOAD_ERROR log message.")
+		t.Fatal("Timed out waiting for LOAD_FAIL log message.")
 	}
 
 	// 9. Check that the error was logged.
@@ -1469,8 +1469,8 @@ chains:
 	// We can add a redundant check on the captured logs for extra safety.
 	logMutex.Lock()
 	defer logMutex.Unlock()
-	if len(capturedLogs) == 0 || !strings.Contains(capturedLogs[len(capturedLogs)-1], "LOAD_ERROR") {
-		t.Errorf("Expected a 'LOAD_ERROR' log message, but none was found. Logs: %v", capturedLogs)
+	if len(capturedLogs) == 0 || !strings.Contains(capturedLogs[len(capturedLogs)-1], "LOAD_FAIL") {
+		t.Errorf("Expected a 'LOAD_FAIL' log message, but none was found. Logs: %v", capturedLogs)
 	}
 }
 
@@ -1520,7 +1520,7 @@ chains:
 		logMutex.Lock()
 		capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
 		logMutex.Unlock()
-		if tag == "WATCH_ERROR" {
+		if tag == "WATCH_FAIL" {
 			logReceived <- true
 		}
 	}
@@ -1544,7 +1544,7 @@ chains:
 	case <-logReceived:
 		// Error was logged as expected.
 	case <-time.After(1 * time.Second):
-		t.Fatal("Timed out waiting for WATCH_ERROR log message.")
+		t.Fatal("Timed out waiting for WATCH_FAIL log message.")
 	}
 
 	// --- Assert ---
@@ -1552,8 +1552,8 @@ chains:
 	logMutex.Lock()
 	logOutput := strings.Join(capturedLogs, "\n")
 	logMutex.Unlock()
-	if !strings.Contains(logOutput, "WATCH_ERROR: Failed to stat file") {
-		t.Errorf("Expected a 'WATCH_ERROR' log message, but none was found. Logs:\n%s", logOutput)
+	if !strings.Contains(logOutput, "WATCH_FAIL: Failed to stat file") {
+		t.Errorf("Expected a 'WATCH_FAIL' log message, but none was found. Logs:\n%s", logOutput)
 	}
 }
 

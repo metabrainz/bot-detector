@@ -1540,12 +1540,12 @@ func (b *HAProxyBlocker) getHAProxyAllIPsInTable(addr, tableName string) ([]HAPr
 		if ip != "" && expStr != "" && gpc0Str != "" {
 			exp, parseErr := utils.ParseInt64(expStr)
 			if parseErr != nil {
-				b.P.Log(logging.LevelError, "HAPROXY_PARSE_ERROR", "Failed to parse exp value '%s' for IP '%s' in table '%s' on '%s': %v", expStr, ip, tableName, addr, parseErr)
+				b.P.Log(logging.LevelError, "HAPROXY_PARSE_FAIL", "Failed to parse exp value '%s' for IP '%s' in table '%s' on '%s': %v", expStr, ip, tableName, addr, parseErr)
 				continue
 			}
 			gpc0, parseErr := utils.ParseInt(gpc0Str)
 			if parseErr != nil {
-				b.P.Log(logging.LevelError, "HAPROXY_PARSE_ERROR", "Failed to parse gpc0 value '%s' for IP '%s' in table '%s' on '%s': %v", gpc0Str, ip, tableName, addr, parseErr)
+				b.P.Log(logging.LevelError, "HAPROXY_PARSE_FAIL", "Failed to parse gpc0 value '%s' for IP '%s' in table '%s' on '%s': %v", gpc0Str, ip, tableName, addr, parseErr)
 				continue
 			}
 			entries = append(entries, HAProxyTableEntry{

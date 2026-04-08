@@ -186,7 +186,7 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 	// Count blocked IPs
 	blockedIPs, err := persistence.GetBlockedIPs(p.DB, time.Now())
 	if err != nil {
-		p.LogFunc(logging.LevelError, "UNBLOCK_WHITELIST", "Failed to query blocked IPs: %v", err)
+		p.LogFunc(logging.LevelError, "UNBLOCK_GOOD_ACTOR", "Failed to query blocked IPs: %v", err)
 		return
 	}
 
@@ -224,7 +224,7 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 					_ = p.Blocker.Unblock(ipInfo, "added-to-good-actors")
 				}
 
-				p.LogFunc(logging.LevelInfo, "UNBLOCK_WHITELIST",
+				p.LogFunc(logging.LevelInfo, "UNBLOCK_GOOD_ACTOR",
 					"Unblocked %s (was blocked by %s): newly added to good_actors (%s)",
 					ip, state.Reason, goodActor.Name)
 				unblocked++
@@ -234,7 +234,7 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 	}
 
 	if unblocked > 0 {
-		p.LogFunc(logging.LevelInfo, "UNBLOCK_WHITELIST",
+		p.LogFunc(logging.LevelInfo, "UNBLOCK_GOOD_ACTOR",
 			"Checked %d blocked IPs against %d new good actor rule(s), unblocked %d IPs",
 			blockedCount, slowPathCount, unblocked)
 	}
@@ -256,7 +256,7 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	if mainConfigChanged {
 		fileInfo, err := os.Stat(p.ConfigFilePath)
 		if err != nil {
-			p.LogFunc(logging.LevelError, "WATCH_ERROR", "Failed to stat file for ModTime update %s: %v", p.ConfigFilePath, err)
+			p.LogFunc(logging.LevelError, "WATCH_FAIL", "Failed to stat file for ModTime update %s: %v", p.ConfigFilePath, err)
 			newLastModTime = oldConfig.LastModTime // Fallback to old time on error
 		} else {
 			newLastModTime = fileInfo.ModTime()
@@ -271,7 +271,7 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	}
 	loadedCfg, err := config.LoadConfigFromYAML(opts)
 	if err != nil {
-		p.LogFunc(logging.LevelError, "LOAD_ERROR", "Failed to reload configuration: %v", err)
+		p.LogFunc(logging.LevelError, "LOAD_FAIL", "Failed to reload configuration: %v", err)
 		return // The deferred signal will still fire.
 	}
 
@@ -574,7 +574,7 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 		// 1. Check the main YAML file
 		fileInfo, err := os.Stat(p.ConfigFilePath)
 		if err != nil {
-			p.LogFunc(logging.LevelError, "WATCH_ERROR", "Failed to stat file %s: %v", p.ConfigFilePath, err)
+			p.LogFunc(logging.LevelError, "WATCH_FAIL", "Failed to stat file %s: %v", p.ConfigFilePath, err)
 			continue
 		}
 

@@ -140,7 +140,7 @@ func (t *Tailer) checkForRotation() bool {
 	// Get stat of the currently open file handle (t.file).
 	currentFileStat, err := t.file.Stat()
 	if err != nil {
-		t.logger(logging.LevelError, "TAIL_ERROR", "Failed to stat open file handle: %v. Assuming rotation.", err)
+		t.logger(logging.LevelError, "TAIL_FAIL", "Failed to stat open file handle: %v. Assuming rotation.", err)
 		return true // File handle is broken, assume rotation.
 	}
 
@@ -148,7 +148,7 @@ func (t *Tailer) checkForRotation() bool {
 	currentPathStat, err := t.config.StatFunc(t.path)
 	if err != nil {
 		// If the file at the path doesn't exist, it likely means it was moved/renamed.
-		t.logger(logging.LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Assuming rotation.", err)
+		t.logger(logging.LevelError, "TAIL_FAIL", "Failed to stat log path during EOF check: %v. Assuming rotation.", err)
 		return true
 	}
 
@@ -310,7 +310,7 @@ func processFileLines(p *app.Processor, file io.Reader, lineProcessor func(line 
 				break // End of file
 			}
 			// For other read errors, log and break. The caller (LiveLogTailer) will handle reopening.
-			p.LogFunc(logging.LevelError, "READ_ERROR", "Read error: %v", readErr)
+			p.LogFunc(logging.LevelError, "READ_FAIL", "Read error: %v", readErr)
 			return readErr // Propagate the error up to the caller.
 		}
 
@@ -382,7 +382,7 @@ func DryRunLogProcessor(p *app.Processor, done chan<- struct{}) {
 	})
 	if err != nil {
 		// Log the error if processing fails unexpectedly (e.g., config error).
-		p.LogFunc(logging.LevelError, "DRY_RUN_ERROR", "Error during file processing: %v", err)
+		p.LogFunc(logging.LevelError, "DRY_RUN_FAIL", "Error during file processing: %v", err)
 	}
 	// After processing all lines, flush any remaining entries in the buffer.
 	checker.FlushEntryBuffer(p)
@@ -491,7 +491,7 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 		tailer, err := NewTailer(p, logPath, seekToEnd)
 		if err != nil {
 			// File not found or error on initial open, wait and retry.
-			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", logPath, err, config.ErrorRetryDelay)
+			p.LogFunc(logging.LevelError, "TAIL_FAIL", "Failed to open log file %s: %v. Retrying in %v.", logPath, err, config.ErrorRetryDelay)
 			restartTailing(config.ErrorRetryDelay)
 			continue
 		}
@@ -546,7 +546,7 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 					break // Break inner loop to reopen.
 				}
 				// Other unexpected errors
-				p.LogFunc(logging.LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening file.", readErr)
+				p.LogFunc(logging.LevelError, "TAIL_FAIL", "Read error while tailing log file: %v. Reopening file.", readErr)
 				_ = tailer.Close()
 				restartTailing(config.ErrorRetryDelay)
 				break // Break the inner loop to force a file reopen via the outer loop.
