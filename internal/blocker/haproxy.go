@@ -201,7 +201,8 @@ func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 		return nil
 	}
 
-	b.P.Log(logging.LevelInfo, "UNBLOCK", "Unblocking IP %s in %d tables: %v (Reason: %s)", ipInfo.Address, len(relevantTables), relevantTables, reason)
+	b.P.Log(logging.LevelInfo, "UNBLOCK", "Unblocking IP %s in %d tables (Reason: %s)", ipInfo.Address, len(relevantTables), reason)
+	b.P.Log(logging.LevelDebug, "UNBLOCK", "Unblocking IP %s tables: %v", ipInfo.Address, relevantTables)
 
 	targets := make(map[string]map[string]string)
 	for _, tableName := range relevantTables {
