@@ -197,6 +197,7 @@ chains:
 	// --- Assert ---
 	if loadedCfg == nil {
 		t.Fatal("Loaded config is nil")
+		return
 	}
 	if len(loadedCfg.FileDependencies) != 1 {
 		t.Fatalf("Expected 1 file dependency, got %d", len(loadedCfg.FileDependencies))
@@ -270,6 +271,7 @@ chains:
 	}
 	if loadedCfg == nil {
 		t.Fatal("Loaded config is nil")
+		return
 	}
 	initialFileDep, ok := loadedCfg.FileDependencies[testFilePath]
 	if !ok || initialFileDep.CurrentStatus.Status != types.FileStatusMissing {
@@ -395,6 +397,7 @@ chains:
 	}
 	if loadedCfg == nil {
 		t.Fatal("Loaded config is nil")
+		return
 	}
 	initialFileDep, ok := loadedCfg.FileDependencies[testFilePath]
 	if !ok || initialFileDep.CurrentStatus.Status != types.FileStatusLoaded {

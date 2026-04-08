@@ -115,8 +115,11 @@ func TestHAProxyBlocker_Block(t *testing.T) {
 
 func TestHAProxyBlocker_Unblock(t *testing.T) {
 	h := newHAProxyTestHarness(t)
-	h.mockProvider.durationTables[10*time.Minute] = "table_10m"
-	h.mockProvider.blockTableNameFallback = "table_long"
+
+	// Simulate HAProxy reporting these tables via "show table"
+	h.blocker.ExecuteHAProxyCommandFunc = func(addr, command string) (string, error) {
+		return "# table: table_10m_ipv4\n# table: table_10m_ipv6\n# table: table_long_ipv4\n# table: table_long_ipv6\n", nil
+	}
 
 	ipInfo := utils.NewIPInfo("192.0.2.1")
 
@@ -133,7 +136,7 @@ func TestHAProxyBlocker_Unblock(t *testing.T) {
 		t.Fatalf("Expected 1 batched command, got %d", len(h.commands))
 	}
 
-	// Check that both commands are in the batched command
+	// Check that both ipv4 commands are in the batched command
 	batchedCmd := h.commands[0]
 	expectedCmds := []string{
 		"set table table_10m_ipv4 key 192.0.2.1 data.gpc0 0",
@@ -144,6 +147,11 @@ func TestHAProxyBlocker_Unblock(t *testing.T) {
 		if !strings.Contains(batchedCmd, expected) {
 			t.Errorf("Batched command missing expected command '%s'. Got: %s", expected, batchedCmd)
 		}
+	}
+
+	// Verify no ipv6 tables were targeted for an ipv4 address
+	if strings.Contains(batchedCmd, "ipv6") {
+		t.Errorf("Batched command should not contain ipv6 tables for an ipv4 address. Got: %s", batchedCmd)
 	}
 }
 
@@ -174,7 +182,11 @@ func TestHAProxyBlocker_Block_Fallback(t *testing.T) {
 func TestHAProxyBlocker_ErrorTolerance(t *testing.T) {
 	h := newHAProxyTestHarness(t)
 	h.mockProvider.blockerAddresses = []string{"working:9999", "failing:9999"}
-	h.mockProvider.durationTables[1*time.Minute] = "table_1m"
+
+	// Simulate HAProxy reporting this table via "show table"
+	h.blocker.ExecuteHAProxyCommandFunc = func(addr, command string) (string, error) {
+		return "# table: table_1m_ipv6\n", nil
+	}
 
 	// Override executor to simulate one failure.
 	h.blocker.Executor = func(addr, ip, command string) error {
