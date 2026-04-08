@@ -1415,3 +1415,113 @@ func (h *CheckerTestHarness) assertChainProgressCleared(chainName string, entry 
 		h.t.Errorf("Expected ChainProgress to be cleared for key %+v, but it has %d entries: %v", key, len(activity.ChainProgress), activity.ChainProgress)
 	}
 }
+
+// TestGoodActorNotBlockedByChain_WithVHost verifies that a good actor with a
+// VHost set is not blocked by a chain that matches the same UA pattern.
+// This is a regression test for a bug where a good actor that was previously
+// blocked (e.g., before good_actors config was loaded) would remain in
+// SkipTypeBlocked state because IsGoodActor only set SkipInfo when it was
+// SkipTypeNone, not when it was SkipTypeBlocked.
+func TestGoodActorNotBlockedByChain_WithVHost(t *testing.T) {
+	const goodIP = "66.249.70.101"
+	const botUA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+	const vhost = "musicbrainz.org"
+
+	h := NewCheckerTestHarness(t, &config.AppConfig{
+		Checker: config.CheckerConfig{
+			UnblockOnGoodActor: true,
+			UnblockCooldown:    5 * time.Minute,
+		},
+	})
+
+	// Define good_actor: IP match + UA match (both must match)
+	ipCtx := config.MatcherContext{
+		ChainName:          "good_actor_test",
+		CanonicalFieldName: "IP",
+		FileDependencies:   map[string]*types.FileDependency{},
+	}
+	ipMatcher, err := config.CompileStringMatcher(ipCtx, goodIP)
+	if err != nil {
+		t.Fatalf("Failed to compile IP matcher: %v", err)
+	}
+	uaCtx := config.MatcherContext{
+		ChainName:          "good_actor_test",
+		CanonicalFieldName: "UserAgent",
+		FileDependencies:   map[string]*types.FileDependency{},
+	}
+	uaMatcher, err := config.CompileStringMatcher(uaCtx, "regex:(?i)googlebot")
+	if err != nil {
+		t.Fatalf("Failed to compile UA matcher: %v", err)
+	}
+
+	// Define a chain that would block the same UA (like fake_google_bot)
+	h.addChain(config.BehavioralChain{
+		Name:          "fake_google_bot",
+		Action:        "block",
+		BlockDuration: time.Hour,
+		MatchKey:      "ip",
+		OnMatch:       "stop",
+		StepsYAML: []config.StepDefYAML{
+			{FieldMatches: map[string]interface{}{"useragent": "regex:(?i)googlebot"}},
+		},
+	})
+
+	entry := &app.LogEntry{
+		IPInfo:    utils.NewIPInfo(goodIP),
+		UserAgent: botUA,
+		VHost:     vhost,
+		Timestamp: time.Now(),
+		Path:      "/artist/some-uuid",
+	}
+
+	// Step 1: Process entry WITHOUT good_actors configured (simulates file load failure).
+	// The chain should block the IP.
+	h.processEntry(entry)
+	if !h.blockCalled {
+		t.Fatal("Expected block when good_actors is empty")
+	}
+	h.blockCalled = false
+
+	// Step 2: Now configure good_actors (simulates successful config reload).
+	h.processor.Config.GoodActors = []config.GoodActorDef{
+		{
+			Name:       "google_bot",
+			IPMatchers: []config.FieldMatcher{ipMatcher},
+			UAMatchers: []config.FieldMatcher{uaMatcher},
+		},
+	}
+
+	// Step 3: Process a new entry from the same IP. The good_actor check should
+	// recognize this as a good actor and clear the stale blocked state.
+	// Before the fix, SkipInfo stayed as SkipTypeBlocked because the code only
+	// set it when Type == SkipTypeNone, so PreCheckActivity would skip the entry
+	// as "blocked" even though IsGoodActor returned true.
+	entry2 := &app.LogEntry{
+		IPInfo:    utils.NewIPInfo(goodIP),
+		UserAgent: botUA,
+		VHost:     vhost,
+		Timestamp: time.Now().Add(time.Second),
+		Path:      "/recording/some-uuid",
+	}
+	h.processEntry(entry2)
+
+	if h.blockCalled {
+		t.Fatal("Good actor was blocked again after good_actors was configured. " +
+			"The good_actor match should clear stale SkipTypeBlocked state.")
+	}
+
+	// Verify the actor is now marked as good_actor, not blocked
+	h.processor.ActivityMutex.RLock()
+	actor := store.Actor{IPInfo: utils.NewIPInfo(goodIP), VHost: vhost}
+	activity, exists := h.processor.ActivityStore[actor]
+	h.processor.ActivityMutex.RUnlock()
+	if !exists {
+		t.Fatal("Expected activity to exist for the good actor")
+	}
+	if activity.SkipInfo.Type != utils.SkipTypeGoodActor {
+		t.Fatalf("Expected SkipInfo.Type to be GoodActor, got %v", activity.SkipInfo.Type)
+	}
+	if activity.IsBlocked {
+		t.Fatal("Expected IsBlocked to be false after good_actor promotion")
+	}
+}

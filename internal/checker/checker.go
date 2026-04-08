@@ -814,15 +814,26 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 
 	// Create the base actor for this entry. This is used for good_actor checks,
 	// pre-checks, and out-of-order buffering logic.
-	actor := store.Actor{IPInfo: entry.IPInfo}
+	// NOTE: VHost must be included to match the actor key used by GetActor() in
+	// checkChainsInternal. Without it, SkipInfo set here would be stored on a
+	// different actor than the one chains look up, causing good_actor skips to
+	// be invisible to chain processing.
+	actor := store.Actor{IPInfo: entry.IPInfo, VHost: entry.VHost}
 	activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
 
 	// 1. First, check if the entry is a good actor. This will set the SkipInfo on the actor's activity.
 	isGood, goodActorRuleName := IsGoodActor(p, entry)
 	if isGood {
-		// Only log the skip message and set the state the first time.
-		if activity.SkipInfo.Type == utils.SkipTypeNone {
+		// Always promote to good_actor status, even if previously blocked.
+		// Without this, an IP that was blocked before being recognized as a
+		// good actor (e.g., due to a temporary file load failure) would remain
+		// in SkipTypeBlocked state, causing PreCheckActivity to skip it as
+		// blocked until the block duration expires — even though the unblock
+		// command was sent to HAProxy.
+		if activity.SkipInfo.Type != utils.SkipTypeGoodActor {
 			activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeGoodActor, Source: p.InternReason(goodActorRuleName)}
+			activity.IsBlocked = false
+			activity.BlockedUntil = time.Time{}
 			websiteCtx := ""
 			if entry.Website != "" {
 				websiteCtx = fmt.Sprintf(" on website '%s'", entry.Website)
