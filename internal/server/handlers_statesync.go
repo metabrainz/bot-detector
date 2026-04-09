@@ -122,6 +122,15 @@ func clusterMergedStateHandler(p Provider) http.HandlerFunc {
 		// Collect and merge states from all nodes
 		merged, nodesQueried, nodesFailed := collectAndMergeStates(p, since)
 
+		// Collect all bad actors (leader's own — peers' are already synced via state sync loop)
+		allBadActors, _ := p.GetAllBadActors()
+		var baList []persistence.BadActorInfo
+		for _, a := range allBadActors {
+			if ba, ok := a.(persistence.BadActorInfo); ok {
+				baList = append(baList, ba)
+			}
+		}
+
 		// Build response
 		response := MergedStateResponse{
 			Version:      StateSyncVersion,
@@ -129,6 +138,7 @@ func clusterMergedStateHandler(p Provider) http.HandlerFunc {
 			NodesQueried: nodesQueried,
 			NodesFailed:  nodesFailed,
 			States:       merged,
+			BadActors:    baList,
 		}
 
 		// Set content type

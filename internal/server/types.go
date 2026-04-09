@@ -139,4 +139,5 @@ type MergedStateResponse struct {
 	NodesQueried []string                       `json:"nodes_queried"`
 	NodesFailed  []string                       `json:"nodes_failed"`
 	States       map[string]persistence.IPState `json:"states"`
+	BadActors    []persistence.BadActorInfo     `json:"bad_actors,omitempty"`
 }
