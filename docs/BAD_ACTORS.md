@@ -163,10 +163,17 @@ On startup, all bad actors are restored to HAProxy with the configured `block_du
 
 ## Cluster Behavior
 
-- Scoring is global across all websites
-- Events are synced across nodes via the existing state sync mechanism
-- Each node promotes independently when the threshold is reached
-- Bad actors are included in the state sync (via the `ips` table with reason "bad-actor")
+- Scoring is per-node — each node scores IPs independently based on its own log stream
+- With IP-hash load balancing, each IP consistently routes to the same node, so scores accumulate correctly on a single node
+- **Bad actors are synced between nodes** via the existing state sync mechanism:
+  - Each node includes its `bad_actors` table in the periodic state sync response
+  - The leader collects bad actors from all peers during its merge cycle
+  - Followers receive bad actors from the leader's merged state
+  - On initial startup, a follower fetches all bad actors from the leader
+- When a bad actor is received from a peer, it is inserted into the local database and blocked on HAProxy (skipped if already known)
+- This ensures bad actors survive node failovers — if a node goes down, the surviving node already knows all bad actors from the failed node
+- Removal via `/ip/{ip}/clear` or `/ip/{ip}/unblock` is cluster-aware and broadcasts to all nodes
+- **Backward compatible:** nodes running older versions without bad actor sync will simply omit the `bad_actors` field; peers will ignore the missing field
 
 ## Config Hot-Reload
 

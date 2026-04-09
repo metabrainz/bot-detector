@@ -264,7 +264,15 @@ Sync 3: "Login-Abuse[main_site] (leader), API-Abuse[api_site] (follower-1)"
       "expire_time": "2026-03-10T10:30:00Z",
       "reason": "API-Rate-Limit[api_site]"
     }
-  }
+  },
+  "bad_actors": [
+    {
+      "ip": "9.8.7.6",
+      "promoted_at": "2026-03-09T08:00:00Z",
+      "total_score": 5.0,
+      "block_count": 5
+    }
+  ]
 }
 ```
 
@@ -295,7 +303,15 @@ Sync 3: "Login-Abuse[main_site] (leader), API-Abuse[api_site] (follower-1)"
       "expire_time": "2026-03-10T11:00:00Z",
       "reason": "Login-Abuse[main_site] (leader), API-Abuse[api_site] (follower-1)"
     }
-  }
+  },
+  "bad_actors": [
+    {
+      "ip": "9.8.7.6",
+      "promoted_at": "2026-03-09T08:00:00Z",
+      "total_score": 5.0,
+      "block_count": 5
+    }
+  ]
 }
 ```
 
@@ -303,6 +319,28 @@ Sync 3: "Login-Abuse[main_site] (leader), API-Abuse[api_site] (follower-1)"
 - If follower is unreachable, leader logs warning and continues with available states
 - `nodes_failed` array lists nodes that couldn't be queried
 - Partial state is still useful (better than nothing)
+
+---
+
+## Bad Actor Sync
+
+Bad actors are included in the state sync protocol alongside IP states. Both the per-node persistence state endpoint and the leader's merged state endpoint include a `bad_actors` array containing all promoted bad actors.
+
+### How It Works
+
+1. Each node includes its local `bad_actors` table in the `GET /api/v1/cluster/internal/persistence/state` response
+2. The leader collects bad actors from all peers during its periodic merge cycle
+3. Followers receive bad actors from the leader's `GET /api/v1/cluster/state/merged` response
+4. When a new bad actor is received, the node inserts it into its local database and issues a block to HAProxy
+5. Already-known bad actors are silently skipped (idempotent)
+
+### Failover Scenario
+
+With IP-hash load balancing, each IP routes to a single node. If that node promotes an IP to bad actor, the promotion is synced to the other node within one sync interval. If the original node goes down, the surviving node already has the bad actor in its database and blocks it immediately when traffic shifts over.
+
+### Backward Compatibility
+
+The `bad_actors` field uses `omitempty` — nodes running older versions without bad actor sync will simply not include it in their response. Peers will decode the response normally and see an empty bad actors list. No errors, no special handling needed.
 
 ---
 
