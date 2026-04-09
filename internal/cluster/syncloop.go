@@ -212,6 +212,7 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 	// Track stats
 	localCount := 0
 	remoteCount := 0
+	remoteBadActorCount := 0
 	nodesSucceeded := 0
 	nodesFailed := 0
 
@@ -267,6 +268,7 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 				}
 			}
 		}
+		remoteBadActorCount += len(nodeBadActors)
 
 		// Merge node state
 		nodeIPCount := 0
@@ -324,8 +326,8 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 		}
 	}
 
-	m.log(logging.LevelInfo, "STATE_SYNC", "Cached merged state: %d IPs (%d blocked + %d unblocked), local: %d, remote: %d, nodes: %d/%d, mode: %s",
-		len(merged), blockedCount, unblockedCount, localCount, remoteCount, nodesSucceeded+1, nodesSucceeded+nodesFailed+1, compressionMode)
+	m.log(logging.LevelInfo, "STATE_SYNC", "Cached merged state: %d IPs (%d blocked + %d unblocked), local: %d, remote: %d, bad_actors: %d, nodes: %d/%d, mode: %s",
+		len(merged), blockedCount, unblockedCount, localCount, remoteCount, remoteBadActorCount, nodesSucceeded+1, nodesSucceeded+nodesFailed+1, compressionMode)
 }
 
 // fetchAndMergeFromLeader fetches merged state from leader and merges with local
@@ -424,8 +426,8 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 		}
 	}
 
-	m.log(logging.LevelInfo, "STATE_SYNC", "Merged from leader: %d IPs (%d blocked + %d unblocked%s), size: %.1f KB, rate: %.1f KB/s, duration: %v, mode: %s",
-		len(states), blockedCount, unblockedCount, deltaStr, metrics.SizeKB, metrics.RateKBps, metrics.Duration.Round(time.Millisecond), modeStr)
+	m.log(logging.LevelInfo, "STATE_SYNC", "Merged from leader: %d IPs (%d blocked + %d unblocked%s), %d bad actors, size: %.1f KB, rate: %.1f KB/s, duration: %v, mode: %s",
+		len(states), blockedCount, unblockedCount, deltaStr, len(peerBadActors), metrics.SizeKB, metrics.RateKBps, metrics.Duration.Round(time.Millisecond), modeStr)
 }
 
 // fetchNodeState fetches state from a specific node
