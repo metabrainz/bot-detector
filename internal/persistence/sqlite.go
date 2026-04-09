@@ -391,11 +391,11 @@ func scanNullUnixTime(n sql.NullInt64) time.Time {
 
 // BadActorInfo represents a bad actor entry.
 type BadActorInfo struct {
-	IP          string
-	PromotedAt  time.Time
-	TotalScore  float64
-	BlockCount  int
-	HistoryJSON string
+	IP          string    `json:"ip"`
+	PromotedAt  time.Time `json:"promoted_at"`
+	TotalScore  float64   `json:"total_score"`
+	BlockCount  int       `json:"block_count"`
+	HistoryJSON string    `json:"history,omitempty"`
 }
 
 // ScoreInfo represents an IP's current score.

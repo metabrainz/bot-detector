@@ -839,3 +839,204 @@ func TestStateSyncManager_StateFieldPreserved(t *testing.T) {
 		t.Errorf("Expected State %v (from longest expiry), got %v", persistence.BlockStateUnblocked, state.State)
 	}
 }
+
+func TestStateSyncManager_LeaderCollectsBadActorsFromFollower(t *testing.T) {
+	// Create follower server that returns bad actors
+	followerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := struct {
+			Version   string                         `json:"version"`
+			States    map[string]persistence.IPState `json:"states"`
+			BadActors []persistence.BadActorInfo     `json:"bad_actors,omitempty"`
+		}{
+			Version: "v1",
+			States:  map[string]persistence.IPState{},
+			BadActors: []persistence.BadActorInfo{
+				{IP: "10.0.0.1", TotalScore: 5.0, BlockCount: 5, PromotedAt: time.Now().Add(-1 * time.Hour)},
+				{IP: "10.0.0.2", TotalScore: 7.0, BlockCount: 7, PromotedAt: time.Now().Add(-30 * time.Minute)},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer followerServer.Close()
+
+	config := &ClusterConfig{
+		Nodes: []NodeConfig{
+			{Name: "leader", Address: "localhost:8080"},
+			{Name: "follower", Address: followerServer.URL[7:]},
+		},
+		Protocol:  "http",
+		StateSync: StateSyncConfig{Enabled: true, Interval: 100 * time.Millisecond, Timeout: 5 * time.Second},
+	}
+
+	var applied []string
+	var mu sync.Mutex
+
+	syncMgr := NewStateSyncManager(config, "leader", "leader", "localhost:8080",
+		testDB(t, nil), &sync.Mutex{},
+		func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+			t.Logf("[%s] "+format, append([]interface{}{tag}, args...)...)
+		},
+	)
+	syncMgr.BadActorApplyFunc = func(ip string, score float64, blockCount int, promotedAt time.Time) error {
+		mu.Lock()
+		applied = append(applied, ip)
+		mu.Unlock()
+		return nil
+	}
+
+	syncMgr.collectAndCacheMergedState()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(applied) != 2 {
+		t.Fatalf("Expected 2 bad actors applied, got %d", len(applied))
+	}
+	if applied[0] != "10.0.0.1" || applied[1] != "10.0.0.2" {
+		t.Errorf("Unexpected bad actors: %v", applied)
+	}
+}
+
+func TestStateSyncManager_FollowerReceivesBadActorsFromLeader(t *testing.T) {
+	promotedAt := time.Now().Add(-1 * time.Hour)
+
+	// Create leader server that returns merged state with bad actors
+	leaderServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := struct {
+			Version   string                         `json:"version"`
+			Timestamp time.Time                      `json:"timestamp"`
+			States    map[string]persistence.IPState `json:"states"`
+			BadActors []persistence.BadActorInfo     `json:"bad_actors,omitempty"`
+		}{
+			Version:   "v1",
+			Timestamp: time.Now(),
+			States:    map[string]persistence.IPState{},
+			BadActors: []persistence.BadActorInfo{
+				{IP: "192.168.1.1", TotalScore: 6.0, BlockCount: 6, PromotedAt: promotedAt},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer leaderServer.Close()
+
+	config := &ClusterConfig{
+		Nodes: []NodeConfig{
+			{Name: "leader", Address: leaderServer.URL[7:]},
+			{Name: "follower", Address: "localhost:9090"},
+		},
+		Protocol:  "http",
+		StateSync: StateSyncConfig{Enabled: true, Interval: 100 * time.Millisecond, Timeout: 5 * time.Second},
+	}
+
+	var appliedIP string
+	var appliedScore float64
+
+	syncMgr := NewStateSyncManager(config, "follower", "follower", "localhost:9090",
+		testDB(t, nil), &sync.Mutex{},
+		func(level logging.LogLevel, tag string, format string, args ...interface{}) {
+			t.Logf("[%s] "+format, append([]interface{}{tag}, args...)...)
+		},
+	)
+	syncMgr.BadActorApplyFunc = func(ip string, score float64, blockCount int, promotedAt time.Time) error {
+		appliedIP = ip
+		appliedScore = score
+		return nil
+	}
+
+	syncMgr.fetchAndMergeFromLeader()
+
+	if appliedIP != "192.168.1.1" {
+		t.Errorf("Expected bad actor 192.168.1.1, got %q", appliedIP)
+	}
+	if appliedScore != 6.0 {
+		t.Errorf("Expected score 6.0, got %.1f", appliedScore)
+	}
+}
+
+func TestStateSyncManager_NoBadActorApplyFunc(t *testing.T) {
+	// Verify no panic when BadActorApplyFunc is nil (backward compat)
+	followerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := struct {
+			Version   string                         `json:"version"`
+			States    map[string]persistence.IPState `json:"states"`
+			BadActors []persistence.BadActorInfo     `json:"bad_actors,omitempty"`
+		}{
+			Version: "v1",
+			States:  map[string]persistence.IPState{},
+			BadActors: []persistence.BadActorInfo{
+				{IP: "10.0.0.1", TotalScore: 5.0, BlockCount: 5, PromotedAt: time.Now()},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer followerServer.Close()
+
+	config := &ClusterConfig{
+		Nodes: []NodeConfig{
+			{Name: "leader", Address: "localhost:8080"},
+			{Name: "follower", Address: followerServer.URL[7:]},
+		},
+		Protocol:  "http",
+		StateSync: StateSyncConfig{Enabled: true, Interval: 100 * time.Millisecond, Timeout: 5 * time.Second},
+	}
+
+	syncMgr := NewStateSyncManager(config, "leader", "leader", "localhost:8080",
+		testDB(t, nil), &sync.Mutex{},
+		func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
+	)
+	// BadActorApplyFunc intentionally left nil
+
+	// Should not panic
+	syncMgr.collectAndCacheMergedState()
+}
+
+func TestStateSyncManager_OldPeerWithoutBadActors(t *testing.T) {
+	// Simulate old peer that doesn't include bad_actors in response
+	followerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := struct {
+			Version string                         `json:"version"`
+			States  map[string]persistence.IPState `json:"states"`
+		}{
+			Version: "v1",
+			States: map[string]persistence.IPState{
+				"1.2.3.4": {Reason: "test", ExpireTime: time.Now().Add(1 * time.Hour)},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer followerServer.Close()
+
+	config := &ClusterConfig{
+		Nodes: []NodeConfig{
+			{Name: "leader", Address: "localhost:8080"},
+			{Name: "follower", Address: followerServer.URL[7:]},
+		},
+		Protocol:  "http",
+		StateSync: StateSyncConfig{Enabled: true, Interval: 100 * time.Millisecond, Timeout: 5 * time.Second},
+	}
+
+	applied := false
+	syncMgr := NewStateSyncManager(config, "leader", "leader", "localhost:8080",
+		testDB(t, nil), &sync.Mutex{},
+		func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
+	)
+	syncMgr.BadActorApplyFunc = func(ip string, score float64, blockCount int, promotedAt time.Time) error {
+		applied = true
+		return nil
+	}
+
+	syncMgr.collectAndCacheMergedState()
+
+	if applied {
+		t.Error("BadActorApplyFunc should not have been called for old peer without bad_actors")
+	}
+
+	// Verify IP states still synced correctly
+	mergedStates, _ := syncMgr.GetMergedStateCache()
+	if _, ok := mergedStates["1.2.3.4"]; !ok {
+		t.Error("Expected IP 1.2.3.4 in merged state")
+	}
+}

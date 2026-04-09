@@ -202,7 +202,7 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 	url := fmt.Sprintf("%s://%s/api/v1/cluster/state/merged", p.Cluster.Protocol, leaderNode.Address)
 	client := &http.Client{Timeout: p.Cluster.StateSync.Timeout}
 
-	states, timestamp, m, err := cluster.FetchMergedState(url, client, p.Cluster.StateSync.Compression)
+	states, peerBadActors, timestamp, m, err := cluster.FetchMergedState(url, client, p.Cluster.StateSync.Compression)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -221,6 +221,11 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 	}
 	unblockedCount := len(states) - blockedCount
 	p.PersistenceMutex.Unlock()
+
+	// Apply bad actors from leader
+	for _, ba := range peerBadActors {
+		_ = p.ApplyBadActorFromPeer(ba.IP, ba.TotalScore, ba.BlockCount, ba.PromotedAt)
+	}
 
 	modeStr := "gz,full"
 	if !m.Compressed {
@@ -1043,6 +1048,9 @@ func start(p *app.Processor) {
 					p.LogFunc,
 				)
 				p.StateSyncManager = syncMgr
+
+				// Wire up bad actor sync
+				syncMgr.BadActorApplyFunc = p.ApplyBadActorFromPeer
 
 				// If we fetched initial state from cluster, set the lastSyncTime
 				// so the first periodic sync is incremental

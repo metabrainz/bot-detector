@@ -376,3 +376,59 @@ func TestBadActor_PersistenceDisabled_NoPanic(t *testing.T) {
 	entry := &app.LogEntry{IPInfo: utils.NewIPInfo("10.0.0.10"), Timestamp: time.Now(), Path: "/"}
 	assert.NotPanics(t, func() { checker.CheckChains(p, entry) })
 }
+
+func TestApplyBadActorFromPeer(t *testing.T) {
+	h := newBAHarness(t, 5.0)
+
+	promotedAt := time.Now().Add(-1 * time.Hour)
+
+	// Apply bad actor from peer
+	err := h.p.ApplyBadActorFromPeer("10.0.0.99", 6.0, 6, promotedAt)
+	require.NoError(t, err)
+
+	// Verify it's in the database
+	isBad, err := persistence.IsBadActor(h.db, "10.0.0.99")
+	require.NoError(t, err)
+	assert.True(t, isBad, "IP should be a bad actor")
+
+	// Verify block was issued
+	h.blockReasonsMu.Lock()
+	assert.Contains(t, h.blockReasons, "bad-actor")
+	h.blockReasonsMu.Unlock()
+
+	// Verify log message
+	h.logsMu.Lock()
+	found := false
+	for _, log := range h.logs {
+		if strings.Contains(log, "10.0.0.99") && strings.Contains(log, "cluster sync") {
+			found = true
+			break
+		}
+	}
+	h.logsMu.Unlock()
+	assert.True(t, found, "Expected cluster sync log message")
+}
+
+func TestApplyBadActorFromPeer_AlreadyExists(t *testing.T) {
+	h := newBAHarness(t, 5.0)
+
+	promotedAt := time.Now().Add(-1 * time.Hour)
+
+	// Promote locally first
+	h.p.PersistenceMutex.Lock()
+	err := persistence.PromoteToBadActor(h.db, "10.0.0.99", 5.0, 5, promotedAt)
+	h.p.PersistenceMutex.Unlock()
+	require.NoError(t, err)
+
+	// Apply same IP from peer — should be a no-op
+	h.blockReasonsMu.Lock()
+	countBefore := len(h.blockReasons)
+	h.blockReasonsMu.Unlock()
+
+	err = h.p.ApplyBadActorFromPeer("10.0.0.99", 6.0, 6, promotedAt)
+	require.NoError(t, err)
+
+	h.blockReasonsMu.Lock()
+	assert.Equal(t, countBefore, len(h.blockReasons), "Should not issue additional block for existing bad actor")
+	h.blockReasonsMu.Unlock()
+}

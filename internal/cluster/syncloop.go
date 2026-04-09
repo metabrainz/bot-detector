@@ -28,6 +28,10 @@ type StateSyncManager struct {
 	mergedStateCache *MergedStateCache
 	lastSyncTime     time.Time // For incremental sync
 	lastSyncMutex    sync.RWMutex
+	// BadActorApplyFunc is called when a new bad actor is received from a peer.
+	// It should insert into the local DB and issue a block to HAProxy.
+	// Set by the application layer after creating the manager.
+	BadActorApplyFunc func(ip string, score float64, blockCount int, promotedAt time.Time) error
 }
 
 // FetchMetrics contains metrics about a state fetch operation
@@ -38,17 +42,18 @@ type FetchMetrics struct {
 	Duration   time.Duration
 }
 
-// FetchMergedState fetches merged state from a URL and returns the states, timestamp, and metrics.
+// FetchMergedState fetches merged state from a URL and returns the states, bad actors, timestamp, and metrics.
 // This is shared between initial cluster fetch and periodic sync.
 func FetchMergedState(url string, client *http.Client, requestCompression bool) (
 	states map[string]persistence.IPState,
+	badActors []persistence.BadActorInfo,
 	timestamp time.Time,
 	metrics FetchMetrics,
 	err error,
 ) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to create request: %w", err)
+		return nil, nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	if requestCompression {
@@ -58,12 +63,12 @@ func FetchMergedState(url string, client *http.Client, requestCompression bool) 
 	startTime := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to fetch: %w", err)
+		return nil, nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to fetch: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, time.Time{}, FetchMetrics{}, fmt.Errorf("server returned status %d", resp.StatusCode)
+		return nil, nil, time.Time{}, FetchMetrics{}, fmt.Errorf("server returned status %d", resp.StatusCode)
 	}
 
 	var reader io.Reader = resp.Body
@@ -71,7 +76,7 @@ func FetchMergedState(url string, client *http.Client, requestCompression bool) 
 	if compressed {
 		gz, err := gzip.NewReader(resp.Body)
 		if err != nil {
-			return nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to create gzip reader: %w", err)
+			return nil, nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to create gzip reader: %w", err)
 		}
 		defer func() { _ = gz.Close() }()
 		reader = gz
@@ -79,7 +84,7 @@ func FetchMergedState(url string, client *http.Client, requestCompression bool) 
 
 	bodyBytes, err := io.ReadAll(reader)
 	if err != nil {
-		return nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to read response: %w", err)
+		return nil, nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to read response: %w", err)
 	}
 	duration := time.Since(startTime)
 
@@ -87,10 +92,11 @@ func FetchMergedState(url string, client *http.Client, requestCompression bool) 
 		Version   string                         `json:"version"`
 		Timestamp time.Time                      `json:"timestamp"`
 		States    map[string]persistence.IPState `json:"states"`
+		BadActors []persistence.BadActorInfo     `json:"bad_actors,omitempty"`
 	}
 
 	if err := json.Unmarshal(bodyBytes, &mergedResp); err != nil {
-		return nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to decode: %w", err)
+		return nil, nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to decode: %w", err)
 	}
 
 	sizeKB := float64(len(bodyBytes)) / 1024.0
@@ -106,7 +112,7 @@ func FetchMergedState(url string, client *http.Client, requestCompression bool) 
 		Duration:   duration,
 	}
 
-	return mergedResp.States, mergedResp.Timestamp, m, nil
+	return mergedResp.States, mergedResp.BadActors, mergedResp.Timestamp, m, nil
 }
 
 // SetLastSyncTime sets the last sync timestamp (used after initial cluster fetch)
@@ -245,13 +251,22 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 			continue
 		}
 
-		nodeState, err := m.fetchNodeState(node)
+		nodeState, nodeBadActors, err := m.fetchNodeState(node)
 		if err != nil {
 			m.log(logging.LevelWarning, "STATE_SYNC", "Failed to fetch state from %s: %v", node.Name, err)
 			nodesFailed++
 			continue
 		}
 		nodesSucceeded++
+
+		// Apply bad actors from peer
+		if m.BadActorApplyFunc != nil {
+			for _, ba := range nodeBadActors {
+				if err := m.BadActorApplyFunc(ba.IP, ba.TotalScore, ba.BlockCount, ba.PromotedAt); err != nil {
+					m.log(logging.LevelWarning, "STATE_SYNC", "Failed to apply bad actor %s from %s: %v", ba.IP, node.Name, err)
+				}
+			}
+		}
 
 		// Merge node state
 		nodeIPCount := 0
@@ -335,10 +350,19 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	}
 
 	// Fetch using shared helper
-	states, responseTimestamp, metrics, err := FetchMergedState(url, m.httpClient, true)
+	states, peerBadActors, responseTimestamp, metrics, err := FetchMergedState(url, m.httpClient, true)
 	if err != nil {
 		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to fetch from leader: %v", err)
 		return
+	}
+
+	// Apply bad actors from leader
+	if m.BadActorApplyFunc != nil {
+		for _, ba := range peerBadActors {
+			if err := m.BadActorApplyFunc(ba.IP, ba.TotalScore, ba.BlockCount, ba.PromotedAt); err != nil {
+				m.log(logging.LevelWarning, "STATE_SYNC", "Failed to apply bad actor %s from leader: %v", ba.IP, err)
+			}
+		}
 	}
 
 	// Update last sync time to the response timestamp (not current time)
@@ -405,7 +429,7 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 }
 
 // fetchNodeState fetches state from a specific node
-func (m *StateSyncManager) fetchNodeState(node NodeConfig) (map[string]persistence.IPState, error) {
+func (m *StateSyncManager) fetchNodeState(node NodeConfig) (map[string]persistence.IPState, []persistence.BadActorInfo, error) {
 	url := fmt.Sprintf("%s://%s/api/v1/cluster/internal/persistence/state", m.config.Protocol, node.Address)
 
 	// Add since parameter for incremental sync
@@ -420,7 +444,7 @@ func (m *StateSyncManager) fetchNodeState(node NodeConfig) (map[string]persisten
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Always request gzip, let server decide
@@ -428,31 +452,32 @@ func (m *StateSyncManager) fetchNodeState(node NodeConfig) (map[string]persisten
 
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
+		return nil, nil, fmt.Errorf("status %d", resp.StatusCode)
 	}
 
 	var reader io.Reader = resp.Body
 	if resp.Header.Get("Content-Encoding") == "gzip" {
 		gz, err := gzip.NewReader(resp.Body)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		defer func() { _ = gz.Close() }()
 		reader = gz
 	}
 
 	var stateResp struct {
-		Version string                         `json:"version"`
-		States  map[string]persistence.IPState `json:"states"`
+		Version   string                         `json:"version"`
+		States    map[string]persistence.IPState `json:"states"`
+		BadActors []persistence.BadActorInfo     `json:"bad_actors,omitempty"`
 	}
 
 	if err := json.NewDecoder(reader).Decode(&stateResp); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Check version compatibility
@@ -471,7 +496,7 @@ func (m *StateSyncManager) fetchNodeState(node NodeConfig) (map[string]persisten
 		}
 	}
 
-	return result, nil
+	return result, stateResp.BadActors, nil
 }
 
 // findLeaderNode finds the leader node in the configuration

@@ -58,11 +58,21 @@ func clusterPersistenceStateHandler(p Provider) http.HandlerFunc {
 		}
 		p.GetPersistenceMutex().Unlock()
 
+		// Collect bad actors
+		badActors, _ := p.GetAllBadActors()
+		var baList []persistence.BadActorInfo
+		for _, a := range badActors {
+			if ba, ok := a.(persistence.BadActorInfo); ok {
+				baList = append(baList, ba)
+			}
+		}
+
 		// Build response
 		response := StateSyncResponse{
 			Version:   StateSyncVersion,
 			Timestamp: time.Now(),
 			States:    states,
+			BadActors: baList,
 		}
 
 		// Set content type

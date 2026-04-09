@@ -483,6 +483,44 @@ func (p *Processor) GetBadActorsThreshold() float64 {
 	return p.Config.BadActors.Threshold
 }
 
+// ApplyBadActorFromPeer inserts a bad actor received from a cluster peer
+// and issues a block to HAProxy. Skips if already a bad actor.
+func (p *Processor) ApplyBadActorFromPeer(ip string, score float64, blockCount int, promotedAt time.Time) error {
+	if !p.PersistenceEnabled || p.DB == nil {
+		return nil
+	}
+
+	already, _ := persistence.IsBadActor(p.DB, ip)
+	if already {
+		return nil
+	}
+
+	p.PersistenceMutex.Lock()
+	err := persistence.PromoteToBadActor(p.DB, ip, score, blockCount, promotedAt)
+	p.PersistenceMutex.Unlock()
+	if err != nil {
+		return err
+	}
+
+	p.LogFunc(logging.LevelCritical, "BAD_ACTOR", "IP %s promoted to bad actor via cluster sync (score=%.1f, blocks=%d)", ip, score, blockCount)
+
+	p.ConfigMutex.RLock()
+	baConfig := p.Config.BadActors
+	p.ConfigMutex.RUnlock()
+
+	if !p.DryRun && p.Blocker != nil {
+		ipInfo := utils.NewIPInfo(ip)
+		_ = p.Blocker.Block(ipInfo, baConfig.BlockDuration, "bad-actor")
+	}
+
+	now := time.Now()
+	p.PersistenceMutex.Lock()
+	_ = persistence.UpsertIPState(p.DB, ip, persistence.BlockStateBlocked, now.Add(baConfig.BlockDuration), "bad-actor", now, now)
+	p.PersistenceMutex.Unlock()
+
+	return nil
+}
+
 func (p *Processor) GetBlockTableNameFallback() string {
 	return p.Config.Blockers.Backends.HAProxy.TableNameFallback
 }
