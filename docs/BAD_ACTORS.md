@@ -78,19 +78,24 @@ Bad actors are **permanent** — they are never automatically cleaned up. They m
 
 ## Removal
 
-Use the existing clear endpoint:
+Use either endpoint:
 
 ```
 DELETE /ip/{ip}/clear
+GET/POST /ip/{ip}/unblock
 ```
 
-This removes the IP from:
+Both remove the IP from:
 - `bad_actors` table
 - `ip_scores` table
-- `ips` table
-- HAProxy stick tables
+- `ips` table (persistence state)
+- In-memory activity store (chain progress)
 
-The endpoint is cluster-aware and broadcasts to all nodes.
+The difference is HAProxy behavior:
+- `/clear` removes the entry entirely from stick tables (slower for large tables)
+- `/unblock` sets `gpc0=0`, entry expires naturally (faster)
+
+Both endpoints are cluster-aware and broadcast to all nodes.
 
 ## API Endpoints
 

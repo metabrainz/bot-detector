@@ -662,6 +662,7 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   HAProxy stick tables: `gpc0` set to 0 (entry remains, expires naturally)
     *   Persistence state: Unblock event written to journal with reason "API unblock"
     *   Activity store: IP removed from in-memory chain progress
+    *   Bad actor status: Removed from `bad_actors` and `ip_scores` tables (same as `/clear`)
 *   **Performance:**
     *   **Fast:** Only updates `gpc0` value, doesn't remove entry from table
     *   Recommended for day-to-day unblocking operations
