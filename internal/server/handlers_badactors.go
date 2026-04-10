@@ -113,3 +113,66 @@ func badActorsDeleteByReasonHandler(p Provider) http.HandlerFunc {
 		json.NewEncoder(w).Encode(resp) //nolint:errcheck
 	}
 }
+
+// badActorsStatsHandler returns aggregated statistics about bad actors.
+// GET /api/v1/bad-actors/stats
+func badActorsStatsHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actors, err := p.GetAllBadActors()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		type histEntry struct {
+			Reason string `json:"r"`
+		}
+
+		byReason := make(map[string]int)
+		byDay := make(map[string]int)
+		var totalScore float64
+		var totalBlocks int
+
+		for _, a := range actors {
+			ba, ok := a.(persistence.BadActorInfo)
+			if !ok {
+				continue
+			}
+			totalScore += ba.TotalScore
+			totalBlocks += ba.BlockCount
+			byDay[ba.PromotedAt.Format("2006-01-02")]++
+
+			if ba.HistoryJSON == "" {
+				continue
+			}
+			var history []histEntry
+			if err := json.Unmarshal([]byte(ba.HistoryJSON), &history); err != nil {
+				continue
+			}
+			seen := make(map[string]bool)
+			for _, h := range history {
+				if h.Reason != "" && !seen[h.Reason] {
+					seen[h.Reason] = true
+					byReason[h.Reason]++
+				}
+			}
+		}
+
+		total := len(actors)
+		var avgScore float64
+		var avgBlocks float64
+		if total > 0 {
+			avgScore = totalScore / float64(total)
+			avgBlocks = float64(totalBlocks) / float64(total)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+			"total":           total,
+			"avg_score":       avgScore,
+			"avg_block_count": avgBlocks,
+			"by_reason":       byReason,
+			"by_day":          byDay,
+		})
+	}
+}

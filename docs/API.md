@@ -129,6 +129,35 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
 *   **Description:** Returns all bad actor IPs as plain text, one per line. Useful for integration with external firewalls, blocklists, or other security tools.
 *   **Role:** `api`
 
+### `GET /api/v1/bad-actors/stats`
+
+*   **Method:** `GET`
+*   **Content-Type:** `application/json`
+*   **Description:** Returns aggregated statistics about bad actors: total count, average score and block count, number of distinct IPs per reason (chain name), and promotions per day. Useful for identifying overzealous chains or spotting spikes in bad actor promotions.
+*   **Role:** `api`
+*   **Response Format:**
+    ```json
+    {
+      "total": 42,
+      "avg_score": 6.3,
+      "avg_block_count": 8,
+      "by_reason": {
+        "aggressive-scraper@example.com": 15,
+        "rate-limit-api@example.com": 10,
+        "SQL-Injection": 17
+      },
+      "by_day": {
+        "2026-04-08": 5,
+        "2026-04-09": 12,
+        "2026-04-10": 25
+      }
+    }
+    ```
+*   **Notes:**
+    *   `by_reason` counts distinct IPs per reason — an IP with multiple block events for the same reason is counted once.
+    *   An IP can appear under multiple reasons if it triggered different chains.
+    *   `by_day` is keyed by the promotion date (not block date).
+
 ### `DELETE /api/v1/bad-actors?reason=<reason>[&unblock]`
 
 *   **Method:** `DELETE`
