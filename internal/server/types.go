@@ -120,6 +120,10 @@ type Provider interface {
 	// GetAllBadActors returns all bad actors.
 	GetAllBadActors() ([]interface{}, error)
 
+	// RemoveBadActorsByReason removes bad actors whose history contains the given reason.
+	// Returns the list of removed IPs.
+	RemoveBadActorsByReason(reason string) ([]string, error)
+
 	// GetBadActorsThreshold returns the configured bad actor threshold (0 if disabled).
 	GetBadActorsThreshold() float64
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -541,6 +542,51 @@ func RemoveBadActor(db *sql.DB, ip string) error {
 		return fmt.Errorf("failed to reset score: %w", err)
 	}
 	return nil
+}
+
+// RemoveBadActorsByReason removes bad actors whose history contains the given reason substring.
+// Returns the list of IPs that were removed.
+func RemoveBadActorsByReason(db *sql.DB, reason string) ([]string, error) {
+	rows, err := db.Query("SELECT ip, history_json FROM bad_actors")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query bad actors: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var toRemove []string
+	for rows.Next() {
+		var ip string
+		var histJSON sql.NullString
+		if err := rows.Scan(&ip, &histJSON); err != nil {
+			continue
+		}
+		if !histJSON.Valid {
+			continue
+		}
+		// Parse history entries and check reason field
+		var history []struct {
+			Reason string `json:"r"`
+		}
+		if err := json.Unmarshal([]byte(histJSON.String), &history); err != nil {
+			continue
+		}
+		for _, h := range history {
+			if strings.Contains(h.Reason, reason) {
+				toRemove = append(toRemove, ip)
+				break
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate bad actors: %w", err)
+	}
+
+	for _, ip := range toRemove {
+		if err := RemoveBadActor(db, ip); err != nil {
+			return toRemove, fmt.Errorf("failed to remove bad actor %s: %w", ip, err)
+		}
+	}
+	return toRemove, nil
 }
 
 // CleanupLowScores removes old low-score entries from ip_scores.

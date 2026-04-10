@@ -910,50 +910,11 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 		}
 
 		// Leader: unblock locally and broadcast to followers
-		blockerInterface := p.GetBlocker()
-		if blockerInterface == nil {
-			http.Error(w, "Blocker not available", http.StatusServiceUnavailable)
+		if err := unblockIP(p, canonical); err != nil {
+			p.Log(logging.LevelError, "API", "Failed to unblock IP %s: %v", canonical, err)
+			http.Error(w, fmt.Sprintf("Failed to unblock IP: %v", err), http.StatusInternalServerError)
 			return
 		}
-
-		blocker, ok := blockerInterface.(blocker.Blocker)
-		if !ok {
-			http.Error(w, "Blocker interface error", http.StatusInternalServerError)
-			return
-		}
-
-		ipInfo := utils.NewIPInfo(canonical)
-
-		// Unblock directly (bypass rate-limited queue for immediate effect)
-		type directUnblocker interface {
-			UnblockDirect(ipInfo utils.IPInfo, reason string) error
-		}
-		var unblockErr error
-		if du, ok := blockerInterface.(directUnblocker); ok {
-			unblockErr = du.UnblockDirect(ipInfo, "API unblock")
-		} else {
-			unblockErr = blocker.Unblock(ipInfo, "API unblock")
-		}
-		if unblockErr != nil {
-			p.Log(logging.LevelError, "API", "Failed to unblock IP %s: %v", canonical, unblockErr)
-			http.Error(w, fmt.Sprintf("Failed to unblock IP: %v", unblockErr), http.StatusInternalServerError)
-			return
-		}
-
-		// Remove from persistence (writes unblock event to journal)
-		if err := p.RemoveFromPersistence(canonical); err != nil {
-			p.Log(logging.LevelError, "API", "Failed to update persistence for IP %s: %v", canonical, err)
-		}
-
-		// Clear from ActivityStore
-		clearIPFromActivityStore(p, canonical)
-
-		// Broadcast to followers
-		if p.GetNodeRole() == "leader" {
-			go broadcastUnblockToFollowers(p, canonical)
-		}
-
-		p.Log(logging.LevelInfo, "API", "IP %s unblocked via API", canonical)
 
 		// If GET request, show status after unblocking
 		if r.Method == "GET" {
@@ -1308,6 +1269,48 @@ func broadcastUnblockToFollowers(p Provider, ip string) {
 }
 
 // clearIPFromActivityStore removes all actors with the given IP from ActivityStore
+// unblockIP performs the core unblock logic for a single IP: HAProxy unblock, persistence removal,
+// activity store cleanup, and follower broadcast. Returns an error if the HAProxy unblock fails.
+func unblockIP(p Provider, canonical string) error {
+	blockerInterface := p.GetBlocker()
+	if blockerInterface == nil {
+		return fmt.Errorf("blocker not available")
+	}
+
+	b, ok := blockerInterface.(blocker.Blocker)
+	if !ok {
+		return fmt.Errorf("blocker interface error")
+	}
+
+	ipInfo := utils.NewIPInfo(canonical)
+
+	type directUnblocker interface {
+		UnblockDirect(ipInfo utils.IPInfo, reason string) error
+	}
+	var unblockErr error
+	if du, ok := blockerInterface.(directUnblocker); ok {
+		unblockErr = du.UnblockDirect(ipInfo, "API unblock")
+	} else {
+		unblockErr = b.Unblock(ipInfo, "API unblock")
+	}
+	if unblockErr != nil {
+		return unblockErr
+	}
+
+	if err := p.RemoveFromPersistence(canonical); err != nil {
+		p.Log(logging.LevelError, "API", "Failed to update persistence for IP %s: %v", canonical, err)
+	}
+
+	clearIPFromActivityStore(p, canonical)
+
+	if p.GetNodeRole() == "leader" {
+		go broadcastUnblockToFollowers(p, canonical)
+	}
+
+	p.Log(logging.LevelInfo, "API", "IP %s unblocked via API", canonical)
+	return nil
+}
+
 func clearIPFromActivityStore(p Provider, ip string) {
 	p.GetActivityMutex().Lock()
 	defer p.GetActivityMutex().Unlock()

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"bot-detector/internal/logging"
 	"bot-detector/internal/persistence"
 )
 
@@ -63,5 +64,52 @@ func badActorsExportHandler(p Provider) http.HandlerFunc {
 				fmt.Fprintln(w, ba.IP) //nolint:errcheck
 			}
 		}
+	}
+}
+
+// badActorsDeleteByReasonHandler removes bad actors whose history contains the given reason.
+// DELETE /api/v1/bad-actors?reason=chainName&unblock
+func badActorsDeleteByReasonHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		reason := r.URL.Query().Get("reason")
+		if reason == "" {
+			http.Error(w, "reason query parameter is required", http.StatusBadRequest)
+			return
+		}
+
+		removed, err := p.RemoveBadActorsByReason(reason)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// If &unblock is present, also unblock the removed IPs from HAProxy
+		var unblocked []string
+		var unblockErrors []string
+		if _, ok := r.URL.Query()["unblock"]; ok {
+			for _, ip := range removed {
+				if err := unblockIP(p, ip); err != nil {
+					p.Log(logging.LevelError, "API", "Failed to unblock bad actor %s: %v", ip, err)
+					unblockErrors = append(unblockErrors, ip)
+				} else {
+					unblocked = append(unblocked, ip)
+				}
+			}
+		}
+
+		resp := map[string]interface{}{
+			"reason":  reason,
+			"removed": len(removed),
+			"ips":     removed,
+		}
+		if _, ok := r.URL.Query()["unblock"]; ok {
+			resp["unblocked"] = len(unblocked)
+			if len(unblockErrors) > 0 {
+				resp["unblock_errors"] = unblockErrors
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp) //nolint:errcheck
 	}
 }

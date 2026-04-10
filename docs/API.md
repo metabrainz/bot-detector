@@ -129,6 +129,70 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
 *   **Description:** Returns all bad actor IPs as plain text, one per line. Useful for integration with external firewalls, blocklists, or other security tools.
 *   **Role:** `api`
 
+### `DELETE /api/v1/bad-actors?reason=<reason>[&unblock]`
+
+*   **Method:** `DELETE`
+*   **Content-Type:** `application/json`
+*   **Description:** Removes all bad actors whose block history contains the given reason substring. This is useful when a chain was overzealous and has been modified or removed — IPs that were promoted to bad actor status because of that chain can be cleared in bulk. The match is performed against the `"r"` field in each bad actor's history JSON. Both the bad actor entry and its accumulated score are removed.
+*   **Role:** `api`
+*   **Parameters:**
+    *   `reason` (query, required) - Substring to match against chain reasons in the bad actor history. Typically a chain name (e.g., `rate-limit-api`) or a vhost-qualified reason (e.g., `rate-limit-api@example.com`).
+    *   `unblock` (query, optional, no value) - If present, also unblocks the removed IPs from HAProxy (sets `gpc0=0`), clears persistence state, and removes from the activity store. In cluster mode, the unblock is broadcast to followers.
+*   **Response Format:**
+    ```json
+    {
+      "reason": "rate-limit-api",
+      "removed": 3,
+      "ips": ["1.2.3.4", "5.6.7.8", "9.10.11.12"]
+    }
+    ```
+*   **Response Format (with `&unblock`):**
+    ```json
+    {
+      "reason": "rate-limit-api",
+      "removed": 3,
+      "ips": ["1.2.3.4", "5.6.7.8", "9.10.11.12"],
+      "unblocked": 3
+    }
+    ```
+*   **Response Format (with `&unblock`, partial failure):**
+    ```json
+    {
+      "reason": "rate-limit-api",
+      "removed": 3,
+      "ips": ["1.2.3.4", "5.6.7.8", "9.10.11.12"],
+      "unblocked": 2,
+      "unblock_errors": ["9.10.11.12"]
+    }
+    ```
+*   **Error Response (400 Bad Request):**
+    ```
+    reason query parameter is required
+    ```
+*   **Notes:**
+    *   The match is a **substring match** — `reason=rate-limit` will match `rate-limit-api`, `rate-limit-static`, etc. Use the full chain name for precision.
+    *   In multi-website mode, reasons include the vhost or website suffix (e.g., `chainName@vhost` or `chainName[website]`). You can match on just the chain name to clear across all websites, or include the suffix to target a specific website.
+    *   Without `&unblock`, this only removes the bad actor record and score from the database. The IPs may still be actively blocked in HAProxy until their block duration expires.
+    *   With `&unblock`, each removed IP is also unblocked from HAProxy (sets `gpc0=0`), cleared from persistence, and removed from the activity store. In cluster mode, the unblock is broadcast to all followers.
+*   **Usage Examples:**
+    ```bash
+    # Remove all bad actors promoted by the "aggressive-scraper" chain
+    curl -X DELETE 'http://localhost:8080/api/v1/bad-actors?reason=aggressive-scraper'
+
+    # Remove and unblock from HAProxy in one call
+    curl -X DELETE 'http://localhost:8080/api/v1/bad-actors?reason=aggressive-scraper&unblock'
+
+    # Remove bad actors from a specific website
+    curl -X DELETE 'http://localhost:8080/api/v1/bad-actors?reason=aggressive-scraper@example.com'
+
+    # Preview which bad actors would match (check history first)
+    curl -s http://localhost:8080/api/v1/bad-actors | jq '.[].history' 
+    ```
+*   **Responses:**
+    *   `200 OK`: Successfully processed the request (even if no bad actors matched).
+    *   `400 Bad Request`: Missing `reason` query parameter.
+    *   `500 Internal Server Error`: Database error during removal.
+
 See [BAD_ACTORS.md](BAD_ACTORS.md) for full documentation of the bad actors feature, including configuration, scoring, and removal.
 
 ## Cluster Endpoints

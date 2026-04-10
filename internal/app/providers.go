@@ -474,6 +474,15 @@ func (p *Processor) GetAllBadActors() ([]interface{}, error) {
 	return result, nil
 }
 
+func (p *Processor) RemoveBadActorsByReason(reason string) ([]string, error) {
+	if !p.PersistenceEnabled {
+		return nil, nil
+	}
+	p.PersistenceMutex.Lock()
+	defer p.PersistenceMutex.Unlock()
+	return persistence.RemoveBadActorsByReason(p.DB, reason)
+}
+
 func (p *Processor) GetBadActorsThreshold() float64 {
 	p.ConfigMutex.RLock()
 	defer p.ConfigMutex.RUnlock()
