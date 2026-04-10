@@ -118,10 +118,10 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 
 	// Help endpoint (available on all listeners)
 	mux.HandleFunc("GET /help", helpHandler("", false))
+	mux.HandleFunc("GET /", helpHandler("", false))
 
 	// Metrics endpoints (role=metrics)
 	if shouldServeEndpoint(allConfigs, currentConfig, RoleMetrics) {
-		mux.HandleFunc("GET /", rootHandler(p))
 		mux.HandleFunc("GET /stats", rootHandler(p))
 		mux.HandleFunc("GET /stats/steps", stepsHandler(p))
 		mux.HandleFunc("GET /stats/websites", websitesHandler(p))

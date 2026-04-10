@@ -33,7 +33,7 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
 *   **Description:** Lists API endpoints as JSON. Each entry includes `method`, `path`, `description`, `content_type`, and `role`.
 *   **Role:** `api`
 
-### `/` or `/stats`
+### `/stats`
 
 *   **Method:** `GET`
 *   **Content-Type:** `text/plain; charset=utf-8`

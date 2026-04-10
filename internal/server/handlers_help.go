@@ -20,8 +20,7 @@ var allEndpoints = []endpoint{
 	{"GET", "/api/v1/help", "List API endpoints (JSON)", "application/json", "api"},
 
 	// Metrics
-	{"GET", "/", "Metrics dashboard", "text/plain", "metrics"},
-	{"GET", "/stats", "Metrics dashboard (alias)", "text/plain", "metrics"},
+	{"GET", "/stats", "Metrics dashboard", "text/plain", "metrics"},
 	{"GET", "/stats/steps", "Step execution counts", "text/plain", "metrics"},
 	{"GET", "/stats/websites", "Multi-website statistics", "text/plain", "metrics"},
 

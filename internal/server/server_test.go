@@ -199,7 +199,7 @@ func TestServer_StartAndShutdown(t *testing.T) {
 	addr := listener.Addr().String()
 	_ = listener.Close() // Close it immediately; the server will re-bind it.
 
-	expected_string := "TEST STATS REPORT"
+	expected_string := "/help"
 	mockProvider := newMockProvider(addr, expected_string)
 
 	var wg sync.WaitGroup
