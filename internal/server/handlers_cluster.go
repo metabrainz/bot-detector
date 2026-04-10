@@ -236,23 +236,3 @@ func clusterMetricsTextHandler(p Provider) http.HandlerFunc {
 		fmt.Fprintf(w, "actors_cleaned: %d\n", snapshot.ActorStats.ActorsCleaned)          //nolint:errcheck
 	}
 }
-
-// clusterMetricsAggregateTextHandler returns aggregated metrics as indented JSON text.
-// GET /cluster/metrics/aggregate
-func clusterMetricsAggregateTextHandler(p Provider) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		aggregated := p.GetAggregatedMetrics()
-		if aggregated == nil {
-			jsonError(w, "Aggregated metrics only available on leader nodes", http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		data, err := json.MarshalIndent(aggregated, "", "  ")
-		if err != nil {
-			jsonError(w, "Failed to format metrics", http.StatusInternalServerError)
-			return
-		}
-		w.Write(data)         //nolint:errcheck
-		w.Write([]byte{'\n'}) //nolint:errcheck
-	}
-}

@@ -42,7 +42,7 @@ var allEndpoints = []endpoint{
 	// Cluster
 	{"GET", "/cluster/status", "Node cluster status", "text/plain", "cluster"},
 	{"GET", "/cluster/metrics", "Node metrics summary", "text/plain", "cluster"},
-	{"GET", "/cluster/metrics/aggregate", "Cluster-wide aggregated metrics (leader only)", "text/plain", "cluster"},
+	{"GET", "/cluster/metrics/aggregate", "Cluster-wide aggregated metrics (leader only)", "application/json", "cluster"},
 	{"GET", "/api/v1/cluster/status", "Node cluster status", "application/json", "cluster"},
 	{"GET", "/api/v1/cluster/metrics", "Node metrics snapshot", "application/json", "cluster"},
 	{"GET", "/api/v1/cluster/metrics/aggregate", "Cluster-wide aggregated metrics (leader only)", "application/json", "cluster"},

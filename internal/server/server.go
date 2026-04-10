@@ -150,7 +150,7 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 	if shouldServeEndpoint(allConfigs, currentConfig, RoleCluster) {
 		mux.HandleFunc("GET /cluster/status", clusterStatusTextHandler(p))
 		mux.HandleFunc("GET /cluster/metrics", clusterMetricsTextHandler(p))
-		mux.HandleFunc("GET /cluster/metrics/aggregate", clusterMetricsAggregateTextHandler(p))
+		mux.HandleFunc("GET /cluster/metrics/aggregate", clusterMetricsAggregateHandler(p))
 		mux.HandleFunc("GET /api/v1/cluster/status", clusterStatusHandler(p))
 		mux.HandleFunc("GET /api/v1/cluster/metrics", clusterMetricsHandler(p))
 		mux.HandleFunc("GET /api/v1/cluster/metrics/aggregate", clusterMetricsAggregateHandler(p))
