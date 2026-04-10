@@ -862,6 +862,46 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
     *   `503 Service Unavailable`: Blocker is not available.
 
+### `POST /api/v1/blocks/unblock?reason=<reason>` (Cluster-Aware)
+
+*   **Method:** `POST`
+*   **Content-Type:** `application/json`
+*   **Description:** Unblocks all IPs currently blocked with a reason matching the given substring. Queries the persistence database for blocked IPs whose reason contains the substring, then unblocks each one from HAProxy. Useful for bulk-unblocking after a chain is modified or removed.
+*   **Role:** `api`
+*   **Parameters:**
+    *   `reason` (query, required) - Substring to match against block reasons. Typically a chain name (e.g., `Bad-User-Agent@musicbrainz.org`).
+*   **Cluster Behavior:**
+    *   **Follower nodes:** Forward the request to the leader.
+    *   **Leader node:** Query local persistence, unblock each IP (broadcasts to followers).
+    *   **Standalone node:** Query and unblock locally.
+*   **Response Format:**
+    ```json
+    {
+      "reason": "Bad-User-Agent@musicbrainz.org",
+      "matched": 150,
+      "unblocked": 148
+    }
+    ```
+*   **Response Format (partial failure):**
+    ```json
+    {
+      "reason": "Bad-User-Agent@musicbrainz.org",
+      "matched": 150,
+      "unblocked": 148,
+      "errors": ["1.2.3.4", "5.6.7.8"]
+    }
+    ```
+*   **Notes:**
+    *   Only affects IPs currently in `blocked` state with a non-expired block. Already-expired blocks are not included.
+    *   The reason match is a **substring match** — use the full chain name for precision.
+    *   For bad actors (permanent blocks), use `DELETE /api/v1/bad-actors?reason=...&unblock` instead.
+    *   With many matched IPs, the unblock commands go through the rate-limited queue. Ensure `commands_per_second` is high enough.
+*   **Responses:**
+    *   `200 OK`: Successfully processed (even if no IPs matched).
+    *   `400 Bad Request`: Missing `reason` query parameter.
+    *   `500 Internal Server Error`: Database error.
+    *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
+
 
 ### `/api/v1/cluster/internal/ip/{ip}` (Internal Use)
 

@@ -124,6 +124,9 @@ type Provider interface {
 	// Returns the list of removed IPs.
 	RemoveBadActorsByReason(reason string) ([]string, error)
 
+	// GetBlockedIPsByReason returns IPs currently blocked with a reason containing the given substring.
+	GetBlockedIPsByReason(reason string) ([]string, error)
+
 	// GetBadActorsThreshold returns the configured bad actor threshold (0 if disabled).
 	GetBadActorsThreshold() float64
 }

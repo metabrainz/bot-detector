@@ -1035,6 +1035,61 @@ func apiUnblockIPHandler(p Provider) http.HandlerFunc {
 	}
 }
 
+// unblockByReasonHandler unblocks all IPs currently blocked with a matching reason.
+// POST /api/v1/blocks/unblock?reason=chainName (cluster-aware)
+func unblockByReasonHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		reason := r.URL.Query().Get("reason")
+		if reason == "" {
+			jsonError(w, "reason query parameter is required", http.StatusBadRequest)
+			return
+		}
+
+		// Follower: forward to leader
+		if p.GetNodeRole() == "follower" {
+			resp, err := forwardToLeader(p, "POST", r.URL.RequestURI(), nil)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+
+		ips, err := p.GetBlockedIPsByReason(reason)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		var unblocked []string
+		var errors []string
+		for _, ip := range ips {
+			if err := unblockIP(p, ip); err != nil {
+				p.Log(logging.LevelError, "API", "Failed to unblock %s: %v", ip, err)
+				errors = append(errors, ip)
+			} else {
+				unblocked = append(unblocked, ip)
+			}
+		}
+
+		resp := map[string]interface{}{
+			"reason":    reason,
+			"matched":   len(ips),
+			"unblocked": len(unblocked),
+		}
+		if len(errors) > 0 {
+			resp["errors"] = errors
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	}
+}
+
 // formatDuration formats a duration in human-readable format (weeks, days, hours, minutes, seconds)
 func formatDuration(d time.Duration) string {
 	if d == 0 {

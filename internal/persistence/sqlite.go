@@ -705,6 +705,29 @@ func GetBlockedIPs(db *sql.DB, now time.Time) (map[string]IPState, error) {
 	return scanIPStates(rows)
 }
 
+// GetBlockedIPsByReason returns IPs currently blocked with a reason containing the given substring.
+func GetBlockedIPsByReason(db *sql.DB, reason string, now time.Time) ([]string, error) {
+	rows, err := db.Query(`
+		SELECT i.ip FROM ips i
+		LEFT JOIN reasons r ON r.id = i.reason_id
+		WHERE i.state = 'blocked' AND i.expire_time > ? AND r.reason LIKE '%' || ? || '%'`,
+		timeToUnix(now), reason)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query blocked IPs by reason: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ips []string
+	for rows.Next() {
+		var ip string
+		if err := rows.Scan(&ip); err != nil {
+			continue
+		}
+		ips = append(ips, ip)
+	}
+	return ips, rows.Err()
+}
+
 // InsertEvent records a block or unblock event.
 func InsertEvent(db *sql.DB, timestamp time.Time, eventType EventType, ip string, reason string, duration time.Duration, nodeName string) error {
 	reasonID, err := GetOrCreateReasonID(db, reason)

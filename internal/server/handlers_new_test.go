@@ -242,3 +242,34 @@ func containsStr(s, substr string) bool {
 	}
 	return false
 }
+
+func TestUnblockByReasonHandler_MissingReason(t *testing.T) {
+	p := newBadActorsProvider(nil)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/v1/blocks/unblock", nil)
+	unblockByReasonHandler(p).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400, got %d", rr.Code)
+	}
+}
+
+func TestUnblockByReasonHandler_NoMatches(t *testing.T) {
+	p := newBadActorsProvider(nil)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/v1/blocks/unblock?reason=nonexistent", nil)
+	unblockByReasonHandler(p).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", rr.Code)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("Invalid JSON: %v", err)
+	}
+	if result["matched"] != float64(0) {
+		t.Errorf("Expected matched=0, got %v", result["matched"])
+	}
+}

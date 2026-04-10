@@ -483,6 +483,15 @@ func (p *Processor) RemoveBadActorsByReason(reason string) ([]string, error) {
 	return persistence.RemoveBadActorsByReason(p.DB, reason)
 }
 
+func (p *Processor) GetBlockedIPsByReason(reason string) ([]string, error) {
+	if !p.PersistenceEnabled {
+		return nil, nil
+	}
+	p.PersistenceMutex.Lock()
+	defer p.PersistenceMutex.Unlock()
+	return persistence.GetBlockedIPsByReason(p.DB, reason, p.NowFunc())
+}
+
 func (p *Processor) GetBadActorsThreshold() float64 {
 	p.ConfigMutex.RLock()
 	defer p.ConfigMutex.RUnlock()
