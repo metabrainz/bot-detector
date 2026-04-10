@@ -20,6 +20,19 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
 
 ## Endpoints
 
+### `/help`
+
+*   **Method:** `GET`
+*   **Content-Type:** `text/plain; charset=utf-8`
+*   **Description:** Lists all available endpoints in a human-readable table with method, path, content type, and description. Available on all listeners regardless of role configuration.
+
+### `/api/v1/help`
+
+*   **Method:** `GET`
+*   **Content-Type:** `application/json`
+*   **Description:** Lists API endpoints as JSON. Each entry includes `method`, `path`, `description`, `content_type`, and `role`.
+*   **Role:** `api`
+
 ### `/` or `/stats`
 
 *   **Method:** `GET`

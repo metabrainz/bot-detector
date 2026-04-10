@@ -116,6 +116,9 @@ func convertToListenConfigSlice(v interface{}) []ListenConfig {
 func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentConfig ListenConfig) http.Handler {
 	mux := http.NewServeMux()
 
+	// Help endpoint (available on all listeners)
+	mux.HandleFunc("GET /help", helpHandler("", false))
+
 	// Metrics endpoints (role=metrics)
 	if shouldServeEndpoint(allConfigs, currentConfig, RoleMetrics) {
 		mux.HandleFunc("/", rootHandler(p))
@@ -136,6 +139,7 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("GET /api/v1/bad-actors/export", badActorsExportHandler(p))
 		mux.HandleFunc("GET /api/v1/bad-actors/stats", badActorsStatsHandler(p))
 		mux.HandleFunc("DELETE /api/v1/bad-actors", badActorsDeleteByReasonHandler(p))
+		mux.HandleFunc("GET /api/v1/help", helpHandler("api", true))
 	}
 
 	// Cluster endpoints (role=cluster)
