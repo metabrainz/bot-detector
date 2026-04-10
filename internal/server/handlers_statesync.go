@@ -32,7 +32,7 @@ func clusterPersistenceStateHandler(p Provider) http.HandlerFunc {
 			var err error
 			since, err = time.Parse(time.RFC3339, sinceStr)
 			if err != nil {
-				http.Error(w, "Invalid 'since' timestamp format", http.StatusBadRequest)
+				jsonError(w, "Invalid 'since' timestamp format", http.StatusBadRequest)
 				return
 			}
 			incremental = true
@@ -103,7 +103,7 @@ func clusterMergedStateHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Only leader can provide merged state
 		if p.GetNodeRole() != "leader" {
-			http.Error(w, "Only leader provides merged state", http.StatusForbidden)
+			jsonError(w, "Only leader provides merged state", http.StatusForbidden)
 			return
 		}
 
@@ -114,7 +114,7 @@ func clusterMergedStateHandler(p Provider) http.HandlerFunc {
 			var err error
 			since, err = time.Parse(time.RFC3339, sinceStr)
 			if err != nil {
-				http.Error(w, "Invalid 'since' timestamp format", http.StatusBadRequest)
+				jsonError(w, "Invalid 'since' timestamp format", http.StatusBadRequest)
 				return
 			}
 		}

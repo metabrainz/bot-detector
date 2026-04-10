@@ -22,14 +22,14 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
 		if ipStr == "" {
-			http.Error(w, "IP address required", http.StatusBadRequest)
+			jsonError(w, "IP address required", http.StatusBadRequest)
 			return
 		}
 
 		// Canonicalize IP
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
-			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			jsonError(w, "Invalid IP address", http.StatusBadRequest)
 			return
 		}
 		canonical := ip.String()
@@ -40,7 +40,7 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 			resp, err := forwardToLeader(p, "GET", path, nil)
 			if err != nil {
 				p.Log(logging.LevelError, "IP_LOOKUP", "Failed to forward to leader: %v", err)
-				http.Error(w, err.Error(), http.StatusBadGateway)
+				jsonError(w, err.Error(), http.StatusBadGateway)
 				return
 			}
 			defer func() { _ = resp.Body.Close() }()
@@ -752,14 +752,14 @@ func clearIPHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
 		if ipStr == "" {
-			http.Error(w, "IP address required", http.StatusBadRequest)
+			jsonError(w, "IP address required", http.StatusBadRequest)
 			return
 		}
 
 		// Canonicalize IP
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
-			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			jsonError(w, "Invalid IP address", http.StatusBadRequest)
 			return
 		}
 		canonical := ip.String()
@@ -770,7 +770,7 @@ func clearIPHandler(p Provider) http.HandlerFunc {
 			resp, err := forwardToLeader(p, "DELETE", path, nil)
 			if err != nil {
 				p.Log(logging.LevelError, "API", "Failed to forward clear request to leader: %v", err)
-				http.Error(w, err.Error(), http.StatusBadGateway)
+				jsonError(w, err.Error(), http.StatusBadGateway)
 				return
 			}
 			defer func() { _ = resp.Body.Close() }()
@@ -785,14 +785,14 @@ func clearIPHandler(p Provider) http.HandlerFunc {
 		// Leader: clear locally and broadcast to followers
 		blockerInterface := p.GetBlocker()
 		if blockerInterface == nil {
-			http.Error(w, "Blocker not available", http.StatusServiceUnavailable)
+			jsonError(w, "Blocker not available", http.StatusServiceUnavailable)
 			return
 		}
 
 		// Type assert to blocker.Blocker interface
 		blocker, ok := blockerInterface.(blocker.Blocker)
 		if !ok {
-			http.Error(w, "Blocker interface error", http.StatusInternalServerError)
+			jsonError(w, "Blocker interface error", http.StatusInternalServerError)
 			return
 		}
 
@@ -803,7 +803,7 @@ func clearIPHandler(p Provider) http.HandlerFunc {
 		foundInfo, err := blocker.ClearIP(ipInfo)
 		if err != nil {
 			p.Log(logging.LevelError, "API", "Failed to clear IP %s: %v", canonical, err)
-			http.Error(w, fmt.Sprintf("Failed to clear IP: %v", err), http.StatusInternalServerError)
+			jsonError(w, fmt.Sprintf("Failed to clear IP: %v", err), http.StatusInternalServerError)
 			return
 		}
 
@@ -880,14 +880,14 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
 		if ipStr == "" {
-			http.Error(w, "IP address required", http.StatusBadRequest)
+			jsonError(w, "IP address required", http.StatusBadRequest)
 			return
 		}
 
 		// Canonicalize IP
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
-			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			jsonError(w, "Invalid IP address", http.StatusBadRequest)
 			return
 		}
 		canonical := ip.String()
@@ -898,7 +898,7 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 			resp, err := forwardToLeader(p, r.Method, path, nil)
 			if err != nil {
 				p.Log(logging.LevelError, "API", "Failed to forward unblock request to leader: %v", err)
-				http.Error(w, err.Error(), http.StatusBadGateway)
+				jsonError(w, err.Error(), http.StatusBadGateway)
 				return
 			}
 			defer func() { _ = resp.Body.Close() }()
@@ -912,7 +912,7 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 		// Leader: unblock locally and broadcast to followers
 		if err := unblockIP(p, canonical); err != nil {
 			p.Log(logging.LevelError, "API", "Failed to unblock IP %s: %v", canonical, err)
-			http.Error(w, fmt.Sprintf("Failed to unblock IP: %v", err), http.StatusInternalServerError)
+			jsonError(w, fmt.Sprintf("Failed to unblock IP: %v", err), http.StatusInternalServerError)
 			return
 		}
 
@@ -1197,14 +1197,14 @@ func internalClearIPHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
 		if ipStr == "" {
-			http.Error(w, "IP address required", http.StatusBadRequest)
+			jsonError(w, "IP address required", http.StatusBadRequest)
 			return
 		}
 
 		// Canonicalize IP
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
-			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			jsonError(w, "Invalid IP address", http.StatusBadRequest)
 			return
 		}
 		canonical := ip.String()
@@ -1213,7 +1213,7 @@ func internalClearIPHandler(p Provider) http.HandlerFunc {
 		// HAProxy instances are shared and already cleared by the leader
 		if err := p.RemoveFromPersistence(canonical); err != nil {
 			p.Log(logging.LevelError, "CLUSTER_CLEAR", "Failed to remove IP %s from persistence: %v", canonical, err)
-			http.Error(w, fmt.Sprintf("Failed to remove from persistence: %v", err), http.StatusInternalServerError)
+			jsonError(w, fmt.Sprintf("Failed to remove from persistence: %v", err), http.StatusInternalServerError)
 			return
 		}
 
@@ -1229,14 +1229,14 @@ func internalUnblockIPHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
 		if ipStr == "" {
-			http.Error(w, "IP address required", http.StatusBadRequest)
+			jsonError(w, "IP address required", http.StatusBadRequest)
 			return
 		}
 
 		// Canonicalize IP
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
-			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			jsonError(w, "Invalid IP address", http.StatusBadRequest)
 			return
 		}
 		canonical := ip.String()
@@ -1245,7 +1245,7 @@ func internalUnblockIPHandler(p Provider) http.HandlerFunc {
 		// HAProxy instances are shared and already unblocked by the leader
 		if err := p.RemoveFromPersistence(canonical); err != nil {
 			p.Log(logging.LevelError, "CLUSTER_UNBLOCK", "Failed to update persistence for IP %s: %v", canonical, err)
-			http.Error(w, fmt.Sprintf("Failed to update persistence: %v", err), http.StatusInternalServerError)
+			jsonError(w, fmt.Sprintf("Failed to update persistence: %v", err), http.StatusInternalServerError)
 			return
 		}
 

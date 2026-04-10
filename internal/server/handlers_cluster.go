@@ -49,7 +49,7 @@ func clusterStatusHandler(p Provider) http.HandlerFunc {
 		// Encode and send response
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			p.Log(3, "CLUSTER", "Failed to encode cluster status response: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			jsonError(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -135,7 +135,7 @@ func clusterMetricsHandler(p Provider) http.HandlerFunc {
 		// Encode and send response
 		if err := json.NewEncoder(w).Encode(snapshot); err != nil {
 			p.Log(3, "CLUSTER", "Failed to encode metrics response: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			jsonError(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -191,7 +191,7 @@ func clusterMetricsAggregateHandler(p Provider) http.HandlerFunc {
 		// Encode and send response
 		if err := json.NewEncoder(w).Encode(aggregated); err != nil {
 			p.Log(3, "CLUSTER", "Failed to encode aggregated metrics response: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			jsonError(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -243,13 +243,13 @@ func clusterMetricsAggregateTextHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		aggregated := p.GetAggregatedMetrics()
 		if aggregated == nil {
-			http.Error(w, "Aggregated metrics only available on leader nodes", http.StatusNotFound)
+			jsonError(w, "Aggregated metrics only available on leader nodes", http.StatusNotFound)
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		data, err := json.MarshalIndent(aggregated, "", "  ")
 		if err != nil {
-			http.Error(w, "Failed to format metrics", http.StatusInternalServerError)
+			jsonError(w, "Failed to format metrics", http.StatusInternalServerError)
 			return
 		}
 		w.Write(data)         //nolint:errcheck

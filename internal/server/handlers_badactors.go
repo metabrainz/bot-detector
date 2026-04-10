@@ -56,7 +56,7 @@ func badActorsExportHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actors, err := p.GetAllBadActors()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -145,14 +145,14 @@ func internalBadActorsDeleteHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reason := r.URL.Query().Get("reason")
 		if reason == "" {
-			http.Error(w, "reason query parameter is required", http.StatusBadRequest)
+			jsonError(w, "reason query parameter is required", http.StatusBadRequest)
 			return
 		}
 
 		removed, err := p.RemoveBadActorsByReason(reason)
 		if err != nil {
 			p.Log(logging.LevelError, "CLUSTER_BAD_ACTORS", "Failed to remove bad actors by reason %q: %v", reason, err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
