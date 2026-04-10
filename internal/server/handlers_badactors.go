@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 
 	"bot-detector/internal/logging"
 	"bot-detector/internal/persistence"
@@ -161,7 +162,59 @@ func internalBadActorsDeleteHandler(p Provider) http.HandlerFunc {
 	}
 }
 
-// badActorsStatsHandler returns aggregated statistics about bad actors.
+type badActorStats struct {
+	Total    int
+	AvgScore float64
+	AvgBlock float64
+	ByReason map[string]int
+	ByDay    map[string]int
+}
+
+func computeBadActorStats(actors []interface{}) badActorStats {
+	type histEntry struct {
+		Reason string `json:"r"`
+	}
+
+	byReason := make(map[string]int)
+	byDay := make(map[string]int)
+	var totalScore float64
+	var totalBlocks int
+
+	for _, a := range actors {
+		ba, ok := a.(persistence.BadActorInfo)
+		if !ok {
+			continue
+		}
+		totalScore += ba.TotalScore
+		totalBlocks += ba.BlockCount
+		byDay[ba.PromotedAt.Format("2006-01-02")]++
+
+		if ba.HistoryJSON == "" {
+			continue
+		}
+		var history []histEntry
+		if err := json.Unmarshal([]byte(ba.HistoryJSON), &history); err != nil {
+			continue
+		}
+		seen := make(map[string]bool)
+		for _, h := range history {
+			if h.Reason != "" && !seen[h.Reason] {
+				seen[h.Reason] = true
+				byReason[h.Reason]++
+			}
+		}
+	}
+
+	total := len(actors)
+	var avgScore, avgBlocks float64
+	if total > 0 {
+		avgScore = totalScore / float64(total)
+		avgBlocks = float64(totalBlocks) / float64(total)
+	}
+	return badActorStats{total, avgScore, avgBlocks, byReason, byDay}
+}
+
+// badActorsStatsHandler returns aggregated statistics about bad actors as JSON.
 // GET /api/v1/bad-actors/stats
 func badActorsStatsHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -170,56 +223,61 @@ func badActorsStatsHandler(p Provider) http.HandlerFunc {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		type histEntry struct {
-			Reason string `json:"r"`
-		}
-
-		byReason := make(map[string]int)
-		byDay := make(map[string]int)
-		var totalScore float64
-		var totalBlocks int
-
-		for _, a := range actors {
-			ba, ok := a.(persistence.BadActorInfo)
-			if !ok {
-				continue
-			}
-			totalScore += ba.TotalScore
-			totalBlocks += ba.BlockCount
-			byDay[ba.PromotedAt.Format("2006-01-02")]++
-
-			if ba.HistoryJSON == "" {
-				continue
-			}
-			var history []histEntry
-			if err := json.Unmarshal([]byte(ba.HistoryJSON), &history); err != nil {
-				continue
-			}
-			seen := make(map[string]bool)
-			for _, h := range history {
-				if h.Reason != "" && !seen[h.Reason] {
-					seen[h.Reason] = true
-					byReason[h.Reason]++
-				}
-			}
-		}
-
-		total := len(actors)
-		var avgScore float64
-		var avgBlocks float64
-		if total > 0 {
-			avgScore = totalScore / float64(total)
-			avgBlocks = float64(totalBlocks) / float64(total)
-		}
-
+		s := computeBadActorStats(actors)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
-			"total":           total,
-			"avg_score":       avgScore,
-			"avg_block_count": avgBlocks,
-			"by_reason":       byReason,
-			"by_day":          byDay,
+			"total":           s.Total,
+			"avg_score":       s.AvgScore,
+			"avg_block_count": s.AvgBlock,
+			"by_reason":       s.ByReason,
+			"by_day":          s.ByDay,
 		})
+	}
+}
+
+// badActorsStatsTextHandler returns bad actor statistics as human-readable text.
+// GET /stats/bad-actors
+func badActorsStatsTextHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actors, err := p.GetAllBadActors()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s := computeBadActorStats(actors)
+
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		fmt.Fprintf(w, "=== Bad Actor Statistics ===\n")                    //nolint:errcheck
+		fmt.Fprintf(w, "Total: %d\n", s.Total)                             //nolint:errcheck
+		fmt.Fprintf(w, "Avg Score: %.1f\n", s.AvgScore)                    //nolint:errcheck
+		fmt.Fprintf(w, "Avg Block Count: %.1f\n\n", s.AvgBlock)            //nolint:errcheck
+
+		// Sort reasons by count descending
+		type rc struct {
+			reason string
+			count  int
+		}
+		reasons := make([]rc, 0, len(s.ByReason))
+		for r, c := range s.ByReason {
+			reasons = append(reasons, rc{r, c})
+		}
+		sort.Slice(reasons, func(i, j int) bool { return reasons[i].count > reasons[j].count })
+
+		fmt.Fprintf(w, "=== IPs per Reason ===\n") //nolint:errcheck
+		for _, r := range reasons {
+			fmt.Fprintf(w, "  %6d  %s\n", r.count, r.reason) //nolint:errcheck
+		}
+
+		// Sort days chronologically
+		days := make([]string, 0, len(s.ByDay))
+		for d := range s.ByDay {
+			days = append(days, d)
+		}
+		sort.Strings(days)
+
+		fmt.Fprintf(w, "\n=== Promotions per Day ===\n") //nolint:errcheck
+		for _, d := range days {
+			fmt.Fprintf(w, "  %6d  %s\n", s.ByDay[d], d) //nolint:errcheck
+		}
 	}
 }

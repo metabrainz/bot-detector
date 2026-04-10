@@ -107,10 +107,33 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
     To enable, add a 'websites' section to your config.yaml
     ```
 
+### `/stats/bad-actors`
+
+*   **Method:** `GET`
+*   **Content-Type:** `text/plain; charset=utf-8`
+*   **Description:** Human-readable bad actor statistics. Shows total count, average score and block count, IPs per reason (sorted by count descending), and promotions per day (sorted chronologically). JSON equivalent: `/api/v1/bad-actors/stats`.
+*   **Response:**
+    ```
+    === Bad Actor Statistics ===
+    Total: 22078
+    Avg Score: 5.0
+    Avg Block Count: 5.0
+
+    === IPs per Reason ===
+        2307  Bad-WS-User-Agent@musicbrainz.org
+         546  No-Referrer-Subpage-Crawler@musicbrainz.org
+         170  Bad-User-Agent-Example-com@musicbrainz.org
+
+    === Promotions per Day ===
+        4544  2026-04-08
+       11442  2026-04-09
+        6092  2026-04-10
+    ```
+
 ### `/config`
 
 *   **Method:** `GET`
-*   **Content-Type:** `text/yaml; charset=utf-8`
+*   **Content-Type:** `application/yaml`
 *   **Description:** Returns the raw YAML content of the main configuration file as it was last loaded by the application. This allows you to inspect the exact configuration that is currently active, which is especially useful after a hot-reload.
 *   **Responses:**
     *   `200 OK`: Successfully returns the YAML configuration.
