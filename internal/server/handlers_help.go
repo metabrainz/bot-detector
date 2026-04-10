@@ -32,6 +32,8 @@ var allEndpoints = []endpoint{
 	{"DELETE", "/ip/{ip}/clear", "Clear IP from all state (cluster-aware)", "text/plain", "api"},
 	{"GET|POST", "/ip/{ip}/unblock", "Fast unblock IP (cluster-aware)", "text/plain", "api"},
 	{"GET", "/api/v1/ip/{ip}", "IP block status (cluster-aware)", "application/json", "api"},
+	{"POST", "/api/v1/ip/{ip}/clear", "Clear IP from all state (cluster-aware)", "application/json", "api"},
+	{"POST", "/api/v1/ip/{ip}/unblock", "Fast unblock IP (cluster-aware)", "application/json", "api"},
 	{"GET", "/api/v1/bad-actors", "List all bad actors", "application/json", "api"},
 	{"GET", "/api/v1/bad-actors/export", "Bad actor IPs, one per line", "text/plain", "api"},
 	{"GET", "/api/v1/bad-actors/stats", "Bad actor statistics", "application/json", "api"},

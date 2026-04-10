@@ -783,42 +783,15 @@ func clearIPHandler(p Provider) http.HandlerFunc {
 		}
 
 		// Leader: clear locally and broadcast to followers
-		blockerInterface := p.GetBlocker()
-		if blockerInterface == nil {
+		if p.GetBlocker() == nil {
 			jsonError(w, "Blocker not available", http.StatusServiceUnavailable)
 			return
 		}
-
-		// Type assert to blocker.Blocker interface
-		blocker, ok := blockerInterface.(blocker.Blocker)
-		if !ok {
-			jsonError(w, "Blocker interface error", http.StatusInternalServerError)
-			return
-		}
-
-		// Create IPInfo using helper
-		ipInfo := utils.NewIPInfo(canonical)
-
-		// Clear the IP from all tables
-		foundInfo, err := blocker.ClearIP(ipInfo)
+		foundInfo, err := clearIP(p, canonical)
 		if err != nil {
 			p.Log(logging.LevelError, "API", "Failed to clear IP %s: %v", canonical, err)
 			jsonError(w, fmt.Sprintf("Failed to clear IP: %v", err), http.StatusInternalServerError)
 			return
-		}
-
-		// Remove from persistence state
-		if err := p.RemoveFromPersistence(canonical); err != nil {
-			p.Log(logging.LevelError, "API", "Failed to remove IP %s from persistence: %v", canonical, err)
-			// Don't fail the request, just log the error
-		}
-
-		// Clear from ActivityStore (in-memory chain progress)
-		clearIPFromActivityStore(p, canonical)
-
-		// Broadcast to followers (async)
-		if p.GetNodeRole() == "leader" {
-			go broadcastClearToFollowers(p, canonical)
 		}
 
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -871,7 +844,6 @@ func clearIPHandler(p Provider) http.HandlerFunc {
 			}
 		}
 
-		p.Log(logging.LevelInfo, "API", "IP %s cleared from %d table entries", canonical, len(foundInfo))
 	}
 }
 
@@ -910,6 +882,10 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 		}
 
 		// Leader: unblock locally and broadcast to followers
+		if p.GetBlocker() == nil {
+			jsonError(w, "Blocker not available", http.StatusServiceUnavailable)
+			return
+		}
 		if err := unblockIP(p, canonical); err != nil {
 			p.Log(logging.LevelError, "API", "Failed to unblock IP %s: %v", canonical, err)
 			jsonError(w, fmt.Sprintf("Failed to unblock IP: %v", err), http.StatusInternalServerError)
@@ -930,6 +906,132 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, "IP %s unblocked (gpc0 set to 0, entry will expire naturally)\n", canonical)
+	}
+}
+
+// parseClearInfo converts blocker clear results into JSON-friendly structs.
+func parseClearInfo(p Provider, foundInfo []interface{}) []map[string]interface{} {
+	durationTables := p.GetDurationTables()
+	var tables []map[string]interface{}
+	for _, info := range foundInfo {
+		infoVal := reflect.ValueOf(info)
+		tableName := infoVal.FieldByName("TableName").String()
+		gpc0 := int(infoVal.FieldByName("Gpc0").Int())
+		expMillis := infoVal.FieldByName("ExpMillis").Int()
+
+		status := "unblocked"
+		if gpc0 > 0 {
+			status = "blocked"
+		}
+
+		entry := map[string]interface{}{
+			"table":      tableName,
+			"backend":    infoVal.FieldByName("Backend").String(),
+			"status":     status,
+			"expires_in": formatDuration(time.Duration(expMillis/1000) * time.Second),
+		}
+		for dur, baseTableName := range durationTables {
+			if strings.HasPrefix(tableName, baseTableName) {
+				entry["duration"] = formatDuration(dur)
+				break
+			}
+		}
+		tables = append(tables, entry)
+	}
+	return tables
+}
+
+// apiClearIPHandler clears an IP from all state and returns JSON.
+// POST /api/v1/ip/{ip}/clear (cluster-aware)
+func apiClearIPHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ipStr := r.PathValue("ip")
+		if ipStr == "" {
+			jsonError(w, "IP address required", http.StatusBadRequest)
+			return
+		}
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			jsonError(w, "Invalid IP address", http.StatusBadRequest)
+			return
+		}
+		canonical := ip.String()
+
+		if p.GetNodeRole() == "follower" {
+			resp, err := forwardToLeader(p, "POST", fmt.Sprintf("/api/v1/ip/%s/clear", canonical), nil)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+
+		if p.GetBlocker() == nil {
+			jsonError(w, "Blocker not available", http.StatusServiceUnavailable)
+			return
+		}
+		foundInfo, err := clearIP(p, canonical)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("Failed to clear IP: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+			"ip":      canonical,
+			"cleared": len(foundInfo),
+			"tables":  parseClearInfo(p, foundInfo),
+		})
+	}
+}
+
+// apiUnblockIPHandler unblocks an IP and returns JSON.
+// POST /api/v1/ip/{ip}/unblock (cluster-aware)
+func apiUnblockIPHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ipStr := r.PathValue("ip")
+		if ipStr == "" {
+			jsonError(w, "IP address required", http.StatusBadRequest)
+			return
+		}
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			jsonError(w, "Invalid IP address", http.StatusBadRequest)
+			return
+		}
+		canonical := ip.String()
+
+		if p.GetNodeRole() == "follower" {
+			resp, err := forwardToLeader(p, "POST", fmt.Sprintf("/api/v1/ip/%s/unblock", canonical), nil)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+
+		if p.GetBlocker() == nil {
+			jsonError(w, "Blocker not available", http.StatusServiceUnavailable)
+			return
+		}
+		if err := unblockIP(p, canonical); err != nil {
+			jsonError(w, fmt.Sprintf("Failed to unblock IP: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+			"ip":     canonical,
+			"status": "unblocked",
+		})
 	}
 }
 
@@ -1269,6 +1371,40 @@ func broadcastUnblockToFollowers(p Provider, ip string) {
 }
 
 // clearIPFromActivityStore removes all actors with the given IP from ActivityStore
+// clearIP performs the core clear logic for a single IP: HAProxy table removal, persistence removal,
+// activity store cleanup, and follower broadcast. Returns the found table info and any error.
+func clearIP(p Provider, canonical string) ([]interface{}, error) {
+	blockerInterface := p.GetBlocker()
+	if blockerInterface == nil {
+		return nil, fmt.Errorf("blocker not available")
+	}
+
+	b, ok := blockerInterface.(blocker.Blocker)
+	if !ok {
+		return nil, fmt.Errorf("blocker interface error")
+	}
+
+	ipInfo := utils.NewIPInfo(canonical)
+
+	foundInfo, err := b.ClearIP(ipInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := p.RemoveFromPersistence(canonical); err != nil {
+		p.Log(logging.LevelError, "API", "Failed to remove IP %s from persistence: %v", canonical, err)
+	}
+
+	clearIPFromActivityStore(p, canonical)
+
+	if p.GetNodeRole() == "leader" {
+		go broadcastClearToFollowers(p, canonical)
+	}
+
+	p.Log(logging.LevelInfo, "API", "IP %s cleared from %d table entries", canonical, len(foundInfo))
+	return foundInfo, nil
+}
+
 // unblockIP performs the core unblock logic for a single IP: HAProxy unblock, persistence removal,
 // activity store cleanup, and follower broadcast. Returns an error if the HAProxy unblock fails.
 func unblockIP(p Provider, canonical string) error {

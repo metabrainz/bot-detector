@@ -136,6 +136,8 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("GET /ip/{ip}/unblock", unblockIPHandler(p))
 		mux.HandleFunc("POST /ip/{ip}/unblock", unblockIPHandler(p))
 		mux.HandleFunc("GET /api/v1/ip/{ip}", apiIPLookupHandler(p))
+		mux.HandleFunc("POST /api/v1/ip/{ip}/clear", apiClearIPHandler(p))
+		mux.HandleFunc("POST /api/v1/ip/{ip}/unblock", apiUnblockIPHandler(p))
 		mux.HandleFunc("GET /api/v1/bad-actors", badActorsListHandler(p))
 		mux.HandleFunc("GET /api/v1/bad-actors/export", badActorsExportHandler(p))
 		mux.HandleFunc("GET /api/v1/bad-actors/stats", badActorsStatsHandler(p))

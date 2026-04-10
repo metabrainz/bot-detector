@@ -813,6 +813,55 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
     *   `503 Service Unavailable`: Blocker is not available (e.g., dry-run mode).
 
+### `POST /api/v1/ip/{ip}/clear` (Cluster-Aware)
+
+*   **Method:** `POST`
+*   **Content-Type:** `application/json`
+*   **Description:** JSON equivalent of `DELETE /ip/{ip}/clear`. Clears an IP from all HAProxy stick tables, persistence, and activity store.
+*   **Role:** `api`
+*   **Response Format:**
+    ```json
+    {
+      "ip": "192.168.1.100",
+      "cleared": 2,
+      "tables": [
+        {
+          "table": "thirty_min_blocks_v4",
+          "backend": "/var/run/haproxy/admin.sock",
+          "status": "blocked",
+          "duration": "30m",
+          "expires_in": "15m"
+        }
+      ]
+    }
+    ```
+*   **Responses:**
+    *   `200 OK`: Successfully cleared the IP.
+    *   `400 Bad Request`: Invalid IP address format.
+    *   `500 Internal Server Error`: Failed to clear the IP.
+    *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
+    *   `503 Service Unavailable`: Blocker is not available.
+
+### `POST /api/v1/ip/{ip}/unblock` (Cluster-Aware)
+
+*   **Method:** `POST`
+*   **Content-Type:** `application/json`
+*   **Description:** JSON equivalent of `/ip/{ip}/unblock`. Sets `gpc0=0` in HAProxy stick tables without removing the entry.
+*   **Role:** `api`
+*   **Response Format:**
+    ```json
+    {
+      "ip": "192.168.1.100",
+      "status": "unblocked"
+    }
+    ```
+*   **Responses:**
+    *   `200 OK`: Successfully unblocked the IP.
+    *   `400 Bad Request`: Invalid IP address format.
+    *   `500 Internal Server Error`: Failed to unblock the IP.
+    *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
+    *   `503 Service Unavailable`: Blocker is not available.
+
 
 ### `/api/v1/cluster/internal/ip/{ip}` (Internal Use)
 
