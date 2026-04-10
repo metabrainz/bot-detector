@@ -17,7 +17,7 @@ func badActorsListHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actors, err := p.GetAllBadActors()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -76,7 +76,7 @@ func badActorsDeleteByReasonHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reason := r.URL.Query().Get("reason")
 		if reason == "" {
-			http.Error(w, "reason query parameter is required", http.StatusBadRequest)
+			jsonError(w, "reason query parameter is required", http.StatusBadRequest)
 			return
 		}
 
@@ -85,7 +85,7 @@ func badActorsDeleteByReasonHandler(p Provider) http.HandlerFunc {
 			resp, err := forwardToLeader(p, "DELETE", r.URL.RequestURI(), nil)
 			if err != nil {
 				p.Log(logging.LevelError, "API", "Failed to forward bad-actors delete to leader: %v", err)
-				http.Error(w, err.Error(), http.StatusBadGateway)
+				jsonError(w, err.Error(), http.StatusBadGateway)
 				return
 			}
 			defer func() { _ = resp.Body.Close() }()
@@ -98,7 +98,7 @@ func badActorsDeleteByReasonHandler(p Provider) http.HandlerFunc {
 		// Leader (or standalone): remove locally
 		removed, err := p.RemoveBadActorsByReason(reason)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -167,7 +167,7 @@ func badActorsStatsHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actors, err := p.GetAllBadActors()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 

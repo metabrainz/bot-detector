@@ -98,7 +98,7 @@ func (mc *MetricsCollector) collectFromAllNodes() {
 // collectFromNode polls a single node for its metrics.
 func (mc *MetricsCollector) collectFromNode(node NodeConfig) {
 	// Build metrics URL
-	metricsURL := fmt.Sprintf("%s://%s/cluster/metrics", mc.protocol, node.Address)
+	metricsURL := fmt.Sprintf("%s://%s/api/v1/cluster/metrics", mc.protocol, node.Address)
 
 	// Make HTTP request
 	resp, err := mc.httpClient.Get(metricsURL)

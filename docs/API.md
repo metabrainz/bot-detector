@@ -246,12 +246,24 @@ See [BAD_ACTORS.md](BAD_ACTORS.md) for full documentation of the bad actors feat
 
 These endpoints are available when cluster mode is enabled. They provide cluster status, metrics collection, and aggregation capabilities.
 
-### `/cluster/status`
+Each cluster endpoint has two variants:
+- `/cluster/*` — Human-readable plain text output
+- `/api/v1/cluster/*` — JSON output for programmatic access
+
+The internal cluster communication uses the `/api/v1/` JSON endpoints.
+
+### `/cluster/status` and `/api/v1/cluster/status`
 
 *   **Method:** `GET`
-*   **Content-Type:** `application/json`
-*   **Description:** Returns the current node's cluster identity and role information. This endpoint is useful for determining which node you're connected to and its role in the cluster.
-*   **Response Format (Leader):**
+*   **Content-Type:** `text/plain` (`/cluster/status`) or `application/json` (`/api/v1/cluster/status`)
+*   **Description:** Returns the current node's cluster identity and role information.
+*   **Plain Text Response:**
+    ```
+    role: leader
+    name: node-1
+    address: localhost:8080
+    ```
+*   **JSON Response:**
     ```json
     {
       "role": "leader",
@@ -259,25 +271,30 @@ These endpoints are available when cluster mode is enabled. They provide cluster
       "address": "localhost:8080"
     }
     ```
-*   **Response Format (Follower):**
-    ```json
-    {
-      "role": "follower",
-      "name": "node-2",
-      "address": "localhost:9090",
-      "leader": "node-1:8080"
-    }
-    ```
 *   **Responses:**
     *   `200 OK`: Successfully returns the node status.
     *   `500 Internal Server Error`: If the server fails to retrieve node status information.
 
-### `/cluster/metrics`
+### `/cluster/metrics` and `/api/v1/cluster/metrics`
 
 *   **Method:** `GET`
-*   **Content-Type:** `application/json`
-*   **Description:** Returns this node's current metrics snapshot in JSON format. This endpoint is used by leader nodes to collect metrics from follower nodes, but can also be queried directly for monitoring individual nodes. The metrics include processing statistics, actor statistics, chain execution statistics, per-website statistics (in multi-website mode), and various performance counters.
-*   **Response Format:**
+*   **Content-Type:** `text/plain` (`/cluster/metrics`) or `application/json` (`/api/v1/cluster/metrics`)
+*   **Description:** Returns this node's current metrics. The JSON variant is used internally by leader nodes to collect metrics from followers.
+*   **Plain Text Response:**
+    ```
+    timestamp: 2025-11-18T20:30:00Z
+    lines_processed: 1000
+    entries_checked: 42
+    parse_errors: 1
+    lines_per_second: 95.2
+    actions_block: 15
+    actions_log: 27
+    chains_completed: 42
+    chains_reset: 1
+    good_actors_skipped: 10
+    actors_cleaned: 5
+    ```
+*   **JSON Response:**
     ```json
     {
       "timestamp": "2025-11-18T20:30:00Z",
@@ -351,11 +368,11 @@ These endpoints are available when cluster mode is enabled. They provide cluster
     *   `200 OK`: Successfully returns the metrics snapshot.
     *   `500 Internal Server Error`: If the server fails to generate the metrics snapshot.
 
-### `/cluster/metrics/aggregate`
+### `/cluster/metrics/aggregate` and `/api/v1/cluster/metrics/aggregate`
 
 *   **Method:** `GET`
-*   **Content-Type:** `application/json`
-*   **Description:** Returns cluster-wide aggregated metrics from all nodes (leader only). This endpoint provides a comprehensive view of the entire cluster's performance, including per-node health status, cluster-wide metric summation, and per-website aggregates (in multi-website mode). Only available on leader nodes; follower nodes will return a 404 error.
+*   **Content-Type:** `text/plain` (`/cluster/metrics/aggregate`, indented JSON) or `application/json` (`/api/v1/cluster/metrics/aggregate`)
+*   **Description:** Returns cluster-wide aggregated metrics from all nodes (leader only). The plain text variant returns indented JSON for readability.
 *   **Response Format:**
     ```json
     {

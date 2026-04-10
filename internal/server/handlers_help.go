@@ -26,7 +26,7 @@ var allEndpoints = []endpoint{
 	{"GET", "/stats/websites", "Multi-website statistics", "text/plain", "metrics"},
 
 	// API
-	{"GET", "/config", "Raw YAML configuration", "text/yaml", "api"},
+	{"GET", "/config", "Raw YAML configuration", "application/yaml", "api"},
 	{"GET", "/config/archive", "Tar.gz archive of config + dependencies", "application/gzip", "api"},
 	{"GET", "/ip/{ip}", "IP block status (cluster-aware)", "text/plain", "api"},
 	{"DELETE", "/ip/{ip}/clear", "Clear IP from all state (cluster-aware)", "text/plain", "api"},
@@ -38,9 +38,12 @@ var allEndpoints = []endpoint{
 	{"DELETE", "/api/v1/bad-actors?reason=<reason>[&unblock]", "Remove bad actors by reason (cluster-aware)", "application/json", "api"},
 
 	// Cluster
-	{"GET", "/cluster/status", "Node cluster status", "application/json", "cluster"},
-	{"GET", "/cluster/metrics", "Node metrics snapshot", "application/json", "cluster"},
-	{"GET", "/cluster/metrics/aggregate", "Cluster-wide aggregated metrics (leader only)", "application/json", "cluster"},
+	{"GET", "/cluster/status", "Node cluster status", "text/plain", "cluster"},
+	{"GET", "/cluster/metrics", "Node metrics summary", "text/plain", "cluster"},
+	{"GET", "/cluster/metrics/aggregate", "Cluster-wide aggregated metrics (leader only)", "text/plain", "cluster"},
+	{"GET", "/api/v1/cluster/status", "Node cluster status", "application/json", "cluster"},
+	{"GET", "/api/v1/cluster/metrics", "Node metrics snapshot", "application/json", "cluster"},
+	{"GET", "/api/v1/cluster/metrics/aggregate", "Cluster-wide aggregated metrics (leader only)", "application/json", "cluster"},
 	{"GET", "/api/v1/cluster/internal/ip/{ip}", "Internal: query follower IP status", "application/json", "cluster"},
 	{"DELETE", "/api/v1/cluster/internal/ip/{ip}/clear", "Internal: broadcast clear to follower", "text/plain", "cluster"},
 	{"GET|POST", "/api/v1/cluster/internal/ip/{ip}/unblock", "Internal: broadcast unblock to follower", "text/plain", "cluster"},
