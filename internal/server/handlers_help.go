@@ -35,7 +35,7 @@ var allEndpoints = []endpoint{
 	{"GET", "/api/v1/bad-actors", "List all bad actors", "application/json", "api"},
 	{"GET", "/api/v1/bad-actors/export", "Bad actor IPs, one per line", "text/plain", "api"},
 	{"GET", "/api/v1/bad-actors/stats", "Bad actor statistics", "application/json", "api"},
-	{"DELETE", "/api/v1/bad-actors?reason=<reason>[&unblock]", "Remove bad actors by reason", "application/json", "api"},
+	{"DELETE", "/api/v1/bad-actors?reason=<reason>[&unblock]", "Remove bad actors by reason (cluster-aware)", "application/json", "api"},
 
 	// Cluster
 	{"GET", "/cluster/status", "Node cluster status", "application/json", "cluster"},
@@ -46,6 +46,7 @@ var allEndpoints = []endpoint{
 	{"GET|POST", "/api/v1/cluster/internal/ip/{ip}/unblock", "Internal: broadcast unblock to follower", "text/plain", "cluster"},
 	{"GET", "/api/v1/cluster/internal/persistence/state", "Internal: persistence state for sync", "application/json", "cluster"},
 	{"GET", "/api/v1/cluster/state/merged", "Merged cluster state", "application/json", "cluster"},
+	{"DELETE", "/api/v1/cluster/internal/bad-actors?reason=<reason>", "Internal: broadcast bad actor removal to follower", "text/plain", "cluster"},
 }
 
 // helpHandler returns endpoint listing.

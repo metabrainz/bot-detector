@@ -171,7 +171,7 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
     *   An IP can appear under multiple reasons if it triggered different chains.
     *   `by_day` is keyed by the promotion date (not block date).
 
-### `DELETE /api/v1/bad-actors?reason=<reason>[&unblock]`
+### `DELETE /api/v1/bad-actors?reason=<reason>[&unblock]` (Cluster-Aware)
 
 *   **Method:** `DELETE`
 *   **Content-Type:** `application/json`
@@ -179,7 +179,11 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
 *   **Role:** `api`
 *   **Parameters:**
     *   `reason` (query, required) - Substring to match against chain reasons in the bad actor history. Typically a chain name (e.g., `rate-limit-api`) or a vhost-qualified reason (e.g., `rate-limit-api@example.com`).
-    *   `unblock` (query, optional, no value) - If present, also unblocks the removed IPs from HAProxy (sets `gpc0=0`), clears persistence state, and removes from the activity store. In cluster mode, the unblock is broadcast to followers.
+    *   `unblock` (query, optional, no value) - If present, also unblocks the removed IPs from HAProxy (sets `gpc0=0`), clears persistence state, and removes from the activity store.
+*   **Cluster Behavior:**
+    *   **Follower nodes:** Forward the request to the leader and return the leader's response.
+    *   **Leader node:** Remove locally, broadcast removal to all followers, then process `&unblock` (which also broadcasts to followers).
+    *   **Standalone node:** Remove locally only.
 *   **Response Format:**
     ```json
     {
@@ -215,7 +219,7 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
     *   The match is a **substring match** — `reason=rate-limit` will match `rate-limit-api`, `rate-limit-static`, etc. Use the full chain name for precision.
     *   In multi-website mode, reasons include the vhost or website suffix (e.g., `chainName@vhost` or `chainName[website]`). You can match on just the chain name to clear across all websites, or include the suffix to target a specific website.
     *   Without `&unblock`, this only removes the bad actor record and score from the database. The IPs may still be actively blocked in HAProxy until their block duration expires.
-    *   With `&unblock`, each removed IP is also unblocked from HAProxy (sets `gpc0=0`), cleared from persistence, and removed from the activity store. In cluster mode, the unblock is broadcast to all followers.
+    *   With `&unblock`, each removed IP is also unblocked from HAProxy (sets `gpc0=0`), cleared from persistence, and removed from the activity store.
 *   **Usage Examples:**
     ```bash
     # Remove all bad actors promoted by the "aggressive-scraper" chain
@@ -234,6 +238,7 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
     *   `200 OK`: Successfully processed the request (even if no bad actors matched).
     *   `400 Bad Request`: Missing `reason` query parameter.
     *   `500 Internal Server Error`: Database error during removal.
+    *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
 
 See [BAD_ACTORS.md](BAD_ACTORS.md) for full documentation of the bad actors feature, including configuration, scoring, and removal.
 

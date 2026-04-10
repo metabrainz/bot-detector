@@ -152,6 +152,7 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("/api/v1/cluster/internal/ip/{ip}/unblock", internalUnblockIPHandler(p)) // Supports both GET and POST
 		mux.HandleFunc("GET /api/v1/cluster/internal/persistence/state", clusterPersistenceStateHandler(p))
 		mux.HandleFunc("GET /api/v1/cluster/state/merged", clusterMergedStateHandler(p))
+		mux.HandleFunc("DELETE /api/v1/cluster/internal/bad-actors", internalBadActorsDeleteHandler(p))
 	}
 
 	// Wrap with logging middleware

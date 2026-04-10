@@ -3,7 +3,9 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 
 	"bot-detector/internal/logging"
 	"bot-detector/internal/persistence"
@@ -69,6 +71,7 @@ func badActorsExportHandler(p Provider) http.HandlerFunc {
 
 // badActorsDeleteByReasonHandler removes bad actors whose history contains the given reason.
 // DELETE /api/v1/bad-actors?reason=chainName&unblock
+// Cluster-aware: followers forward to leader, leader broadcasts to followers.
 func badActorsDeleteByReasonHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reason := r.URL.Query().Get("reason")
@@ -77,10 +80,32 @@ func badActorsDeleteByReasonHandler(p Provider) http.HandlerFunc {
 			return
 		}
 
+		// Follower: forward to leader
+		if p.GetNodeRole() == "follower" {
+			resp, err := forwardToLeader(p, "DELETE", r.URL.RequestURI(), nil)
+			if err != nil {
+				p.Log(logging.LevelError, "API", "Failed to forward bad-actors delete to leader: %v", err)
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+
+		// Leader (or standalone): remove locally
 		removed, err := p.RemoveBadActorsByReason(reason)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		// Broadcast removal to followers
+		if p.GetNodeRole() == "leader" {
+			go broadcastToFollowers(p, "DELETE",
+				fmt.Sprintf("/api/v1/cluster/internal/bad-actors?reason=%s", url.QueryEscape(reason)), nil)
 		}
 
 		// If &unblock is present, also unblock the removed IPs from HAProxy
@@ -111,6 +136,28 @@ func badActorsDeleteByReasonHandler(p Provider) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp) //nolint:errcheck
+	}
+}
+
+// internalBadActorsDeleteHandler handles cluster-internal bad actor removal on followers.
+// DELETE /api/v1/cluster/internal/bad-actors?reason=chainName
+func internalBadActorsDeleteHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		reason := r.URL.Query().Get("reason")
+		if reason == "" {
+			http.Error(w, "reason query parameter is required", http.StatusBadRequest)
+			return
+		}
+
+		removed, err := p.RemoveBadActorsByReason(reason)
+		if err != nil {
+			p.Log(logging.LevelError, "CLUSTER_BAD_ACTORS", "Failed to remove bad actors by reason %q: %v", reason, err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		p.Log(logging.LevelInfo, "CLUSTER_BAD_ACTORS", "Removed %d bad actors by reason %q", len(removed), reason)
+		w.WriteHeader(http.StatusOK)
 	}
 }
 
