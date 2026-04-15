@@ -627,7 +627,7 @@ func execute(params *commandline.AppParameters) error {
 
 	// Runtime validation: multi-website mode vs --log-path flag
 	if len(loadedCfg.Websites) > 0 {
-		if params.LogPath != "" {
+		if params.LogPath != "" && !params.DryRun {
 			logging.LogOutput(logging.LevelWarning, "CONFIG",
 				"--log-path flag is ignored in multi-website mode. Log paths are defined in config.yaml")
 		}
