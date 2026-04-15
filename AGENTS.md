@@ -2,20 +2,13 @@
 
 ## Pre-commit checklist
 
-Run these **before every commit**, in order:
+Run **before every commit**:
 
 ```sh
-gofmt -w $(gofmt -l .)   # Format ALL files, not just the ones you touched
-go vet ./...              # Static analysis
-go test ./... -count=1    # Full test suite (no cache)
+./run_checks.sh
 ```
 
-If adding a new CLI flag, config field, or endpoint, also run:
-
-```sh
-go build -o bot-detector ./cmd/bot-detector   # Verify binary builds
-./bot-detector --check --config-dir testdata   # Validate test config
-```
+This runs `gofmt`, `go vet`, `golangci-lint`, `go test -race`, `go build`, dry-run validation, and `govulncheck` — in that order.
 
 ## Testing
 
