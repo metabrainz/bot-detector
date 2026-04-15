@@ -23,7 +23,7 @@ The configuration is structured as a top-level map containing settings for the a
 
 ### `websites`
 
-**New in multi-website mode.** Defines multiple websites to monitor, each with its own log file. If this section is present, the `--log-path` command-line flag is ignored.
+**New in multi-website mode.** Defines multiple websites to monitor, each with its own log file. If this section is present, the `--log-path` command-line flag is ignored in live mode (but accepted in `--dry-run` mode for testing against a static log file).
 
 | Field | Type | Description |
 | :---- | :---- | :---- |
@@ -481,7 +481,7 @@ The application uses a unified logging system with five discrete levels. The `ap
 
 | Level | Severity | Description |
 | :--- | :--- | :--- |
-| **`critical`** | **0** (Highest) | Only displays actions that modify state or terminate the program (e.g., **IP blocks**, graceful **SHUTDOWN**). |
+| **`critical`** | **0** (Highest) | Only displays actions that modify state or terminate the program (e.g., **IP blocks**, graceful **SHUTDOWN**), and **metrics summary** output. Useful for quiet dry-run mode where only the final summary is needed. |
 | **`error`** | **1** | Displays severe, non-fatal issues (e.g., file read errors, **Blocker connection failures** that trigger fail-safe). |
 | **`warning`** | **2** (Default) | Includes non-critical operational issues that should be reviewed (e.g., failed timestamp parsing, malformed URL referrers). |
 | **`info`** | **3** | Includes major application lifecycle events (e.g., configuration **LOAD**, **DRY_RUN** start/completion, tailing start). |

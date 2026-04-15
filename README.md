@@ -78,7 +78,11 @@ The application is configured using a configuration directory containing a YAML 
 
 Use `--dry-run` to test your chains against a static log file. This will process the file once and log all match actions without attempting to connect to the configured blocking backend (even if the chain action is `block`).
 
-If `--log-path` is provided, it will read from that file. If `--log-path` is omitted in dry-run mode, the application will read from standard input (`stdin`), allowing you to pipe log data into it.
+If `--log-path` is provided, it will read from that file. If `--log-path` is omitted in dry-run mode, the application will read from standard input (`stdin`), allowing you to pipe log data into it. You can also use `--log-path -` or `--log-path /dev/stdin` explicitly.
+
+In **multi-website mode**, dry-run resolves the vhost from each log line using the configured log format regex, so website-specific chains are properly evaluated.
+
+Use `--chain` to limit evaluation to specific chains (can be specified multiple times). This is useful for testing a single chain without noise from others:
 
 ```sh
 # Reading from a file (config directory contains `config.yaml`)
@@ -88,6 +92,19 @@ If `--log-path` is provided, it will read from that file. If `--log-path` is omi
 
 # Reading from stdin
 cat test_access.log | ./bot-detector --dry-run --config-dir "./testdata"
+
+# Test a specific chain only
+./bot-detector --dry-run \
+  --config-dir "./config" \
+  --log-path "access.log" \
+  --chain "My-New-Chain" \
+  --top-n 10
+
+# Quiet mode: suppress per-IP BLOCK lines, show only the summary
+# Set log_level to "critical" in config.yaml
+./bot-detector --dry-run \
+  --config-dir "./config" \
+  --log-path "access.log"
 ```
 
 ## Operational Behavior
@@ -120,6 +137,7 @@ See [Cluster Configuration](docs/ClusterConfiguration.md) and [Cluster and Docke
 | Flag | Arg. Type | Description |
 | :--- | :--- | :--- |
 | **`--check`** | | Validates the configuration and exits with error code on failure. |
+| **`--chain`** | string | Only evaluate the named chain during dry-run. Can be specified multiple times. |
 | **`--cluster-node-name`** | string | Name of the node (cluster mode). |
 | **`--config-dir`** | dirpath | **Path to the configuration directory** containing `config.yaml`. |
 | **`--dry-run`** | | Runs in test mode, ignoring the blocking backend and live logging. |
@@ -127,7 +145,7 @@ See [Cluster Configuration](docs/ClusterConfiguration.md) and [Cluster and Docke
 | **`--exit-on-eof`** | | Exits after processing the log file to EOF instead of tailing. |
 | **`--help`** | | Display command-line help. |
 | **`--listen`** | string | Starts a web server on this address (e.g., `:8080` or `:8080,role=api`). Can be specified multiple times for multiple listeners. |
-| **`--log-path`** | filepath | Path to the access log file to tail (or to read in dry-run mode). Ignored in multi-website mode where log paths are defined in `config.yaml`. |
+| **`--log-path`** | filepath | Path to the access log file to tail (or to read in dry-run mode). In multi-website mode, ignored in live mode but accepted in dry-run. Supports `-` and `/dev/stdin` for stdin. |
 | **`--reload-on`** | string | Controls config reloading: `watcher`, `HUP`, `USR1`, or `USR2`. |
 | **`--state-dir`** | dirpath | Path to the state directory. Enables persistence if set. |
 | **`--top-n`** | number | In dry-run mode, show top N actors per chain. |
