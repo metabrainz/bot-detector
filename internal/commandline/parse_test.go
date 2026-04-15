@@ -109,6 +109,17 @@ func TestParseParameters(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "chain filter with multiple --chain flags",
+			args: []string{"bot-detector", "--config-dir", configDir, "--dry-run", "--chain", "Chain-A", "--chain", "Chain-B"},
+			want: &AppParameters{
+				ConfigDir:   configDir,
+				DryRun:      true,
+				ChainFilter: []string{"Chain-A", "Chain-B"},
+				Envs:        &EnvParameters{},
+			},
+			wantErr: false,
+		},
+		{
 			name:        "no flags returns help error",
 			args:        []string{"bot-detector"},
 			wantErr:     true,

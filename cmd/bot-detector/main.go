@@ -137,7 +137,7 @@ func handleStartupFlags(params *commandline.AppParameters) error {
 }
 
 func initializeProcessor(params *commandline.AppParameters, appConfig *config.AppConfig, loadedCfg *config.LoadedConfig) *app.Processor {
-	return &app.Processor{
+	p := &app.Processor{
 		ActivityMutex:        &sync.RWMutex{},
 		TopActorsPerChain:    make(map[string]map[string]*store.ActorStats),
 		ActivityStore:        make(map[store.Actor]*store.ActorActivity),
@@ -181,6 +181,15 @@ func initializeProcessor(params *commandline.AppParameters, appConfig *config.Ap
 		GlobalChains:   []int{},
 		UnknownVHosts:  make(map[string]bool),
 	}
+
+	if len(params.ChainFilter) > 0 {
+		p.ChainFilter = make(map[string]bool, len(params.ChainFilter))
+		for _, name := range params.ChainFilter {
+			p.ChainFilter[name] = true
+		}
+	}
+
+	return p
 }
 
 // fetchInitialStateFromCluster fetches the current cluster state from the leader

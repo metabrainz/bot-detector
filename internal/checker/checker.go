@@ -765,6 +765,12 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 	// 2. Iterate over applicable chains.
 	for _, idx := range chainIndices {
 		chain := &p.Chains[idx]
+
+		// Skip chains not in the filter (dry-run --chain flag)
+		if len(p.ChainFilter) > 0 && !p.ChainFilter[chain.Name] {
+			continue
+		}
+
 		actor := GetActor(chain, entry)
 		if actor.IPInfo.Address == "" {
 			continue // Skip chain if actor could not be determined (e.g., IP version mismatch).

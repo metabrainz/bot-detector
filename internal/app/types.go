@@ -59,6 +59,7 @@ type Processor struct {
 	ConfigMutex   *sync.RWMutex
 	Metrics       *metrics.Metrics
 	Chains        []config.BehavioralChain
+	ChainFilter   map[string]bool
 	Config        *config.AppConfig
 	DryRun        bool
 	EnableMetrics bool
