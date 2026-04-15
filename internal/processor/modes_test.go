@@ -763,6 +763,59 @@ test.com 2.2.2.2 - - [01/Jan/2025:00:00:09 +0000] "GET /step2 HTTP/1.1" 200 100 
 	}
 }
 
+func TestIsStdinPath(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		{"-", true},
+		{"/dev/stdin", true},
+		{"", false},
+		{"access.log", false},
+		{"/dev/null", false},
+	}
+	for _, tt := range tests {
+		if got := processor.IsStdinPath(tt.path); got != tt.expected {
+			t.Errorf("IsStdinPath(%q) = %v, want %v", tt.path, got, tt.expected)
+		}
+	}
+}
+
+func TestDryRunLogProcessor_StdinPath(t *testing.T) {
+	// When LogPath is "/dev/stdin" or "-", DryRunLogProcessor should treat it
+	// as stdin (LogPath="") rather than trying to open and seek the file.
+	for _, stdinPath := range []string{"-", "/dev/stdin"} {
+		t.Run(stdinPath, func(t *testing.T) {
+			harness := newDryRunTestHarness(t, &config.AppConfig{})
+			harness.app.Processor.LogPath = stdinPath
+
+			// Provide a pipe as stdin with test data
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			oldStdin := os.Stdin
+			os.Stdin = r
+			defer func() { os.Stdin = oldStdin }()
+
+			go func() {
+				_, _ = w.WriteString("example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] \"GET /1 HTTP/1.1\" 200 100 \"-\" \"-\"\n")
+				_ = w.Close()
+			}()
+
+			done := make(chan struct{})
+			go processor.DryRunLogProcessor(harness.app.Processor, done)
+			<-done
+
+			if len(harness.processedLines) != 1 {
+				t.Errorf("Expected 1 line processed, got %d", len(harness.processedLines))
+			}
+			logOutput := strings.Join(harness.capturedLogs, "\n")
+			assertContains(t, logOutput, "Starting dry-run mode from stdin")
+		})
+	}
+}
+
 // TestLiveLogTailer_Success covers the happy path for the live tailer,
 // including initial startup, processing new lines, and handling log rotation.
 // NOTE: This test is named with a suffix to distinguish it from the error case tests below.

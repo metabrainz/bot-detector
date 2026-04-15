@@ -29,6 +29,11 @@ var (
 	ErrEOF = errors.New("end of file reached without rotation")
 )
 
+// IsStdinPath returns true if the given path refers to standard input.
+func IsStdinPath(path string) bool {
+	return path == "-" || path == "/dev/stdin"
+}
+
 // Tailer is a struct that encapsulates the state and logic for tailing a single file.
 type Tailer struct {
 	path        string
@@ -325,6 +330,10 @@ func DryRunLogProcessor(p *app.Processor, done chan<- struct{}) {
 
 	var reader io.Reader
 	var logSource string
+
+	if IsStdinPath(p.LogPath) {
+		p.LogPath = ""
+	}
 
 	if p.LogPath != "" {
 		logSource = fmt.Sprintf("log file: %s", p.LogPath)
