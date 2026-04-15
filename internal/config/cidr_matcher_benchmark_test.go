@@ -1,7 +1,7 @@
 package config
 
 import (
-	"net"
+	"net/netip"
 	"testing"
 
 	"bot-detector/internal/types"
@@ -10,31 +10,31 @@ import (
 
 // Benchmark raw CIDR evaluation (baseline - no caching at all)
 func BenchmarkCIDRMatcher_RawCIDR(b *testing.B) {
-	_, ipNet, _ := net.ParseCIDR("192.168.0.0/16")
-	ip := net.ParseIP("192.168.1.100")
+	prefix := netip.MustParsePrefix("192.168.0.0/16")
+	addr := netip.MustParseAddr("192.168.1.100")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ipNet.Contains(ip)
+		_ = prefix.Contains(addr)
 	}
 }
 
-// Benchmark CIDR matcher with net.ParseIP overhead
+// Benchmark CIDR matcher with netip.ParseAddr overhead
 func BenchmarkCIDRMatcher_WithParsing(b *testing.B) {
-	_, ipNet, _ := net.ParseCIDR("192.168.0.0/16")
+	prefix := netip.MustParsePrefix("192.168.0.0/16")
 	ipStr := "192.168.1.100"
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ip := net.ParseIP(ipStr)
-		_ = ipNet.Contains(ip)
+		addr, _ := netip.ParseAddr(ipStr)
+		_ = prefix.Contains(addr)
 	}
 }
 
 // Benchmark CIDR matcher WITHOUT result caching (only field caching)
 // Simulates 10 chains checking same CIDR on same entry
 func BenchmarkCIDRMatcher_NoResultCache(b *testing.B) {
-	_, ipNet, _ := net.ParseCIDR("192.168.0.0/16")
+	prefix := netip.MustParsePrefix("192.168.0.0/16")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -44,13 +44,7 @@ func BenchmarkCIDRMatcher_NoResultCache(b *testing.B) {
 
 		// Simulate 10 chains evaluating same CIDR
 		for chain := 0; chain < 10; chain++ {
-			fieldVal := types.GetMatchValueIfType("IP", entry, types.StringField)
-			if fieldVal != nil {
-				ip := net.ParseIP(fieldVal.(string))
-				if ip != nil {
-					_ = ipNet.Contains(ip)
-				}
-			}
+			_ = entry.IPInfo.Addr.IsValid() && prefix.Contains(entry.IPInfo.Addr)
 		}
 	}
 }

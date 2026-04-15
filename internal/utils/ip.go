@@ -1,6 +1,9 @@
 package utils
 
-import "net"
+import (
+	"net"
+	"net/netip"
+)
 
 // IPVersion is used internally to track whether an IP is v4 or v6.
 type IPVersion byte
@@ -14,6 +17,7 @@ const (
 // IPInfo holds the string representation of an IP and its version.
 type IPInfo struct {
 	Address string
+	Addr    netip.Addr // Pre-parsed for fast CIDR matching
 	Version IPVersion
 }
 
@@ -28,14 +32,17 @@ func NewIPInfo(ipStr string) IPInfo {
 	// Store canonical form
 	canonical := ip.String()
 
+	// Parse once for fast CIDR matching
+	addr, _ := netip.ParseAddr(canonical)
+
 	// Check if it's an IPv4 address.
 	if ip.To4() != nil {
-		return IPInfo{Address: canonical, Version: VersionIPv4}
+		return IPInfo{Address: canonical, Addr: addr, Version: VersionIPv4}
 	}
 
 	// Check if it's an IPv6 address.
 	if ip.To16() != nil {
-		return IPInfo{Address: canonical, Version: VersionIPv6}
+		return IPInfo{Address: canonical, Addr: addr, Version: VersionIPv6}
 	}
 
 	return IPInfo{Address: ipStr, Version: VersionInvalid}

@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -426,7 +426,7 @@ func CompileStringMatcher(ctx MatcherContext, value string) (FieldMatcher, error
 			return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': 'cidr:' matcher is only supported for the 'IP' field", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName)
 		}
 		cidrStr := strings.TrimPrefix(value, "cidr:")
-		_, ipNet, err := net.ParseCIDR(cidrStr)
+		prefix, err := netip.ParsePrefix(cidrStr)
 		if err != nil {
 			return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': invalid CIDR '%s' for 'cidr:' matcher: %w", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, cidrStr, err)
 		}
@@ -437,22 +437,7 @@ func CompileStringMatcher(ctx MatcherContext, value string) (FieldMatcher, error
 			if result, found := entry.CheckMatcherCache(cacheKey); found {
 				return result
 			}
-
-			// Cache miss - evaluate matcher
-			fieldVal := types.GetMatchValueIfType(ctx.CanonicalFieldName, entry, types.StringField)
-			if fieldVal == nil {
-				entry.StoreMatcherResult(cacheKey, false)
-				return false
-			}
-			ipStr := fieldVal.(string)
-			ip := net.ParseIP(ipStr)
-			if ip == nil {
-				entry.StoreMatcherResult(cacheKey, false)
-				return false
-			}
-			result := ipNet.Contains(ip)
-
-			// Store result in cache
+			result := entry.IPInfo.Addr.IsValid() && prefix.Contains(entry.IPInfo.Addr)
 			entry.StoreMatcherResult(cacheKey, result)
 			return result
 		}, nil
