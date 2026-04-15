@@ -13,6 +13,7 @@ import (
 
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/metrics"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
@@ -445,6 +446,11 @@ func InitializeMetrics(p *Processor, loadedCfg *config.LoadedConfig) {
 	p.Metrics.GoodActorHits = &sync.Map{}
 	for _, goodActor := range loadedCfg.GoodActors {
 		p.Metrics.GoodActorHits.Store(goodActor.Name, new(atomic.Int64))
+	}
+
+	// Initialize parse error buffer (only on first init, preserve across reloads)
+	if p.Metrics.RecentParseErrors == nil {
+		p.Metrics.RecentParseErrors = metrics.NewParseErrorBuffer(loadedCfg.Application.MaxRecentParseErrors)
 	}
 }
 
