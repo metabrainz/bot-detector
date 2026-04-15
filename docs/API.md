@@ -130,6 +130,17 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
         6092  2026-04-10
     ```
 
+### `/stats/parse-errors`
+
+*   **Method:** `GET`
+*   **Content-Type:** `text/plain; charset=utf-8`
+*   **Description:** Returns the most recent log lines that failed to parse (newest first, one per line). The buffer size is controlled by `application.max_recent_parse_errors` (default: 50, set to 0 to disable).
+*   **Response:**
+    ```
+    musicbrainz.org 34.58.6.41 - - [15/Apr/2026:11:44:05 +0000] "" 400 0 "-" "-"
+    musicbrainz.org 1.2.3.4 - - [15/Apr/2026:11:43:00 +0000] "GET /incomplete HTTP/1.1" 200 100 "-"
+    ```
+
 ### `/config`
 
 *   **Method:** `GET`

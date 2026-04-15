@@ -57,6 +57,7 @@ websites:
 | :---- | :---- | :---- |
 | **log_level** | string | Optional. Set minimum log level: `critical`, `error`, `warning`, `info`, `debug`. Default: `warning`. |
 | **enable_metrics** | boolean | Optional. If `true`, enables the metrics endpoint. Default: `true`. |
+| **max_recent_parse_errors** | int | Optional. Number of recent parse error log lines to keep in memory for the `/stats/parse-errors` endpoint. Default: `50`. Set to `0` to disable. |
 | **eof_polling_delay** | string | Optional. Duration to wait before re-checking a log file after reaching its end. Default: `200ms`. |
 | **config** | object | Settings related to application configuration management. See table [`application.config`](#applicationconfig). |
 | **persistence** | object | Settings related to state persistence. See table [`application.persistence`](#applicationpersistence). |
