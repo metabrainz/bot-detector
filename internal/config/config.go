@@ -503,13 +503,19 @@ func compileIntMatcher(ctx MatcherContext, value int) FieldMatcher {
 
 // compileListMatcher handles lists, creating an OR condition over its items.
 func compileListMatcher(ctx MatcherContext, values []interface{}) (FieldMatcher, error) {
+	// Optimization: if all items are CIDR matchers for the IP field, batch them
+	// into a single matcher with one prefix slice lookup instead of N closures.
+	if ctx.CanonicalFieldName == "IP" {
+		if matcher, ok := tryCompileBatchedCIDR(values); ok {
+			return matcher, nil
+		}
+	}
+
 	var subMatchers []FieldMatcher
 	for _, item := range values {
-		// Pass the existing context to the sub-matcher.
-		// The canonicalFieldName is already set in ctx by compileSingleMatcher.
 		matcher, _, err := compileSingleMatcher(ctx, ctx.CanonicalFieldName, item)
 		if err != nil {
-			return nil, err // Error in a sub-matcher
+			return nil, err
 		}
 		subMatchers = append(subMatchers, matcher)
 	}
@@ -517,11 +523,39 @@ func compileListMatcher(ctx MatcherContext, values []interface{}) (FieldMatcher,
 	return func(entry *types.LogEntry) bool {
 		for _, matcher := range subMatchers {
 			if matcher(entry) {
-				return true // OR logic: one match is enough
+				return true
 			}
 		}
 		return false
 	}, nil
+}
+
+// tryCompileBatchedCIDR attempts to parse all list items as cidr: prefixes.
+// Returns a single fast matcher and true if all items are CIDRs, or nil/false otherwise.
+func tryCompileBatchedCIDR(values []interface{}) (FieldMatcher, bool) {
+	prefixes := make([]netip.Prefix, 0, len(values))
+	for _, item := range values {
+		s, ok := item.(string)
+		if !ok || !strings.HasPrefix(s, "cidr:") {
+			return nil, false
+		}
+		p, err := netip.ParsePrefix(strings.TrimPrefix(s, "cidr:"))
+		if err != nil {
+			return nil, false
+		}
+		prefixes = append(prefixes, p)
+	}
+	return func(entry *types.LogEntry) bool {
+		if !entry.IPInfo.Addr.IsValid() {
+			return false
+		}
+		for _, p := range prefixes {
+			if p.Contains(entry.IPInfo.Addr) {
+				return true
+			}
+		}
+		return false
+	}, true
 }
 
 // compileObjectMatcher handles map values, creating an AND condition for its sub-matchers.
