@@ -34,8 +34,12 @@ find . -name "*.go" -print0 | xargs -0 gofmt -w
 echo "Running bot-detector --dry-run with testdata..."
 ./bot-detector --dry-run --config-dir testdata --log-path testdata/test_access.log --top-n 10
 
-# Test multi-website config validation (config check only, dry-run not yet supported for multi-website)
+# Test multi-website config validation
 echo "Validating multi-website configuration..."
 ./bot-detector --check --config-dir testdata/multiwebsite
+
+# Run govulncheck
+echo "Running govulncheck..."
+go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 echo "All checks passed!"
