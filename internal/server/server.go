@@ -126,6 +126,7 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("GET /stats/steps", stepsHandler(p))
 		mux.HandleFunc("GET /stats/websites", websitesHandler(p))
 		mux.HandleFunc("GET /stats/bad-actors", badActorsStatsTextHandler(p))
+		mux.HandleFunc("GET /stats/parse-errors", parseErrorsHandler(p))
 	}
 
 	// API endpoints (role=api)

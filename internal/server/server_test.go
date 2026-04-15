@@ -188,6 +188,7 @@ func (m *mockProvider) GetAllBadActors() ([]interface{}, error)                 
 func (m *mockProvider) RemoveBadActorsByReason(reason string) ([]string, error) { return nil, nil }
 func (m *mockProvider) GetBlockedIPsByReason(reason string) ([]string, error)   { return nil, nil }
 func (m *mockProvider) GetBadActorsThreshold() float64                          { return 0 }
+func (m *mockProvider) GetRecentParseErrors() []string                          { return nil }
 
 // TestServer_StartAndShutdown verifies the full lifecycle of the stats server.
 func TestServer_StartAndShutdown(t *testing.T) {

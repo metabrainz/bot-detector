@@ -254,6 +254,7 @@ func (m *mockIPProvider) GetAllBadActors() ([]interface{}, error)               
 func (m *mockIPProvider) RemoveBadActorsByReason(reason string) ([]string, error) { return nil, nil }
 func (m *mockIPProvider) GetBlockedIPsByReason(reason string) ([]string, error)   { return nil, nil }
 func (m *mockIPProvider) GetBadActorsThreshold() float64                          { return 0 }
+func (m *mockIPProvider) GetRecentParseErrors() []string                          { return nil }
 
 func TestAPIIPLookupHandler_JSON(t *testing.T) {
 	now := time.Now()

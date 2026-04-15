@@ -129,6 +129,9 @@ type Provider interface {
 
 	// GetBadActorsThreshold returns the configured bad actor threshold (0 if disabled).
 	GetBadActorsThreshold() float64
+
+	// GetRecentParseErrors returns the most recent parse error log lines (newest first).
+	GetRecentParseErrors() []string
 }
 
 // StateSyncResponse is the response format for state sync endpoints.

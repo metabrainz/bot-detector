@@ -501,6 +501,14 @@ func (p *Processor) GetBadActorsThreshold() float64 {
 	return p.Config.BadActors.Threshold
 }
 
+// GetRecentParseErrors returns the most recent parse error log lines (newest first).
+func (p *Processor) GetRecentParseErrors() []string {
+	if p.Metrics.RecentParseErrors == nil {
+		return nil
+	}
+	return p.Metrics.RecentParseErrors.Entries()
+}
+
 // ApplyBadActorFromPeer inserts a bad actor received from a cluster peer
 // and issues a block to HAProxy. Skips if already a bad actor.
 func (p *Processor) ApplyBadActorFromPeer(ip string, score float64, blockCount int, promotedAt time.Time) error {
