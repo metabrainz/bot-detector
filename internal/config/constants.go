@@ -56,6 +56,7 @@ const (
 	DefaultMaxCommandsPerBatch      = 500   // Default batch size for HAProxy CLI commands
 	DefaultUnblockCooldown          = "5m"
 	DefaultEnableMetrics            = true
+	DefaultMaxRecentParseErrors     = 50
 
 	// Default Cluster settings
 	DefaultConfigPollInterval    = "30s"  // How often followers check for config updates

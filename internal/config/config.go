@@ -933,7 +933,7 @@ func NewClusterConfigWithDefaults(nodes []cluster.NodeConfig) *cluster.ClusterCo
 	}
 }
 
-func parseStringAndBoolSettings(config *TopLevelConfig) (string, string, bool, string, error) {
+func parseStringAndBoolSettings(config *TopLevelConfig) (string, string, bool, int, string, error) {
 	logLevelStr := DefaultLogLevel
 	if config.Application.LogLevel != "" {
 		logLevelStr = config.Application.LogLevel
@@ -946,7 +946,7 @@ func parseStringAndBoolSettings(config *TopLevelConfig) (string, string, bool, s
 	switch lineEndingStr {
 	case "lf", "crlf", "cr":
 	default:
-		return "", "", false, "", fmt.Errorf("invalid line_ending value: '%s'. Must be one of 'lf', 'crlf', 'cr'", lineEndingStr)
+		return "", "", false, 0, "", fmt.Errorf("invalid line_ending value: '%s'. Must be one of 'lf', 'crlf', 'cr'", lineEndingStr)
 	}
 
 	enableMetrics := DefaultEnableMetrics
@@ -954,12 +954,17 @@ func parseStringAndBoolSettings(config *TopLevelConfig) (string, string, bool, s
 		enableMetrics = *config.Application.EnableMetrics
 	}
 
+	maxRecentParseErrors := DefaultMaxRecentParseErrors
+	if config.Application.MaxRecentParseErrors != nil {
+		maxRecentParseErrors = *config.Application.MaxRecentParseErrors
+	}
+
 	unblockCooldownStr := DefaultUnblockCooldown
 	if config.Checker.UnblockCooldown != "" {
 		unblockCooldownStr = config.Checker.UnblockCooldown
 	}
 
-	return logLevelStr, lineEndingStr, enableMetrics, unblockCooldownStr, nil
+	return logLevelStr, lineEndingStr, enableMetrics, maxRecentParseErrors, unblockCooldownStr, nil
 }
 
 func parseCustomLogRegex(config *TopLevelConfig) (*regexp.Regexp, error) {
@@ -1464,7 +1469,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		return nil, err
 	}
 
-	logLevelStr, lineEndingStr, enableMetrics, unblockCooldownStr, err := parseStringAndBoolSettings(config)
+	logLevelStr, lineEndingStr, enableMetrics, maxRecentParseErrors, unblockCooldownStr, err := parseStringAndBoolSettings(config)
 	if err != nil {
 		return nil, err
 	}
@@ -1573,9 +1578,10 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 
 	return &LoadedConfig{
 		Application: ApplicationConfig{
-			LogLevel:        logLevelStr,
-			EnableMetrics:   enableMetrics,
-			Config:          ConfigManagement{PollingInterval: pollingInterval},
+			LogLevel:             logLevelStr,
+			EnableMetrics:        enableMetrics,
+			MaxRecentParseErrors: maxRecentParseErrors,
+			Config:               ConfigManagement{PollingInterval: pollingInterval},
 			Persistence:     persistenceConfig,
 			EOFPollingDelay: eofPollingDelay,
 		},
