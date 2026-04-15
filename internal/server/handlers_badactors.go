@@ -247,10 +247,10 @@ func badActorsStatsTextHandler(p Provider) http.HandlerFunc {
 		s := computeBadActorStats(actors)
 
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		fmt.Fprintf(w, "=== Bad Actor Statistics ===\n")                    //nolint:errcheck
-		fmt.Fprintf(w, "Total: %d\n", s.Total)                             //nolint:errcheck
-		fmt.Fprintf(w, "Avg Score: %.1f\n", s.AvgScore)                    //nolint:errcheck
-		fmt.Fprintf(w, "Avg Block Count: %.1f\n\n", s.AvgBlock)            //nolint:errcheck
+		fmt.Fprintf(w, "=== Bad Actor Statistics ===\n")        //nolint:errcheck
+		fmt.Fprintf(w, "Total: %d\n", s.Total)                  //nolint:errcheck
+		fmt.Fprintf(w, "Avg Score: %.1f\n", s.AvgScore)         //nolint:errcheck
+		fmt.Fprintf(w, "Avg Block Count: %.1f\n\n", s.AvgBlock) //nolint:errcheck
 
 		// Sort reasons by count descending
 		type rc struct {
