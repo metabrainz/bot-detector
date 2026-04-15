@@ -376,13 +376,14 @@ func (p *Processor) GetPersistenceState(ip string) (interface{}, bool) {
 	if !p.PersistenceEnabled {
 		return nil, false
 	}
-	p.PersistenceMutex.Lock()
-	defer p.PersistenceMutex.Unlock()
-	state, exists := p.IPStates[ip]
-	return state, exists
+	state, err := persistence.GetIPState(p.DB, ip)
+	if err != nil || state == nil {
+		return nil, false
+	}
+	return *state, true
 }
 
-// RemoveFromPersistence removes an IP from persistence state and writes unblock event to journal.
+// RemoveFromPersistence removes an IP from persistence state, bad actors, and scores.
 func (p *Processor) RemoveFromPersistence(ip string) error {
 	if !p.PersistenceEnabled {
 		return nil
@@ -391,25 +392,24 @@ func (p *Processor) RemoveFromPersistence(ip string) error {
 	p.PersistenceMutex.Lock()
 	defer p.PersistenceMutex.Unlock()
 
-	// Check if IP exists in persistence
-	if _, exists := p.IPStates[ip]; !exists {
-		return nil // Not in persistence, nothing to do
+	// Remove from bad actors and scores
+	_ = persistence.RemoveBadActor(p.DB, ip)
+
+	// Check if IP exists in ips table
+	state, err := persistence.GetIPState(p.DB, ip)
+	if err != nil {
+		return fmt.Errorf("failed to query IP state: %w", err)
+	}
+	if state == nil {
+		return nil
 	}
 
-	// Remove from IPStates map
-	delete(p.IPStates, ip)
+	if err := persistence.DeleteIPState(p.DB, ip); err != nil {
+		return fmt.Errorf("failed to delete IP state: %w", err)
+	}
 
-	// Write unblock event to journal
-	if p.JournalHandle != nil {
-		event := &persistence.AuditEvent{
-			Timestamp: time.Now(),
-			Event:     persistence.EventTypeUnblock,
-			IP:        ip,
-			Reason:    "manual_clear",
-		}
-		if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
-			return fmt.Errorf("failed to write unblock event to journal: %w", err)
-		}
+	if err := persistence.InsertEvent(p.DB, time.Now(), persistence.EventTypeUnblock, ip, "manual_clear", 0, ""); err != nil {
+		return fmt.Errorf("failed to insert unblock event: %w", err)
 	}
 
 	return nil
@@ -417,7 +417,12 @@ func (p *Processor) RemoveFromPersistence(ip string) error {
 
 // GetIPStates returns the complete IPStates map for state sync.
 func (p *Processor) GetIPStates() map[string]persistence.IPState {
-	return p.IPStates
+	states, err := persistence.GetAllIPStates(p.DB)
+	if err != nil {
+		p.LogFunc(logging.LevelError, "PERSISTENCE", "Failed to get all IP states: %v", err)
+		return make(map[string]persistence.IPState)
+	}
+	return states
 }
 
 // GetPersistenceMutex returns the mutex for IPStates.
@@ -443,6 +448,103 @@ func (p *Processor) GetStateSyncConfig() (bool, bool, time.Duration, bool) {
 
 func (p *Processor) GetStateSyncManager() interface{} {
 	return p.StateSyncManager
+}
+
+func (p *Processor) GetBadActorInfo(ip string) (interface{}, interface{}) {
+	if !p.PersistenceEnabled {
+		return nil, nil
+	}
+	ba, _ := persistence.GetBadActor(p.DB, ip)
+	score, _ := persistence.GetScore(p.DB, ip)
+	return ba, score
+}
+
+func (p *Processor) GetAllBadActors() ([]interface{}, error) {
+	if !p.PersistenceEnabled {
+		return nil, nil
+	}
+	actors, err := persistence.GetAllBadActors(p.DB)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]interface{}, len(actors))
+	for i, a := range actors {
+		result[i] = a
+	}
+	return result, nil
+}
+
+func (p *Processor) RemoveBadActorsByReason(reason string) ([]string, error) {
+	if !p.PersistenceEnabled {
+		return nil, nil
+	}
+	p.PersistenceMutex.Lock()
+	defer p.PersistenceMutex.Unlock()
+	return persistence.RemoveBadActorsByReason(p.DB, reason)
+}
+
+func (p *Processor) GetBlockedIPsByReason(reason string) ([]string, error) {
+	if !p.PersistenceEnabled {
+		return nil, nil
+	}
+	p.PersistenceMutex.Lock()
+	defer p.PersistenceMutex.Unlock()
+	return persistence.GetBlockedIPsByReason(p.DB, reason, p.NowFunc())
+}
+
+func (p *Processor) GetBadActorsThreshold() float64 {
+	p.ConfigMutex.RLock()
+	defer p.ConfigMutex.RUnlock()
+	if !p.Config.BadActors.Enabled {
+		return 0
+	}
+	return p.Config.BadActors.Threshold
+}
+
+// GetRecentParseErrors returns the most recent parse error log lines (newest first).
+func (p *Processor) GetRecentParseErrors() []string {
+	if p.Metrics.RecentParseErrors == nil {
+		return nil
+	}
+	return p.Metrics.RecentParseErrors.Entries()
+}
+
+// ApplyBadActorFromPeer inserts a bad actor received from a cluster peer
+// and issues a block to HAProxy. Skips if already a bad actor.
+func (p *Processor) ApplyBadActorFromPeer(ip string, score float64, blockCount int, promotedAt time.Time) error {
+	if !p.PersistenceEnabled || p.DB == nil {
+		return nil
+	}
+
+	already, _ := persistence.IsBadActor(p.DB, ip)
+	if already {
+		return nil
+	}
+
+	p.PersistenceMutex.Lock()
+	err := persistence.PromoteToBadActor(p.DB, ip, score, blockCount, promotedAt)
+	p.PersistenceMutex.Unlock()
+	if err != nil {
+		return err
+	}
+
+	p.LogFunc(logging.LevelCritical, "BAD_ACTOR", "IP %s promoted to bad actor via cluster sync (score=%.1f, blocks=%d)", ip, score, blockCount)
+
+	p.ConfigMutex.RLock()
+	baConfig := p.Config.BadActors
+	p.ConfigMutex.RUnlock()
+
+	if !p.DryRun && p.Blocker != nil {
+		ipInfo := utils.NewIPInfo(ip)
+		_ = p.Blocker.Block(ipInfo, baConfig.BlockDuration, "bad-actor")
+	}
+
+	now := time.Now()
+	p.PersistenceMutex.Lock()
+	_ = persistence.UpsertIPState(p.DB, ip, persistence.BlockStateBlocked, now.Add(baConfig.BlockDuration), "bad-actor", now, now)
+	p.PersistenceMutex.Unlock()
+
+	return nil
 }
 
 func (p *Processor) GetBlockTableNameFallback() string {

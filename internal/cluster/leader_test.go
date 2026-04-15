@@ -68,8 +68,8 @@ func TestMetricsCollector_SuccessfulCollection(t *testing.T) {
 
 	// Create a test HTTP server that returns mock metrics
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/cluster/metrics" {
-			t.Errorf("Expected path '/cluster/metrics', got %s", r.URL.Path)
+		if r.URL.Path != "/api/v1/cluster/metrics" {
+			t.Errorf("Expected path '/api/v1/cluster/metrics', got %s", r.URL.Path)
 		}
 
 		w.Header().Set("Content-Type", "application/json")

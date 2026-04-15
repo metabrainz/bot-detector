@@ -112,6 +112,26 @@ type Provider interface {
 	// GetStateSyncManager returns the state sync manager (nil if not enabled).
 	// Returns *cluster.StateSyncManager but typed as interface{} to avoid import cycle.
 	GetStateSyncManager() interface{}
+
+	// GetBadActorInfo returns bad actor info and score for an IP.
+	// Returns (badActorInfo, scoreInfo) — either can be nil.
+	GetBadActorInfo(ip string) (interface{}, interface{})
+
+	// GetAllBadActors returns all bad actors.
+	GetAllBadActors() ([]interface{}, error)
+
+	// RemoveBadActorsByReason removes bad actors whose history contains the given reason.
+	// Returns the list of removed IPs.
+	RemoveBadActorsByReason(reason string) ([]string, error)
+
+	// GetBlockedIPsByReason returns IPs currently blocked with a reason containing the given substring.
+	GetBlockedIPsByReason(reason string) ([]string, error)
+
+	// GetBadActorsThreshold returns the configured bad actor threshold (0 if disabled).
+	GetBadActorsThreshold() float64
+
+	// GetRecentParseErrors returns the most recent parse error log lines (newest first).
+	GetRecentParseErrors() []string
 }
 
 // StateSyncResponse is the response format for state sync endpoints.
@@ -119,6 +139,7 @@ type StateSyncResponse struct {
 	Version   string                         `json:"version"`
 	Timestamp time.Time                      `json:"timestamp"`
 	States    map[string]persistence.IPState `json:"states"`
+	BadActors []persistence.BadActorInfo     `json:"bad_actors,omitempty"`
 }
 
 // MergedStateResponse is the response format for merged cluster state.
@@ -128,4 +149,5 @@ type MergedStateResponse struct {
 	NodesQueried []string                       `json:"nodes_queried"`
 	NodesFailed  []string                       `json:"nodes_failed"`
 	States       map[string]persistence.IPState `json:"states"`
+	BadActors    []persistence.BadActorInfo     `json:"bad_actors,omitempty"`
 }

@@ -108,7 +108,7 @@ Chains can be:
 Chain completion logs show which website triggered the chain:
 
 ```
-[ALERT] BLOCK! Chain: API-Rate-Limit completed by IP 10.0.0.1 on website 'api' (vhost: api.example.com). Blocking for 15m
+[BLOCK] Chain: API-Rate-Limit completed by IP 10.0.0.1 on website 'api' (vhost: api.example.com). Blocking for 15m
 ```
 
 This makes it easy to find the triggering log line in the correct log file.

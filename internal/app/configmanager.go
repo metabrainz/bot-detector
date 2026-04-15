@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/metrics"
 	"bot-detector/internal/persistence"
 	"bot-detector/internal/types"
 	"bot-detector/internal/utils"
@@ -59,7 +61,7 @@ func LogConfigurationSummary(p *Processor, oldChains []config.BehavioralChain, o
 	p.ConfigMutex.RUnlock()
 
 	if p.ConfigReloaded {
-		p.LogFunc(logging.LevelInfo, "CONFIG_RELOAD", "Successfully reloaded main configuration from '%s'", p.ConfigFilePath)
+		p.LogFunc(logging.LevelInfo, "CONFIG_RELOAD", "Successfully reloaded main configuration from '%s'", filepath.Base(p.ConfigFilePath))
 
 		// Show changes on reload
 		if len(oldChains) != len(newChains) || len(oldGoodActors) != len(newGoodActors) {
@@ -73,7 +75,7 @@ func LogConfigurationSummary(p *Processor, oldChains []config.BehavioralChain, o
 		}
 	} else {
 		p.ConfigReloaded = true
-		p.LogFunc(logging.LevelInfo, "CONFIG", "Successfully loaded main configuration from '%s'", p.ConfigFilePath)
+		p.LogFunc(logging.LevelInfo, "CONFIG", "Successfully loaded main configuration from '%s'", filepath.Base(p.ConfigFilePath))
 		p.LogFunc(logging.LevelInfo, "CONFIG", "Chains: %d, Good Actors: %d, Log Level: %s",
 			len(newChains), len(newGoodActors), currentLogLevel)
 	}
@@ -184,15 +186,13 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 	}
 
 	// Count blocked IPs
-	p.PersistenceMutex.Lock()
-	blockedCount := 0
-	for _, state := range p.IPStates {
-		if state.State == persistence.BlockStateBlocked {
-			blockedCount++
-		}
+	blockedIPs, err := persistence.GetBlockedIPs(p.DB, time.Now())
+	if err != nil {
+		p.LogFunc(logging.LevelError, "UNBLOCK_GOOD_ACTOR", "Failed to query blocked IPs: %v", err)
+		return
 	}
-	p.PersistenceMutex.Unlock()
 
+	blockedCount := len(blockedIPs)
 	if blockedCount == 0 {
 		return
 	}
@@ -207,13 +207,7 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 		}
 
 		// Iterate through blocked IPs for pattern matching (CIDR/regex)
-		p.PersistenceMutex.Lock()
-		for ip, state := range p.IPStates {
-			// Skip if not blocked
-			if state.State != persistence.BlockStateBlocked {
-				continue
-			}
-
+		for ip, state := range blockedIPs {
 			// Create a minimal LogEntry with just the IP set
 			testEntry := &LogEntry{
 				IPInfo: utils.NewIPInfo(ip),
@@ -222,11 +216,9 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 			// Test if this IP matches the good actor's IP matcher
 			if goodActor.IPMatchers[0](testEntry) {
 				// Match found - need to unblock
-				// Update state to unblocked
-				p.IPStates[ip] = persistence.IPState{
-					State:  persistence.BlockStateUnblocked,
-					Reason: "added-to-good-actors",
-				}
+				p.PersistenceMutex.Lock()
+				_ = persistence.UpsertIPState(p.DB, ip, persistence.BlockStateUnblocked, time.Now(), "added-to-good-actors", time.Now(), time.Time{})
+				p.PersistenceMutex.Unlock()
 
 				// Issue unblock command to HAProxy
 				if !p.DryRun && p.Blocker != nil {
@@ -234,18 +226,17 @@ func unblockNewlyWhitelistedIPs(p *Processor, newGoodActors []config.GoodActorDe
 					_ = p.Blocker.Unblock(ipInfo, "added-to-good-actors")
 				}
 
-				p.LogFunc(logging.LevelInfo, "UNBLOCK_WHITELIST",
+				p.LogFunc(logging.LevelInfo, "UNBLOCK_GOOD_ACTOR",
 					"Unblocked %s (was blocked by %s): newly added to good_actors (%s)",
 					ip, state.Reason, goodActor.Name)
 				unblocked++
 			}
 		}
-		p.PersistenceMutex.Unlock()
 		slowPathCount++
 	}
 
 	if unblocked > 0 {
-		p.LogFunc(logging.LevelInfo, "UNBLOCK_WHITELIST",
+		p.LogFunc(logging.LevelInfo, "UNBLOCK_GOOD_ACTOR",
 			"Checked %d blocked IPs against %d new good actor rule(s), unblocked %d IPs",
 			blockedCount, slowPathCount, unblocked)
 	}
@@ -267,7 +258,7 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	if mainConfigChanged {
 		fileInfo, err := os.Stat(p.ConfigFilePath)
 		if err != nil {
-			p.LogFunc(logging.LevelError, "WATCH_ERROR", "Failed to stat file for ModTime update %s: %v", p.ConfigFilePath, err)
+			p.LogFunc(logging.LevelError, "WATCH_FAIL", "Failed to stat file for ModTime update %s: %v", p.ConfigFilePath, err)
 			newLastModTime = oldConfig.LastModTime // Fallback to old time on error
 		} else {
 			newLastModTime = fileInfo.ModTime()
@@ -282,7 +273,7 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	}
 	loadedCfg, err := config.LoadConfigFromYAML(opts)
 	if err != nil {
-		p.LogFunc(logging.LevelError, "LOAD_ERROR", "Failed to reload configuration: %v", err)
+		p.LogFunc(logging.LevelError, "LOAD_FAIL", "Failed to reload configuration: %v", err)
 		return // The deferred signal will still fire.
 	}
 
@@ -292,6 +283,8 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 		Parser:           loadedCfg.Parser,
 		Checker:          loadedCfg.Checker,
 		Blockers:         loadedCfg.Blockers,
+		BadActors:        loadedCfg.BadActors,
+		Cluster:          oldConfig.Cluster, // Cluster config is not reloadable
 		GoodActors:       loadedCfg.GoodActors,
 		FileDependencies: loadedCfg.FileDependencies,
 
@@ -454,6 +447,11 @@ func InitializeMetrics(p *Processor, loadedCfg *config.LoadedConfig) {
 	for _, goodActor := range loadedCfg.GoodActors {
 		p.Metrics.GoodActorHits.Store(goodActor.Name, new(atomic.Int64))
 	}
+
+	// Initialize parse error buffer (only on first init, preserve across reloads)
+	if p.Metrics.RecentParseErrors == nil {
+		p.Metrics.RecentParseErrors = metrics.NewParseErrorBuffer(loadedCfg.Application.MaxRecentParseErrors)
+	}
 }
 
 // SignalReloader listens for a specific OS signal to trigger a configuration reload. //nolint:cyclop
@@ -583,7 +581,7 @@ func ConfigWatcher(p *Processor, stop <-chan struct{}) {
 		// 1. Check the main YAML file
 		fileInfo, err := os.Stat(p.ConfigFilePath)
 		if err != nil {
-			p.LogFunc(logging.LevelError, "WATCH_ERROR", "Failed to stat file %s: %v", p.ConfigFilePath, err)
+			p.LogFunc(logging.LevelError, "WATCH_FAIL", "Failed to stat file %s: %v", p.ConfigFilePath, err)
 			continue
 		}
 

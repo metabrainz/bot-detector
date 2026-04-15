@@ -12,6 +12,7 @@ import (
 
 	"bot-detector/internal/blocker"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
 	"bot-detector/internal/utils"
 )
@@ -21,14 +22,14 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
 		if ipStr == "" {
-			http.Error(w, "IP address required", http.StatusBadRequest)
+			jsonError(w, "IP address required", http.StatusBadRequest)
 			return
 		}
 
 		// Canonicalize IP
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
-			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			jsonError(w, "Invalid IP address", http.StatusBadRequest)
 			return
 		}
 		canonical := ip.String()
@@ -39,7 +40,7 @@ func ipLookupHandler(p Provider) http.HandlerFunc {
 			resp, err := forwardToLeader(p, "GET", path, nil)
 			if err != nil {
 				p.Log(logging.LevelError, "IP_LOOKUP", "Failed to forward to leader: %v", err)
-				http.Error(w, err.Error(), http.StatusBadGateway)
+				jsonError(w, err.Error(), http.StatusBadGateway)
 				return
 			}
 			defer func() { _ = resp.Body.Close() }()
@@ -123,7 +124,7 @@ func renderLocalIPStatus(w http.ResponseWriter, p Provider, canonical string) {
 
 	if len(actors) == 0 && len(backendInfo) == 0 {
 		_, _ = fmt.Fprint(w, "status: unknown\n")
-		formatPersistenceState(w, persistState, hasPersist)
+		formatPersistenceState(w, p, canonical, persistState, hasPersist)
 		return
 	}
 
@@ -132,7 +133,7 @@ func renderLocalIPStatus(w http.ResponseWriter, p Provider, canonical string) {
 		_, _ = fmt.Fprint(w, "status: blocked\n")
 		_, _ = fmt.Fprint(w, "source: backend\n")
 		formatBackendInfo(w, backendInfo, p.GetDurationTables())
-		formatPersistenceState(w, persistState, hasPersist)
+		formatPersistenceState(w, p, canonical, persistState, hasPersist)
 		// If no persistence reason available, add note
 		if !hasPersist || reflect.ValueOf(persistState).FieldByName("Reason").String() == "" {
 			_, _ = fmt.Fprint(w, "note: Block reason unavailable (IP may have been manually added to HAProxy or blocked before persistence was enabled)\n")
@@ -150,7 +151,7 @@ func renderLocalIPStatus(w http.ResponseWriter, p Provider, canonical string) {
 		formatBackendInfo(w, backendInfo, p.GetDurationTables())
 	}
 
-	formatPersistenceState(w, persistState, hasPersist)
+	formatPersistenceState(w, p, canonical, persistState, hasPersist)
 }
 
 // renderClusterIPStatus renders cluster-wide aggregated IP status in plain text
@@ -205,6 +206,16 @@ func renderClusterIPStatus(w http.ResponseWriter, p Provider, canonical string) 
 		if node.PersistenceReason != "" {
 			_, _ = fmt.Fprintf(w, "    persistence_reason: %s\n", node.PersistenceReason)
 		}
+		if node.BadActor != nil {
+			_, _ = fmt.Fprintf(w, "    bad_actor: yes\n")
+			_, _ = fmt.Fprintf(w, "    bad_actor_promoted_at: %s\n", node.BadActor.PromotedAt)
+			_, _ = fmt.Fprintf(w, "    bad_actor_score: %.1f\n", node.BadActor.TotalScore)
+			_, _ = fmt.Fprintf(w, "    bad_actor_block_count: %d\n", node.BadActor.BlockCount)
+			formatBadActorHistory(w, node.BadActor.History, "    ")
+		} else if node.Score != nil {
+			_, _ = fmt.Fprintf(w, "    score: %.1f / %.1f\n", node.Score.CurrentScore, node.Score.Threshold)
+			_, _ = fmt.Fprintf(w, "    score_block_count: %d\n", node.Score.BlockCount)
+		}
 	}
 
 	// Add backend table details from leader node
@@ -246,7 +257,7 @@ func renderClusterIPStatus(w http.ResponseWriter, p Provider, canonical string) 
 							elapsedSec := tableDuration.Seconds() - float64(expSec)
 							addedAt := time.Now().Add(-time.Duration(elapsedSec) * time.Second)
 							_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, duration: %v, expires in: %s, added: %s)\n",
-								tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format("2006-01-02 15:04:05"))
+								tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format(time.RFC3339))
 						} else {
 							_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %s)\n",
 								tableName, backend, status, formatDuration(expiresDuration))
@@ -288,7 +299,7 @@ func formatBackendInfo(w http.ResponseWriter, backendInfo []interface{}, duratio
 			elapsedSec := tableDuration.Seconds() - float64(expSec)
 			addedAt := time.Now().Add(-time.Duration(elapsedSec) * time.Second)
 			_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, duration: %v, expires in: %s, added: %s)\n",
-				tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format("2006-01-02 15:04:05"))
+				tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format(time.RFC3339))
 		} else {
 			_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %s)\n",
 				tableName, backend, status, formatDuration(expiresDuration))
@@ -297,21 +308,65 @@ func formatBackendInfo(w http.ResponseWriter, backendInfo []interface{}, duratio
 }
 
 // formatPersistenceState displays persistence state information if available
-func formatPersistenceState(w http.ResponseWriter, persistState interface{}, hasPersist bool) {
-	if !hasPersist {
+
+func formatBadActorHistory(w http.ResponseWriter, historyJSON string, indent string) {
+	if historyJSON == "" {
 		return
 	}
-	stateVal := reflect.ValueOf(persistState)
-	state := stateVal.FieldByName("State").String()
-	expireTime := stateVal.FieldByName("ExpireTime").Interface().(time.Time)
-	reason := stateVal.FieldByName("Reason").String()
-
-	_, _ = fmt.Fprintf(w, "persistence: %s\n", state)
-	if !expireTime.IsZero() {
-		_, _ = fmt.Fprintf(w, "persistence_expires: %s\n", expireTime.Format(time.RFC3339))
+	var history []struct {
+		Timestamp string `json:"ts"`
+		Reason    string `json:"r"`
 	}
-	if reason != "" {
-		_, _ = fmt.Fprintf(w, "persistence_reason: %s\n", reason)
+	if err := json.Unmarshal([]byte(historyJSON), &history); err != nil || len(history) == 0 {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "%sbad_actor_history:\n", indent)
+	for _, h := range history {
+		_, _ = fmt.Fprintf(w, "%s  - %s %s\n", indent, h.Timestamp, h.Reason)
+	}
+}
+func formatPersistenceState(w http.ResponseWriter, p Provider, canonical string, persistState interface{}, hasPersist bool) {
+	if hasPersist {
+		stateVal := reflect.ValueOf(persistState)
+		state := fmt.Sprintf("%s", stateVal.FieldByName("State").Interface())
+		expireTime := stateVal.FieldByName("ExpireTime").Interface().(time.Time)
+		reason := stateVal.FieldByName("Reason").String()
+		modifiedAt := stateVal.FieldByName("ModifiedAt").Interface().(time.Time)
+		firstBlockedAt := stateVal.FieldByName("FirstBlockedAt").Interface().(time.Time)
+
+		_, _ = fmt.Fprintf(w, "persistence: %s\n", state)
+		if !expireTime.IsZero() {
+			_, _ = fmt.Fprintf(w, "persistence_expires: %s\n", expireTime.Format(time.RFC3339))
+		}
+		if reason != "" {
+			_, _ = fmt.Fprintf(w, "persistence_reason: %s\n", reason)
+		}
+		if !firstBlockedAt.IsZero() {
+			_, _ = fmt.Fprintf(w, "persistence_first_blocked: %s\n", firstBlockedAt.Format(time.RFC3339))
+		}
+		if !modifiedAt.IsZero() {
+			_, _ = fmt.Fprintf(w, "persistence_modified: %s\n", modifiedAt.Format(time.RFC3339))
+		}
+	}
+
+	// Bad actor / score info
+	baInfo, scoreInfo := p.GetBadActorInfo(canonical)
+	if baInfo != nil {
+		if ba, ok := baInfo.(*persistence.BadActorInfo); ok && ba != nil {
+			_, _ = fmt.Fprintf(w, "bad_actor: yes\n")
+			_, _ = fmt.Fprintf(w, "bad_actor_promoted_at: %s\n", ba.PromotedAt.Format(time.RFC3339))
+			_, _ = fmt.Fprintf(w, "bad_actor_score: %.1f\n", ba.TotalScore)
+			_, _ = fmt.Fprintf(w, "bad_actor_block_count: %d\n", ba.BlockCount)
+			formatBadActorHistory(w, ba.HistoryJSON, "")
+		}
+	} else if scoreInfo != nil {
+		if s, ok := scoreInfo.(*persistence.ScoreInfo); ok && s != nil {
+			threshold := p.GetBadActorsThreshold()
+			if threshold > 0 {
+				_, _ = fmt.Fprintf(w, "score: %.1f / %.1f\n", s.Score, threshold)
+				_, _ = fmt.Fprintf(w, "score_block_count: %d\n", s.BlockCount)
+			}
+		}
 	}
 }
 
@@ -422,6 +477,23 @@ type IPStatusResponse struct {
 	Persistence        string            `json:"persistence,omitempty"`
 	PersistenceExpires string            `json:"persistence_expires,omitempty"`
 	PersistenceReason  string            `json:"persistence_reason,omitempty"`
+	BadActor           *BadActorStatus   `json:"bad_actor,omitempty"`
+	Score              *ScoreStatus      `json:"score,omitempty"`
+}
+
+// BadActorStatus is included in IP lookup when the IP is a bad actor.
+type BadActorStatus struct {
+	PromotedAt string  `json:"promoted_at"`
+	TotalScore float64 `json:"total_score"`
+	BlockCount int     `json:"block_count"`
+	History    string  `json:"history,omitempty"`
+}
+
+// ScoreStatus is included in IP lookup when the IP has a score but is not yet a bad actor.
+type ScoreStatus struct {
+	CurrentScore float64 `json:"current_score"`
+	BlockCount   int     `json:"block_count"`
+	Threshold    float64 `json:"threshold"`
 }
 
 // apiIPLookupHandler returns IP status as JSON (cluster-aware)
@@ -525,7 +597,7 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 	var persistFirstBlockedAt time.Time
 	if persistState, hasPersist := p.GetPersistenceState(ip); hasPersist {
 		stateVal := reflect.ValueOf(persistState)
-		response.Persistence = stateVal.FieldByName("State").String()
+		response.Persistence = fmt.Sprintf("%s", stateVal.FieldByName("State").Interface())
 		expireTime := stateVal.FieldByName("ExpireTime").Interface().(time.Time)
 		if !expireTime.IsZero() {
 			response.PersistenceExpires = expireTime.Format(time.RFC3339)
@@ -543,6 +615,7 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 
 	if len(actors) == 0 && !inBackend {
 		response.Status = "unknown"
+		populateBadActorInfo(p, &response, ip)
 		return response
 	}
 
@@ -550,7 +623,10 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 	if inBackend && len(actors) == 0 {
 		response.Status = "blocked"
 		response.Backend = "present"
-		// Note: PersistenceReason already set above if available
+		if !persistFirstBlockedAt.IsZero() {
+			response.EarliestBlock = persistFirstBlockedAt.Format(time.RFC3339)
+		}
+		populateBadActorInfo(p, &response, ip)
 		return response
 	}
 
@@ -631,7 +707,38 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 		}
 	}
 
+	// Add bad actor / score info
+	populateBadActorInfo(p, &response, ip)
+
 	return response
+}
+
+// populateBadActorInfo adds bad actor and score sections to the response.
+func populateBadActorInfo(p Provider, response *IPStatusResponse, ip string) {
+	baInfo, scoreInfo := p.GetBadActorInfo(ip)
+	if baInfo != nil {
+		if ba, ok := baInfo.(*persistence.BadActorInfo); ok && ba != nil {
+			response.BadActor = &BadActorStatus{
+				PromotedAt: ba.PromotedAt.Format(time.RFC3339),
+				TotalScore: ba.TotalScore,
+				BlockCount: ba.BlockCount,
+				History:    ba.HistoryJSON,
+			}
+		}
+	}
+	if scoreInfo != nil && response.BadActor == nil {
+		// Only show score if NOT already a bad actor (score is redundant once promoted)
+		if s, ok := scoreInfo.(*persistence.ScoreInfo); ok && s != nil {
+			threshold := p.GetBadActorsThreshold()
+			if threshold > 0 {
+				response.Score = &ScoreStatus{
+					CurrentScore: s.Score,
+					BlockCount:   s.BlockCount,
+					Threshold:    threshold,
+				}
+			}
+		}
+	}
 }
 
 // parseRFC3339 is a helper to parse RFC3339 time strings
@@ -645,14 +752,14 @@ func clearIPHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
 		if ipStr == "" {
-			http.Error(w, "IP address required", http.StatusBadRequest)
+			jsonError(w, "IP address required", http.StatusBadRequest)
 			return
 		}
 
 		// Canonicalize IP
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
-			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			jsonError(w, "Invalid IP address", http.StatusBadRequest)
 			return
 		}
 		canonical := ip.String()
@@ -663,7 +770,7 @@ func clearIPHandler(p Provider) http.HandlerFunc {
 			resp, err := forwardToLeader(p, "DELETE", path, nil)
 			if err != nil {
 				p.Log(logging.LevelError, "API", "Failed to forward clear request to leader: %v", err)
-				http.Error(w, err.Error(), http.StatusBadGateway)
+				jsonError(w, err.Error(), http.StatusBadGateway)
 				return
 			}
 			defer func() { _ = resp.Body.Close() }()
@@ -676,42 +783,15 @@ func clearIPHandler(p Provider) http.HandlerFunc {
 		}
 
 		// Leader: clear locally and broadcast to followers
-		blockerInterface := p.GetBlocker()
-		if blockerInterface == nil {
-			http.Error(w, "Blocker not available", http.StatusServiceUnavailable)
+		if p.GetBlocker() == nil {
+			jsonError(w, "Blocker not available", http.StatusServiceUnavailable)
 			return
 		}
-
-		// Type assert to blocker.Blocker interface
-		blocker, ok := blockerInterface.(blocker.Blocker)
-		if !ok {
-			http.Error(w, "Blocker interface error", http.StatusInternalServerError)
-			return
-		}
-
-		// Create IPInfo using helper
-		ipInfo := utils.NewIPInfo(canonical)
-
-		// Clear the IP from all tables
-		foundInfo, err := blocker.ClearIP(ipInfo)
+		foundInfo, err := clearIP(p, canonical)
 		if err != nil {
 			p.Log(logging.LevelError, "API", "Failed to clear IP %s: %v", canonical, err)
-			http.Error(w, fmt.Sprintf("Failed to clear IP: %v", err), http.StatusInternalServerError)
+			jsonError(w, fmt.Sprintf("Failed to clear IP: %v", err), http.StatusInternalServerError)
 			return
-		}
-
-		// Remove from persistence state
-		if err := p.RemoveFromPersistence(canonical); err != nil {
-			p.Log(logging.LevelError, "API", "Failed to remove IP %s from persistence: %v", canonical, err)
-			// Don't fail the request, just log the error
-		}
-
-		// Clear from ActivityStore (in-memory chain progress)
-		clearIPFromActivityStore(p, canonical)
-
-		// Broadcast to followers (async)
-		if p.GetNodeRole() == "leader" {
-			go broadcastClearToFollowers(p, canonical)
 		}
 
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -757,14 +837,13 @@ func clearIPHandler(p Provider) http.HandlerFunc {
 				elapsedSec := tableDuration.Seconds() - float64(expSec)
 				addedAt := time.Now().Add(-time.Duration(elapsedSec) * time.Second)
 				_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, duration: %v, expires in: %s, added: %s)\n",
-					tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format("2006-01-02 15:04:05"))
+					tableName, backend, status, tableDuration, formatDuration(expiresDuration), addedAt.Format(time.RFC3339))
 			} else {
 				_, _ = fmt.Fprintf(w, "  - %s on %s (status: %s, expires in: %s)\n",
 					tableName, backend, status, formatDuration(expiresDuration))
 			}
 		}
 
-		p.Log(logging.LevelInfo, "API", "IP %s cleared from %d table entries", canonical, len(foundInfo))
 	}
 }
 
@@ -773,14 +852,14 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
 		if ipStr == "" {
-			http.Error(w, "IP address required", http.StatusBadRequest)
+			jsonError(w, "IP address required", http.StatusBadRequest)
 			return
 		}
 
 		// Canonicalize IP
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
-			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			jsonError(w, "Invalid IP address", http.StatusBadRequest)
 			return
 		}
 		canonical := ip.String()
@@ -791,7 +870,7 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 			resp, err := forwardToLeader(p, r.Method, path, nil)
 			if err != nil {
 				p.Log(logging.LevelError, "API", "Failed to forward unblock request to leader: %v", err)
-				http.Error(w, err.Error(), http.StatusBadGateway)
+				jsonError(w, err.Error(), http.StatusBadGateway)
 				return
 			}
 			defer func() { _ = resp.Body.Close() }()
@@ -803,50 +882,15 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 		}
 
 		// Leader: unblock locally and broadcast to followers
-		blockerInterface := p.GetBlocker()
-		if blockerInterface == nil {
-			http.Error(w, "Blocker not available", http.StatusServiceUnavailable)
+		if p.GetBlocker() == nil {
+			jsonError(w, "Blocker not available", http.StatusServiceUnavailable)
 			return
 		}
-
-		blocker, ok := blockerInterface.(blocker.Blocker)
-		if !ok {
-			http.Error(w, "Blocker interface error", http.StatusInternalServerError)
+		if err := unblockIP(p, canonical); err != nil {
+			p.Log(logging.LevelError, "API", "Failed to unblock IP %s: %v", canonical, err)
+			jsonError(w, fmt.Sprintf("Failed to unblock IP: %v", err), http.StatusInternalServerError)
 			return
 		}
-
-		ipInfo := utils.NewIPInfo(canonical)
-
-		// Unblock directly (bypass rate-limited queue for immediate effect)
-		type directUnblocker interface {
-			UnblockDirect(ipInfo utils.IPInfo, reason string) error
-		}
-		var unblockErr error
-		if du, ok := blockerInterface.(directUnblocker); ok {
-			unblockErr = du.UnblockDirect(ipInfo, "API unblock")
-		} else {
-			unblockErr = blocker.Unblock(ipInfo, "API unblock")
-		}
-		if unblockErr != nil {
-			p.Log(logging.LevelError, "API", "Failed to unblock IP %s: %v", canonical, unblockErr)
-			http.Error(w, fmt.Sprintf("Failed to unblock IP: %v", unblockErr), http.StatusInternalServerError)
-			return
-		}
-
-		// Remove from persistence (writes unblock event to journal)
-		if err := p.RemoveFromPersistence(canonical); err != nil {
-			p.Log(logging.LevelError, "API", "Failed to update persistence for IP %s: %v", canonical, err)
-		}
-
-		// Clear from ActivityStore
-		clearIPFromActivityStore(p, canonical)
-
-		// Broadcast to followers
-		if p.GetNodeRole() == "leader" {
-			go broadcastUnblockToFollowers(p, canonical)
-		}
-
-		p.Log(logging.LevelInfo, "API", "IP %s unblocked via API", canonical)
 
 		// If GET request, show status after unblocking
 		if r.Method == "GET" {
@@ -862,6 +906,187 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, "IP %s unblocked (gpc0 set to 0, entry will expire naturally)\n", canonical)
+	}
+}
+
+// parseClearInfo converts blocker clear results into JSON-friendly structs.
+func parseClearInfo(p Provider, foundInfo []interface{}) []map[string]interface{} {
+	durationTables := p.GetDurationTables()
+	var tables []map[string]interface{}
+	for _, info := range foundInfo {
+		infoVal := reflect.ValueOf(info)
+		tableName := infoVal.FieldByName("TableName").String()
+		gpc0 := int(infoVal.FieldByName("Gpc0").Int())
+		expMillis := infoVal.FieldByName("ExpMillis").Int()
+
+		status := "unblocked"
+		if gpc0 > 0 {
+			status = "blocked"
+		}
+
+		entry := map[string]interface{}{
+			"table":      tableName,
+			"backend":    infoVal.FieldByName("Backend").String(),
+			"status":     status,
+			"expires_in": formatDuration(time.Duration(expMillis/1000) * time.Second),
+		}
+		for dur, baseTableName := range durationTables {
+			if strings.HasPrefix(tableName, baseTableName) {
+				entry["duration"] = formatDuration(dur)
+				break
+			}
+		}
+		tables = append(tables, entry)
+	}
+	return tables
+}
+
+// apiClearIPHandler clears an IP from all state and returns JSON.
+// POST /api/v1/ip/{ip}/clear (cluster-aware)
+func apiClearIPHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ipStr := r.PathValue("ip")
+		if ipStr == "" {
+			jsonError(w, "IP address required", http.StatusBadRequest)
+			return
+		}
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			jsonError(w, "Invalid IP address", http.StatusBadRequest)
+			return
+		}
+		canonical := ip.String()
+
+		if p.GetNodeRole() == "follower" {
+			resp, err := forwardToLeader(p, "POST", fmt.Sprintf("/api/v1/ip/%s/clear", canonical), nil)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+
+		if p.GetBlocker() == nil {
+			jsonError(w, "Blocker not available", http.StatusServiceUnavailable)
+			return
+		}
+		foundInfo, err := clearIP(p, canonical)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("Failed to clear IP: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+			"ip":      canonical,
+			"cleared": len(foundInfo),
+			"tables":  parseClearInfo(p, foundInfo),
+		})
+	}
+}
+
+// apiUnblockIPHandler unblocks an IP and returns JSON.
+// POST /api/v1/ip/{ip}/unblock (cluster-aware)
+func apiUnblockIPHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ipStr := r.PathValue("ip")
+		if ipStr == "" {
+			jsonError(w, "IP address required", http.StatusBadRequest)
+			return
+		}
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			jsonError(w, "Invalid IP address", http.StatusBadRequest)
+			return
+		}
+		canonical := ip.String()
+
+		if p.GetNodeRole() == "follower" {
+			resp, err := forwardToLeader(p, "POST", fmt.Sprintf("/api/v1/ip/%s/unblock", canonical), nil)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+
+		if p.GetBlocker() == nil {
+			jsonError(w, "Blocker not available", http.StatusServiceUnavailable)
+			return
+		}
+		if err := unblockIP(p, canonical); err != nil {
+			jsonError(w, fmt.Sprintf("Failed to unblock IP: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+			"ip":     canonical,
+			"status": "unblocked",
+		})
+	}
+}
+
+// unblockByReasonHandler unblocks all IPs currently blocked with a matching reason.
+// POST /api/v1/blocks/unblock?reason=chainName (cluster-aware)
+func unblockByReasonHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		reason := r.URL.Query().Get("reason")
+		if reason == "" {
+			jsonError(w, "reason query parameter is required", http.StatusBadRequest)
+			return
+		}
+
+		// Follower: forward to leader
+		if p.GetNodeRole() == "follower" {
+			resp, err := forwardToLeader(p, "POST", r.URL.RequestURI(), nil)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			defer func() { _ = resp.Body.Close() }()
+			w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+			w.WriteHeader(resp.StatusCode)
+			_, _ = io.Copy(w, resp.Body)
+			return
+		}
+
+		ips, err := p.GetBlockedIPsByReason(reason)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		var unblocked []string
+		var errors []string
+		for _, ip := range ips {
+			if err := unblockIP(p, ip); err != nil {
+				p.Log(logging.LevelError, "API", "Failed to unblock %s: %v", ip, err)
+				errors = append(errors, ip)
+			} else {
+				unblocked = append(unblocked, ip)
+			}
+		}
+
+		resp := map[string]interface{}{
+			"reason":    reason,
+			"matched":   len(ips),
+			"unblocked": len(unblocked),
+		}
+		if len(errors) > 0 {
+			resp["errors"] = errors
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp) //nolint:errcheck
 	}
 }
 
@@ -985,6 +1210,8 @@ type NodeIPStatusResponse struct {
 	Persistence        string            `json:"persistence,omitempty"`
 	PersistenceExpires string            `json:"persistence_expires,omitempty"`
 	PersistenceReason  string            `json:"persistence_reason,omitempty"`
+	BadActor           *BadActorStatus   `json:"bad_actor,omitempty"`
+	Score              *ScoreStatus      `json:"score,omitempty"`
 }
 
 // NodeInfo is a minimal representation of cluster node to avoid import cycles
@@ -1103,16 +1330,21 @@ func queryNodeIPStatus(p Provider, nodeName, nodeAddr, protocol, ip string) Node
 
 	// Convert to NodeIPStatusResponse
 	return NodeIPStatusResponse{
-		Name:          nodeName,
-		Address:       nodeAddr,
-		Status:        status.Status,
-		Actors:        status.Actors,
-		Chains:        status.Chains,
-		EarliestBlock: status.EarliestBlock,
-		LatestExpiry:  status.LatestExpiry,
-		LastSeen:      status.LastSeen,
-		LastUnblock:   status.LastUnblock,
-		UnblockReason: status.UnblockReason,
+		Name:               nodeName,
+		Address:            nodeAddr,
+		Status:             status.Status,
+		Actors:             status.Actors,
+		Chains:             status.Chains,
+		EarliestBlock:      status.EarliestBlock,
+		LatestExpiry:       status.LatestExpiry,
+		LastSeen:           status.LastSeen,
+		LastUnblock:        status.LastUnblock,
+		UnblockReason:      status.UnblockReason,
+		Persistence:        status.Persistence,
+		PersistenceExpires: status.PersistenceExpires,
+		PersistenceReason:  status.PersistenceReason,
+		BadActor:           status.BadActor,
+		Score:              status.Score,
 	}
 }
 
@@ -1122,14 +1354,14 @@ func internalClearIPHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
 		if ipStr == "" {
-			http.Error(w, "IP address required", http.StatusBadRequest)
+			jsonError(w, "IP address required", http.StatusBadRequest)
 			return
 		}
 
 		// Canonicalize IP
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
-			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			jsonError(w, "Invalid IP address", http.StatusBadRequest)
 			return
 		}
 		canonical := ip.String()
@@ -1138,7 +1370,7 @@ func internalClearIPHandler(p Provider) http.HandlerFunc {
 		// HAProxy instances are shared and already cleared by the leader
 		if err := p.RemoveFromPersistence(canonical); err != nil {
 			p.Log(logging.LevelError, "CLUSTER_CLEAR", "Failed to remove IP %s from persistence: %v", canonical, err)
-			http.Error(w, fmt.Sprintf("Failed to remove from persistence: %v", err), http.StatusInternalServerError)
+			jsonError(w, fmt.Sprintf("Failed to remove from persistence: %v", err), http.StatusInternalServerError)
 			return
 		}
 
@@ -1154,14 +1386,14 @@ func internalUnblockIPHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ipStr := r.PathValue("ip")
 		if ipStr == "" {
-			http.Error(w, "IP address required", http.StatusBadRequest)
+			jsonError(w, "IP address required", http.StatusBadRequest)
 			return
 		}
 
 		// Canonicalize IP
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
-			http.Error(w, "Invalid IP address", http.StatusBadRequest)
+			jsonError(w, "Invalid IP address", http.StatusBadRequest)
 			return
 		}
 		canonical := ip.String()
@@ -1170,7 +1402,7 @@ func internalUnblockIPHandler(p Provider) http.HandlerFunc {
 		// HAProxy instances are shared and already unblocked by the leader
 		if err := p.RemoveFromPersistence(canonical); err != nil {
 			p.Log(logging.LevelError, "CLUSTER_UNBLOCK", "Failed to update persistence for IP %s: %v", canonical, err)
-			http.Error(w, fmt.Sprintf("Failed to update persistence: %v", err), http.StatusInternalServerError)
+			jsonError(w, fmt.Sprintf("Failed to update persistence: %v", err), http.StatusInternalServerError)
 			return
 		}
 
@@ -1194,6 +1426,82 @@ func broadcastUnblockToFollowers(p Provider, ip string) {
 }
 
 // clearIPFromActivityStore removes all actors with the given IP from ActivityStore
+// clearIP performs the core clear logic for a single IP: HAProxy table removal, persistence removal,
+// activity store cleanup, and follower broadcast. Returns the found table info and any error.
+func clearIP(p Provider, canonical string) ([]interface{}, error) {
+	blockerInterface := p.GetBlocker()
+	if blockerInterface == nil {
+		return nil, fmt.Errorf("blocker not available")
+	}
+
+	b, ok := blockerInterface.(blocker.Blocker)
+	if !ok {
+		return nil, fmt.Errorf("blocker interface error")
+	}
+
+	ipInfo := utils.NewIPInfo(canonical)
+
+	foundInfo, err := b.ClearIP(ipInfo)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := p.RemoveFromPersistence(canonical); err != nil {
+		p.Log(logging.LevelError, "API", "Failed to remove IP %s from persistence: %v", canonical, err)
+	}
+
+	clearIPFromActivityStore(p, canonical)
+
+	if p.GetNodeRole() == "leader" {
+		go broadcastClearToFollowers(p, canonical)
+	}
+
+	p.Log(logging.LevelInfo, "API", "IP %s cleared from %d table entries", canonical, len(foundInfo))
+	return foundInfo, nil
+}
+
+// unblockIP performs the core unblock logic for a single IP: HAProxy unblock, persistence removal,
+// activity store cleanup, and follower broadcast. Returns an error if the HAProxy unblock fails.
+func unblockIP(p Provider, canonical string) error {
+	blockerInterface := p.GetBlocker()
+	if blockerInterface == nil {
+		return fmt.Errorf("blocker not available")
+	}
+
+	b, ok := blockerInterface.(blocker.Blocker)
+	if !ok {
+		return fmt.Errorf("blocker interface error")
+	}
+
+	ipInfo := utils.NewIPInfo(canonical)
+
+	type directUnblocker interface {
+		UnblockDirect(ipInfo utils.IPInfo, reason string) error
+	}
+	var unblockErr error
+	if du, ok := blockerInterface.(directUnblocker); ok {
+		unblockErr = du.UnblockDirect(ipInfo, "API unblock")
+	} else {
+		unblockErr = b.Unblock(ipInfo, "API unblock")
+	}
+	if unblockErr != nil {
+		return unblockErr
+	}
+
+	if err := p.RemoveFromPersistence(canonical); err != nil {
+		p.Log(logging.LevelError, "API", "Failed to update persistence for IP %s: %v", canonical, err)
+	}
+
+	clearIPFromActivityStore(p, canonical)
+
+	if p.GetNodeRole() == "leader" {
+		go broadcastUnblockToFollowers(p, canonical)
+	}
+
+	p.Log(logging.LevelInfo, "API", "IP %s unblocked via API", canonical)
+	return nil
+}
+
 func clearIPFromActivityStore(p Provider, ip string) {
 	p.GetActivityMutex().Lock()
 	defer p.GetActivityMutex().Unlock()

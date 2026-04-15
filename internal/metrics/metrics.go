@@ -45,6 +45,53 @@ type Metrics struct {
 	BackendResyncs      atomic.Int64 `metric:"Backend Resyncs Triggered" dryrun:"false"`
 	BackendRestarts     atomic.Int64 `metric:"Backend Restarts Detected" dryrun:"false"`
 	BackendRecoveries   atomic.Int64 `metric:"Backend Recoveries" dryrun:"false"`
+
+	RecentParseErrors *ParseErrorBuffer // Ring buffer of recent parse error messages
+}
+
+// ParseErrorBuffer is a thread-safe ring buffer that stores the most recent parse errors.
+type ParseErrorBuffer struct {
+	mu      sync.Mutex
+	entries []string
+	pos     int
+	cap     int
+	full    bool
+}
+
+// NewParseErrorBuffer creates a ring buffer of the given capacity. Returns nil if cap <= 0.
+func NewParseErrorBuffer(cap int) *ParseErrorBuffer {
+	if cap <= 0 {
+		return nil
+	}
+	return &ParseErrorBuffer{entries: make([]string, cap), cap: cap}
+}
+
+// Add stores an error string in the ring buffer.
+func (b *ParseErrorBuffer) Add(s string) {
+	b.mu.Lock()
+	b.entries[b.pos] = s
+	b.pos = (b.pos + 1) % b.cap
+	if b.pos == 0 {
+		b.full = true
+	}
+	b.mu.Unlock()
+}
+
+// Entries returns all stored errors, newest first.
+func (b *ParseErrorBuffer) Entries() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := b.pos
+	if b.full {
+		n = b.cap
+	}
+	result := make([]string, n)
+	for i := range n {
+		// Walk backwards from most recent
+		idx := (b.pos - 1 - i + b.cap) % b.cap
+		result[i] = b.entries[idx]
+	}
+	return result
 }
 
 // NewMetrics initializes a new Metrics struct.

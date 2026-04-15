@@ -183,6 +183,12 @@ func (m *mockProvider) GetStateSyncConfig() (bool, bool, time.Duration, bool) {
 func (m *mockProvider) GetStateSyncManager() interface{} {
 	return nil
 }
+func (m *mockProvider) GetBadActorInfo(ip string) (interface{}, interface{})    { return nil, nil }
+func (m *mockProvider) GetAllBadActors() ([]interface{}, error)                 { return nil, nil }
+func (m *mockProvider) RemoveBadActorsByReason(reason string) ([]string, error) { return nil, nil }
+func (m *mockProvider) GetBlockedIPsByReason(reason string) ([]string, error)   { return nil, nil }
+func (m *mockProvider) GetBadActorsThreshold() float64                          { return 0 }
+func (m *mockProvider) GetRecentParseErrors() []string                          { return nil }
 
 // TestServer_StartAndShutdown verifies the full lifecycle of the stats server.
 func TestServer_StartAndShutdown(t *testing.T) {
@@ -195,7 +201,7 @@ func TestServer_StartAndShutdown(t *testing.T) {
 	addr := listener.Addr().String()
 	_ = listener.Close() // Close it immediately; the server will re-bind it.
 
-	expected_string := "TEST STATS REPORT"
+	expected_string := "/help"
 	mockProvider := newMockProvider(addr, expected_string)
 
 	var wg sync.WaitGroup

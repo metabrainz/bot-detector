@@ -113,7 +113,7 @@ func PreCheckActivity(p *app.Processor, entry *app.LogEntry, actor store.Actor) 
 				if entry.Website != "" {
 					websiteCtx = fmt.Sprintf(" on website '%s'", entry.Website)
 				}
-				p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (blocked:%s)%s.", actor.IPInfo.Address, entry.UserAgent, activity.SkipInfo.Source, websiteCtx)
+				p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (blocked:%s)%s.", actor.IPInfo.Address, entry.UserAgent, activity.SkipInfo.Source, websiteCtx)
 			}
 			return activity, true, activity.SkipInfo
 		}
@@ -295,18 +295,18 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 		switch chain.Action {
 		case "block":
 			if websiteName != "" {
-				p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s on website '%s'. Blocking for %v%s",
+				p.LogFunc(logLevel, "BLOCK", "Chain: %s completed by IP %s on website '%s'. Blocking for %v%s",
 					formattedReason, entry.IPInfo.Address, websiteName, chain.BlockDuration, getOnMatchSuffix(chain))
 			} else {
-				p.LogFunc(logLevel, "ALERT", "BLOCK! Chain: %s completed by IP %s. Blocking for %v%s",
+				p.LogFunc(logLevel, "BLOCK", "Chain: %s completed by IP %s. Blocking for %v%s",
 					formattedReason, entry.IPInfo.Address, chain.BlockDuration, getOnMatchSuffix(chain))
 			}
 		case "log":
 			if websiteName != "" {
-				p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s on website '%s'. Action set to 'log'%s",
+				p.LogFunc(logLevel, "LOG", "Chain: %s completed by IP %s on website '%s'. Action set to 'log'%s",
 					formattedReason, entry.IPInfo.Address, websiteName, getOnMatchSuffix(chain))
 			} else {
-				p.LogFunc(logLevel, "ALERT", "LOG! Chain: %s completed by IP %s. Action set to 'log'%s",
+				p.LogFunc(logLevel, "LOG", "Chain: %s completed by IP %s. Action set to 'log'%s",
 					formattedReason, entry.IPInfo.Address, getOnMatchSuffix(chain))
 			}
 		}
@@ -364,53 +364,59 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 // executeBlock calls the external blocker unless in DryRun mode.
 func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.BehavioralChain) {
 	if p.PersistenceEnabled {
-		p.PersistenceWg.Add(1)
-		go func() {
-			defer p.PersistenceWg.Done()
-			p.PersistenceMutex.Lock()
-			defer p.PersistenceMutex.Unlock()
+		p.PersistenceMutex.Lock()
+		now := p.NowFunc()
+		reason := p.InternReason(formatChainKey(chain.Name, entry))
+		unblockTime := now.Add(chain.BlockDuration)
 
-			unblockTime := p.NowFunc().Add(chain.BlockDuration)
-			reason := p.InternReason(formatChainKey(chain.Name, entry))
-			event := &persistence.AuditEvent{
-				Timestamp: p.NowFunc(),
-				Event:     persistence.EventTypeBlock,
-				IP:        entry.IPInfo.Address,
-				Duration:  chain.BlockDuration,
-				Reason:    reason,
-			}
-			if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
-				p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write block event to journal for %s: %v", entry.IPInfo.Address, err)
-			}
+		if err := persistence.InsertEvent(p.DB, now, persistence.EventTypeBlock, entry.IPInfo.Address, reason, chain.BlockDuration, ""); err != nil {
+			p.LogFunc(logging.LevelError, "PERSIST_FAIL", "Failed to insert block event for %s: %v", entry.IPInfo.Address, err)
+		}
+		if err := persistence.UpsertIPState(p.DB, entry.IPInfo.Address, persistence.BlockStateBlocked, unblockTime, reason, now, now); err != nil {
+			p.LogFunc(logging.LevelError, "PERSIST_FAIL", "Failed to upsert IP state for %s: %v", entry.IPInfo.Address, err)
+		}
 
-			// Update in-memory state
-			now := time.Now()
-			existingState, exists := p.IPStates[entry.IPInfo.Address]
-			newState := persistence.IPState{
-				State:          persistence.BlockStateBlocked,
-				ExpireTime:     unblockTime,
-				Reason:         reason,
-				ModifiedAt:     now,
-				FirstBlockedAt: now,
+		// Bad actor scoring
+		p.ConfigMutex.RLock()
+		baConfig := p.Config.BadActors
+		p.ConfigMutex.RUnlock()
+
+		if baConfig.Enabled && chain.BadActorWeight > 0 {
+			score, blockCount, err := persistence.IncrementScore(p.DB, entry.IPInfo.Address, chain.BadActorWeight, now)
+			if err != nil {
+				p.LogFunc(logging.LevelError, "BAD_ACTOR", "Failed to increment score for %s: %v", entry.IPInfo.Address, err)
+			} else if score >= baConfig.Threshold {
+				// Check if already a bad actor
+				already, _ := persistence.IsBadActor(p.DB, entry.IPInfo.Address)
+				if !already {
+					if err := persistence.PromoteToBadActor(p.DB, entry.IPInfo.Address, score, blockCount, now); err != nil {
+						p.LogFunc(logging.LevelError, "BAD_ACTOR", "Failed to promote %s to bad actor: %v", entry.IPInfo.Address, err)
+					} else {
+						p.LogFunc(logging.LevelCritical, "BAD_ACTOR", "IP %s promoted to bad actor (score=%.1f, blocks=%d, chain=%s, weight=%.1f)",
+							entry.IPInfo.Address, score, blockCount, chain.Name, chain.BadActorWeight)
+						// Issue max-duration block
+						if !p.DryRun && p.Blocker != nil {
+							blockerIPInfo := utils.IPInfo{Address: entry.IPInfo.Address, Version: entry.IPInfo.Version}
+							_ = p.Blocker.Block(blockerIPInfo, baConfig.BlockDuration, "bad-actor")
+						}
+						if err := persistence.UpsertIPState(p.DB, entry.IPInfo.Address, persistence.BlockStateBlocked, now.Add(baConfig.BlockDuration), "bad-actor", now, now); err != nil {
+							p.LogFunc(logging.LevelError, "BAD_ACTOR", "Failed to update state for promoted bad actor %s: %v", entry.IPInfo.Address, err)
+						}
+					}
+				}
 			}
-			// Preserve FirstBlockedAt if already blocked
-			if exists && !existingState.FirstBlockedAt.IsZero() {
-				newState.FirstBlockedAt = existingState.FirstBlockedAt
-			}
-			p.IPStates[entry.IPInfo.Address] = newState
-		}()
+		}
+		p.PersistenceMutex.Unlock()
 	}
 
-	if p.DryRun { // Should not happen due to caller check, but safe to keep.
-		return // Do not execute block in dry-run mode.
+	if p.DryRun {
+		return
 	}
-	// Convert main.IPInfo to utils.IPInfo before calling the blocker.
 	blockerIPInfo := utils.IPInfo{
 		Address: entry.IPInfo.Address,
 		Version: entry.IPInfo.Version,
 	}
 	if err := p.Blocker.Block(blockerIPInfo, chain.BlockDuration, chain.Name); err != nil {
-		// The error is logged inside the HAProxyBlocker, but not the RateLimitedBlocker. Log it here for safety.
 		p.LogFunc(logging.LevelError, "BLOCK_FAIL", "Failed to queue block command for %s: %v", entry.IPInfo.Address, err)
 	}
 }
@@ -464,10 +470,10 @@ func logDryRunCompletion(p *app.Processor, chain *config.BehavioralChain, entry 
 
 	switch chain.Action {
 	case "block":
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK! Chain: %s completed by IP %s%s. Blocking for %v (DryRun)%s",
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK: Chain: %s completed by IP %s%s. Blocking for %v (DryRun)%s",
 			chain.Name, entry.IPInfo.Address, websiteContext, chain.BlockDuration, onMatchSuffix)
 	case "log":
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG! Chain: %s completed by IP %s%s. Action set to 'log' (DryRun)%s",
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG: Chain: %s completed by IP %s%s. Action set to 'log' (DryRun)%s",
 			chain.Name, entry.IPInfo.Address, websiteContext, onMatchSuffix)
 	default:
 		p.LogFunc(logging.LevelInfo, "DRY_RUN", "UNKNOWN_ACTION! Chain: %s completed by IP %s%s. Unrecognized action '%s' (DryRun)%s",
@@ -759,6 +765,12 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 	// 2. Iterate over applicable chains.
 	for _, idx := range chainIndices {
 		chain := &p.Chains[idx]
+
+		// Skip chains not in the filter (dry-run --chain flag)
+		if len(p.ChainFilter) > 0 && !p.ChainFilter[chain.Name] {
+			continue
+		}
+
 		actor := GetActor(chain, entry)
 		if actor.IPInfo.Address == "" {
 			continue // Skip chain if actor could not be determined (e.g., IP version mismatch).
@@ -838,7 +850,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 			if entry.Website != "" {
 				websiteCtx = fmt.Sprintf(" on website '%s'", entry.Website)
 			}
-			p.LogFunc(logging.LevelDebug, "SKIP", "store.Actor %s (UA: %s): Skipped (good_actor:%s)%s.", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName, websiteCtx)
+			p.LogFunc(logging.LevelDebug, "SKIP", "Actor %s (UA: %s): Skipped (good_actor:%s)%s.", entry.IPInfo.Address, entry.UserAgent, goodActorRuleName, websiteCtx)
 		}
 
 		// --- UNBLOCK ON GOOD ACTOR LOGIC ---
@@ -850,57 +862,54 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 		p.ConfigMutex.RUnlock()
 
 		if unblockEnabled {
-			// Use the existing activity for the IP-only actor.
-			// The lock is already held by the caller (CheckChains).
-			activity := store.GetOrCreateUnsafe(p.ActivityStore, store.Actor(actor))
-
-			// Check if IP is blocked in persistence
+			// Check if IP is blocked and determine last unblock time for cooldown.
+			// When persistence is enabled, use the DB as source of truth since
+			// in-memory actors get cleaned up by idle cleanup, resetting the
+			// cooldown. Fall back to in-memory tracking without persistence.
 			var isBlocked bool
+			var lastUnblockTime time.Time
 			if p.PersistenceEnabled {
-				p.PersistenceMutex.Lock()
-				ipState, exists := p.IPStates[entry.IPInfo.Address]
-				isBlocked = exists && ipState.State == persistence.BlockStateBlocked
-				p.PersistenceMutex.Unlock()
+				ipState, err := persistence.GetIPState(p.DB, entry.IPInfo.Address)
+				if err == nil && ipState != nil {
+					isBlocked = ipState.State == persistence.BlockStateBlocked
+					if ipState.State == persistence.BlockStateUnblocked {
+						lastUnblockTime = ipState.ModifiedAt
+					}
+				}
+			} else {
+				ipOnlyActor := store.Actor{IPInfo: entry.IPInfo}
+				act := store.GetOrCreateUnsafe(p.ActivityStore, ipOnlyActor)
+				lastUnblockTime = act.LastUnblockTime
 			}
 
 			// Determine if we should unblock:
 			// - Always unblock if IP is blocked (immediate safety)
 			// - Unblock on first appearance (handles pre-existing blocks)
 			// - Apply cooldown for subsequent non-blocked appearances (prevents spam)
-			shouldUnblock := isBlocked || activity.LastUnblockTime.IsZero()
-			if !isBlocked && !activity.LastUnblockTime.IsZero() {
-				shouldUnblock = time.Since(activity.LastUnblockTime) > unblockCooldown
+			// Use the DB-persisted unblock time for cooldown. The in-memory
+			// actor's LastUnblockTime is unreliable because idle cleanup
+			// deletes actors after MaxTimeSinceLastHit, resetting the cooldown.
+			shouldUnblock := isBlocked || lastUnblockTime.IsZero()
+			if !isBlocked && !lastUnblockTime.IsZero() {
+				shouldUnblock = time.Since(lastUnblockTime) > unblockCooldown
 			}
 
 			if shouldUnblock {
-				p.LogFunc(logging.LevelInfo, "UNBLOCK", "Good actor match for %s (rule: %s). Issuing unblock command.", entry.IPInfo.Address, goodActorRuleName)
+				p.LogFunc(logging.LevelDebug, "UNBLOCK", "Good actor match for %s (rule: %s). Issuing unblock command.", entry.IPInfo.Address, goodActorRuleName)
 
 				// Create detailed unblock reason with good actor name
 				unblockReason := p.InternReason("good-actor:" + goodActorRuleName)
 
 				if p.PersistenceEnabled {
-					func() {
-						p.PersistenceMutex.Lock()
-						defer p.PersistenceMutex.Unlock()
-
-						event := &persistence.AuditEvent{
-							Timestamp: p.NowFunc(),
-							Event:     persistence.EventTypeUnblock,
-							IP:        entry.IPInfo.Address,
-							Reason:    unblockReason,
-						}
-						if err := persistence.WriteEventToJournal(p.JournalHandle, event); err != nil {
-							p.LogFunc(logging.LevelError, "JOURNAL_FAIL", "Failed to write unblock event to journal for %s: %v", entry.IPInfo.Address, err)
-						}
-
-						// Update in-memory state
-						p.IPStates[entry.IPInfo.Address] = persistence.IPState{
-							State:      persistence.BlockStateUnblocked,
-							ExpireTime: p.NowFunc(), // Set to now so retention period starts from unblock time
-							Reason:     unblockReason,
-							ModifiedAt: time.Now(),
-						}
-					}()
+					now := p.NowFunc()
+					p.PersistenceMutex.Lock()
+					if err := persistence.InsertEvent(p.DB, now, persistence.EventTypeUnblock, entry.IPInfo.Address, unblockReason, 0, ""); err != nil {
+						p.LogFunc(logging.LevelError, "PERSIST_FAIL", "Failed to insert unblock event for %s: %v", entry.IPInfo.Address, err)
+					}
+					if err := persistence.UpsertIPState(p.DB, entry.IPInfo.Address, persistence.BlockStateUnblocked, now, unblockReason, now, time.Time{}); err != nil {
+						p.LogFunc(logging.LevelError, "PERSIST_FAIL", "Failed to upsert unblock state for %s: %v", entry.IPInfo.Address, err)
+					}
+					p.PersistenceMutex.Unlock()
 				}
 
 				// Convert main.IPInfo to utils.IPInfo before calling the blocker.
@@ -914,8 +923,44 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 						p.LogFunc(logging.LevelError, "UNBLOCK_FAIL", "Failed to queue unblock command for %s: %v", entry.IPInfo.Address, err)
 					}
 				}
-				activity.LastUnblockTime = time.Now()
-				activity.LastUnblockReason = unblockReason
+
+				// Update in-memory cooldown for non-persistence mode.
+				if !p.PersistenceEnabled {
+					ipOnlyActor := store.Actor{IPInfo: entry.IPInfo}
+					act := store.GetOrCreateUnsafe(p.ActivityStore, ipOnlyActor)
+					act.LastUnblockTime = time.Now()
+					act.LastUnblockReason = unblockReason
+				}
+			}
+		}
+	}
+
+	// 1b. Check if the entry is a bad actor (only if not a good actor).
+	if !isGood && p.PersistenceEnabled {
+		p.ConfigMutex.RLock()
+		baConfig := p.Config.BadActors
+		p.ConfigMutex.RUnlock()
+
+		if baConfig.Enabled {
+			// SQLite WAL mode allows concurrent reads — no exclusive lock needed for SELECT.
+			// The ActivityStore caches the result, so this only hits SQLite once per unique IP.
+			isBad, _ := persistence.IsBadActor(p.DB, entry.IPInfo.Address)
+			if isBad {
+				// Ensure block is active in ActivityStore (cached for subsequent lines)
+				if !activity.IsBlocked {
+					activity.IsBlocked = true
+					activity.SkipInfo = store.SkipInfo{Type: utils.SkipTypeBlocked, Source: p.InternReason("bad-actor")}
+					activity.BlockedUntil = time.Now().Add(baConfig.BlockDuration)
+					p.LogFunc(logging.LevelInfo, "BAD_ACTOR", "Re-blocking known bad actor %s for %v", entry.IPInfo.Address, baConfig.BlockDuration)
+				}
+
+				if p.EnableMetrics {
+					val, _ := p.Metrics.SkipsByReason.LoadOrStore("bad-actor", new(atomic.Int64))
+					if counter, ok := val.(*atomic.Int64); ok {
+						counter.Add(1)
+					}
+				}
+				return
 			}
 		}
 	}

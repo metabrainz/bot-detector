@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -192,7 +192,11 @@ func findFileDirectives(path string, isMainConfig bool) ([]string, error) {
 		}
 	}
 
-	logging.LogOutput(logging.LevelInfo, "FILE_SCAN", "Successfully scanned '%s' for file directives. Found %d dependencies.", path, len(dependencies))
+	if len(dependencies) > 0 {
+		logging.LogOutput(logging.LevelInfo, "FILE_SCAN", "Successfully scanned '%s' for file directives. Found %d dependencies.", filepath.Base(path), len(dependencies))
+	} else {
+		logging.LogOutput(logging.LevelInfo, "FILE_SCAN", "Successfully scanned '%s' for file directives.", filepath.Base(path))
+	}
 	return dependencies, nil
 }
 
@@ -369,7 +373,11 @@ func CompileStringMatcher(ctx MatcherContext, value string) (FieldMatcher, error
 			} else {
 				// Successfully loaded, cache the content for the matcher.
 				fileDep.Content = lines
-				logging.LogOutput(logging.LevelInfo, "FILE_DEP", "Successfully loaded content from file dependency '%s' for chain '%s', step %d, field '%s'", absoluteFilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName)
+				stepInfo := ""
+				if ctx.StepIndex > 0 {
+					stepInfo = fmt.Sprintf(", step %d", ctx.StepIndex+1)
+				}
+				logging.LogOutput(logging.LevelInfo, "FILE_DEP", "Successfully loaded content from file dependency '%s' for chain '%s'%s, field '%s'", filepath.Base(absoluteFilePath), ctx.ChainName, stepInfo, ctx.CanonicalFieldName)
 			}
 		case types.FileStatusMissing, types.FileStatusError:
 			// If the file is missing or in error, log a warning and treat it as empty.
@@ -418,7 +426,7 @@ func CompileStringMatcher(ctx MatcherContext, value string) (FieldMatcher, error
 			return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': 'cidr:' matcher is only supported for the 'IP' field", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName)
 		}
 		cidrStr := strings.TrimPrefix(value, "cidr:")
-		_, ipNet, err := net.ParseCIDR(cidrStr)
+		prefix, err := netip.ParsePrefix(cidrStr)
 		if err != nil {
 			return nil, fmt.Errorf("in file '%s': chain '%s', step %d, field '%s': invalid CIDR '%s' for 'cidr:' matcher: %w", ctx.FilePath, ctx.ChainName, ctx.StepIndex+1, ctx.CanonicalFieldName, cidrStr, err)
 		}
@@ -429,22 +437,7 @@ func CompileStringMatcher(ctx MatcherContext, value string) (FieldMatcher, error
 			if result, found := entry.CheckMatcherCache(cacheKey); found {
 				return result
 			}
-
-			// Cache miss - evaluate matcher
-			fieldVal := types.GetMatchValueIfType(ctx.CanonicalFieldName, entry, types.StringField)
-			if fieldVal == nil {
-				entry.StoreMatcherResult(cacheKey, false)
-				return false
-			}
-			ipStr := fieldVal.(string)
-			ip := net.ParseIP(ipStr)
-			if ip == nil {
-				entry.StoreMatcherResult(cacheKey, false)
-				return false
-			}
-			result := ipNet.Contains(ip)
-
-			// Store result in cache
+			result := entry.IPInfo.Addr.IsValid() && prefix.Contains(entry.IPInfo.Addr)
 			entry.StoreMatcherResult(cacheKey, result)
 			return result
 		}, nil
@@ -510,13 +503,19 @@ func compileIntMatcher(ctx MatcherContext, value int) FieldMatcher {
 
 // compileListMatcher handles lists, creating an OR condition over its items.
 func compileListMatcher(ctx MatcherContext, values []interface{}) (FieldMatcher, error) {
+	// Optimization: if all items are CIDR matchers for the IP field, batch them
+	// into a single matcher with one prefix slice lookup instead of N closures.
+	if ctx.CanonicalFieldName == "IP" {
+		if matcher, ok := tryCompileBatchedCIDR(values); ok {
+			return matcher, nil
+		}
+	}
+
 	var subMatchers []FieldMatcher
 	for _, item := range values {
-		// Pass the existing context to the sub-matcher.
-		// The canonicalFieldName is already set in ctx by compileSingleMatcher.
 		matcher, _, err := compileSingleMatcher(ctx, ctx.CanonicalFieldName, item)
 		if err != nil {
-			return nil, err // Error in a sub-matcher
+			return nil, err
 		}
 		subMatchers = append(subMatchers, matcher)
 	}
@@ -524,11 +523,39 @@ func compileListMatcher(ctx MatcherContext, values []interface{}) (FieldMatcher,
 	return func(entry *types.LogEntry) bool {
 		for _, matcher := range subMatchers {
 			if matcher(entry) {
-				return true // OR logic: one match is enough
+				return true
 			}
 		}
 		return false
 	}, nil
+}
+
+// tryCompileBatchedCIDR attempts to parse all list items as cidr: prefixes.
+// Returns a single fast matcher and true if all items are CIDRs, or nil/false otherwise.
+func tryCompileBatchedCIDR(values []interface{}) (FieldMatcher, bool) {
+	prefixes := make([]netip.Prefix, 0, len(values))
+	for _, item := range values {
+		s, ok := item.(string)
+		if !ok || !strings.HasPrefix(s, "cidr:") {
+			return nil, false
+		}
+		p, err := netip.ParsePrefix(strings.TrimPrefix(s, "cidr:"))
+		if err != nil {
+			return nil, false
+		}
+		prefixes = append(prefixes, p)
+	}
+	return func(entry *types.LogEntry) bool {
+		if !entry.IPInfo.Addr.IsValid() {
+			return false
+		}
+		for _, p := range prefixes {
+			if p.Contains(entry.IPInfo.Addr) {
+				return true
+			}
+		}
+		return false
+	}, true
 }
 
 // compileObjectMatcher handles map values, creating an AND condition for its sub-matchers.
@@ -906,7 +933,7 @@ func NewClusterConfigWithDefaults(nodes []cluster.NodeConfig) *cluster.ClusterCo
 	}
 }
 
-func parseStringAndBoolSettings(config *TopLevelConfig) (string, string, bool, string, error) {
+func parseStringAndBoolSettings(config *TopLevelConfig) (string, string, bool, int, string, error) {
 	logLevelStr := DefaultLogLevel
 	if config.Application.LogLevel != "" {
 		logLevelStr = config.Application.LogLevel
@@ -919,7 +946,7 @@ func parseStringAndBoolSettings(config *TopLevelConfig) (string, string, bool, s
 	switch lineEndingStr {
 	case "lf", "crlf", "cr":
 	default:
-		return "", "", false, "", fmt.Errorf("invalid line_ending value: '%s'. Must be one of 'lf', 'crlf', 'cr'", lineEndingStr)
+		return "", "", false, 0, "", fmt.Errorf("invalid line_ending value: '%s'. Must be one of 'lf', 'crlf', 'cr'", lineEndingStr)
 	}
 
 	enableMetrics := DefaultEnableMetrics
@@ -927,12 +954,17 @@ func parseStringAndBoolSettings(config *TopLevelConfig) (string, string, bool, s
 		enableMetrics = *config.Application.EnableMetrics
 	}
 
+	maxRecentParseErrors := DefaultMaxRecentParseErrors
+	if config.Application.MaxRecentParseErrors != nil {
+		maxRecentParseErrors = *config.Application.MaxRecentParseErrors
+	}
+
 	unblockCooldownStr := DefaultUnblockCooldown
 	if config.Checker.UnblockCooldown != "" {
 		unblockCooldownStr = config.Checker.UnblockCooldown
 	}
 
-	return logLevelStr, lineEndingStr, enableMetrics, unblockCooldownStr, nil
+	return logLevelStr, lineEndingStr, enableMetrics, maxRecentParseErrors, unblockCooldownStr, nil
 }
 
 func parseCustomLogRegex(config *TopLevelConfig) (*regexp.Regexp, error) {
@@ -960,6 +992,79 @@ func parseCustomLogRegex(config *TopLevelConfig) (*regexp.Regexp, error) {
 	}
 
 	return re, nil
+}
+
+// parseBadActorWeight returns the weight from YAML, defaulting to 1.0.
+func parseBadActorWeight(w *float64) float64 {
+	if w == nil {
+		return 1.0
+	}
+	if *w < 0.0 {
+		return 0.0
+	}
+	if *w > 1.0 {
+		return 1.0
+	}
+	return *w
+}
+
+// parseBadActorsConfig parses the bad_actors YAML section into runtime config.
+func parseBadActorsConfig(config *TopLevelConfig) (BadActorsConfig, error) {
+	if config.BadActors == nil {
+		return BadActorsConfig{}, nil
+	}
+	ba := config.BadActors
+
+	enabled := ba.Enabled == nil || *ba.Enabled // default true if section present
+	if !enabled {
+		return BadActorsConfig{Enabled: false}, nil
+	}
+
+	threshold := ba.Threshold
+	if threshold <= 0 {
+		return BadActorsConfig{}, fmt.Errorf("bad_actors.threshold must be > 0, got %v", threshold)
+	}
+
+	var blockDuration time.Duration
+	if ba.BlockDuration != "" {
+		var err error
+		blockDuration, err = utils.ParseDuration(ba.BlockDuration)
+		if err != nil {
+			return BadActorsConfig{}, fmt.Errorf("bad_actors.block_duration: %w", err)
+		}
+	} else {
+		blockDuration = 168 * time.Hour // default 1 week
+	}
+
+	maxEntries := ba.MaxScoreEntries
+	if maxEntries <= 0 {
+		maxEntries = 100000
+	}
+
+	var scoreMaxAge time.Duration
+	if ba.ScoreMaxAge != "" {
+		var err error
+		scoreMaxAge, err = utils.ParseDuration(ba.ScoreMaxAge)
+		if err != nil {
+			return BadActorsConfig{}, fmt.Errorf("bad_actors.score_max_age: %w", err)
+		}
+	} else {
+		scoreMaxAge = 30 * 24 * time.Hour // default 30 days
+	}
+
+	scoreMinCleanup := ba.ScoreMinCleanup
+	if scoreMinCleanup <= 0 {
+		scoreMinCleanup = 2.0
+	}
+
+	return BadActorsConfig{
+		Enabled:         true,
+		Threshold:       threshold,
+		BlockDuration:   blockDuration,
+		MaxScoreEntries: maxEntries,
+		ScoreMaxAge:     scoreMaxAge,
+		ScoreMinCleanup: scoreMinCleanup,
+	}, nil
 }
 
 func parseChains(config *TopLevelConfig, fileDeps map[string]*types.FileDependency, configFilePath string, durationTables map[time.Duration]string) ([]BehavioralChain, error) {
@@ -1020,6 +1125,7 @@ func parseChains(config *TopLevelConfig, fileDeps map[string]*types.FileDependen
 			MatchKey:                 yamlChain.MatchKey,
 			OnMatch:                  yamlChain.OnMatch,
 			Websites:                 yamlChain.Websites,
+			BadActorWeight:           parseBadActorWeight(yamlChain.BadActorWeight),
 			StepsYAML:                yamlChain.Steps,
 			MetricsCounter:           new(atomic.Int64),
 			MetricsResetCounter:      new(atomic.Int64),
@@ -1363,7 +1469,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		return nil, err
 	}
 
-	logLevelStr, lineEndingStr, enableMetrics, unblockCooldownStr, err := parseStringAndBoolSettings(config)
+	logLevelStr, lineEndingStr, enableMetrics, maxRecentParseErrors, unblockCooldownStr, err := parseStringAndBoolSettings(config)
 	if err != nil {
 		return nil, err
 	}
@@ -1420,6 +1526,11 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		return nil, err
 	}
 
+	badActorsConfig, err := parseBadActorsConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
 	persistenceConfig := config.Application.Persistence
 	if persistenceConfig.CompactionInterval == 0 {
 		persistenceConfig.CompactionInterval = time.Hour
@@ -1467,11 +1578,12 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 
 	return &LoadedConfig{
 		Application: ApplicationConfig{
-			LogLevel:        logLevelStr,
-			EnableMetrics:   enableMetrics,
-			Config:          ConfigManagement{PollingInterval: pollingInterval},
-			Persistence:     persistenceConfig,
-			EOFPollingDelay: eofPollingDelay,
+			LogLevel:             logLevelStr,
+			EnableMetrics:        enableMetrics,
+			MaxRecentParseErrors: maxRecentParseErrors,
+			Config:               ConfigManagement{PollingInterval: pollingInterval},
+			Persistence:          persistenceConfig,
+			EOFPollingDelay:      eofPollingDelay,
 		},
 		Parser: ParserConfig{
 			LineEnding:          lineEndingStr,
@@ -1503,6 +1615,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 			},
 		},
 		Cluster:          clusterConfig,
+		BadActors:        badActorsConfig,
 		Websites:         resolvedWebsites,
 		GoodActors:       newGoodActors,
 		Chains:           newChains,

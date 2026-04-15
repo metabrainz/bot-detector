@@ -5,6 +5,8 @@ import (
 	"bot-detector/internal/checker"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
+	"bot-detector/internal/logparser"
+	"bot-detector/internal/parser"
 	"bot-detector/internal/store"
 	"bufio"
 	"bytes"
@@ -14,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"syscall"
 	"time"
@@ -28,6 +31,32 @@ var (
 	// has been reached, but no rotation was detected. The caller should retry.
 	ErrEOF = errors.New("end of file reached without rotation")
 )
+
+// IsStdinPath returns true if the given path refers to standard input.
+func IsStdinPath(path string) bool {
+	return path == "-" || path == "/dev/stdin"
+}
+
+// extractVHost extracts the VHost capture group from a log line using the
+// configured log format regex. Returns "" if the line doesn't match or has
+// no VHost group. When logRegex is nil, falls back to the default log format.
+func extractVHost(line string, logRegex *regexp.Regexp) string {
+	if len(line) == 0 || line[0] == '#' {
+		return ""
+	}
+	if logRegex == nil {
+		logRegex = parser.DefaultLogFormatRegex
+	}
+	idx := logRegex.SubexpIndex("VHost")
+	if idx < 0 {
+		return ""
+	}
+	matches := logRegex.FindStringSubmatch(line)
+	if matches == nil || idx >= len(matches) {
+		return ""
+	}
+	return matches[idx]
+}
 
 // Tailer is a struct that encapsulates the state and logic for tailing a single file.
 type Tailer struct {
@@ -140,7 +169,7 @@ func (t *Tailer) checkForRotation() bool {
 	// Get stat of the currently open file handle (t.file).
 	currentFileStat, err := t.file.Stat()
 	if err != nil {
-		t.logger(logging.LevelError, "TAIL_ERROR", "Failed to stat open file handle: %v. Assuming rotation.", err)
+		t.logger(logging.LevelError, "TAIL_FAIL", "Failed to stat open file handle: %v. Assuming rotation.", err)
 		return true // File handle is broken, assume rotation.
 	}
 
@@ -148,7 +177,7 @@ func (t *Tailer) checkForRotation() bool {
 	currentPathStat, err := t.config.StatFunc(t.path)
 	if err != nil {
 		// If the file at the path doesn't exist, it likely means it was moved/renamed.
-		t.logger(logging.LevelError, "TAIL_ERROR", "Failed to stat log path during EOF check: %v. Assuming rotation.", err)
+		t.logger(logging.LevelError, "TAIL_FAIL", "Failed to stat log path during EOF check: %v. Assuming rotation.", err)
 		return true
 	}
 
@@ -310,7 +339,7 @@ func processFileLines(p *app.Processor, file io.Reader, lineProcessor func(line 
 				break // End of file
 			}
 			// For other read errors, log and break. The caller (LiveLogTailer) will handle reopening.
-			p.LogFunc(logging.LevelError, "READ_ERROR", "Read error: %v", readErr)
+			p.LogFunc(logging.LevelError, "READ_FAIL", "Read error: %v", readErr)
 			return readErr // Propagate the error up to the caller.
 		}
 
@@ -325,6 +354,10 @@ func DryRunLogProcessor(p *app.Processor, done chan<- struct{}) {
 
 	var reader io.Reader
 	var logSource string
+
+	if IsStdinPath(p.LogPath) {
+		p.LogPath = ""
+	}
 
 	if p.LogPath != "" {
 		logSource = fmt.Sprintf("log file: %s", p.LogPath)
@@ -375,14 +408,27 @@ func DryRunLogProcessor(p *app.Processor, done chan<- struct{}) {
 	startTime := time.Now()
 	p.TopActorsPerChain = make(map[string]map[string]*store.ActorStats) // Initialize for this dry run.
 
+	multiWebsite := len(p.Websites) > 0
+
 	// Use the shared line processing logic.
 	err := processFileLines(p, reader, func(line string) {
-		p.ProcessLogLine(line)
+		if multiWebsite {
+			// In multi-website mode, resolve vhost from the log line to
+			// determine which website-specific chains should be evaluated.
+			if vhost := extractVHost(line, p.LogRegex); vhost != "" {
+				website := p.VHostToWebsite[vhost]
+				logparser.ProcessLogLineWithWebsite(p, line, website)
+			} else {
+				p.ProcessLogLine(line)
+			}
+		} else {
+			p.ProcessLogLine(line)
+		}
 		p.Metrics.LinesProcessed.Add(1)
 	})
 	if err != nil {
 		// Log the error if processing fails unexpectedly (e.g., config error).
-		p.LogFunc(logging.LevelError, "DRY_RUN_ERROR", "Error during file processing: %v", err)
+		p.LogFunc(logging.LevelError, "DRY_RUN_FAIL", "Error during file processing: %v", err)
 	}
 	// After processing all lines, flush any remaining entries in the buffer.
 	checker.FlushEntryBuffer(p)
@@ -491,7 +537,7 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 		tailer, err := NewTailer(p, logPath, seekToEnd)
 		if err != nil {
 			// File not found or error on initial open, wait and retry.
-			p.LogFunc(logging.LevelError, "TAIL_ERROR", "Failed to open log file %s: %v. Retrying in %v.", logPath, err, config.ErrorRetryDelay)
+			p.LogFunc(logging.LevelError, "TAIL_FAIL", "Failed to open log file %s: %v. Retrying in %v.", logPath, err, config.ErrorRetryDelay)
 			restartTailing(config.ErrorRetryDelay)
 			continue
 		}
@@ -546,7 +592,7 @@ func LiveLogTailer(p *app.Processor, signalCh <-chan os.Signal, readySignal chan
 					break // Break inner loop to reopen.
 				}
 				// Other unexpected errors
-				p.LogFunc(logging.LevelError, "TAIL_ERROR", "Read error while tailing log file: %v. Reopening file.", readErr)
+				p.LogFunc(logging.LevelError, "TAIL_FAIL", "Read error while tailing log file: %v. Reopening file.", readErr)
 				_ = tailer.Close()
 				restartTailing(config.ErrorRetryDelay)
 				break // Break the inner loop to force a file reopen via the outer loop.

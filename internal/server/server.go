@@ -116,34 +116,53 @@ func convertToListenConfigSlice(v interface{}) []ListenConfig {
 func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentConfig ListenConfig) http.Handler {
 	mux := http.NewServeMux()
 
+	// Help endpoint (available on all listeners)
+	mux.HandleFunc("GET /help", helpHandler("", false))
+	mux.HandleFunc("GET /", helpHandler("", false))
+
 	// Metrics endpoints (role=metrics)
 	if shouldServeEndpoint(allConfigs, currentConfig, RoleMetrics) {
-		mux.HandleFunc("/", rootHandler(p))
-		mux.HandleFunc("/stats", rootHandler(p))
-		mux.HandleFunc("/stats/steps", stepsHandler(p))
-		mux.HandleFunc("/stats/websites", websitesHandler(p))
+		mux.HandleFunc("GET /stats", rootHandler(p))
+		mux.HandleFunc("GET /stats/steps", stepsHandler(p))
+		mux.HandleFunc("GET /stats/websites", websitesHandler(p))
+		mux.HandleFunc("GET /stats/bad-actors", badActorsStatsTextHandler(p))
+		mux.HandleFunc("GET /stats/parse-errors", parseErrorsHandler(p))
 	}
 
 	// API endpoints (role=api)
 	if shouldServeEndpoint(allConfigs, currentConfig, RoleAPI) {
-		mux.HandleFunc("/config", configHandler(p))
-		mux.HandleFunc("/config/archive", archiveHandler(p))
+		mux.HandleFunc("GET /config", configHandler(p))
+		mux.HandleFunc("GET /config/archive", archiveHandler(p))
 		mux.HandleFunc("GET /ip/{ip}", ipLookupHandler(p))
 		mux.HandleFunc("DELETE /ip/{ip}/clear", clearIPHandler(p))
-		mux.HandleFunc("/ip/{ip}/unblock", unblockIPHandler(p)) // Supports both GET and POST
+		mux.HandleFunc("GET /ip/{ip}/unblock", unblockIPHandler(p))
+		mux.HandleFunc("POST /ip/{ip}/unblock", unblockIPHandler(p))
 		mux.HandleFunc("GET /api/v1/ip/{ip}", apiIPLookupHandler(p))
+		mux.HandleFunc("POST /api/v1/ip/{ip}/clear", apiClearIPHandler(p))
+		mux.HandleFunc("POST /api/v1/ip/{ip}/unblock", apiUnblockIPHandler(p))
+		mux.HandleFunc("POST /api/v1/blocks/unblock", unblockByReasonHandler(p))
+		mux.HandleFunc("GET /api/v1/bad-actors", badActorsListHandler(p))
+		mux.HandleFunc("GET /api/v1/bad-actors/export", badActorsExportHandler(p))
+		mux.HandleFunc("GET /api/v1/bad-actors/stats", badActorsStatsHandler(p))
+		mux.HandleFunc("DELETE /api/v1/bad-actors", badActorsDeleteByReasonHandler(p))
+		mux.HandleFunc("GET /api/v1/help", helpHandler("api", true))
 	}
 
 	// Cluster endpoints (role=cluster)
 	if shouldServeEndpoint(allConfigs, currentConfig, RoleCluster) {
-		mux.HandleFunc("/cluster/status", clusterStatusHandler(p))
-		mux.HandleFunc("/cluster/metrics", clusterMetricsHandler(p))
-		mux.HandleFunc("/cluster/metrics/aggregate", clusterMetricsAggregateHandler(p))
+		mux.HandleFunc("GET /cluster/status", clusterStatusTextHandler(p))
+		mux.HandleFunc("GET /cluster/metrics", clusterMetricsTextHandler(p))
+		mux.HandleFunc("GET /cluster/metrics/aggregate", clusterMetricsAggregateHandler(p))
+		mux.HandleFunc("GET /api/v1/cluster/status", clusterStatusHandler(p))
+		mux.HandleFunc("GET /api/v1/cluster/metrics", clusterMetricsHandler(p))
+		mux.HandleFunc("GET /api/v1/cluster/metrics/aggregate", clusterMetricsAggregateHandler(p))
 		mux.HandleFunc("GET /api/v1/cluster/internal/ip/{ip}", clusterIPLookupHandler(p))
 		mux.HandleFunc("DELETE /api/v1/cluster/internal/ip/{ip}/clear", internalClearIPHandler(p))
-		mux.HandleFunc("/api/v1/cluster/internal/ip/{ip}/unblock", internalUnblockIPHandler(p)) // Supports both GET and POST
+		mux.HandleFunc("GET /api/v1/cluster/internal/ip/{ip}/unblock", internalUnblockIPHandler(p))
+		mux.HandleFunc("POST /api/v1/cluster/internal/ip/{ip}/unblock", internalUnblockIPHandler(p))
 		mux.HandleFunc("GET /api/v1/cluster/internal/persistence/state", clusterPersistenceStateHandler(p))
 		mux.HandleFunc("GET /api/v1/cluster/state/merged", clusterMergedStateHandler(p))
+		mux.HandleFunc("DELETE /api/v1/cluster/internal/bad-actors", internalBadActorsDeleteHandler(p))
 	}
 
 	// Wrap with logging middleware

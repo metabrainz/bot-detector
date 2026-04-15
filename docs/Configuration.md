@@ -23,7 +23,7 @@ The configuration is structured as a top-level map containing settings for the a
 
 ### `websites`
 
-**New in multi-website mode.** Defines multiple websites to monitor, each with its own log file. If this section is present, the `--log-path` command-line flag is ignored.
+**New in multi-website mode.** Defines multiple websites to monitor, each with its own log file. If this section is present, the `--log-path` command-line flag is ignored in live mode (but accepted in `--dry-run` mode for testing against a static log file).
 
 | Field | Type | Description |
 | :---- | :---- | :---- |
@@ -57,6 +57,7 @@ websites:
 | :---- | :---- | :---- |
 | **log_level** | string | Optional. Set minimum log level: `critical`, `error`, `warning`, `info`, `debug`. Default: `warning`. |
 | **enable_metrics** | boolean | Optional. If `true`, enables the metrics endpoint. Default: `true`. |
+| **max_recent_parse_errors** | int | Optional. Number of recent parse error log lines to keep in memory for the `/stats/parse-errors` endpoint. Default: `50`. Set to `0` to disable. |
 | **eof_polling_delay** | string | Optional. Duration to wait before re-checking a log file after reaching its end. Default: `200ms`. |
 | **config** | object | Settings related to application configuration management. See table [`application.config`](#applicationconfig). |
 | **persistence** | object | Settings related to state persistence. See table [`application.persistence`](#applicationpersistence). |
@@ -168,6 +169,7 @@ Chains are processed in the order they are defined. Each chain definition must i
 | **block_duration** | string | No | The duration for which the IP should be blocked if `action` is `block`. Format: Go duration string (e.g., `5m`, `1h`, `30m`, `1h30m`). If not specified, uses `blockers.default_duration`. |
 | **match_key** | string | Yes | The key used to track activity. Determines if behavior is tracked per IP, per IP version, or per unique client (IP + User-Agent). See [`match_key` values](#match_key-values) below. |
 | **on_match** | string | No | If set to `stop`, no further chains will be processed for the current log entry after this chain completes. |
+| **bad_actor_weight** | float | No | Weight added to the bad actor score when this chain blocks an IP (0.0–1.0). Default: `1.0`. Only relevant when `bad_actors` is enabled. See [BAD_ACTORS.md](BAD_ACTORS.md). |
 | **websites** | list of strings | No | **Multi-website mode only.** List of website names (from `websites` section) where this chain applies. If omitted or empty, the chain applies to all websites (global chain). Example: `["main_site", "api_site"]`. |
 | **steps** | list of objects | Yes | The sequential list of steps that define the malicious pattern. See table [`chains[].steps[].fields`](#chainsstepsfields). |
 
@@ -447,6 +449,31 @@ good_actors:
 ```
 
 
+### Bad Actors
+
+The `bad_actors` section enables automatic tracking and permanent blocking of IPs that are blocked repeatedly. See [BAD_ACTORS.md](BAD_ACTORS.md) for full details.
+
+```yaml
+bad_actors:
+  enabled: true
+  threshold: 5.0             # Score needed to become a bad actor (required)
+  block_duration: "168h"     # Block duration for bad actors (default: 168h)
+  max_score_entries: 100000  # Max IPs in scoring table (default: 100000)
+  score_max_age: "30d"       # Remove low scores older than this (default: 30d)
+  score_min_cleanup: 2.0     # Only remove scores below this during cleanup (default: 2.0)
+```
+
+| Field | Type | Default | Description |
+| :---- | :---- | :---- | :---- |
+| **enabled** | bool | `true` if section present | Enable/disable bad actor tracking |
+| **threshold** | float | required | Cumulative score needed for promotion to bad actor |
+| **block_duration** | duration | `168h` | How long to block promoted bad actors |
+| **max_score_entries** | int | `100000` | Maximum number of IPs tracked in the scoring table |
+| **score_max_age** | duration | `30d` | Remove scores below `score_min_cleanup` older than this |
+| **score_min_cleanup** | float | `2.0` | During cleanup, only remove scores below this value |
+
+Each chain contributes to the score via its `bad_actor_weight` field (default 1.0). When an IP's cumulative score reaches the threshold, it is permanently blocked until manually cleared via `DELETE /ip/{ip}/clear`.
+
 ## Advanced Topics
 
 ### Log Levels
@@ -455,7 +482,7 @@ The application uses a unified logging system with five discrete levels. The `ap
 
 | Level | Severity | Description |
 | :--- | :--- | :--- |
-| **`critical`** | **0** (Highest) | Only displays actions that modify state or terminate the program (e.g., **IP blocks**, graceful **SHUTDOWN**). |
+| **`critical`** | **0** (Highest) | Only displays actions that modify state or terminate the program (e.g., **IP blocks**, graceful **SHUTDOWN**), and **metrics summary** output. Useful for quiet dry-run mode where only the final summary is needed. |
 | **`error`** | **1** | Displays severe, non-fatal issues (e.g., file read errors, **Blocker connection failures** that trigger fail-safe). |
 | **`warning`** | **2** (Default) | Includes non-critical operational issues that should be reviewed (e.g., failed timestamp parsing, malformed URL referrers). |
 | **`info`** | **3** | Includes major application lifecycle events (e.g., configuration **LOAD**, **DRY_RUN** start/completion, tailing start). |

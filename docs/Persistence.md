@@ -1,6 +1,6 @@
 # Bot-Detector Persistence and State Management
 
-This document outlines the architecture used by `bot-detector` to reliably persist its state, ensuring that block information can be restored after a restart.
+This document describes how `bot-detector` persists its state using SQLite.
 
 ## Enabling Persistence
 
@@ -10,259 +10,186 @@ Persistence is controlled by the `--state-dir` command-line flag. When you speci
 ./bot-detector --config-dir /etc/bot-detector --state-dir /var/lib/bot-detector/state
 ```
 
-To disable persistence even when `--state-dir` is provided, set `persistence.enabled: false` in your `config.yaml`:
+To disable persistence even when `--state-dir` is provided:
 
 ```yaml
-# config.yaml
-persistence:
-  enabled: false  # Explicitly disable persistence
-  compaction_interval: "1h"  # Ignored when disabled
+application:
+  persistence:
+    enabled: false
 ```
 
-You can also configure the compaction interval:
+You can also configure the cleanup interval and retention period:
 
 ```yaml
-# config.yaml
-persistence:
-  compaction_interval: "1h"  # Optional, defaults to 1 hour
+application:
+  persistence:
+    compaction_interval: "1h"  # How often to clean up expired entries (default: 1h)
+    retention_period: "168h"   # How long to keep unblocked entries (default: 168h / 1 week)
 ```
 
-If a `state_dir` is provided, the application will create the directory if it doesn't exist and manage its state within it.
+## Database
+
+Persistence uses a single SQLite database file: `{state_dir}/state.db`
+
+The database runs in **WAL (Write-Ahead Logging) mode** for crash safety and better read/write concurrency.
+
+### Schema
+
+All timestamps are stored as **Unix seconds** (INTEGER) for compact storage. The current schema version is **4**.
+
+**ips** — Current state per IP address:
+- `ip` (TEXT PRIMARY KEY) — IP address
+- `state` — "blocked" or "unblocked"
+- `expire_time` — When the block expires (Unix seconds)
+- `reason_id` — Foreign key to reasons table
+- `modified_at` — Last modification timestamp (Unix seconds)
+- `first_blocked_at` — Earliest block timestamp, preserved across re-blocks (Unix seconds)
+
+**Indexes:** `idx_ips_state_expire(state, expire_time)` — compound index covering all cleanup and lookup queries.
+
+**events** — Audit log of all block/unblock actions:
+- `timestamp` (Unix seconds), `event_type`, `ip`, `reason_id`, `duration`, `node_name`
+- UNIQUE constraint on `(timestamp, ip, node_name, event_type)` for cluster deduplication
+
+**reasons** — Deduplicated reason strings with FNV-1a hash-based IDs (cluster-safe, deterministic).
+
+**ip_scores** — Bad actor score tracking per IP (see [BAD_ACTORS.md](BAD_ACTORS.md)).
+
+**bad_actors** — Permanent bad actor records with promotion history.
+
+**schema_version** — Tracks applied migrations for future schema upgrades.
 
 ## Guiding Principles
 
-- **Local State is Truth:** The state stored locally by `bot-detector` is the source of truth. The backend's (e.g., HAProxy) state is considered a replica that will be automatically synchronized on startup.
-- **Reliability:** The system prioritizes durably recording every action to prevent data loss.
-- **Backend Agnostic:** The persistence model is self-contained and does not depend on the specific backend it manages.
-- **Unified State Management:** The system tracks both blocked IPs (`gpc0=1`) and explicitly unblocked IPs (`gpc0=0`) to ensure complete state restoration after crashes or HAProxy restarts.
-
-## Core Components
-
-The persistence model is a "Log-and-Snapshot" design, which relies on two key files within the configured `state_dir`:
-
-### 1. The Journal (Event Log)
-
-This is an append-only log file where every state-changing action is recorded *before* it is executed.
-
-- **Format:** JSON Lines (JSONL). Each line is a complete JSON object representing a single event.
-- **Content:** Records all `block` and `unblock` events, including timestamp, IP, duration, and the reason for the action.
-- **Durability:** When a new event is logged, the file is explicitly flushed to disk (`fsync`). This guarantees that if the application crashes, a record of the intended action exists and will be correctly applied on the next startup.
-- **Lifecycle:** This log grows during operation and is cleared by the Compaction process. It only contains events that have occurred since the last snapshot.
-
-### 2. The Snapshot (State File)
-
-This file is a complete, point-in-time snapshot of all IP states known to the system.
-
-- **Format:** A gzip-compressed JSON object. The application automatically compresses snapshots on write and decompresses them on read.
-- **Content:** Contains the timestamp of the snapshot and all IP states (both blocked and unblocked).
-- **Compression:** Snapshots are automatically gzipped to reduce disk usage (typically 80-90% size reduction) and improve I/O performance.
-- **Reliability:** The snapshot is written using an **atomic rename** pattern (`compress -> write to .tmp -> fsync -> rename`). This ensures that a valid, non-corrupt snapshot is always available, even if the application crashes mid-write.
-- **Purpose:** Its primary role is to ensure fast application startups by avoiding the need to replay a long history of events.
-
-## Visual Overview
-
-The following diagram illustrates the lifecycle of the persistence components during startup, runtime, and compaction.
-
-```mermaid
-graph TD
-    subgraph "1. Application Startup"
-        A["Start bot-detector"] --> B{"Snapshot exists?"}
-        B -- Yes --> C["Load snapshot into memory"]
-        B -- No --> D["Start with empty state"]
-        C --> E["Replay journal since snapshot time"]
-        D --> E
-        E --> F["Sync in-memory state with HAProxy backend"]
-    end
-
-    F --> MainLoop["Application is Running"]
-    style MainLoop fill:#fff,stroke:#333,stroke-width:2px
-
-    subgraph "2. Runtime Operation (Event-Driven)"
-        MainLoop --> G["Log line received"]
-        G --> H{"Match found?"}
-        H -- Yes --> I["Action: Block/Unblock"]
-        I --> J["Write event to journal (fsync)"]
-        J --> K["Execute command on HAProxy backend"]
-        H -- No --> L["Discard"]
-    end
-
-    subgraph "3. Periodic Compaction (Time-Driven)"
-        MainLoop --> M["Compaction Interval Reached"]
-        M --> N["Filter expired blocks from memory"]
-        N --> O["Compress and write in-memory state to new .tmp snapshot"]
-        O --> P["fsync .tmp snapshot"]
-        P --> Q["Atomic Rename: .tmp -> snapshot"]
-        Q --> R["Truncate journal"]
-    end
-```
+- **Local State is Truth:** The SQLite database is the source of truth. The backend's (e.g., HAProxy) state is a replica synchronized on startup.
+- **Availability > Persistence:** If the database fails during operation, blocking continues via HAProxy. Persistence errors are logged but don't halt processing.
+- **Synchronous Writes:** All state changes are written to SQLite synchronously (WAL mode makes this fast). No async goroutines or write queues.
+- **Unified State:** Both blocked IPs (`gpc0=1`) and explicitly unblocked IPs (`gpc0=0`) are tracked for complete state restoration.
 
 ## Key Processes
 
 ### Startup and State Restoration
 
-On startup, `bot-detector` follows a specific process to bring the backend's state into sync with its local source of truth.
+1. **Open Database:** Open or create `state.db`, apply any pending schema migrations. If migrations were applied, a `VACUUM` is performed to reclaim space.
+2. **Legacy Migration:** If `state.snapshot` or `events.log` exist and the database is empty, migrate the legacy data into SQLite and rename the old files to `.migrated`.
+3. **Query State:** Read all IP states from the `ips` table.
+4. **State Push:** Issue block/unblock commands to HAProxy for each IP, respecting good actor configuration and checking for already-synced entries.
 
-1.  **Load Snapshot:** The application loads the snapshot into memory. If the file doesn't exist, it starts with an empty state.
-2.  **Replay Journal:** It reads the journal and applies any events that are newer than the snapshot's timestamp, ensuring the in-memory state is fully up-to-date.
-3.  **State Push:** `bot-detector` iterates through its complete in-memory state and issues commands to the configured backend:
-    - **Block commands** (`gpc0=1`) for all blocked IPs with remaining duration
-    - **Unblock commands** (`gpc0=0`) for all explicitly unblocked IPs (good actors)
-    
-    This process is idempotent and ensures the backend converges to the correct state without causing a service interruption.
+### Runtime
 
-> **Note:** During the "State Push" phase, the application respects the *currently loaded* configuration. This means if an IP address exists in the state snapshot but is also listed in the current `good_actors` configuration, its block will **not** be restored to the backend.
+Every block or unblock action:
+1. Insert event into `events` table (audit trail)
+2. Upsert IP state in `ips` table
+3. Queue command for HAProxy backend (rate-limited)
 
-### Runtime Event Logging
+All database writes are synchronous and protected by a mutex.
 
-Every block or unblock action follows this sequence:
+### Periodic Cleanup
 
-1. **Write to Journal:** The event is written to the journal file and flushed to disk
-2. **Update In-Memory State:** The internal state map is updated
-3. **Execute Backend Command:** The command is queued for the backend (rate-limited)
+A background goroutine runs at the configured `compaction_interval` (default: 1 hour):
 
-This ensures that even if the backend command fails or the application crashes, the event is preserved and will be replayed on restart.
+1. Delete expired blocks from `ips` table
+2. Delete old unblocked entries past the retention period
+3. Delete old events past the retention period
+4. Delete orphaned reason strings
+5. WAL checkpoint (flush WAL to main database file)
 
-### Compaction
+No snapshots, no journal truncation — just SQL DELETE queries.
 
-To prevent the journal from growing infinitely, a periodic compaction process runs. The interval is configurable via `compaction_interval` in the YAML config (default is 1 hour).
+### Graceful Shutdown
 
-1.  **Filter State:** Remove expired blocked IPs from in-memory state (unblocked IPs have no expiration)
-2.  **Snapshot:** Create a new, clean gzipped snapshot of the current in-memory state using the atomic rename pattern
-3.  **Truncate:** Once the new compressed snapshot is safely on disk, the journal is truncated (cleared), as all its information is now consolidated in the new snapshot
+1. WAL checkpoint (flush WAL to main database file)
+2. Close database connection
 
-**Compaction Logging:**
-```
-COMPACTION: Snapshot written (size=1234 bytes, entries=100 blocked + 5 unblocked, expired=15)
-COMPACTION: Journal truncated and reset
-```
+## Dry-Run Mode
+
+In dry-run mode, the database is created in memory (`:memory:`). This runs the exact same code path as production but with no disk I/O. The database is automatically destroyed on exit.
+
+## Cluster Support
+
+The cluster state sync protocol is unchanged — nodes exchange `map[string]IPState` as JSON over HTTP. The SQLite database is queried to produce this map on the leader side, and received states are written to SQLite on the follower side.
+
+See [ClusterStateSync.md](ClusterStateSync.md) for details.
+
+## Migration from Legacy Format
+
+When upgrading from the old snapshot/journal persistence:
+
+1. Start the new version with the same `--state-dir`
+2. On first startup, the application detects `state.snapshot` and/or `events.log`
+3. Data is imported into SQLite (snapshot first, then journal replay)
+4. Legacy files are renamed to `state.snapshot.migrated` and `events.log.migrated`
+5. Normal operation continues with SQLite
+
+### Rollback
+
+To revert to the old version:
+1. Stop bot-detector
+2. Remove `state.db`, `state.db-wal`, `state.db-shm`
+3. Rename `state.snapshot.migrated` → `state.snapshot` and `events.log.migrated` → `events.log`
+4. Deploy old binary and start
 
 ## Failure Scenarios
 
-| Failure Type | System Behavior | Outcome | Key Feature |
-| :--- | :--- | :--- | :--- |
-| **App Crash (Normal)** | Replays journal on restart to recover state since last snapshot. | **Highly Resilient.** State is self-healed. | Journaling |
-| **App Crash (Compaction)** | Safely ignores temporary files and uses the last good snapshot and journal. | **Highly Resilient.** No state is lost. | Atomic Rename |
-| **HAProxy Restart** | Full state (blocks + unblocks) is restored on next bot-detector startup. | **Resilient.** Good actor protections preserved. | Unified State |
-| **Disk Full** | Write operations fail; the app logs errors and may halt. | **Safe.** Prevents state inconsistency. | Error Handling on I/O |
-| **Network Failure** | A single block command is retried based on `blocker_max_retries`. | **Resilient.** The state will be fully synchronized on the next restart. | Per-Command Retries |
+| Failure Type | Behavior | Outcome |
+|:---|:---|:---|
+| **App crash** | SQLite WAL ensures committed transactions survive. On restart, database is intact. | **Resilient.** No data loss. |
+| **Database corruption** | Detected on open. Application logs error and can continue without persistence. | **Degraded.** Blocking still works via HAProxy. |
+| **Disk full** | Write operations fail. Errors logged, processing continues. | **Degraded.** Events not persisted until space freed. |
+| **HAProxy restart** | Full state (blocks + unblocks) restored from database on next bot-detector startup. | **Resilient.** |
 
-### Crash During Normal Operation
+## Database Maintenance
 
-If the application crashes after writing an event to the journal but before executing it on the backend, the startup process will automatically correct the situation. The journaled event is replayed, added to the in-memory state, and pushed to the backend, ensuring no actions are lost.
-
-### Crash During Compaction
-
-The compaction process is transactional. If a crash occurs, the state remains consistent because the old snapshot and journal are not deleted until the new snapshot is successfully written.
-
-### HAProxy Restart Scenario
-
-If HAProxy is restarted while bot-detector is running, all stick table entries are lost. When bot-detector restarts:
-
-1. Loads snapshot with both blocked and unblocked IPs
-2. Replays journal to get latest state
-3. Sends **both** block and unblock commands to HAProxy
-4. Result: Full state restoration including good actor protections (`gpc0=0`)
-
-## Disaster Recovery from a Snapshot Backup
-
-If the entire server is lost, the snapshot file is the key asset for recovery.
-
-### Restoration Procedure
-
-1.  **Prepare New Server:** Set up a new machine with the `bot-detector` binary and its backend.
-2.  **Restore Snapshot:** Place the backed-up snapshot file into the state directory. **Ensure no journal file is present.**
-3.  **Start Application:** Launch `bot-detector`. It will load the snapshot and proceed to push the state to the backend.
-4.  **Resume:** The system will create a new journal and resume normal operation.
-
-This means your Recovery Point Objective (RPO) is determined by how frequently you back up the snapshot file.
-
-### Backup Considerations
-
-- **Format:** Snapshot files are gzip-compressed for efficiency
-- **Size:** Gzipped snapshots are typically 80-90% smaller than plain JSON, making backups faster and more storage-efficient
-- **Inspection:** To manually inspect a gzipped snapshot: `gunzip -c state.snapshot | jq .`
-
-## Format Specification
-
-### File Naming
-
-Both files are located in the directory specified by the `--state-dir` flag:
-
-- **Snapshot:** `state.snapshot` (gzipped JSON)
-- **Journal:** `events.log` (JSONL)
-
-### Snapshot Structure
-```json
-{
-  "ts": "2025-11-21T12:00:00Z",
-  "snapshot": {
-    "entries": [
-      {
-        "ip": "192.0.2.1",
-        "state": "blocked",
-        "expire_time": "2025-11-21T13:00:00Z",
-        "reason": "chain-name"
-      },
-      {
-        "ip": "192.0.2.2",
-        "state": "unblocked",
-        "expire_time": "2025-11-21T14:00:00Z",
-        "reason": "good-actor-match"
-      }
-    ]
-  }
-}
+### Manual Inspection
+```bash
+sqlite3 /var/lib/bot-detector/state/state.db <<EOF
+SELECT 'IPs:', COUNT(*) FROM ips;
+SELECT 'Events:', COUNT(*) FROM events;
+SELECT 'Reasons:', COUNT(*) FROM reasons;
+SELECT 'DB Size:', page_count * page_size / 1024 / 1024 || ' MB'
+FROM pragma_page_count(), pragma_page_size();
+EOF
 ```
 
-**Characteristics:**
-- Stores **both blocked and unblocked IPs**
-- Wrapped structure: timestamp at top level, data nested in `snapshot` object
-- Entries are **sorted chronologically** by `expire_time`
-- `state` field explicitly indicates "blocked" or "unblocked"
-
-### Journal Entry Format
-```json
-{"ts":"2025-11-21T12:00:00Z","event":{"type":"block","ip":"192.0.2.1","duration":3600000000000,"reason":"chain-name"}}
-{"ts":"2025-11-21T12:00:01Z","event":{"type":"unblock","ip":"192.0.2.2","reason":"good-actor-match"}}
+Note: Timestamps are stored as Unix seconds (integers). To view them as human-readable dates:
+```bash
+sqlite3 /var/lib/bot-detector/state/state.db \
+  "SELECT ip, state, datetime(expire_time, 'unixepoch') AS expires, datetime(modified_at, 'unixepoch') AS modified FROM ips LIMIT 10;"
 ```
 
-**Characteristics:**
-- Wrapped structure: timestamp at top level, event data nested in `event` object
-- `type` field contains event type ("block" or "unblock")
-- Cleaner separation of metadata from payload
-- Duration in nanoseconds for block events
+### Manual Vacuum
+```bash
+sqlite3 /var/lib/bot-detector/state/state.db "VACUUM"
+```
 
-### Advantages
-- **Complete state restoration:** Both blocks and unblocks are preserved
-- **Good actor protection:** Unblocked IPs (`gpc0=0`) are restored to HAProxy after restart
-- **Chronological ordering:** Snapshot entries sorted by expiration time for efficient processing
-- **Cleaner structure:** Consistent wrapping pattern for both snapshot and journal
-
+### Backup
+```bash
+sqlite3 /var/lib/bot-detector/state/state.db ".backup /backup/state.db.$(date +%Y%m%d)"
+```
 
 ## Logging Output
 
-The application provides detailed logging for all persistence operations:
-
 ### Startup
 ```
-STATE_LOAD: Loaded snapshot (size=1234 bytes, entries=100 blocked + 5 unblocked, timestamp=2025-11-21T12:00:00Z)
-JOURNAL_REPLAY: Replayed journal (size=5678 bytes, blocks=10, unblocks=2, skipped=50, errors=0)
-STATE_RESTORE: Restoring 105 IP states to backend...
+SETUP: Persistence enabled. Loading state from '/var/lib/bot-detector/state'...
+STATE_LOAD: Loaded 105 IP states from database (100 blocked + 5 unblocked)
+STATE_RESTORE: State restoration complete: 95 restored, 10 skipped (already_blocked=3, already_unblocked=2, expired=4, good_actors=1)
 ```
 
-### Runtime
+### Migration (first run after upgrade)
 ```
-JOURNAL_FAIL: Failed to write block event to journal for 192.0.2.1: disk full
-```
-
-### Compaction
-```
-COMPACTION: Snapshot written (size=1300 bytes, entries=95 blocked + 7 unblocked, expired=15)
-COMPACTION: Journal truncated and reset
+MIGRATION: Legacy persistence files detected, migrating to SQLite...
+MIGRATION: Legacy persistence migration completed successfully
 ```
 
-The logging provides visibility into:
-- File sizes for capacity planning
-- Entry counts for monitoring state growth
-- Event counts for auditing
-- Error conditions for troubleshooting
+### Cleanup
+```
+CLEANUP: Cleanup completed: expired_blocks=15, old_unblocked=3, old_events=1200, orphaned_reasons=5
+```
+
+### Shutdown
+```
+SHUTDOWN: Performing final cleanup...
+PERSISTENCE: Closing database.
+SHUTDOWN: Shutdown complete.
+```

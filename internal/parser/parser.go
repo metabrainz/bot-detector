@@ -15,8 +15,9 @@ type Provider interface {
 	GetLogRegex() *regexp.Regexp
 }
 
-var defaultLogFormatRegex = regexp.MustCompile(
-	`^(?P<VHost>\S+) (?P<IP>\S+) (?P<Identity>\S+) (?P<User>\S+) \[(?P<Timestamp>[^\]]+)\] (?:\"(?P<Method>\S+)\s+(?P<Path>.+?)(?:\s+(?P<Protocol>\S+))?\"|\"-\"|-) (?P<StatusCode>\d{1,3}) (?P<Size>\S+) \"(?P<Referrer>[^\"]*)\" \"(?P<UserAgent>[^\"]*)\"$`,
+// DefaultLogFormatRegex is the default regex for parsing virtual-host-prefixed combined log format.
+var DefaultLogFormatRegex = regexp.MustCompile(
+	`^(?P<VHost>\S+) (?P<IP>\S+) (?P<Identity>\S+) (?P<User>\S+) \[(?P<Timestamp>[^\]]+)\] (?:\"(?P<Method>\S+)\s+(?P<Path>.+?)(?:\s+(?P<Protocol>\S+))?\"|\"-\"|\"\"|-) (?P<StatusCode>\d{1,3}) (?P<Size>\S+) \"(?P<Referrer>[^\"]*)\" \"(?P<UserAgent>[^\"]*)\"$`,
 )
 
 // getMatch safely retrieves a value from a named capture group.
@@ -36,7 +37,7 @@ func ParseLogLine(p Provider, line string) (*types.LogEntry, error) {
 
 	regexToUse := p.GetLogRegex()
 	if regexToUse == nil {
-		regexToUse = defaultLogFormatRegex
+		regexToUse = DefaultLogFormatRegex
 	}
 
 	matches := regexToUse.FindStringSubmatch(line)

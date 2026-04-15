@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -48,7 +49,7 @@ func clusterStatusHandler(p Provider) http.HandlerFunc {
 		// Encode and send response
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
 			p.Log(3, "CLUSTER", "Failed to encode cluster status response: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			jsonError(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -134,7 +135,7 @@ func clusterMetricsHandler(p Provider) http.HandlerFunc {
 		// Encode and send response
 		if err := json.NewEncoder(w).Encode(snapshot); err != nil {
 			p.Log(3, "CLUSTER", "Failed to encode metrics response: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			jsonError(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
 	}
@@ -179,7 +180,7 @@ func clusterMetricsAggregateHandler(p Provider) http.HandlerFunc {
 
 		// If nil, this node is not a leader or clustering is not enabled
 		if aggregated == nil {
-			http.Error(w, "Aggregated metrics only available on leader nodes", http.StatusNotFound)
+			jsonError(w, "Aggregated metrics only available on leader nodes", http.StatusNotFound)
 			return
 		}
 
@@ -190,8 +191,48 @@ func clusterMetricsAggregateHandler(p Provider) http.HandlerFunc {
 		// Encode and send response
 		if err := json.NewEncoder(w).Encode(aggregated); err != nil {
 			p.Log(3, "CLUSTER", "Failed to encode aggregated metrics response: %v", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			jsonError(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
+	}
+}
+
+// clusterStatusTextHandler returns cluster status as human-readable text.
+// GET /cluster/status
+func clusterStatusTextHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		status := p.GetNodeStatus()
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		fmt.Fprintf(w, "role: %s\n", status.Role) //nolint:errcheck
+		if status.Name != "" {
+			fmt.Fprintf(w, "name: %s\n", status.Name) //nolint:errcheck
+		}
+		if status.Address != "" {
+			fmt.Fprintf(w, "address: %s\n", status.Address) //nolint:errcheck
+		}
+		if status.LeaderAddress != "" {
+			fmt.Fprintf(w, "leader: %s\n", status.LeaderAddress) //nolint:errcheck
+		}
+	}
+}
+
+// clusterMetricsTextHandler returns node metrics as human-readable text.
+// GET /cluster/metrics
+func clusterMetricsTextHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		snapshot := p.GetMetricsSnapshot()
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		s := snapshot.ProcessingStats
+		fmt.Fprintf(w, "timestamp: %s\n", snapshot.Timestamp.Format(time.RFC3339))         //nolint:errcheck
+		fmt.Fprintf(w, "lines_processed: %d\n", s.LinesProcessed)                          //nolint:errcheck
+		fmt.Fprintf(w, "entries_checked: %d\n", s.EntriesChecked)                          //nolint:errcheck
+		fmt.Fprintf(w, "parse_errors: %d\n", s.ParseErrors)                                //nolint:errcheck
+		fmt.Fprintf(w, "lines_per_second: %.1f\n", s.LinesPerSecond)                       //nolint:errcheck
+		fmt.Fprintf(w, "actions_block: %d\n", snapshot.ChainStats.ActionsBlock)            //nolint:errcheck
+		fmt.Fprintf(w, "actions_log: %d\n", snapshot.ChainStats.ActionsLog)                //nolint:errcheck
+		fmt.Fprintf(w, "chains_completed: %d\n", snapshot.ChainStats.Completed)            //nolint:errcheck
+		fmt.Fprintf(w, "chains_reset: %d\n", snapshot.ChainStats.Resets)                   //nolint:errcheck
+		fmt.Fprintf(w, "good_actors_skipped: %d\n", snapshot.ActorStats.GoodActorsSkipped) //nolint:errcheck
+		fmt.Fprintf(w, "actors_cleaned: %d\n", snapshot.ActorStats.ActorsCleaned)          //nolint:errcheck
 	}
 }

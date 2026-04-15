@@ -20,7 +20,20 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
 
 ## Endpoints
 
-### `/` or `/stats`
+### `/help`
+
+*   **Method:** `GET`
+*   **Content-Type:** `text/plain; charset=utf-8`
+*   **Description:** Lists all available endpoints in a human-readable table with method, path, content type, and description. Available on all listeners regardless of role configuration.
+
+### `/api/v1/help`
+
+*   **Method:** `GET`
+*   **Content-Type:** `application/json`
+*   **Description:** Lists API endpoints as JSON. Each entry includes `method`, `path`, `description`, `content_type`, and `role`.
+*   **Role:** `api`
+
+### `/stats`
 
 *   **Method:** `GET`
 *   **Content-Type:** `text/plain; charset=utf-8`
@@ -94,10 +107,44 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
     To enable, add a 'websites' section to your config.yaml
     ```
 
+### `/stats/bad-actors`
+
+*   **Method:** `GET`
+*   **Content-Type:** `text/plain; charset=utf-8`
+*   **Description:** Human-readable bad actor statistics. Shows total count, average score and block count, IPs per reason (sorted by count descending), and promotions per day (sorted chronologically). JSON equivalent: `/api/v1/bad-actors/stats`.
+*   **Response:**
+    ```
+    === Bad Actor Statistics ===
+    Total: 22078
+    Avg Score: 5.0
+    Avg Block Count: 5.0
+
+    === IPs per Reason ===
+        2307  Bad-WS-User-Agent@musicbrainz.org
+         546  No-Referrer-Subpage-Crawler@musicbrainz.org
+         170  Bad-User-Agent-Example-com@musicbrainz.org
+
+    === Promotions per Day ===
+        4544  2026-04-08
+       11442  2026-04-09
+        6092  2026-04-10
+    ```
+
+### `/stats/parse-errors`
+
+*   **Method:** `GET`
+*   **Content-Type:** `text/plain; charset=utf-8`
+*   **Description:** Returns the most recent log lines that failed to parse (newest first, one per line). The buffer size is controlled by `application.max_recent_parse_errors` (default: 50, set to 0 to disable).
+*   **Response:**
+    ```
+    musicbrainz.org 34.58.6.41 - - [15/Apr/2026:11:44:05 +0000] "" 400 0 "-" "-"
+    musicbrainz.org 1.2.3.4 - - [15/Apr/2026:11:43:00 +0000] "GET /incomplete HTTP/1.1" 200 100 "-"
+    ```
+
 ### `/config`
 
 *   **Method:** `GET`
-*   **Content-Type:** `text/yaml; charset=utf-8`
+*   **Content-Type:** `application/yaml`
 *   **Description:** Returns the raw YAML content of the main configuration file as it was last loaded by the application. This allows you to inspect the exact configuration that is currently active, which is especially useful after a hot-reload.
 *   **Responses:**
     *   `200 OK`: Successfully returns the YAML configuration.
@@ -113,16 +160,144 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
     *   `500 Internal Server Error`: If the server fails to access the configuration or its dependencies to create the archive.
 
 
+## Bad Actors Endpoints
+
+### `GET /api/v1/bad-actors`
+
+*   **Method:** `GET`
+*   **Content-Type:** `application/json`
+*   **Description:** Returns all IPs that have been promoted to bad actor status. Each entry includes the IP, promotion timestamp, total score, block count, and a JSON history of the block events that led to promotion.
+*   **Role:** `api`
+
+### `GET /api/v1/bad-actors/export`
+
+*   **Method:** `GET`
+*   **Content-Type:** `text/plain`
+*   **Description:** Returns all bad actor IPs as plain text, one per line. Useful for integration with external firewalls, blocklists, or other security tools.
+*   **Role:** `api`
+
+### `GET /api/v1/bad-actors/stats`
+
+*   **Method:** `GET`
+*   **Content-Type:** `application/json`
+*   **Description:** Returns aggregated statistics about bad actors: total count, average score and block count, number of distinct IPs per reason (chain name), and promotions per day. Useful for identifying overzealous chains or spotting spikes in bad actor promotions.
+*   **Role:** `api`
+*   **Response Format:**
+    ```json
+    {
+      "total": 42,
+      "avg_score": 6.3,
+      "avg_block_count": 8,
+      "by_reason": {
+        "aggressive-scraper@example.com": 15,
+        "rate-limit-api@example.com": 10,
+        "SQL-Injection": 17
+      },
+      "by_day": {
+        "2026-04-08": 5,
+        "2026-04-09": 12,
+        "2026-04-10": 25
+      }
+    }
+    ```
+*   **Notes:**
+    *   `by_reason` counts distinct IPs per reason — an IP with multiple block events for the same reason is counted once.
+    *   An IP can appear under multiple reasons if it triggered different chains.
+    *   `by_day` is keyed by the promotion date (not block date).
+
+### `DELETE /api/v1/bad-actors?reason=<reason>[&unblock]` (Cluster-Aware)
+
+*   **Method:** `DELETE`
+*   **Content-Type:** `application/json`
+*   **Description:** Removes all bad actors whose block history contains the given reason substring. This is useful when a chain was overzealous and has been modified or removed — IPs that were promoted to bad actor status because of that chain can be cleared in bulk. The match is performed against the `"r"` field in each bad actor's history JSON. Both the bad actor entry and its accumulated score are removed.
+*   **Role:** `api`
+*   **Parameters:**
+    *   `reason` (query, required) - Substring to match against chain reasons in the bad actor history. Typically a chain name (e.g., `rate-limit-api`) or a vhost-qualified reason (e.g., `rate-limit-api@example.com`).
+    *   `unblock` (query, optional, no value) - If present, also unblocks the removed IPs from HAProxy (sets `gpc0=0`), clears persistence state, and removes from the activity store.
+*   **Cluster Behavior:**
+    *   **Follower nodes:** Forward the request to the leader and return the leader's response.
+    *   **Leader node:** Remove locally, broadcast removal to all followers, then process `&unblock` (which also broadcasts to followers).
+    *   **Standalone node:** Remove locally only.
+*   **Response Format:**
+    ```json
+    {
+      "reason": "rate-limit-api",
+      "removed": 3,
+      "ips": ["1.2.3.4", "5.6.7.8", "9.10.11.12"]
+    }
+    ```
+*   **Response Format (with `&unblock`):**
+    ```json
+    {
+      "reason": "rate-limit-api",
+      "removed": 3,
+      "ips": ["1.2.3.4", "5.6.7.8", "9.10.11.12"],
+      "unblocked": 3
+    }
+    ```
+*   **Response Format (with `&unblock`, partial failure):**
+    ```json
+    {
+      "reason": "rate-limit-api",
+      "removed": 3,
+      "ips": ["1.2.3.4", "5.6.7.8", "9.10.11.12"],
+      "unblocked": 2,
+      "unblock_errors": ["9.10.11.12"]
+    }
+    ```
+*   **Error Response (400 Bad Request):**
+    ```
+    reason query parameter is required
+    ```
+*   **Notes:**
+    *   The match is a **substring match** — `reason=rate-limit` will match `rate-limit-api`, `rate-limit-static`, etc. Use the full chain name for precision.
+    *   In multi-website mode, reasons include the vhost or website suffix (e.g., `chainName@vhost` or `chainName[website]`). You can match on just the chain name to clear across all websites, or include the suffix to target a specific website.
+    *   Without `&unblock`, this only removes the bad actor record and score from the database. The IPs may still be actively blocked in HAProxy until their block duration expires.
+    *   With `&unblock`, each removed IP is also unblocked from HAProxy (sets `gpc0=0`), cleared from persistence, and removed from the activity store.
+*   **Usage Examples:**
+    ```bash
+    # Remove all bad actors promoted by the "aggressive-scraper" chain
+    curl -X DELETE 'http://localhost:8080/api/v1/bad-actors?reason=aggressive-scraper'
+
+    # Remove and unblock from HAProxy in one call
+    curl -X DELETE 'http://localhost:8080/api/v1/bad-actors?reason=aggressive-scraper&unblock'
+
+    # Remove bad actors from a specific website
+    curl -X DELETE 'http://localhost:8080/api/v1/bad-actors?reason=aggressive-scraper@example.com'
+
+    # Preview which bad actors would match (check history first)
+    curl -s http://localhost:8080/api/v1/bad-actors | jq '.[].history' 
+    ```
+*   **Responses:**
+    *   `200 OK`: Successfully processed the request (even if no bad actors matched).
+    *   `400 Bad Request`: Missing `reason` query parameter.
+    *   `500 Internal Server Error`: Database error during removal.
+    *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
+
+See [BAD_ACTORS.md](BAD_ACTORS.md) for full documentation of the bad actors feature, including configuration, scoring, and removal.
+
 ## Cluster Endpoints
 
 These endpoints are available when cluster mode is enabled. They provide cluster status, metrics collection, and aggregation capabilities.
 
-### `/cluster/status`
+Each cluster endpoint has two variants:
+- `/cluster/*` — Human-readable plain text output
+- `/api/v1/cluster/*` — JSON output for programmatic access
+
+The internal cluster communication uses the `/api/v1/` JSON endpoints.
+
+### `/cluster/status` and `/api/v1/cluster/status`
 
 *   **Method:** `GET`
-*   **Content-Type:** `application/json`
-*   **Description:** Returns the current node's cluster identity and role information. This endpoint is useful for determining which node you're connected to and its role in the cluster.
-*   **Response Format (Leader):**
+*   **Content-Type:** `text/plain` (`/cluster/status`) or `application/json` (`/api/v1/cluster/status`)
+*   **Description:** Returns the current node's cluster identity and role information.
+*   **Plain Text Response:**
+    ```
+    role: leader
+    name: node-1
+    address: localhost:8080
+    ```
+*   **JSON Response:**
     ```json
     {
       "role": "leader",
@@ -130,25 +305,30 @@ These endpoints are available when cluster mode is enabled. They provide cluster
       "address": "localhost:8080"
     }
     ```
-*   **Response Format (Follower):**
-    ```json
-    {
-      "role": "follower",
-      "name": "node-2",
-      "address": "localhost:9090",
-      "leader": "node-1:8080"
-    }
-    ```
 *   **Responses:**
     *   `200 OK`: Successfully returns the node status.
     *   `500 Internal Server Error`: If the server fails to retrieve node status information.
 
-### `/cluster/metrics`
+### `/cluster/metrics` and `/api/v1/cluster/metrics`
 
 *   **Method:** `GET`
-*   **Content-Type:** `application/json`
-*   **Description:** Returns this node's current metrics snapshot in JSON format. This endpoint is used by leader nodes to collect metrics from follower nodes, but can also be queried directly for monitoring individual nodes. The metrics include processing statistics, actor statistics, chain execution statistics, per-website statistics (in multi-website mode), and various performance counters.
-*   **Response Format:**
+*   **Content-Type:** `text/plain` (`/cluster/metrics`) or `application/json` (`/api/v1/cluster/metrics`)
+*   **Description:** Returns this node's current metrics. The JSON variant is used internally by leader nodes to collect metrics from followers.
+*   **Plain Text Response:**
+    ```
+    timestamp: 2025-11-18T20:30:00Z
+    lines_processed: 1000
+    entries_checked: 42
+    parse_errors: 1
+    lines_per_second: 95.2
+    actions_block: 15
+    actions_log: 27
+    chains_completed: 42
+    chains_reset: 1
+    good_actors_skipped: 10
+    actors_cleaned: 5
+    ```
+*   **JSON Response:**
     ```json
     {
       "timestamp": "2025-11-18T20:30:00Z",
@@ -222,11 +402,11 @@ These endpoints are available when cluster mode is enabled. They provide cluster
     *   `200 OK`: Successfully returns the metrics snapshot.
     *   `500 Internal Server Error`: If the server fails to generate the metrics snapshot.
 
-### `/cluster/metrics/aggregate`
+### `/cluster/metrics/aggregate` and `/api/v1/cluster/metrics/aggregate`
 
 *   **Method:** `GET`
-*   **Content-Type:** `application/json`
-*   **Description:** Returns cluster-wide aggregated metrics from all nodes (leader only). This endpoint provides a comprehensive view of the entire cluster's performance, including per-node health status, cluster-wide metric summation, and per-website aggregates (in multi-website mode). Only available on leader nodes; follower nodes will return a 404 error.
+*   **Content-Type:** `text/plain` (`/cluster/metrics/aggregate`, indented JSON) or `application/json` (`/api/v1/cluster/metrics/aggregate`)
+*   **Description:** Returns cluster-wide aggregated metrics from all nodes (leader only). The plain text variant returns indented JSON for readability.
 *   **Response Format:**
     ```json
     {
@@ -377,6 +557,26 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     backend_tables:
       - thirty_min_blocks_v4 on /var/run/haproxy/admin.sock (status: blocked, duration: 30m, expires in: 15m)
     ```
+*   **Response Format (Standalone - Bad Actor):**
+    ```
+    node: standalone
+    status: blocked
+    persistence: blocked
+    persistence_reason: bad-actor
+    bad_actor: yes
+    bad_actor_promoted_at: 2026-03-12T16:00:00Z
+    bad_actor_score: 5.5
+    bad_actor_block_count: 7
+    ```
+*   **Response Format (Standalone - IP with Score):**
+    ```
+    node: standalone
+    status: blocked
+    persistence: blocked
+    persistence_reason: SQL-Injection
+    score: 2.3 / 5.0
+    score_block_count: 4
+    ```
 *   **Response Format (Unknown IP):**
     ```
     cluster_status: unknown
@@ -451,6 +651,35 @@ These endpoints allow you to query the block/unblock status of specific IP addre
       "persistence_expires": "2025-11-22T02:00:00Z"
     }
     ```
+*   **Response Format (Standalone - Bad Actor):**
+    ```json
+    {
+      "node": "standalone",
+      "status": "blocked",
+      "persistence": "blocked",
+      "persistence_reason": "bad-actor",
+      "bad_actor": {
+        "promoted_at": "2026-03-12T16:00:00Z",
+        "total_score": 5.5,
+        "block_count": 7,
+        "history": "[{\"ts\":\"2026-03-12T16:00:00Z\",\"r\":\"SQL-Injection\"}]"
+      }
+    }
+    ```
+*   **Response Format (Standalone - IP with Score, not yet bad actor):**
+    ```json
+    {
+      "node": "standalone",
+      "status": "blocked",
+      "persistence": "blocked",
+      "persistence_reason": "SQL-Injection",
+      "score": {
+        "current_score": 2.3,
+        "block_count": 4,
+        "threshold": 5.0
+      }
+    }
+    ```
 *   **Response Format (Standalone - Unblocked IP):**
     ```json
     {
@@ -497,6 +726,8 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   All timestamps are in RFC3339 format (ISO 8601)
     *   IPv6 addresses are canonicalized (e.g., `2001:0db8::1` → `2001:db8::1`)
     *   The `chains` object maps chain names to their expiry times
+    *   The `bad_actor` object is present only when the IP has been promoted to bad actor status
+    *   The `score` object is present only when the IP has a score but is not yet a bad actor
     *   The `cluster_hint` field (on followers) provides the URL to query for cluster-wide status
 *   **Responses:**
     *   `200 OK`: Successfully returns IP status.
@@ -506,7 +737,7 @@ These endpoints allow you to query the block/unblock status of specific IP addre
 
 *   **Method:** `DELETE`
 *   **Content-Type:** `text/plain; charset=utf-8`
-*   **Description:** Clears an IP address from all state: HAProxy stick tables, activity store, and persistence (journal/snapshot). This is a cluster-aware operation - if called on a follower, the request is forwarded to the leader, which then broadcasts the clear command to all nodes. Each node independently clears the IP from its local HAProxy tables and persistence state. An unblock event is written to the journal with reason "manual_clear".
+*   **Description:** Clears an IP address from all state: HAProxy stick tables, activity store, persistence, bad actor status, and score. This is a cluster-aware operation - if called on a follower, the request is forwarded to the leader, which then broadcasts the clear command to all nodes. Each node independently clears the IP from its local HAProxy tables and persistence state.
 *   **Parameters:**
     *   `ip` - IPv4 or IPv6 address (will be canonicalized)
 *   **Response Format (Success - IP found):**
@@ -593,6 +824,7 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   HAProxy stick tables: `gpc0` set to 0 (entry remains, expires naturally)
     *   Persistence state: Unblock event written to journal with reason "API unblock"
     *   Activity store: IP removed from in-memory chain progress
+    *   Bad actor status: Removed from `bad_actors` and `ip_scores` tables (same as `/clear`)
 *   **Performance:**
     *   **Fast:** Only updates `gpc0` value, doesn't remove entry from table
     *   Recommended for day-to-day unblocking operations
@@ -614,6 +846,95 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `500 Internal Server Error`: Failed to unblock the IP.
     *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
     *   `503 Service Unavailable`: Blocker is not available (e.g., dry-run mode).
+
+### `POST /api/v1/ip/{ip}/clear` (Cluster-Aware)
+
+*   **Method:** `POST`
+*   **Content-Type:** `application/json`
+*   **Description:** JSON equivalent of `DELETE /ip/{ip}/clear`. Clears an IP from all HAProxy stick tables, persistence, and activity store.
+*   **Role:** `api`
+*   **Response Format:**
+    ```json
+    {
+      "ip": "192.168.1.100",
+      "cleared": 2,
+      "tables": [
+        {
+          "table": "thirty_min_blocks_v4",
+          "backend": "/var/run/haproxy/admin.sock",
+          "status": "blocked",
+          "duration": "30m",
+          "expires_in": "15m"
+        }
+      ]
+    }
+    ```
+*   **Responses:**
+    *   `200 OK`: Successfully cleared the IP.
+    *   `400 Bad Request`: Invalid IP address format.
+    *   `500 Internal Server Error`: Failed to clear the IP.
+    *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
+    *   `503 Service Unavailable`: Blocker is not available.
+
+### `POST /api/v1/ip/{ip}/unblock` (Cluster-Aware)
+
+*   **Method:** `POST`
+*   **Content-Type:** `application/json`
+*   **Description:** JSON equivalent of `/ip/{ip}/unblock`. Sets `gpc0=0` in HAProxy stick tables without removing the entry.
+*   **Role:** `api`
+*   **Response Format:**
+    ```json
+    {
+      "ip": "192.168.1.100",
+      "status": "unblocked"
+    }
+    ```
+*   **Responses:**
+    *   `200 OK`: Successfully unblocked the IP.
+    *   `400 Bad Request`: Invalid IP address format.
+    *   `500 Internal Server Error`: Failed to unblock the IP.
+    *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
+    *   `503 Service Unavailable`: Blocker is not available.
+
+### `POST /api/v1/blocks/unblock?reason=<reason>` (Cluster-Aware)
+
+*   **Method:** `POST`
+*   **Content-Type:** `application/json`
+*   **Description:** Unblocks all IPs currently blocked with a reason matching the given substring. Queries the persistence database for blocked IPs whose reason contains the substring, then unblocks each one from HAProxy. Useful for bulk-unblocking after a chain is modified or removed.
+*   **Role:** `api`
+*   **Parameters:**
+    *   `reason` (query, required) - Substring to match against block reasons. Typically a chain name (e.g., `Bad-User-Agent@musicbrainz.org`).
+*   **Cluster Behavior:**
+    *   **Follower nodes:** Forward the request to the leader.
+    *   **Leader node:** Query local persistence, unblock each IP (broadcasts to followers).
+    *   **Standalone node:** Query and unblock locally.
+*   **Response Format:**
+    ```json
+    {
+      "reason": "Bad-User-Agent@musicbrainz.org",
+      "matched": 150,
+      "unblocked": 148
+    }
+    ```
+*   **Response Format (partial failure):**
+    ```json
+    {
+      "reason": "Bad-User-Agent@musicbrainz.org",
+      "matched": 150,
+      "unblocked": 148,
+      "errors": ["1.2.3.4", "5.6.7.8"]
+    }
+    ```
+*   **Notes:**
+    *   Only affects IPs currently in `blocked` state with a non-expired block. Already-expired blocks are not included.
+    *   The reason match is a **substring match** — use the full chain name for precision.
+    *   For bad actors (permanent blocks), use `DELETE /api/v1/bad-actors?reason=...&unblock` instead.
+    *   With many matched IPs, the unblock commands go through the rate-limited queue. Ensure `commands_per_second` is high enough.
+*   **Responses:**
+    *   `200 OK`: Successfully processed (even if no IPs matched).
+    *   `400 Bad Request`: Missing `reason` query parameter.
+    *   `500 Internal Server Error`: Database error.
+    *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
 
 
 ### `/api/v1/cluster/internal/ip/{ip}` (Internal Use)

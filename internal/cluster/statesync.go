@@ -21,6 +21,7 @@ type StateSyncResponse struct {
 	Version   string                         `json:"version"`
 	Timestamp time.Time                      `json:"timestamp"`
 	States    map[string]persistence.IPState `json:"states"`
+	BadActors []persistence.BadActorInfo     `json:"bad_actors,omitempty"`
 }
 
 // MergedStateResponse is the response format for merged cluster state.

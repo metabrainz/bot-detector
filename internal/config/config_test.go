@@ -1421,7 +1421,7 @@ chains:
 		logMutex.Lock()
 		capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
 		logMutex.Unlock()
-		if tag == "LOAD_ERROR" {
+		if tag == "LOAD_FAIL" {
 			logReceived <- true
 		}
 	}
@@ -1459,9 +1459,9 @@ chains:
 	// we triggered the check manually.
 	select {
 	case <-logReceived:
-		// The LOAD_ERROR was logged as expected.
+		// The LOAD_FAIL was logged as expected.
 	case <-time.After(1 * time.Second):
-		t.Fatal("Timed out waiting for LOAD_ERROR log message.")
+		t.Fatal("Timed out waiting for LOAD_FAIL log message.")
 	}
 
 	// 9. Check that the error was logged.
@@ -1469,8 +1469,8 @@ chains:
 	// We can add a redundant check on the captured logs for extra safety.
 	logMutex.Lock()
 	defer logMutex.Unlock()
-	if len(capturedLogs) == 0 || !strings.Contains(capturedLogs[len(capturedLogs)-1], "LOAD_ERROR") {
-		t.Errorf("Expected a 'LOAD_ERROR' log message, but none was found. Logs: %v", capturedLogs)
+	if len(capturedLogs) == 0 || !strings.Contains(capturedLogs[len(capturedLogs)-1], "LOAD_FAIL") {
+		t.Errorf("Expected a 'LOAD_FAIL' log message, but none was found. Logs: %v", capturedLogs)
 	}
 }
 
@@ -1520,7 +1520,7 @@ chains:
 		logMutex.Lock()
 		capturedLogs = append(capturedLogs, fmt.Sprintf(tag+": "+format, args...))
 		logMutex.Unlock()
-		if tag == "WATCH_ERROR" {
+		if tag == "WATCH_FAIL" {
 			logReceived <- true
 		}
 	}
@@ -1544,7 +1544,7 @@ chains:
 	case <-logReceived:
 		// Error was logged as expected.
 	case <-time.After(1 * time.Second):
-		t.Fatal("Timed out waiting for WATCH_ERROR log message.")
+		t.Fatal("Timed out waiting for WATCH_FAIL log message.")
 	}
 
 	// --- Assert ---
@@ -1552,8 +1552,8 @@ chains:
 	logMutex.Lock()
 	logOutput := strings.Join(capturedLogs, "\n")
 	logMutex.Unlock()
-	if !strings.Contains(logOutput, "WATCH_ERROR: Failed to stat file") {
-		t.Errorf("Expected a 'WATCH_ERROR' log message, but none was found. Logs:\n%s", logOutput)
+	if !strings.Contains(logOutput, "WATCH_FAIL: Failed to stat file") {
+		t.Errorf("Expected a 'WATCH_FAIL' log message, but none was found. Logs:\n%s", logOutput)
 	}
 }
 
@@ -1783,8 +1783,7 @@ chains:
 				UnblockOnGoodActor: true,
 			},
 		},
-		DryRun:   false,
-		IPStates: make(map[string]persistence.IPState),
+		DryRun: false,
 		Blocker: &testutil.MockBlocker{
 			UnblockFunc: func(ipInfo utils.IPInfo, reason string) error {
 				unblockMutex.Lock()
@@ -1803,6 +1802,15 @@ chains:
 		ConfigFilePath: tmpConfigFilePath,
 	}
 
+	// Set up SQLite DB for persistence
+	testDB, dbErr := persistence.OpenDB("", true)
+	if dbErr != nil {
+		t.Fatalf("Failed to open test DB: %v", dbErr)
+	}
+	defer func() { _ = persistence.CloseDB(testDB) }()
+	processor.DB = testDB
+	processor.PersistenceEnabled = true
+
 	// Set LastModTime
 	initialFileInfo, err := os.Stat(tmpConfigFilePath)
 	if err != nil {
@@ -1811,16 +1819,9 @@ chains:
 	processor.Config.LastModTime = initialFileInfo.ModTime()
 
 	// Add some blocked IPs
-	processor.IPStates["1.2.3.4"] = persistence.IPState{
-		State:      persistence.BlockStateBlocked,
-		Reason:     "test-chain",
-		ExpireTime: time.Now().Add(1 * time.Hour),
-	}
-	processor.IPStates["5.6.7.8"] = persistence.IPState{
-		State:      persistence.BlockStateBlocked,
-		Reason:     "test-chain",
-		ExpireTime: time.Now().Add(1 * time.Hour),
-	}
+	now := time.Now()
+	_ = persistence.UpsertIPState(testDB, "1.2.3.4", persistence.BlockStateBlocked, now.Add(1*time.Hour), "test-chain", now, now)
+	_ = persistence.UpsertIPState(testDB, "5.6.7.8", persistence.BlockStateBlocked, now.Add(1*time.Hour), "test-chain", now, now)
 
 	// Start app.ConfigWatcher
 	stopWatcher := make(chan struct{})
@@ -1876,15 +1877,15 @@ chains:
 	}
 	unblockMutex.Unlock()
 
-	// Check IPStates
-	processor.PersistenceMutex.Lock()
-	if state, exists := processor.IPStates["1.2.3.4"]; exists && state.State == persistence.BlockStateBlocked {
+	// Check IPStates via SQLite
+	state124, _ := persistence.GetIPState(testDB, "1.2.3.4")
+	if state124 != nil && state124.State == persistence.BlockStateBlocked {
 		t.Error("Expected 1.2.3.4 to be unblocked or removed from IPStates")
 	}
-	if state, exists := processor.IPStates["5.6.7.8"]; !exists || state.State != persistence.BlockStateBlocked {
+	state568, _ := persistence.GetIPState(testDB, "5.6.7.8")
+	if state568 == nil || state568.State != persistence.BlockStateBlocked {
 		t.Error("Expected 5.6.7.8 to remain blocked in IPStates")
 	}
-	processor.PersistenceMutex.Unlock()
 }
 
 // --- Cluster Configuration Tests ---

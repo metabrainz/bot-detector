@@ -11,6 +11,7 @@ import (
 // AppParameters holds the fully parsed and validated configuration
 // from command-line flags and environment variables, ready for execution.
 type AppParameters struct {
+	ChainFilter     []string
 	Check           bool
 	ConfigDir       string // Directory containing config.yaml
 	DryRun          bool
@@ -119,6 +120,8 @@ func ParseParameters(args []string) (*AppParameters, error) {
 		}
 	}
 
+	params.ChainFilter = cliFlags.Chain
+
 	// --version is a special case, returns ASAP
 	if params.ShowVersion {
 		return params, nil
@@ -176,6 +179,7 @@ func ParseParameters(args []string) (*AppParameters, error) {
 
 // CLIFlagValues holds pointers to the variables where command-line flag values will be stored.
 type CLIFlagValues struct {
+	Chain           []string
 	Check           *bool
 	ConfigDir       *string
 	DryRun          *bool
@@ -209,6 +213,12 @@ func registerCLIFlags(fs *flag.FlagSet) *CLIFlagValues {
 	// Custom handling for multiple --listen flags
 	fs.Func("listen", "Listen address with optional configuration (e.g., :8080 or :8080,role=api). Can be specified multiple times.", func(s string) error {
 		flags.Listen = append(flags.Listen, s)
+		return nil
+	})
+
+	// Custom handling for multiple --chain flags (dry-run only)
+	fs.Func("chain", "Only evaluate the named chain during dry-run. Can be specified multiple times.", func(s string) error {
+		flags.Chain = append(flags.Chain, s)
 		return nil
 	})
 

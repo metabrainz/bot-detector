@@ -29,6 +29,7 @@ type AppConfig struct {
 	Checker          CheckerConfig                     `config:"compare"`
 	Blockers         BlockersConfig                    `config:"compare"`
 	Cluster          *cluster.ClusterConfig            `config:"compare"` // Cluster configuration (optional)
+	BadActors        BadActorsConfig                   `config:"compare"` // Bad actors configuration
 	GoodActors       []GoodActorDef                    `config:"compare"`
 	FileDependencies map[string]*types.FileDependency  // Map of file paths to their dependency status.
 	LastModTime      time.Time                         // Not compared
@@ -38,11 +39,12 @@ type AppConfig struct {
 }
 
 type ApplicationConfig struct {
-	LogLevel        string                        `config:"compare"`
-	EnableMetrics   bool                          `config:"compare" summary:"enable_metrics"`
-	Config          ConfigManagement              `config:"compare"`
-	Persistence     persistence.PersistenceConfig `config:"compare"`
-	EOFPollingDelay time.Duration                 `config:"compare" summary:"eof_polling_delay"`
+	LogLevel             string                        `config:"compare"`
+	EnableMetrics        bool                          `config:"compare" summary:"enable_metrics"`
+	MaxRecentParseErrors int                           `config:"compare" summary:"max_recent_parse_errors"`
+	Config               ConfigManagement              `config:"compare"`
+	Persistence          persistence.PersistenceConfig `config:"compare"`
+	EOFPollingDelay      time.Duration                 `config:"compare" summary:"eof_polling_delay"`
 }
 
 type ConfigManagement struct {
@@ -102,6 +104,7 @@ type LoadedConfig struct {
 	Checker          CheckerConfig
 	Blockers         BlockersConfig
 	Cluster          *cluster.ClusterConfig // Cluster configuration (optional)
+	BadActors        BadActorsConfig        // Bad actors configuration
 	Websites         []WebsiteConfig        // Optional: multi-website configuration
 	GoodActors       []GoodActorDef         `config:"compare"`
 	Chains           []BehavioralChain      // Not compared here
@@ -125,17 +128,39 @@ type TopLevelConfig struct {
 	Parser      ParserConfigYAML         `yaml:"parser"`
 	Checker     CheckerConfigYAML        `yaml:"checker"`
 	Blockers    BlockersConfigYAML       `yaml:"blockers"`
-	Cluster     *ClusterConfigYAML       `yaml:"cluster"` // Optional cluster configuration
+	Cluster     *ClusterConfigYAML       `yaml:"cluster"`    // Optional cluster configuration
+	BadActors   *BadActorsConfigYAML     `yaml:"bad_actors"` // Optional bad actors configuration
 	GoodActors  []map[string]interface{} `yaml:"good_actors"`
 	Chains      []BehavioralChainYAML    `yaml:"chains"`
 }
 
+// BadActorsConfigYAML represents the bad_actors configuration in YAML format.
+type BadActorsConfigYAML struct {
+	Enabled         *bool   `yaml:"enabled"`
+	Threshold       float64 `yaml:"threshold"`
+	BlockDuration   string  `yaml:"block_duration"`
+	MaxScoreEntries int     `yaml:"max_score_entries"`
+	ScoreMaxAge     string  `yaml:"score_max_age"`
+	ScoreMinCleanup float64 `yaml:"score_min_cleanup"`
+}
+
+// BadActorsConfig holds the runtime bad actors configuration.
+type BadActorsConfig struct {
+	Enabled         bool
+	Threshold       float64
+	BlockDuration   time.Duration
+	MaxScoreEntries int
+	ScoreMaxAge     time.Duration // How long to keep low scores before cleanup
+	ScoreMinCleanup float64       // Minimum score to keep during cleanup
+}
+
 type ApplicationConfigYAML struct {
-	LogLevel        string                        `yaml:"log_level"`
-	EnableMetrics   *bool                         `yaml:"enable_metrics"`
-	Config          ConfigManagementYAML          `yaml:"config"`
-	Persistence     persistence.PersistenceConfig `yaml:"persistence"`
-	EOFPollingDelay string                        `yaml:"eof_polling_delay"`
+	LogLevel             string                        `yaml:"log_level"`
+	EnableMetrics        *bool                         `yaml:"enable_metrics"`
+	MaxRecentParseErrors *int                          `yaml:"max_recent_parse_errors"`
+	Config               ConfigManagementYAML          `yaml:"config"`
+	Persistence          persistence.PersistenceConfig `yaml:"persistence"`
+	EOFPollingDelay      string                        `yaml:"eof_polling_delay"`
 }
 
 type ConfigManagementYAML struct {
@@ -211,13 +236,14 @@ type StepDefYAML struct {
 }
 
 type BehavioralChainYAML struct {
-	Name          string        `yaml:"name"`
-	Action        string        `yaml:"action"`
-	BlockDuration string        `yaml:"block_duration"`
-	MatchKey      string        `yaml:"match_key"`
-	OnMatch       string        `yaml:"on_match"`
-	Websites      []string      `yaml:"websites"` // Optional: restrict chain to specific websites
-	Steps         []StepDefYAML `yaml:"steps"`
+	Name           string        `yaml:"name"`
+	Action         string        `yaml:"action"`
+	BlockDuration  string        `yaml:"block_duration"`
+	MatchKey       string        `yaml:"match_key"`
+	OnMatch        string        `yaml:"on_match"`
+	Websites       []string      `yaml:"websites"`         // Optional: restrict chain to specific websites
+	BadActorWeight *float64      `yaml:"bad_actor_weight"` // Optional: weight for bad actor scoring (default 1.0)
+	Steps          []StepDefYAML `yaml:"steps"`
 }
 
 // --- RUNTIME DATA STRUCTURES ---
@@ -242,6 +268,7 @@ type BehavioralChain struct {
 	MatchKey                 string        // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
 	OnMatch                  string        // "stop" to halt processing of other chains on match.
 	Websites                 []string      // Optional: restrict chain to specific websites (empty = global)
+	BadActorWeight           float64       // Weight for bad actor scoring (0.0-1.0, default 1.0)
 	StepsYAML                []StepDefYAML // Store original YAML for accurate comparison
 	Steps                    []StepDef
 	MetricsHitsCounter       *atomic.Int64 // Counter for hits on this specific chain.

@@ -165,7 +165,7 @@ func TestChainCompletion_LiveMode(t *testing.T) {
 	handleChainCompletion(p, chain, entry, activity)
 
 	expectedSubstrings := []string{
-		"BLOCK!",
+		"BLOCK:",
 		"ProdChain",
 		"192.168.1.1",
 		"on website 'production'",

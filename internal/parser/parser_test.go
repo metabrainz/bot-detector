@@ -110,6 +110,26 @@ func TestParseLogLine(t *testing.T) {
 			},
 		},
 		{
+			name:     "Valid Line with Empty Quoted Request",
+			line:     `musicbrainz.org 34.58.6.41 - - [15/Apr/2026:11:44:05 +0000] "" 400 0 "-" "-"`,
+			provider: defaultProvider,
+			expected: &types.LogEntry{
+				Timestamp: func() time.Time {
+					t, _ := time.Parse("02/Jan/2006:15:04:05 -0700", "15/Apr/2026:11:44:05 +0000")
+					return t
+				}(),
+				IPInfo:     utils.NewIPInfo("34.58.6.41"),
+				Method:     "",
+				Path:       "",
+				Protocol:   "",
+				StatusCode: 400,
+				Size:       0,
+				Referrer:   "-",
+				UserAgent:  "-",
+				VHost:      "musicbrainz.org",
+			},
+		},
+		{
 			name:     "Valid IPv6 Line Without Protocol",
 			line:     `musicbrainz.org 2600:1700:92d0:5000:2d0b:50ec:f647:5cc0 - - [22/Nov/2025:20:22:19 +0000] "GET /ws/2/recording/?query=%22Crosby,%20Stills%20&%20Nash%20-%20Just%20A%20Song%20Before%20I%20Go%20(remastered)%22%20AND%20artist:%22Crosby,%20Stills%20&%20Nash" 400 154 "-" "-"`,
 			provider: defaultProvider,

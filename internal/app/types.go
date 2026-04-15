@@ -7,9 +7,9 @@ import (
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	metrics "bot-detector/internal/metrics"
-	"bot-detector/internal/persistence"
 	"bot-detector/internal/store"
 	"bot-detector/internal/types"
+	"database/sql"
 	"os"
 	"regexp"
 	"sync"
@@ -59,6 +59,7 @@ type Processor struct {
 	ConfigMutex   *sync.RWMutex
 	Metrics       *metrics.Metrics
 	Chains        []config.BehavioralChain
+	ChainFilter   map[string]bool
 	Config        *config.AppConfig
 	DryRun        bool
 	EnableMetrics bool
@@ -86,9 +87,7 @@ type Processor struct {
 	StateDir           string
 	CompactionInterval time.Duration
 	PersistenceMutex   sync.Mutex
-	PersistenceWg      sync.WaitGroup
-	JournalHandle      *os.File
-	IPStates           map[string]persistence.IPState // Unified state: blocked + unblocked IPs
+	DB                 *sql.DB // SQLite database handle
 
 	// String interning for memory optimization
 	ReasonCache      map[string]*string // Canonical reason strings

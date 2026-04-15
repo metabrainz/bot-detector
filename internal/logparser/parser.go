@@ -35,6 +35,9 @@ func ProcessLogLineWithWebsite(p *app.Processor, line string, website string) {
 			p.LogFunc(logLevel, "PARSE_FAIL", "Parsing failed for line \"%s\": %v", line, err)
 		}
 		p.Metrics.ParseErrors.Add(1)
+		if p.Metrics.RecentParseErrors != nil {
+			p.Metrics.RecentParseErrors.Add(line)
+		}
 		return
 	}
 

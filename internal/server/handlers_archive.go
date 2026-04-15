@@ -21,7 +21,7 @@ func archiveHandler(p Provider) http.HandlerFunc {
 		mainConfig, modTime, deps, configDir, err := p.GetConfigForArchive()
 		if err != nil {
 			http.Error(w, "Failed to get configuration for archive", http.StatusInternalServerError)
-			p.Log(0, "ARCHIVE_ERROR", "Failed to get config for archive: %v", err)
+			p.Log(0, "ARCHIVE_FAIL", "Failed to get config for archive: %v", err)
 			return
 		}
 
@@ -45,7 +45,7 @@ func archiveHandler(p Provider) http.HandlerFunc {
 		// Add the main config.yaml to the archive.
 		if err := addBytesToTar(tw, "config.yaml", mainConfig, modTime); err != nil {
 			http.Error(w, "Failed to create archive", http.StatusInternalServerError)
-			p.Log(0, "ARCHIVE_ERROR", "Failed to add main config to archive: %v", err)
+			p.Log(0, "ARCHIVE_FAIL", "Failed to add main config to archive: %v", err)
 			return
 		}
 
@@ -76,7 +76,7 @@ func archiveHandler(p Provider) http.HandlerFunc {
 
 				if err := addBytesToTar(tw, relPath, []byte(content), dep.CurrentStatus.ModTime); err != nil {
 					http.Error(w, "Failed to create archive", http.StatusInternalServerError)
-					p.Log(0, "ARCHIVE_ERROR", "Failed to add dependency '%s' to archive: %v", path, err)
+					p.Log(0, "ARCHIVE_FAIL", "Failed to add dependency '%s' to archive: %v", path, err)
 					return
 				}
 			}
@@ -107,7 +107,7 @@ func archiveHandler(p Provider) http.HandlerFunc {
 
 		// Write the buffered archive to the response.
 		if _, err := w.Write(archiveBytes); err != nil {
-			p.Log(0, "ARCHIVE_ERROR", "Failed to write archive to response: %v", err)
+			p.Log(0, "ARCHIVE_FAIL", "Failed to write archive to response: %v", err)
 		}
 	}
 }

@@ -32,7 +32,7 @@ func clusterPersistenceStateHandler(p Provider) http.HandlerFunc {
 			var err error
 			since, err = time.Parse(time.RFC3339, sinceStr)
 			if err != nil {
-				http.Error(w, "Invalid 'since' timestamp format", http.StatusBadRequest)
+				jsonError(w, "Invalid 'since' timestamp format", http.StatusBadRequest)
 				return
 			}
 			incremental = true
@@ -58,11 +58,21 @@ func clusterPersistenceStateHandler(p Provider) http.HandlerFunc {
 		}
 		p.GetPersistenceMutex().Unlock()
 
+		// Collect bad actors
+		badActors, _ := p.GetAllBadActors()
+		var baList []persistence.BadActorInfo
+		for _, a := range badActors {
+			if ba, ok := a.(persistence.BadActorInfo); ok {
+				baList = append(baList, ba)
+			}
+		}
+
 		// Build response
 		response := StateSyncResponse{
 			Version:   StateSyncVersion,
 			Timestamp: time.Now(),
 			States:    states,
+			BadActors: baList,
 		}
 
 		// Set content type
@@ -93,7 +103,7 @@ func clusterMergedStateHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Only leader can provide merged state
 		if p.GetNodeRole() != "leader" {
-			http.Error(w, "Only leader provides merged state", http.StatusForbidden)
+			jsonError(w, "Only leader provides merged state", http.StatusForbidden)
 			return
 		}
 
@@ -104,13 +114,22 @@ func clusterMergedStateHandler(p Provider) http.HandlerFunc {
 			var err error
 			since, err = time.Parse(time.RFC3339, sinceStr)
 			if err != nil {
-				http.Error(w, "Invalid 'since' timestamp format", http.StatusBadRequest)
+				jsonError(w, "Invalid 'since' timestamp format", http.StatusBadRequest)
 				return
 			}
 		}
 
 		// Collect and merge states from all nodes
 		merged, nodesQueried, nodesFailed := collectAndMergeStates(p, since)
+
+		// Collect all bad actors (leader's own — peers' are already synced via state sync loop)
+		allBadActors, _ := p.GetAllBadActors()
+		var baList []persistence.BadActorInfo
+		for _, a := range allBadActors {
+			if ba, ok := a.(persistence.BadActorInfo); ok {
+				baList = append(baList, ba)
+			}
+		}
 
 		// Build response
 		response := MergedStateResponse{
@@ -119,6 +138,7 @@ func clusterMergedStateHandler(p Provider) http.HandlerFunc {
 			NodesQueried: nodesQueried,
 			NodesFailed:  nodesFailed,
 			States:       merged,
+			BadActors:    baList,
 		}
 
 		// Set content type

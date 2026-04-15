@@ -168,7 +168,7 @@ func (b *HAProxyBlocker) Block(ipInfo utils.IPInfo, duration time.Duration, reas
 
 	tableName := getTableNameWithSuffix(baseTableName, ipInfo.Version)
 	if tableName == baseTableName && ipInfo.Version != 4 && ipInfo.Version != 6 {
-		b.P.Log(logging.LevelError, "SKIP_BLOCK", "cannot block IP %s: invalid IP version", ipInfo.Address)
+		b.P.Log(logging.LevelError, "SKIP_BLOCK", "Cannot block IP %s: invalid IP version", ipInfo.Address)
 		return nil
 	}
 
@@ -201,7 +201,8 @@ func (b *HAProxyBlocker) Unblock(ipInfo utils.IPInfo, reason string) error {
 		return nil
 	}
 
-	b.P.Log(logging.LevelInfo, "UNBLOCK", "Unblocking IP %s in %d tables: %v (Reason: %s)", ipInfo.Address, len(relevantTables), relevantTables, reason)
+	b.P.Log(logging.LevelInfo, "UNBLOCK", "Unblocking IP %s in %d tables (Reason: %s)", ipInfo.Address, len(relevantTables), reason)
+	b.P.Log(logging.LevelDebug, "UNBLOCK", "Unblocking IP %s tables: %v", ipInfo.Address, relevantTables)
 
 	targets := make(map[string]map[string]string)
 	for _, tableName := range relevantTables {
@@ -1539,12 +1540,12 @@ func (b *HAProxyBlocker) getHAProxyAllIPsInTable(addr, tableName string) ([]HAPr
 		if ip != "" && expStr != "" && gpc0Str != "" {
 			exp, parseErr := utils.ParseInt64(expStr)
 			if parseErr != nil {
-				b.P.Log(logging.LevelError, "HAPROXY_PARSE_ERROR", "Failed to parse exp value '%s' for IP '%s' in table '%s' on '%s': %v", expStr, ip, tableName, addr, parseErr)
+				b.P.Log(logging.LevelError, "HAPROXY_PARSE_FAIL", "Failed to parse exp value '%s' for IP '%s' in table '%s' on '%s': %v", expStr, ip, tableName, addr, parseErr)
 				continue
 			}
 			gpc0, parseErr := utils.ParseInt(gpc0Str)
 			if parseErr != nil {
-				b.P.Log(logging.LevelError, "HAPROXY_PARSE_ERROR", "Failed to parse gpc0 value '%s' for IP '%s' in table '%s' on '%s': %v", gpc0Str, ip, tableName, addr, parseErr)
+				b.P.Log(logging.LevelError, "HAPROXY_PARSE_FAIL", "Failed to parse gpc0 value '%s' for IP '%s' in table '%s' on '%s': %v", gpc0Str, ip, tableName, addr, parseErr)
 				continue
 			}
 			entries = append(entries, HAProxyTableEntry{

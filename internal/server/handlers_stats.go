@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"bot-detector/internal/logging"
 )
@@ -39,6 +40,23 @@ func websitesHandler(p Provider) http.HandlerFunc {
 		_, err := fmt.Fprint(w, p.GenerateWebsiteStatsReport())
 		if err != nil {
 			logging.LogOutput(logging.LevelError, "websitesHandler", "Error writing website stats: %v", err)
+		}
+	}
+}
+
+// parseErrorsHandler returns an HTTP handler that serves recent parse error log lines.
+// This handler is registered for the "/stats/parse-errors" endpoint.
+func parseErrorsHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		entries := p.GetRecentParseErrors()
+		if len(entries) == 0 {
+			_, _ = fmt.Fprint(w, "No recent parse errors.\n")
+			return
+		}
+		_, err := fmt.Fprint(w, strings.Join(entries, "\n")+"\n")
+		if err != nil {
+			logging.LogOutput(logging.LevelError, "parseErrorsHandler", "Error writing parse errors: %v", err)
 		}
 	}
 }
