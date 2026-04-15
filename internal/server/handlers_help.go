@@ -24,6 +24,7 @@ var allEndpoints = []endpoint{
 	{"GET", "/stats/steps", "Step execution counts", "text/plain", "metrics"},
 	{"GET", "/stats/websites", "Multi-website statistics", "text/plain", "metrics"},
 	{"GET", "/stats/bad-actors", "Bad actor statistics", "text/plain", "metrics"},
+	{"GET", "/stats/parse-errors", "Recent parse error log lines", "text/plain", "metrics"},
 
 	// API
 	{"GET", "/config", "Raw YAML configuration", "application/yaml", "api"},

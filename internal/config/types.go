@@ -39,12 +39,12 @@ type AppConfig struct {
 }
 
 type ApplicationConfig struct {
-	LogLevel              string                        `config:"compare"`
-	EnableMetrics         bool                          `config:"compare" summary:"enable_metrics"`
-	MaxRecentParseErrors  int                           `config:"compare" summary:"max_recent_parse_errors"`
-	Config                ConfigManagement              `config:"compare"`
-	Persistence     persistence.PersistenceConfig `config:"compare"`
-	EOFPollingDelay time.Duration                 `config:"compare" summary:"eof_polling_delay"`
+	LogLevel             string                        `config:"compare"`
+	EnableMetrics        bool                          `config:"compare" summary:"enable_metrics"`
+	MaxRecentParseErrors int                           `config:"compare" summary:"max_recent_parse_errors"`
+	Config               ConfigManagement              `config:"compare"`
+	Persistence          persistence.PersistenceConfig `config:"compare"`
+	EOFPollingDelay      time.Duration                 `config:"compare" summary:"eof_polling_delay"`
 }
 
 type ConfigManagement struct {
@@ -159,8 +159,8 @@ type ApplicationConfigYAML struct {
 	EnableMetrics        *bool                         `yaml:"enable_metrics"`
 	MaxRecentParseErrors *int                          `yaml:"max_recent_parse_errors"`
 	Config               ConfigManagementYAML          `yaml:"config"`
-	Persistence     persistence.PersistenceConfig `yaml:"persistence"`
-	EOFPollingDelay string                        `yaml:"eof_polling_delay"`
+	Persistence          persistence.PersistenceConfig `yaml:"persistence"`
+	EOFPollingDelay      string                        `yaml:"eof_polling_delay"`
 }
 
 type ConfigManagementYAML struct {

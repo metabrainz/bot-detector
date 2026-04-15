@@ -1582,8 +1582,8 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 			EnableMetrics:        enableMetrics,
 			MaxRecentParseErrors: maxRecentParseErrors,
 			Config:               ConfigManagement{PollingInterval: pollingInterval},
-			Persistence:     persistenceConfig,
-			EOFPollingDelay: eofPollingDelay,
+			Persistence:          persistenceConfig,
+			EOFPollingDelay:      eofPollingDelay,
 		},
 		Parser: ParserConfig{
 			LineEnding:          lineEndingStr,
