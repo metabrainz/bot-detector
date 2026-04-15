@@ -7,6 +7,7 @@ import (
 	"bot-detector/internal/logparser"
 	"bot-detector/internal/processor"
 	"bot-detector/internal/testutil"
+	"bot-detector/internal/utils"
 	"bufio"
 	"errors"
 	"fmt"
@@ -778,6 +779,71 @@ func TestIsStdinPath(t *testing.T) {
 		if got := processor.IsStdinPath(tt.path); got != tt.expected {
 			t.Errorf("IsStdinPath(%q) = %v, want %v", tt.path, got, tt.expected)
 		}
+	}
+}
+
+func TestDryRunLogProcessor_MultiWebsiteVHostResolution(t *testing.T) {
+	// Verify that dry-run resolves vhosts from log lines so website-specific chains fire.
+	cfg := &config.AppConfig{
+		Parser: config.ParserConfig{
+			LogFormatRegex:  `^(?P<VHost>\S+) (?P<IP>\S+) - - \[(?P<Timestamp>[^\]]+)\] "(?P<Method>\S+) (?P<Path>\S+) \S+" (?P<StatusCode>\S+) (?P<Size>\S+) "(?P<Referrer>[^"]*)" "(?P<UserAgent>[^"]*)"$`,
+			TimestampFormat: "02/Jan/2006:15:04:05 -0700",
+		},
+		Checker: config.CheckerConfig{
+			ActorStateIdleTimeout: 30 * time.Minute,
+		},
+	}
+	harness := newDryRunTestHarness(t, cfg)
+	p := harness.app.Processor
+
+	// Configure multi-website mode
+	p.Websites = []config.WebsiteConfig{
+		{Name: "main_site", VHosts: []string{"www.example.com"}},
+		{Name: "api_site", VHosts: []string{"api.example.com"}},
+	}
+	p.VHostToWebsite = map[string]string{
+		"www.example.com": "main_site",
+		"api.example.com": "api_site",
+	}
+
+	// Website-specific chain: only applies to main_site
+	p.Chains = []config.BehavioralChain{
+		{
+			Name:          "MainSiteOnly",
+			MatchKey:      "ip",
+			Action:        "block",
+			BlockDuration: 1 * time.Hour,
+			Websites:      []string{"main_site"},
+			Steps: []config.StepDef{
+				{Matchers: []struct {
+					Matcher   config.FieldMatcher
+					FieldName string
+				}{{Matcher: func(e *app.LogEntry) bool { return e.Path == "/trigger" }, FieldName: "Path"}}},
+			},
+		},
+	}
+	p.WebsiteChains, p.GlobalChains = app.CategorizeChains(p.Chains)
+
+	blockCount := 0
+	p.Blocker = &testutil.MockBlocker{
+		BlockFunc: func(_ utils.IPInfo, _ time.Duration, _ string) error {
+			blockCount++
+			return nil
+		},
+	}
+
+	// Log lines: www.example.com should trigger, api.example.com should not
+	logContent := `www.example.com 1.1.1.1 - - [01/Jan/2025:00:00:00 +0000] "GET /trigger HTTP/1.1" 200 100 "-" "-"
+api.example.com 1.1.1.2 - - [01/Jan/2025:00:00:01 +0000] "GET /trigger HTTP/1.1" 200 100 "-" "-"
+`
+	_ = os.WriteFile(harness.tempLogFile, []byte(logContent), 0644)
+
+	done := make(chan struct{})
+	go processor.DryRunLogProcessor(p, done)
+	<-done
+
+	if blockCount != 1 {
+		t.Errorf("Expected 1 block (main_site only), got %d. Logs:\n%s", blockCount, strings.Join(harness.capturedLogs, "\n"))
 	}
 }
 
