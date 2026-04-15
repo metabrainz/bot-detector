@@ -6,6 +6,7 @@ import (
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/logparser"
+	"bot-detector/internal/parser"
 	"bot-detector/internal/store"
 	"bufio"
 	"bytes"
@@ -15,8 +16,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -36,16 +37,25 @@ func IsStdinPath(path string) bool {
 	return path == "-" || path == "/dev/stdin"
 }
 
-// extractVHost returns the first space-delimited field from a log line,
-// which is the vhost in the default log format. Returns "" for empty/comment lines.
-func extractVHost(line string) string {
+// extractVHost extracts the VHost capture group from a log line using the
+// configured log format regex. Returns "" if the line doesn't match or has
+// no VHost group. When logRegex is nil, falls back to the default log format.
+func extractVHost(line string, logRegex *regexp.Regexp) string {
 	if len(line) == 0 || line[0] == '#' {
 		return ""
 	}
-	if i := strings.IndexByte(line, ' '); i > 0 {
-		return line[:i]
+	if logRegex == nil {
+		logRegex = parser.DefaultLogFormatRegex
 	}
-	return ""
+	idx := logRegex.SubexpIndex("VHost")
+	if idx < 0 {
+		return ""
+	}
+	matches := logRegex.FindStringSubmatch(line)
+	if matches == nil || idx >= len(matches) {
+		return ""
+	}
+	return matches[idx]
 }
 
 // Tailer is a struct that encapsulates the state and logic for tailing a single file.
@@ -405,7 +415,7 @@ func DryRunLogProcessor(p *app.Processor, done chan<- struct{}) {
 		if multiWebsite {
 			// In multi-website mode, resolve vhost from the log line to
 			// determine which website-specific chains should be evaluated.
-			if vhost := extractVHost(line); vhost != "" {
+			if vhost := extractVHost(line, p.LogRegex); vhost != "" {
 				website := p.VHostToWebsite[vhost]
 				logparser.ProcessLogLineWithWebsite(p, line, website)
 			} else {
