@@ -51,7 +51,7 @@ func parseErrorsHandler(p Provider) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		entries := p.GetRecentParseErrors()
 		if len(entries) == 0 {
-			fmt.Fprint(w, "No recent parse errors.\n")
+			_, _ = fmt.Fprint(w, "No recent parse errors.\n")
 			return
 		}
 		_, err := fmt.Fprint(w, strings.Join(entries, "\n")+"\n")
