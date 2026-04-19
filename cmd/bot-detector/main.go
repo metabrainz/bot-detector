@@ -1108,6 +1108,8 @@ func start(p *app.Processor) {
 				LogPath: p.LogPath,
 				VHosts:  []string{}, // Empty = catch-all
 			}}
+			p.VHostToWebsite, p.CatchAllWebsite = app.BuildVHostMap(p.Websites)
+			p.WebsiteChains, p.GlobalChains = app.CategorizeChains(p.Chains)
 			p.LogFunc(logging.LevelInfo, "SETUP", "Starting single-website mode on %s", p.LogPath)
 		}
 		processor.MultiLogTailer(p, p.SignalCh)
