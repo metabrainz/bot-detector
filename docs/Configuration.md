@@ -103,7 +103,7 @@ websites:
 | :---- | :---- | :---- |
 | **default_duration** | string | Optional. A global block duration to apply to any `block` action chain that does not define its own `block_duration`. Format: Go duration string (e.g., "5m", "1h"). |
 | **commands_per_second** | int | Optional. The maximum number of commands per second to send to the blocker. Default: `5000`. |
-| **command_queue_size** | int | Optional. The maximum number of commands that can be queued for the blocker. Default: `10000`. |
+| **command_queue_size** | int | Optional. The maximum number of commands that can be queued for the blocker. Default: `100000`. |
 | **max_commands_per_batch** | int | Optional. The maximum number of commands to batch together in a single request to the backend. HAProxy CLI supports semicolon-separated commands. Default: `100` (optimal throughput). |
 | **dial_timeout** | string | Optional. Timeout for establishing a connection to a blocker socket. Default: `5s`. |
 | **max_retries** | int | Optional. Number of attempts to send a command to a blocker instance. Default: `3`. |
