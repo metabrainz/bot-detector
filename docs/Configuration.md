@@ -271,7 +271,26 @@ See table [`chains[].steps[].fields`](#chainsstepsfields) for detailed field des
 | **max_delay** | string | No | **(Steps 2+)** The maximum allowed time between the previous step and this one. If exceeded, the chain resets. Ignored on the first step. Format: Go duration string (e.g., `10s`, `1m`). |
 | **min_delay** | string | No | **(Steps 2+)** The minimum required time between the previous step and the current step. If not met, the chain resets. Ignored on the first step. Format: Go duration string. |
 | **min_time_since_last_hit** | string | No | **(First Step Only)** The first step will only match if the time since the last overall request from the same actor is **greater than** this duration. Useful for detecting "sleepy" bots with long periods of inactivity. Ignored on subsequent steps. Format: Go duration string (e.g., `30m`, `12h`). |
-| **repeated** | int | No | If `> 1`, this step definition will be repeated the specified number of times when the chain is compiled. Simplifies defining sequences of identical steps. Default: `1`. |
+| **repeated** | int | No | If `> 1`, this step definition will be repeated the specified number of times when the chain is compiled. Simplifies defining sequences of identical steps. Default: `1`. Can be used on the first step (see tip below). |
+
+> **Tip: Using `repeated` on the first step.** When `repeated` is used on the first step together with `max_delay`, the timing constraint only applies from the 2nd repetition onward (since `max_delay` is always ignored on the very first compiled step). This allows you to write a single step instead of two:
+> ```yaml
+> # Instead of this:
+> steps:
+>   - field_matches:
+>       statuscode: 429
+>   - field_matches:
+>       statuscode: 429
+>     max_delay: "5s"
+>     repeated: 9
+>
+> # You can write this (equivalent — 10 matches, first unconstrained, rest within 5s):
+> steps:
+>   - field_matches:
+>       statuscode: 429
+>     max_delay: "5s"
+>     repeated: 10
+> ```
 
 ##### `chains[].steps[].field_matches`
 
