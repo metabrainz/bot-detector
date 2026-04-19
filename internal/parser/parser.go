@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -20,13 +21,57 @@ var DefaultLogFormatRegex = regexp.MustCompile(
 	`^(?P<VHost>\S+) (?P<IP>\S+) (?P<Identity>\S+) (?P<User>\S+) \[(?P<Timestamp>[^\]]+)\] (?:\"(?P<Method>\S+)\s+(?P<Path>.+?)(?:\s+(?P<Protocol>\S+))?\"|\"-\"|\"\"|-) (?P<StatusCode>\d{1,3}) (?P<Size>\S+) \"(?P<Referrer>[^\"]*)\" \"(?P<UserAgent>[^\"]*)\"$`,
 )
 
-// getMatch safely retrieves a value from a named capture group.
-func getMatch(name string, matches []string, regex *regexp.Regexp) string {
-	idx := regex.SubexpIndex(name)
-	if idx == -1 || idx >= len(matches) {
+// subexpIndices caches the named capture group indices for a regex.
+type subexpIndices struct {
+	vhost, ip, timestamp, method, path, protocol, statusCode, size, referrer, userAgent int
+}
+
+// buildSubexpIndices pre-computes named capture group indices for a regex.
+func buildSubexpIndices(re *regexp.Regexp) subexpIndices {
+	return subexpIndices{
+		vhost:      re.SubexpIndex("VHost"),
+		ip:         re.SubexpIndex("IP"),
+		timestamp:  re.SubexpIndex("Timestamp"),
+		method:     re.SubexpIndex("Method"),
+		path:       re.SubexpIndex("Path"),
+		protocol:   re.SubexpIndex("Protocol"),
+		statusCode: re.SubexpIndex("StatusCode"),
+		size:       re.SubexpIndex("Size"),
+		referrer:   re.SubexpIndex("Referrer"),
+		userAgent:  re.SubexpIndex("UserAgent"),
+	}
+}
+
+var defaultSubexpIndices = buildSubexpIndices(DefaultLogFormatRegex)
+
+// cachedIndices stores pre-computed indices for custom regexes.
+var cachedIndicesMu sync.Mutex
+var cachedIndicesMap = make(map[*regexp.Regexp]subexpIndices)
+
+func getSubexpIndices(re *regexp.Regexp) subexpIndices {
+	if re == DefaultLogFormatRegex {
+		return defaultSubexpIndices
+	}
+	cachedIndicesMu.Lock()
+	idx, ok := cachedIndicesMap[re]
+	if !ok {
+		idx = buildSubexpIndices(re)
+		cachedIndicesMap[re] = idx
+	}
+	cachedIndicesMu.Unlock()
+	return idx
+}
+
+// extractMatch extracts a substring from line using index-based match results.
+func extractMatch(line string, indices []int, subexpIdx int) string {
+	if subexpIdx < 0 || 2*subexpIdx+1 >= len(indices) {
 		return ""
 	}
-	return matches[idx]
+	start, end := indices[2*subexpIdx], indices[2*subexpIdx+1]
+	if start < 0 {
+		return ""
+	}
+	return line[start:end]
 }
 
 // ParseLogLine parses a single log line string into a structured LogEntry.
@@ -40,13 +85,15 @@ func ParseLogLine(p Provider, line string) (*types.LogEntry, error) {
 		regexToUse = DefaultLogFormatRegex
 	}
 
-	matches := regexToUse.FindStringSubmatch(line)
-	if matches == nil {
+	indices := regexToUse.FindStringSubmatchIndex(line)
+	if indices == nil {
 		return nil, fmt.Errorf("line does not match log format regex")
 	}
 
-	ipStr := getMatch("IP", matches, regexToUse)
-	timestampStr := getMatch("Timestamp", matches, regexToUse)
+	idx := getSubexpIndices(regexToUse)
+
+	ipStr := extractMatch(line, indices, idx.ip)
+	timestampStr := extractMatch(line, indices, idx.timestamp)
 	timestamp, err := time.Parse(p.GetTimestampFormat(), timestampStr)
 	if err != nil {
 		return nil, fmt.Errorf("malformed timestamp: %w", err)
@@ -57,12 +104,11 @@ func ParseLogLine(p Provider, line string) (*types.LogEntry, error) {
 		return nil, fmt.Errorf("invalid or unrecognized IP address '%s'", ipStr)
 	}
 
-	statusCode, _ := strconv.Atoi(getMatch("StatusCode", matches, regexToUse))
+	statusCode, _ := strconv.Atoi(extractMatch(line, indices, idx.statusCode))
 
 	var size int
-	sizeStr := getMatch("Size", matches, regexToUse)
+	sizeStr := extractMatch(line, indices, idx.size)
 	if sizeStr == "-" {
-		// A dash for size often indicates a request with no response body (e.g., 204, 304, or a failed request).
 		size = -1
 	} else {
 		size, _ = strconv.Atoi(sizeStr)
@@ -71,13 +117,13 @@ func ParseLogLine(p Provider, line string) (*types.LogEntry, error) {
 	return &types.LogEntry{
 		Timestamp:  timestamp,
 		IPInfo:     ipInfo,
-		Method:     utils.ForLog(getMatch("Method", matches, regexToUse)),
-		Path:       utils.ForLog(getMatch("Path", matches, regexToUse)),
-		Protocol:   utils.ForLog(getMatch("Protocol", matches, regexToUse)),
-		Referrer:   utils.ForLog(getMatch("Referrer", matches, regexToUse)),
+		Method:     utils.ForLog(extractMatch(line, indices, idx.method)),
+		Path:       utils.ForLog(extractMatch(line, indices, idx.path)),
+		Protocol:   utils.ForLog(extractMatch(line, indices, idx.protocol)),
+		Referrer:   utils.ForLog(extractMatch(line, indices, idx.referrer)),
 		StatusCode: statusCode,
-		UserAgent:  utils.ForLog(getMatch("UserAgent", matches, regexToUse)),
+		UserAgent:  utils.ForLog(extractMatch(line, indices, idx.userAgent)),
 		Size:       size,
-		VHost:      utils.ForLog(getMatch("VHost", matches, regexToUse)),
+		VHost:      utils.ForLog(extractMatch(line, indices, idx.vhost)),
 	}, nil
 }
