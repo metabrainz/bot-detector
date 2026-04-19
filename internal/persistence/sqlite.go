@@ -371,6 +371,9 @@ func timeToUnix(t time.Time) int64 {
 	return t.Unix()
 }
 
+// TimeToUnix converts a time.Time to Unix seconds. Exported for use by cluster sync.
+func TimeToUnix(t time.Time) int64 { return timeToUnix(t) }
+
 // unixToTime converts Unix seconds back to time.Time.
 // 0 is returned as zero time.
 func unixToTime(secs int64) time.Time {
@@ -606,6 +609,9 @@ func reasonHash(reason string) int64 {
 	h.Write([]byte(reason))
 	return int64(h.Sum64())
 }
+
+// ReasonHash returns the FNV-64a hash of a reason string. Exported for use by cluster sync.
+func ReasonHash(reason string) int64 { return reasonHash(reason) }
 
 // GetOrCreateReasonID returns the hash-based ID for a reason, inserting if needed.
 func GetOrCreateReasonID(db *sql.DB, reason string) (int64, error) {

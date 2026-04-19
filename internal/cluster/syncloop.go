@@ -383,30 +383,46 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	m.lastSyncTime = responseTimestamp
 	m.lastSyncMutex.Unlock()
 
-	// Merge with local state
+	// Merge with local state using a single transaction for performance
 	now := time.Now()
 	m.dbMutex.Lock()
+	tx, err := m.db.Begin()
+	if err != nil {
+		m.dbMutex.Unlock()
+		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to begin transaction: %v", err)
+		return
+	}
+
+	upsertStmt, err := tx.Prepare(`INSERT INTO ips (ip, state, expire_time, reason_id, modified_at, first_blocked_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(ip) DO UPDATE SET
+			state = excluded.state,
+			expire_time = MAX(ips.expire_time, excluded.expire_time),
+			reason_id = excluded.reason_id,
+			modified_at = MAX(ips.modified_at, excluded.modified_at),
+			first_blocked_at = CASE
+				WHEN ips.first_blocked_at IS NOT NULL AND ips.first_blocked_at > 0 AND ips.first_blocked_at < excluded.first_blocked_at
+				THEN ips.first_blocked_at
+				ELSE excluded.first_blocked_at
+			END`)
+	if err != nil {
+		_ = tx.Rollback()
+		m.dbMutex.Unlock()
+		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to prepare upsert statement: %v", err)
+		return
+	}
+	defer func() { _ = upsertStmt.Close() }()
+
 	for ip, state := range states {
 		if state.ExpireTime.After(now) {
-			existing, err := persistence.GetIPState(m.db, ip)
-			if err == nil && existing != nil {
-				// Merge reasons, keep longest expiry, latest modification, earliest block
-				mergedState := persistence.IPState{
-					Reason:         MergeReasons(existing.Reason, state.Reason),
-					ExpireTime:     maxTime(existing.ExpireTime, state.ExpireTime),
-					ModifiedAt:     maxTime(existing.ModifiedAt, state.ModifiedAt),
-					FirstBlockedAt: minTime(existing.FirstBlockedAt, state.FirstBlockedAt),
-				}
-				if state.ExpireTime.After(existing.ExpireTime) {
-					mergedState.State = state.State
-				} else {
-					mergedState.State = existing.State
-				}
-				_ = persistence.UpsertIPState(m.db, ip, mergedState.State, mergedState.ExpireTime, mergedState.Reason, mergedState.ModifiedAt, mergedState.FirstBlockedAt)
-			} else {
-				_ = persistence.UpsertIPState(m.db, ip, state.State, state.ExpireTime, state.Reason, state.ModifiedAt, state.FirstBlockedAt)
-			}
+			reasonID := persistence.ReasonHash(state.Reason)
+			_, _ = tx.Exec("INSERT OR IGNORE INTO reasons (id, reason) VALUES (?, ?)", reasonID, state.Reason)
+			_, _ = upsertStmt.Exec(ip, state.State.String(), persistence.TimeToUnix(state.ExpireTime), reasonID, persistence.TimeToUnix(state.ModifiedAt), persistence.TimeToUnix(state.FirstBlockedAt))
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to commit transaction: %v", err)
 	}
 	m.dbMutex.Unlock()
 
