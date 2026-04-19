@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -1075,6 +1076,22 @@ func unblockByReasonHandler(p Provider) http.HandlerFunc {
 			return
 		}
 
+		// Also query followers for IPs blocked with this reason
+		if p.GetNodeRole() == "leader" {
+			followerIPs := queryFollowersBlockedByReason(p, reason)
+			// Deduplicate
+			seen := make(map[string]bool, len(ips))
+			for _, ip := range ips {
+				seen[ip] = true
+			}
+			for _, ip := range followerIPs {
+				if !seen[ip] {
+					ips = append(ips, ip)
+					seen[ip] = true
+				}
+			}
+		}
+
 		var unblocked []string
 		var errors []string
 		for _, ip := range ips {
@@ -1641,4 +1658,56 @@ func broadcastToFollowersSync(p Provider, method, path string) {
 		}(node.Name, node.Address)
 	}
 	wg.Wait()
+}
+
+// internalBlocksByReasonHandler returns IPs blocked with a matching reason on this node.
+// GET /api/v1/cluster/internal/blocks/by-reason?reason=chainName
+func internalBlocksByReasonHandler(p Provider) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		reason := r.URL.Query().Get("reason")
+		if reason == "" {
+			jsonError(w, "reason required", http.StatusBadRequest)
+			return
+		}
+		ips, err := p.GetBlockedIPsByReason(reason)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"ips": ips}) //nolint:errcheck
+	}
+}
+
+// queryFollowersBlockedByReason queries all follower nodes for IPs blocked with a matching reason.
+func queryFollowersBlockedByReason(p Provider, reason string) []string {
+	nodes := extractNodeInfo(p.GetClusterNodes())
+	if nodes == nil {
+		return nil
+	}
+
+	protocol := p.GetClusterProtocol()
+	nodeName := p.GetNodeName()
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	var allIPs []string
+	for _, node := range nodes {
+		if node.Name == nodeName {
+			continue
+		}
+		url := fmt.Sprintf("%s://%s/api/v1/cluster/internal/blocks/by-reason?reason=%s",
+			protocol, node.Address, neturl.QueryEscape(reason))
+		resp, err := client.Get(url)
+		if err != nil {
+			p.Log(logging.LevelWarning, "CLUSTER_QUERY", "Failed to query blocks from %s: %v", node.Name, err)
+			continue
+		}
+		var result struct {
+			IPs []string `json:"ips"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&result)
+		_ = resp.Body.Close()
+		allIPs = append(allIPs, result.IPs...)
+	}
+	return allIPs
 }
