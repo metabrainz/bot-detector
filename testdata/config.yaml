@@ -41,11 +41,13 @@ good_actors:
     useragent: "regex:(?i)KnownBot"
 
 
+chain_defaults:
+  match_key: "ip"
+
 chains:
   # --- 1. Simple Log Chain (10.0.0.1) ---
   - name: "SimpleLogChain"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches: { path: "regex:^/log/step1" }
       - field_matches: { path: "regex:^/log/step2" }
@@ -54,7 +56,6 @@ chains:
   - name: "SimpleBlockChain"
     action: "block"
     block_duration: "1h"
-    match_key: "ip"
     steps:
       - field_matches: { path: "/block/step1" }
       - field_matches: { path: "/block/step2" }
@@ -62,7 +63,6 @@ chains:
   # --- 3. Out-of-Order Chain (10.0.0.3) ---
   - name: "OutOfOrderChain"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches: { path: "regex:^/order/start$" }
       - field_matches: { path: "/order/end" }
@@ -87,7 +87,6 @@ chains:
   # with the same IP and User-Agent, and a common referrer.
   - name: "IP-UA-Referrer-Chain"
     action: "log" # Action is log
-    match_key: "ip" # Track by IP, allowing UA to change between steps
     steps:
       - field_matches:
           useragent: |-
@@ -105,7 +104,6 @@ chains:
   # --- 6. Sleepy Bot Detection (min_time_since_last_hit) ---
   - name: "SleepyBotChain"
     action: "log"
-    match_key: "ip"
     steps:
       - min_time_since_last_hit: "15s"
         field_matches:
@@ -114,7 +112,6 @@ chains:
   # --- 7. Combined Field Matching (Size and IP) ---
   - name: "CombinedMatcherChain"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches:
           size:
@@ -125,7 +122,6 @@ chains:
   # --- 8. Malformed Request Matching ---
   - name: "MalformedRequestChain"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches:
           statuscode: 400
@@ -135,7 +131,6 @@ chains:
   # --- 9. HTTP/2 Protocol Matching ---
   - name: "HTTP2RequestChain"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches:
           protocol: "HTTP/2.0"
@@ -144,7 +139,6 @@ chains:
   # --- 10. VHost Matching ---
   - name: "VHostSpecificChain"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches:
           vhost: "internal.api.com"
@@ -153,7 +147,6 @@ chains:
   # --- 11. Chain Reset Test ---
   - name: "ChainResetTest"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches: { path: "/reset/step1" }
       - max_delay: "5s"
@@ -166,13 +159,11 @@ chains:
   # ChainOrderTest_Block, which matches and blocks the IP.
   - name: "ChainOrderTest_Log"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches: { path: "/chain-order-test" }
   - name: "ChainOrderTest_Block"
     action: "block"
     block_duration: "10m"
-    match_key: "ip"
     steps:
       - field_matches: { path: "/chain-order-test" }
 
@@ -182,25 +173,21 @@ chains:
   # Since ChainB has `on_match: "stop"`, processing will halt, and ChainC will NOT be evaluated.
   - name: "OnMatchStop_ChainA_Log"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches: { path: "/on-match-stop-test" }
   - name: "OnMatchStop_ChainB_Stop"
     action: "log"
-    match_key: "ip"
     on_match: "stop" # This should stop processing after this chain.
     steps:
       - field_matches: { path: "/on-match-stop-test" }
   - name: "OnMatchStop_ChainC_Should_Not_Run"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches: { path: "/on-match-stop-test" }
 
   # --- 17. Repeated Path Access Detection ---
   - name: "RepeatedPathAccess"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches:
           path: "/repeated/path"

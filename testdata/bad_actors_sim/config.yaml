@@ -40,12 +40,14 @@ good_actors:
   - name: "trusted_monitor"
     ip: "10.0.0.100"
 
+chain_defaults:
+  action: block
+  match_key: ip
+
 chains:
   # High severity - SQL injection attempts (weight 1.0)
   - name: "SQL-Injection"
-    action: block
     block_duration: "1h"
-    match_key: ip
     bad_actor_weight: 1.0
     steps:
       - field_matches:
@@ -53,9 +55,7 @@ chains:
 
   # Medium severity - login brute force (weight 0.5)
   - name: "Login-Brute-Force"
-    action: block
     block_duration: "30m"
-    match_key: ip
     bad_actor_weight: 0.5
     steps:
       - field_matches:
@@ -66,9 +66,7 @@ chains:
 
   # Low severity - suspicious user agent (weight 0.3)
   - name: "Suspicious-UA"
-    action: block
     block_duration: "30m"
-    match_key: ip
     bad_actor_weight: 0.3
     steps:
       - field_matches:
@@ -76,9 +74,7 @@ chains:
 
   # Normal chain - path scanning (weight 1.0 default)
   - name: "Path-Scanner"
-    action: block
     block_duration: "30m"
-    match_key: ip
     steps:
       - field_matches:
           path: "regex:^/(wp-admin|phpmyadmin|.env|.git)"
@@ -88,7 +84,6 @@ chains:
   # Log-only chain (should not affect scoring since action is log)
   - name: "404-Monitor"
     action: log
-    match_key: ip
     steps:
       - field_matches:
           status_code: "404"

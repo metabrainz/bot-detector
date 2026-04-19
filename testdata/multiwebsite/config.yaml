@@ -32,12 +32,14 @@ blockers:
     haproxy:
       addresses: []  # Empty for dry-run
 
+chain_defaults:
+  action: "block"
+  match_key: "ip"
+
 chains:
   # Global chain - applies to ALL websites
   - name: "Global-Aggressive-Scanner"
-    action: "block"
     block_duration: "1h"
-    match_key: "ip"
     steps:
       - field_matches:
           method: "HEAD"
@@ -49,7 +51,6 @@ chains:
 
   # Main website specific chain
   - name: "Main-Login-Abuse"
-    action: "block"
     block_duration: "30m"
     match_key: "ip_ua"
     websites: ["main_site"]
@@ -61,9 +62,7 @@ chains:
 
   # API website specific chain
   - name: "API-Rate-Limit"
-    action: "block"
     block_duration: "15m"
-    match_key: "ip"
     websites: ["api_site"]
     steps:
       - field_matches:
@@ -73,9 +72,7 @@ chains:
 
   # Admin website specific chain
   - name: "Admin-Unauthorized-Access"
-    action: "block"
     block_duration: "24h"
-    match_key: "ip"
     websites: ["admin_site"]
     steps:
       - field_matches:
@@ -84,9 +81,7 @@ chains:
 
   # Shared chain - applies to main and api
   - name: "Shared-SQL-Injection-Attempt"
-    action: "block"
     block_duration: "2h"
-    match_key: "ip"
     websites: ["main_site", "api_site"]
     steps:
       - field_matches:
