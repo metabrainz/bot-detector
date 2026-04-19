@@ -454,10 +454,18 @@ func restorePersistenceState(p *app.Processor) error {
 		if baErr != nil {
 			p.LogFunc(logging.LevelError, "STATE_RESTORE", "Failed to load bad actors: %v", baErr)
 		} else {
+			skippedBA := 0
 			for _, ba := range badActors {
+				if gpc0, exists := currentState[ba.IP]; exists && gpc0 > 0 {
+					skippedBA++
+					continue
+				}
 				cmds = append(cmds, restoreCmd{"block", ba.IP, p.Config.BadActors.BlockDuration, "bad-actor"})
 			}
-			baCmds = len(badActors)
+			baCmds = len(badActors) - skippedBA
+			if skippedBA > 0 {
+				skippedAlreadyBlocked += skippedBA
+			}
 		}
 	}
 
