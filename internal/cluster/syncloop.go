@@ -386,43 +386,65 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	// Merge with local state using a single transaction for performance
 	now := time.Now()
 	m.dbMutex.Lock()
-	tx, err := m.db.Begin()
+	const batchSize = 10000
+	count := 0
+
+	beginBatch := func() (*sql.Tx, *sql.Stmt, error) {
+		tx, err := m.db.Begin()
+		if err != nil {
+			return nil, nil, err
+		}
+		stmt, err := tx.Prepare(`INSERT INTO ips (ip, state, expire_time, reason_id, modified_at, first_blocked_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(ip) DO UPDATE SET
+				state = excluded.state,
+				expire_time = MAX(ips.expire_time, excluded.expire_time),
+				reason_id = excluded.reason_id,
+				modified_at = MAX(ips.modified_at, excluded.modified_at),
+				first_blocked_at = CASE
+					WHEN ips.first_blocked_at IS NOT NULL AND ips.first_blocked_at > 0 AND ips.first_blocked_at < excluded.first_blocked_at
+					THEN ips.first_blocked_at
+					ELSE excluded.first_blocked_at
+				END`)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, nil, err
+		}
+		return tx, stmt, nil
+	}
+
+	tx, upsertStmt, err := beginBatch()
 	if err != nil {
 		m.dbMutex.Unlock()
 		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to begin transaction: %v", err)
 		return
 	}
 
-	upsertStmt, err := tx.Prepare(`INSERT INTO ips (ip, state, expire_time, reason_id, modified_at, first_blocked_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(ip) DO UPDATE SET
-			state = excluded.state,
-			expire_time = MAX(ips.expire_time, excluded.expire_time),
-			reason_id = excluded.reason_id,
-			modified_at = MAX(ips.modified_at, excluded.modified_at),
-			first_blocked_at = CASE
-				WHEN ips.first_blocked_at IS NOT NULL AND ips.first_blocked_at > 0 AND ips.first_blocked_at < excluded.first_blocked_at
-				THEN ips.first_blocked_at
-				ELSE excluded.first_blocked_at
-			END`)
-	if err != nil {
-		_ = tx.Rollback()
-		m.dbMutex.Unlock()
-		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to prepare upsert statement: %v", err)
-		return
-	}
-	defer func() { _ = upsertStmt.Close() }()
-
 	for ip, state := range states {
 		if state.ExpireTime.After(now) {
 			reasonID := persistence.ReasonHash(state.Reason)
 			_, _ = tx.Exec("INSERT OR IGNORE INTO reasons (id, reason) VALUES (?, ?)", reasonID, state.Reason)
 			_, _ = upsertStmt.Exec(ip, state.State.String(), persistence.TimeToUnix(state.ExpireTime), reasonID, persistence.TimeToUnix(state.ModifiedAt), persistence.TimeToUnix(state.FirstBlockedAt))
+			count++
+
+			if count%batchSize == 0 {
+				_ = upsertStmt.Close()
+				if err := tx.Commit(); err != nil {
+					m.log(logging.LevelWarning, "STATE_SYNC", "Failed to commit batch: %v", err)
+				}
+				tx, upsertStmt, err = beginBatch()
+				if err != nil {
+					m.dbMutex.Unlock()
+					m.log(logging.LevelWarning, "STATE_SYNC", "Failed to begin batch: %v", err)
+					return
+				}
+			}
 		}
 	}
 
+	_ = upsertStmt.Close()
 	if err := tx.Commit(); err != nil {
-		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to commit transaction: %v", err)
+		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to commit final batch: %v", err)
 	}
 	m.dbMutex.Unlock()
 
