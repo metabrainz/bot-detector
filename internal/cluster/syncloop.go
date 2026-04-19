@@ -15,6 +15,18 @@ import (
 	"bot-detector/internal/persistence"
 )
 
+// countingReader wraps a reader and counts bytes read.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
 // StateSyncManager manages periodic state synchronization
 type StateSyncManager struct {
 	config           *ClusterConfig
@@ -82,11 +94,8 @@ func FetchMergedState(url string, client *http.Client, requestCompression bool) 
 		reader = gz
 	}
 
-	bodyBytes, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to read response: %w", err)
-	}
-	duration := time.Since(startTime)
+	// Use a counting reader to track bytes read for metrics
+	cr := &countingReader{r: reader}
 
 	var mergedResp struct {
 		Version   string                         `json:"version"`
@@ -95,11 +104,12 @@ func FetchMergedState(url string, client *http.Client, requestCompression bool) 
 		BadActors []persistence.BadActorInfo     `json:"bad_actors,omitempty"`
 	}
 
-	if err := json.Unmarshal(bodyBytes, &mergedResp); err != nil {
+	if err := json.NewDecoder(cr).Decode(&mergedResp); err != nil {
 		return nil, nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to decode: %w", err)
 	}
 
-	sizeKB := float64(len(bodyBytes)) / 1024.0
+	duration := time.Since(startTime)
+	sizeKB := float64(cr.n) / 1024.0
 	var rateKBps float64
 	if duration.Seconds() > 0 {
 		rateKBps = sizeKB / duration.Seconds()
