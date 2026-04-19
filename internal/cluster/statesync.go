@@ -40,6 +40,7 @@ type StateSyncConfig struct {
 	Compression bool          `yaml:"compression"`
 	Timeout     time.Duration `yaml:"timeout"`
 	Incremental bool          `yaml:"incremental"`
+	BatchSize   int           `yaml:"batch_size"`
 }
 
 // AddSourceNode adds source node attribution to a reason if not already present.

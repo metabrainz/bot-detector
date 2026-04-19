@@ -875,7 +875,8 @@ func parseStateSyncConfig(yamlConfig *StateSyncConfigYAML) cluster.StateSyncConf
 		Interval:    60 * time.Second,
 		Compression: true, // Default: enabled
 		Timeout:     30 * time.Second,
-		Incremental: true, // Default: incremental sync (more efficient)
+		Incremental: true,  // Default: incremental sync (more efficient)
+		BatchSize:   10000, // Default: 10,000 rows per transaction batch
 	}
 
 	if yamlConfig == nil {
@@ -911,6 +912,11 @@ func parseStateSyncConfig(yamlConfig *StateSyncConfigYAML) cluster.StateSyncConf
 		config.Incremental = *yamlConfig.Incremental
 	}
 
+	// Parse batch size
+	if yamlConfig.BatchSize > 0 {
+		config.BatchSize = yamlConfig.BatchSize
+	}
+
 	return config
 }
 
@@ -929,6 +935,7 @@ func NewClusterConfigWithDefaults(nodes []cluster.NodeConfig) *cluster.ClusterCo
 			Compression: true,
 			Timeout:     30 * time.Second,
 			Incremental: true,
+			BatchSize:   10000,
 		},
 	}
 }

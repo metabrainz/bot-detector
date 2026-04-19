@@ -386,7 +386,11 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	// Merge with local state using a single transaction for performance
 	now := time.Now()
 	m.dbMutex.Lock()
-	const batchSize = 10000
+	const defaultBatchSize = 10000
+	batchSize := m.config.StateSync.BatchSize
+	if batchSize <= 0 {
+		batchSize = defaultBatchSize
+	}
 	count := 0
 
 	beginBatch := func() (*sql.Tx, *sql.Stmt, error) {

@@ -229,6 +229,7 @@ type StateSyncConfigYAML struct {
 	Compression *bool  `yaml:"compression"`
 	Timeout     string `yaml:"timeout"`
 	Incremental *bool  `yaml:"incremental"`
+	BatchSize   int    `yaml:"batch_size"`
 }
 
 // NodeConfigYAML represents a single node in the cluster in YAML format.
