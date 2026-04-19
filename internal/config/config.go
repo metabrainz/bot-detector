@@ -1079,6 +1079,25 @@ func parseChains(config *TopLevelConfig, fileDeps map[string]*types.FileDependen
 	}
 
 	for _, yamlChain := range config.Chains {
+		// Apply chain_defaults for any unset fields.
+		if d := config.ChainDefaults; d != nil {
+			if yamlChain.Action == "" {
+				yamlChain.Action = d.Action
+			}
+			if yamlChain.BlockDuration == "" {
+				yamlChain.BlockDuration = d.BlockDuration
+			}
+			if yamlChain.MatchKey == "" {
+				yamlChain.MatchKey = d.MatchKey
+			}
+			if yamlChain.OnMatch == "" {
+				yamlChain.OnMatch = d.OnMatch
+			}
+			if yamlChain.BadActorWeight == nil && d.BadActorWeight != nil {
+				yamlChain.BadActorWeight = d.BadActorWeight
+			}
+		}
+
 		if strings.HasPrefix(yamlChain.Action, "!") {
 			logging.LogOutput(logging.LevelDebug, "CONFIG_SKIP", "Skipping disabled chain '%s' (action: %s)", yamlChain.Name, yamlChain.Action)
 			continue
