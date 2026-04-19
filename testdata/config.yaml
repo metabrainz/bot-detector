@@ -176,7 +176,8 @@ chains:
     steps:
       - field_matches: { path: "/on-match-stop-test" }
   - name: "OnMatchStop_ChainB_Stop"
-    action: "log"
+    action: "block"
+    block_duration: "5m"
     on_match: "stop" # This should stop processing after this chain.
     steps:
       - field_matches: { path: "/on-match-stop-test" }

@@ -445,18 +445,19 @@ func TestCheckChains_OnMatchStop(t *testing.T) {
 
 	// Chain 1: This chain will match and has on_match: "stop".
 	h.addChain(config.BehavioralChain{
-		Name:      "StopChain",
-		MatchKey:  "ip",
-		Action:    "log",
-		OnMatch:   "stop",
-		StepsYAML: []config.StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/trigger"}}},
+		Name:          "StopChain",
+		MatchKey:      "ip",
+		Action:        "block",
+		BlockDuration: 5 * time.Minute,
+		OnMatch:       "stop",
+		StepsYAML:     []config.StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/trigger"}}},
 	})
 
 	// Chain 2: This chain also matches the same entry but should be skipped.
 	h.addChain(config.BehavioralChain{
 		Name:      "ShouldBeSkippedChain",
 		MatchKey:  "ip",
-		Action:    "log",
+		Action:    "block",
 		StepsYAML: []config.StepDefYAML{{FieldMatches: map[string]interface{}{"Path": "/trigger"}}},
 	})
 

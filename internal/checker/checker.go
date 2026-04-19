@@ -358,7 +358,8 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 	}
 
 	// Return true if OnMatch is "stop" to halt further chain processing.
-	return chain.OnMatch == "stop"
+	// Log-only chains never stop processing — on_match is only effective for block actions.
+	return chain.OnMatch == "stop" && chain.Action == "block"
 }
 
 // executeBlock calls the external blocker unless in DryRun mode.
