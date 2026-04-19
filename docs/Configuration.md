@@ -208,7 +208,7 @@ Chains are processed in the order they are defined. Each chain definition must i
 | **action** | string | Yes | The action to take when the chain is completed: `block` or `log`. To temporarily disable a chain, prefix the action with `!` (e.g., `!block`). |
 | **block_duration** | string | No | The duration for which the IP should be blocked if `action` is `block`. Format: Go duration string (e.g., `5m`, `1h`, `30m`, `1h30m`). If not specified, uses `blockers.default_duration`. |
 | **match_key** | string | Yes | The key used to track activity. Determines if behavior is tracked per IP, per IP version, or per unique client (IP + User-Agent). See [`match_key` values](#match_key-values) below. |
-| **on_match** | string | No | If set to `stop`, no further chains will be processed for the current log entry after this chain completes. |
+| **on_match** | string | No | If set to `stop`, no further chains will be processed for the current log entry after this chain completes. Only effective for `block` actions — log-only chains never stop further processing. |
 | **bad_actor_weight** | float | No | Weight added to the bad actor score when this chain blocks an IP (0.0–1.0). Default: `1.0`. Only relevant when `bad_actors` is enabled. See [BAD_ACTORS.md](BAD_ACTORS.md). |
 | **websites** | list of strings | No | **Multi-website mode only.** List of website names (from `websites` section) where this chain applies. If omitted or empty, the chain applies to all websites (global chain). Example: `["main_site", "api_site"]`. |
 | **steps** | list of objects | Yes | The sequential list of steps that define the malicious pattern. See table [`chains[].steps[].fields`](#chainsstepsfields). |
@@ -217,7 +217,7 @@ Chains are processed in the order they are defined. Each chain definition must i
 
 Chains are processed for each log entry in the order they are defined in the `chains` array. Place more specific or higher-priority chains before more general ones.
 
-When a chain with `on_match: "stop"` is completed, the application immediately stops evaluating subsequent chains for that log entry. For example, you might place a very specific, high-confidence "block" chain first, followed by more general "log-only" chains.
+When a chain with `on_match: "stop"` is completed, the application immediately stops evaluating subsequent chains for that log entry. This only applies to `block` actions — log-only chains always continue processing regardless of `on_match`. For example, you might place a very specific, high-confidence "block" chain first, followed by more general "log-only" chains.
 
 ##### Multi-Website Chain Filtering
 
