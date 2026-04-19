@@ -78,8 +78,7 @@ chains:
     steps:
       - field_matches:
           path: "regex:^/(wp-admin|phpmyadmin|.env|.git)"
-      - field_matches:
-          path: "regex:^/(wp-admin|phpmyadmin|.env|.git)"
+        repeated: 2
 
   # Log-only chain (should not affect scoring since action is log)
   - name: "404-Monitor"
