@@ -684,6 +684,13 @@ func DeleteIPState(db *sql.DB, ip string) error {
 	return nil
 }
 
+// CountIPStates returns the total number of rows in the ips table.
+func CountIPStates(db *sql.DB) (int, error) {
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM ips").Scan(&count)
+	return count, err
+}
+
 // GetAllIPStates returns all IP states as a map, matching the Provider interface.
 func GetAllIPStates(db *sql.DB) (map[string]IPState, error) {
 	rows, err := db.Query(`
