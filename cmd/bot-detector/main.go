@@ -559,6 +559,11 @@ func execute(params *commandline.AppParameters) error {
 		return err
 	}
 
+	// Initialize merged state cache in state directory
+	if params.StateDir != "" {
+		server.InitMergedStateCache(params.StateDir)
+	}
+
 	// Log build information (after handling --version and --check)
 	info, ok := debug.ReadBuildInfo()
 	if ok {

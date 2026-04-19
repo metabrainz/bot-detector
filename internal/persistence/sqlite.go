@@ -691,6 +691,13 @@ func CountIPStates(db *sql.DB) (int, error) {
 	return count, err
 }
 
+// CountModifiedSince returns the number of IP states modified after the given time.
+func CountModifiedSince(db *sql.DB, since time.Time) (int, error) {
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM ips WHERE modified_at > ?", timeToUnix(since)).Scan(&count)
+	return count, err
+}
+
 // GetAllIPStates returns all IP states as a map, matching the Provider interface.
 func GetAllIPStates(db *sql.DB) (map[string]IPState, error) {
 	rows, err := db.Query(`

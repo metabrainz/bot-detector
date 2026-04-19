@@ -3,9 +3,13 @@ package server
 import (
 	"compress/gzip"
 	"encoding/json"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"bot-detector/internal/logging"
@@ -97,6 +101,73 @@ func clusterPersistenceStateHandler(p Provider) http.HandlerFunc {
 	}
 }
 
+const mergedStateCachePrefix = "bot-detector-merged-state-"
+
+// cachedMergedResponse holds a path to a pre-serialized gzipped response file on disk.
+type cachedMergedResponse struct {
+	mu        sync.RWMutex
+	cacheDir  string    // directory for cache files
+	gzPath    string    // path to gzipped JSON file
+	cacheTime time.Time // wall clock when cached
+}
+
+var mergedResponseCache = &cachedMergedResponse{}
+
+// InitMergedStateCache sets the cache directory and cleans up stale files.
+func InitMergedStateCache(stateDir string) {
+	dir := filepath.Join(stateDir, "cache")
+	_ = os.MkdirAll(dir, 0755)
+
+	// Clean up stale files from previous runs
+	matches, _ := filepath.Glob(filepath.Join(dir, mergedStateCachePrefix+"*"))
+	for _, f := range matches {
+		_ = os.Remove(f)
+	}
+
+	mergedResponseCache.mu.Lock()
+	mergedResponseCache.cacheDir = dir
+	mergedResponseCache.mu.Unlock()
+}
+
+func (c *cachedMergedResponse) storeStreaming(response interface{}) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.cacheDir == "" {
+		return
+	}
+
+	// Stream JSON → gzip → temp file (near-zero memory)
+	f, err := os.CreateTemp(c.cacheDir, mergedStateCachePrefix+"tmp-*.json.gz")
+	if err != nil {
+		return
+	}
+	tmpPath := f.Name()
+
+	gz := gzip.NewWriter(f)
+	err = json.NewEncoder(gz).Encode(response)
+	_ = gz.Close()
+	_ = f.Close()
+
+	if err != nil {
+		_ = os.Remove(tmpPath)
+		return
+	}
+
+	finalPath := filepath.Join(c.cacheDir, mergedStateCachePrefix+"current.json.gz")
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return
+	}
+
+	if c.gzPath != "" && c.gzPath != finalPath {
+		_ = os.Remove(c.gzPath)
+	}
+
+	c.gzPath = finalPath
+	c.cacheTime = time.Now()
+}
+
 // clusterMergedStateHandler exposes the cluster-wide merged state (leader only).
 // GET /api/v1/cluster/state/merged?since=<timestamp>
 func clusterMergedStateHandler(p Provider) http.HandlerFunc {
@@ -119,47 +190,169 @@ func clusterMergedStateHandler(p Provider) http.HandlerFunc {
 			}
 		}
 
-		// Collect and merge states from all nodes
-		merged, nodesQueried, nodesFailed := collectAndMergeStates(p, since)
+		// For incremental sync, always compute fresh (small delta)
+		if !since.IsZero() {
+			serveMergedStateFresh(p, w, r, since)
+			return
+		}
 
-		// Collect all bad actors (leader's own — peers' are already synced via state sync loop)
-		allBadActors, _ := p.GetAllBadActors()
-		var baList []persistence.BadActorInfo
-		for _, a := range allBadActors {
-			if ba, ok := a.(persistence.BadActorInfo); ok {
-				baList = append(baList, ba)
+		// For full sync, serve from pre-built disk cache if still relevant
+		mergedResponseCache.mu.RLock()
+		gzPath := mergedResponseCache.gzPath
+		cacheTime := mergedResponseCache.cacheTime
+		mergedResponseCache.mu.RUnlock()
+
+		if gzPath != "" && !cacheTime.IsZero() {
+			// Check if cache is still relevant by counting changes since snapshot
+			changed := 0
+			total := 0
+			p.GetPersistenceMutex().Lock()
+			for _, state := range p.GetIPStates() {
+				total++
+				if state.ModifiedAt.After(cacheTime) {
+					changed++
+				}
+			}
+			p.GetPersistenceMutex().Unlock()
+
+			// Rebuild if >10% of IPs changed since snapshot
+			if total == 0 || changed <= total/10 {
+				_, useCompression, _, _ := p.GetStateSyncConfig()
+				acceptsGzip := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
+				w.Header().Set("Content-Type", "application/json")
+				if useCompression && acceptsGzip {
+					w.Header().Set("Content-Encoding", "gzip")
+					serveFileContent(w, gzPath)
+				} else {
+					serveGzFileDecompressed(w, gzPath)
+				}
+				return
 			}
 		}
 
-		// Build response
-		response := MergedStateResponse{
-			Version:      StateSyncVersion,
-			Timestamp:    time.Now(),
-			NodesQueried: nodesQueried,
-			NodesFailed:  nodesFailed,
-			States:       merged,
-			BadActors:    baList,
+		// No cache yet (first request before sync loop runs) — compute fresh
+		serveMergedStateFreshAndCache(p, w, r)
+	}
+}
+
+// serveFileContent streams a file to the response writer without loading it all into memory.
+func serveFileContent(w http.ResponseWriter, path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		http.Error(w, "Cache read error", http.StatusInternalServerError)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	_, _ = io.Copy(w, f)
+}
+
+// serveGzFileDecompressed streams a gzipped file decompressed to the response writer.
+func serveGzFileDecompressed(w http.ResponseWriter, path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		http.Error(w, "Cache read error", http.StatusInternalServerError)
+		return
+	}
+	defer func() { _ = f.Close() }()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		http.Error(w, "Cache decompress error", http.StatusInternalServerError)
+		return
+	}
+	defer func() { _ = gz.Close() }()
+	_, _ = io.Copy(w, gz)
+}
+
+// serveMergedStateFresh serves a fresh (non-cached) merged state response.
+func serveMergedStateFresh(p Provider, w http.ResponseWriter, r *http.Request, since time.Time) {
+	merged, nodesQueried, nodesFailed := collectAndMergeStates(p, since)
+
+	allBadActors, _ := p.GetAllBadActors()
+	var baList []persistence.BadActorInfo
+	for _, a := range allBadActors {
+		if ba, ok := a.(persistence.BadActorInfo); ok {
+			baList = append(baList, ba)
 		}
+	}
 
-		// Set content type
-		w.Header().Set("Content-Type", "application/json")
+	response := MergedStateResponse{
+		Version:      StateSyncVersion,
+		Timestamp:    time.Now(),
+		NodesQueried: nodesQueried,
+		NodesFailed:  nodesFailed,
+		States:       merged,
+		BadActors:    baList,
+	}
 
-		// Apply compression if requested and enabled
+	w.Header().Set("Content-Type", "application/json")
+	_, useCompression, _, _ := p.GetStateSyncConfig()
+	acceptsGzip := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
+
+	if useCompression && acceptsGzip {
+		w.Header().Set("Content-Encoding", "gzip")
+		gz := gzip.NewWriter(w)
+		defer func() { _ = gz.Close() }()
+		if err := json.NewEncoder(gz).Encode(response); err != nil {
+			p.Log(logging.LevelError, "STATE_SYNC", "Failed to encode merged state response: %v", err)
+		}
+	} else {
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			p.Log(logging.LevelError, "STATE_SYNC", "Failed to encode merged state response: %v", err)
+		}
+	}
+}
+
+// serveMergedStateFreshAndCache builds a fresh response, caches to disk, and serves from the file.
+func serveMergedStateFreshAndCache(p Provider, w http.ResponseWriter, r *http.Request) {
+	merged, _, _ := collectAndMergeStates(p, time.Time{})
+
+	allBadActors, _ := p.GetAllBadActors()
+	var baList []persistence.BadActorInfo
+	for _, a := range allBadActors {
+		if ba, ok := a.(persistence.BadActorInfo); ok {
+			baList = append(baList, ba)
+		}
+	}
+
+	response := MergedStateResponse{
+		Version:   StateSyncVersion,
+		Timestamp: time.Now(),
+		States:    merged,
+		BadActors: baList,
+	}
+
+	// Stream to disk cache
+	mergedResponseCache.storeStreaming(response)
+
+	// Serve from the cached file
+	mergedResponseCache.mu.RLock()
+	gzPath := mergedResponseCache.gzPath
+	mergedResponseCache.mu.RUnlock()
+
+	if gzPath != "" {
 		_, useCompression, _, _ := p.GetStateSyncConfig()
 		acceptsGzip := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
-
+		w.Header().Set("Content-Type", "application/json")
 		if useCompression && acceptsGzip {
 			w.Header().Set("Content-Encoding", "gzip")
-			gz := gzip.NewWriter(w)
-			defer func() { _ = gz.Close() }()
-			if err := json.NewEncoder(gz).Encode(response); err != nil {
-				p.Log(logging.LevelError, "STATE_SYNC", "Failed to encode merged state response: %v", err)
-			}
+			serveFileContent(w, gzPath)
 		} else {
-			if err := json.NewEncoder(w).Encode(response); err != nil {
-				p.Log(logging.LevelError, "STATE_SYNC", "Failed to encode merged state response: %v", err)
-			}
+			serveGzFileDecompressed(w, gzPath)
 		}
+		return
+	}
+
+	// Fallback: stream directly to response (no state dir configured)
+	w.Header().Set("Content-Type", "application/json")
+	_, useCompression, _, _ := p.GetStateSyncConfig()
+	acceptsGzip := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
+	if useCompression && acceptsGzip {
+		w.Header().Set("Content-Encoding", "gzip")
+		gz := gzip.NewWriter(w)
+		_ = json.NewEncoder(gz).Encode(response)
+		_ = gz.Close()
+	} else {
+		_ = json.NewEncoder(w).Encode(response)
 	}
 }
 
