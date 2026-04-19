@@ -1528,3 +1528,73 @@ func TestGoodActorNotBlockedByChain_WithVHost(t *testing.T) {
 		t.Fatal("Expected IsBlocked to be false after good_actor promotion")
 	}
 }
+
+// TestCheckChains_ConfigReloadRace verifies that reducing the number of chains
+// during a config reload does not cause an index-out-of-range panic.
+func TestCheckChains_ConfigReloadRace(t *testing.T) {
+	if raceEnabled {
+		t.Skip("Skipping under race detector — tests panic prevention, not race-freedom")
+	}
+
+	p := testutil.NewTestProcessor(nil, nil)
+	p.DryRun = true
+	p.EnableMetrics = false
+
+	for i := 0; i < 3; i++ {
+		p.Chains = append(p.Chains, config.BehavioralChain{
+			Name: fmt.Sprintf("Chain%d", i), MatchKey: "ip", Action: "log",
+			Steps: []config.StepDef{{Order: 1, Matchers: []struct {
+				Matcher   config.FieldMatcher
+				FieldName string
+			}{{Matcher: func(e *types.LogEntry) bool { return true }, FieldName: "Path"}}}},
+		})
+	}
+
+	p.ConfigMutex.Lock()
+	p.Websites = []config.WebsiteConfig{{Name: "test", VHosts: []string{}}}
+	p.VHostToWebsite, p.CatchAllWebsite = app.BuildVHostMap(p.Websites)
+	p.WebsiteChains, p.GlobalChains = app.CategorizeChains(p.Chains)
+	p.ConfigMutex.Unlock()
+
+	// Simulate config reload reducing chains while entries are being processed.
+	// The bounds check in the iteration loop should prevent panics.
+	panicked := make(chan string, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() {
+			if r := recover(); r != nil {
+				panicked <- fmt.Sprintf("%v", r)
+			}
+		}()
+		for i := 0; i < 500; i++ {
+			entry := &app.LogEntry{
+				IPInfo:    utils.NewIPInfo("10.0.0.1"),
+				Timestamp: time.Now(),
+				Path:      "/test",
+			}
+			checker.CheckChains(p, entry)
+		}
+	}()
+
+	for i := 0; i < 50; i++ {
+		p.ConfigMutex.Lock()
+		p.Chains = p.Chains[:1]
+		p.WebsiteChains, p.GlobalChains = app.CategorizeChains(p.Chains)
+		p.ConfigMutex.Unlock()
+
+		p.ConfigMutex.Lock()
+		for len(p.Chains) < 3 {
+			p.Chains = append(p.Chains, p.Chains[0])
+		}
+		p.WebsiteChains, p.GlobalChains = app.CategorizeChains(p.Chains)
+		p.ConfigMutex.Unlock()
+	}
+
+	<-done
+	select {
+	case msg := <-panicked:
+		t.Fatalf("Panic during concurrent config reload: %s", msg)
+	default:
+	}
+}

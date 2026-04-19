@@ -729,6 +729,9 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 	processedActivities := make(map[*store.ActorActivity]struct{})
 
 	// Determine which chains to process based on website configuration
+	// Snapshot chains and indices under ConfigMutex to prevent race with config reload.
+	p.ConfigMutex.RLock()
+	chains := p.Chains
 	var chainIndices []int
 	if len(p.Websites) > 0 {
 		// Multi-website mode: filter chains by vhost
@@ -757,15 +760,19 @@ var checkChainsInternal = func(p *app.Processor, entry *app.LogEntry) {
 		}
 	} else {
 		// Legacy single-website mode: process all chains
-		chainIndices = make([]int, len(p.Chains))
-		for i := range p.Chains {
+		chainIndices = make([]int, len(chains))
+		for i := range chains {
 			chainIndices[i] = i
 		}
 	}
+	p.ConfigMutex.RUnlock()
 
 	// 2. Iterate over applicable chains.
 	for _, idx := range chainIndices {
-		chain := &p.Chains[idx]
+		if idx >= len(chains) {
+			break // Safety: skip stale indices from a previous config
+		}
+		chain := &chains[idx]
 
 		// Skip chains not in the filter (dry-run --chain flag)
 		if len(p.ChainFilter) > 0 && !p.ChainFilter[chain.Name] {
