@@ -19,6 +19,7 @@ The configuration is structured as a top-level map containing settings for the a
 | **blockers** | object | Configuration for the blocking backend(s). See table [`blockers`](#blockers). |
 | **cluster** | object | Optional. Cluster configuration for multi-node deployments. See table [`cluster`](#cluster). |
 | **good_actors** | list of objects | Optional. A list of trusted actors to skip from all processing. See table [`good_actors`](#good_actors). |
+| **chain_defaults** | object | Optional. Default values for chain fields. See table [`chain_defaults`](#chain_defaults). |
 | **chains** | list of objects | The list of behavioral chains to be loaded. See table [`chains`](#chains). |
 
 ### `websites`
@@ -152,11 +153,50 @@ For cluster communication, you can dedicate a specific listener using `--listen 
 | **useragent** | string or list | A string, `file:` path, or `regex:` pattern to match against the log entry's User-Agent. Can be a single string or a list of strings. |
 
 
+### `chain_defaults`
+
+Optional. Provides default values for chain fields. Any field set here will be used as the default for chains that don't explicitly specify it. This reduces repetition when many chains share the same settings.
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
+| **action** | string | Default action for chains (`block` or `log`). |
+| **block_duration** | string | Default block duration. Takes precedence over `blockers.default_duration`. |
+| **match_key** | string | Default match key (e.g., `ip`, `ip_ua`). |
+| **on_match** | string | Default on_match behavior (`stop` or `continue`). |
+| **bad_actor_weight** | float | Default bad actor weight (0.0–1.0). |
+
+To override a default back to the "no value" behavior, use the explicit opposite value. For example, if `chain_defaults` sets `on_match: "stop"`, a chain can use `on_match: "continue"` to keep processing subsequent chains after a match.
+
+**Example:**
+```yaml
+chain_defaults:
+  action: "block"
+  match_key: "ip"
+  on_match: "stop"
+
+chains:
+  # This chain inherits action: block, match_key: ip, on_match: stop
+  - name: "Simple-Bot"
+    block_duration: "1h"
+    steps:
+      - field_matches:
+          useragent: "BadBot/1.0"
+
+  # This chain overrides on_match to continue processing
+  - name: "Log-Only-Scanner"
+    action: "log"
+    on_match: "continue"
+    steps:
+      - field_matches:
+          statuscode: 429
+```
+
+
 ### `chains`
 
 The `chains` key is a list of behavioral chain definitions. Each chain represents a sequential pattern of log entries that, when completed, triggers an action (block or log).
 
-Chains are processed in the order they are defined. Each chain definition must include a unique name, an action, a match key, and a list of steps. See table [`chains[].fields`](#chainsfields) for detailed field descriptions.
+Chains are processed in the order they are defined. Each chain definition must include a unique name, an action, a match key, and a list of steps (unless provided by `chain_defaults`). See table [`chains[].fields`](#chainsfields) for detailed field descriptions.
 
 **Important:** Chain names must be unique. Duplicate names will cause a configuration error.
 
