@@ -191,6 +191,59 @@ else
 fi
 echo ""
 
+# --- Block more IPs on leader and verify incremental sync ---
+echo -e "${YELLOW}Step 11: Testing incremental sync...${NC}"
+TS2=$(LC_ALL=C date -u +"%d/%b/%Y:%H:%M:%S +0000")
+for i in $(seq 6 10); do
+    for j in $(seq 1 3); do
+        echo "example.com 10.0.0.$i - - [$TS2] \"GET /page/$j HTTP/1.1\" 429 568 \"-\" \"TestBot/1.0\"" >> "$LOG_FILE"
+    done
+done
+sleep 8  # Wait for leader to process + follower sync tick
+
+INCR_BLOCKED=0
+for i in $(seq 6 10); do
+    STATUS=$(curl -s "http://127.0.0.1:9090/api/v1/cluster/internal/ip/10.0.0.$i" 2>/dev/null || echo '{}')
+    if echo "$STATUS" | grep -q '"blocked"'; then
+        INCR_BLOCKED=$((INCR_BLOCKED + 1))
+    fi
+done
+if [ "$INCR_BLOCKED" -ge 4 ]; then
+    pass "Incremental sync: follower received $INCR_BLOCKED/5 new blocked IPs"
+else
+    fail "Incremental sync: follower only has $INCR_BLOCKED/5 new IPs (expected ≥4)"
+    grep "STATE_SYNC.*Merged" "$SCRIPT_DIR/follower.log" 2>/dev/null | tail -3 | sed 's/^/    /'
+fi
+echo ""
+
+# --- Verify incremental sync used delta (not full) ---
+echo -e "${YELLOW}Step 12: Verifying incremental sync mode...${NC}"
+INCR_LINE=$(grep "STATE_SYNC.*Merged from leader.*incr" "$SCRIPT_DIR/follower.log" 2>/dev/null | tail -1)
+if [ -n "$INCR_LINE" ]; then
+    pass "Follower used incremental sync"
+    echo "  $INCR_LINE"
+else
+    fail "No incremental sync found in follower logs"
+fi
+echo ""
+
+# --- Verify all 10 IPs are blocked on both nodes ---
+echo -e "${YELLOW}Step 13: Verifying full state consistency...${NC}"
+LEADER_TOTAL=0
+FOLLOWER_TOTAL=0
+for i in $(seq 1 10); do
+    L=$(curl -s "http://127.0.0.1:8080/api/v1/cluster/internal/ip/10.0.0.$i" 2>/dev/null || echo '{}')
+    F=$(curl -s "http://127.0.0.1:9090/api/v1/cluster/internal/ip/10.0.0.$i" 2>/dev/null || echo '{}')
+    echo "$L" | grep -q '"blocked"' && LEADER_TOTAL=$((LEADER_TOTAL + 1))
+    echo "$F" | grep -q '"blocked"' && FOLLOWER_TOTAL=$((FOLLOWER_TOTAL + 1))
+done
+if [ "$LEADER_TOTAL" -ge 9 ] && [ "$FOLLOWER_TOTAL" -ge 9 ]; then
+    pass "State consistent: leader=$LEADER_TOTAL/10, follower=$FOLLOWER_TOTAL/10"
+else
+    fail "State inconsistent: leader=$LEADER_TOTAL/10, follower=$FOLLOWER_TOTAL/10"
+fi
+echo ""
+
 # --- Summary ---
 echo -e "${GREEN}=== Results: $PASS passed, $FAIL failed ===${NC}"
 [ "$FAIL" -gt 0 ] && exit 1
