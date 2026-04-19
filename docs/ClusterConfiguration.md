@@ -420,6 +420,7 @@ cluster:
     compression: true      # Default: true - use gzip
     timeout: "30s"         # Default: 30s - HTTP timeout
     incremental: true      # Default: true - only sync changed IPs
+    batch_size: 10000      # Default: 10000 - rows per DB transaction batch
 ```
 
 **How it works:**
