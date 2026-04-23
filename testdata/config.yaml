@@ -41,11 +41,13 @@ good_actors:
     useragent: "regex:(?i)KnownBot"
 
 
+chain_defaults:
+  match_key: "ip"
+
 chains:
   # --- 1. Simple Log Chain (10.0.0.1) ---
   - name: "SimpleLogChain"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches: { path: "regex:^/log/step1" }
       - field_matches: { path: "regex:^/log/step2" }
@@ -54,7 +56,6 @@ chains:
   - name: "SimpleBlockChain"
     action: "block"
     block_duration: "1h"
-    match_key: "ip"
     steps:
       - field_matches: { path: "/block/step1" }
       - field_matches: { path: "/block/step2" }
@@ -62,7 +63,6 @@ chains:
   # --- 3. Out-of-Order Chain (10.0.0.3) ---
   - name: "OutOfOrderChain"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches: { path: "regex:^/order/start$" }
       - field_matches: { path: "/order/end" }
@@ -87,7 +87,6 @@ chains:
   # with the same IP and User-Agent, and a common referrer.
   - name: "IP-UA-Referrer-Chain"
     action: "log" # Action is log
-    match_key: "ip" # Track by IP, allowing UA to change between steps
     steps:
       - field_matches:
           useragent: |-
@@ -105,7 +104,6 @@ chains:
   # --- 6. Sleepy Bot Detection (min_time_since_last_hit) ---
   - name: "SleepyBotChain"
     action: "log"
-    match_key: "ip"
     steps:
       - min_time_since_last_hit: "15s"
         field_matches:
@@ -114,7 +112,6 @@ chains:
   # --- 7. Combined Field Matching (Size and IP) ---
   - name: "CombinedMatcherChain"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches:
           size:
@@ -125,7 +122,6 @@ chains:
   # --- 8. Malformed Request Matching ---
   - name: "MalformedRequestChain"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches:
           statuscode: 400
@@ -135,7 +131,6 @@ chains:
   # --- 9. HTTP/2 Protocol Matching ---
   - name: "HTTP2RequestChain"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches:
           protocol: "HTTP/2.0"
@@ -144,7 +139,6 @@ chains:
   # --- 10. VHost Matching ---
   - name: "VHostSpecificChain"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches:
           vhost: "internal.api.com"
@@ -153,7 +147,6 @@ chains:
   # --- 11. Chain Reset Test ---
   - name: "ChainResetTest"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches: { path: "/reset/step1" }
       - max_delay: "5s"
@@ -166,13 +159,11 @@ chains:
   # ChainOrderTest_Block, which matches and blocks the IP.
   - name: "ChainOrderTest_Log"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches: { path: "/chain-order-test" }
   - name: "ChainOrderTest_Block"
     action: "block"
     block_duration: "10m"
-    match_key: "ip"
     steps:
       - field_matches: { path: "/chain-order-test" }
 
@@ -182,32 +173,27 @@ chains:
   # Since ChainB has `on_match: "stop"`, processing will halt, and ChainC will NOT be evaluated.
   - name: "OnMatchStop_ChainA_Log"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches: { path: "/on-match-stop-test" }
   - name: "OnMatchStop_ChainB_Stop"
-    action: "log"
-    match_key: "ip"
+    action: "block"
+    block_duration: "5m"
     on_match: "stop" # This should stop processing after this chain.
     steps:
       - field_matches: { path: "/on-match-stop-test" }
   - name: "OnMatchStop_ChainC_Should_Not_Run"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches: { path: "/on-match-stop-test" }
 
   # --- 17. Repeated Path Access Detection ---
   - name: "RepeatedPathAccess"
     action: "log"
-    match_key: "ip"
     steps:
       - field_matches:
           path: "/repeated/path"
-      - field_matches:
-          path: "/repeated/path"
         max_delay: "5s"
-        repeated: 2 # This will expand to two steps, making a total of 1 + 2 = 3 steps
+        repeated: 3
 
   # --- NEW CHAIN: Rapid API Abuse (429/503) ---
   # Detects an IP that rapidly receives multiple 429 or 503 responses on API paths,
@@ -217,14 +203,8 @@ chains:
     block_duration: "5m"
     match_key: "ip_ua"
     steps:
-      # Step 1: Initial hit that is a 429 or 503, on an API path.
       - field_matches:
           statuscode: [429, 503]
           path: "regex:^/ws/\\d+/"
-      # Step 2: Subsequent hits that ARE 429 or 503, on an API path, rapidly.
-      # This looks for 5 such hits within 1 second of each other.
-      - field_matches:
-          statuscode: [429, 503]
-          path: "regex:^/ws/\\d+/"
-        max_delay: "1s" # Subsequent 429/503s must occur within 1 second of the previous one
-        repeated: 4 # This means 1 initial non-429/503 + 4 more 429/503s within 1s of each other = 5 total hits
+        max_delay: "1s"
+        repeated: 5

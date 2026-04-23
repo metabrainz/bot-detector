@@ -1,111 +1,250 @@
 #!/bin/bash
 set -e
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$SCRIPT_DIR/../.."
+BINARY="$ROOT_DIR/bot-detector"
+LEADER_DIR="$SCRIPT_DIR/leader"
+FOLLOWER_DIR="$SCRIPT_DIR/follower"
+LOG_FILE="/tmp/bot-detector-cluster-test.log"
+LEADER_STATE="$SCRIPT_DIR/leader-state"
+FOLLOWER_STATE="$SCRIPT_DIR/follower-state"
+
+PASS=0
+FAIL=0
+
+pass() { echo -e "${GREEN}✓ $1${NC}"; PASS=$((PASS + 1)); }
+fail() { echo -e "${RED}✗ $1${NC}"; FAIL=$((FAIL + 1)); }
+
+cleanup() {
+    echo -e "\n${YELLOW}Cleaning up...${NC}"
+    [ -n "$LEADER_PID" ] && kill "$LEADER_PID" 2>/dev/null || true
+    [ -n "$FOLLOWER_PID" ] && kill "$FOLLOWER_PID" 2>/dev/null || true
+    sleep 1
+    rm -rf "$LOG_FILE" "$LEADER_STATE" "$FOLLOWER_STATE" "$SCRIPT_DIR/leader.log" "$SCRIPT_DIR/follower.log"
+    rm -f "$FOLLOWER_DIR/config.yaml"
+}
+trap cleanup EXIT
 
 echo -e "${GREEN}=== Bot Detector Cluster Integration Test ===${NC}\n"
 
-# Clean up function
-cleanup() {
-    echo -e "\n${YELLOW}Cleaning up...${NC}"
-    if [ -n "$LEADER_PID" ]; then
-        kill $LEADER_PID 2>/dev/null || true
-        echo "Stopped leader (PID: $LEADER_PID)"
-    fi
-    if [ -n "$FOLLOWER_PID" ]; then
-        kill $FOLLOWER_PID 2>/dev/null || true
-        echo "Stopped follower (PID: $FOLLOWER_PID)"
-    fi
-    rm -f /tmp/bot-detector-test.log
-}
-
-trap cleanup EXIT
-
-# Build the application
-echo -e "${YELLOW}Step 1: Building application...${NC}"
-cd ../..
+# --- Build ---
+echo -e "${YELLOW}Step 1: Building...${NC}"
+cd "$ROOT_DIR"
 go build -o bot-detector ./cmd/bot-detector
-cd testing/2-nodes-cluster
-echo -e "${GREEN}✓ Build successful${NC}\n"
+pass "Build successful"
+echo ""
 
-# Start leader node
-echo -e "${YELLOW}Step 2: Starting leader node...${NC}"
-../../bot-detector --config leader/config.yaml --dry-run /tmp/bot-detector-test.log &
+# --- Create empty log file ---
+echo -e "${YELLOW}Step 2: Preparing test log...${NC}"
+> "$LEADER_DIR/test.log"
+pass "Created empty log file"
+echo ""
+
+# --- Start leader ---
+echo -e "${YELLOW}Step 3: Starting leader...${NC}"
+mkdir -p "$LEADER_STATE"
+"$BINARY" \
+    --config-dir "$LEADER_DIR" \
+    --listen 127.0.0.1:8080 \
+    --state-dir "$LEADER_STATE" \
+    --cluster-node-name leader \
+    > "$SCRIPT_DIR/leader.log" 2>&1 &
 LEADER_PID=$!
-sleep 3
-echo -e "${GREEN}✓ Leader started (PID: $LEADER_PID)${NC}\n"
+sleep 2
 
-# Test leader status
-echo -e "${YELLOW}Step 3: Testing leader status endpoint...${NC}"
-LEADER_STATUS=$(curl -s http://127.0.0.1:8080/cluster/status)
-echo "$LEADER_STATUS" | python3 -m json.tool
-echo -e "${GREEN}✓ Leader is responding${NC}\n"
-
-# Test archive endpoint
-echo -e "${YELLOW}Step 4: Testing config archive endpoint...${NC}"
-curl -s -I http://127.0.0.1:8080/config/archive | grep -E "(HTTP|Content-Type|Last-Modified|ETag)"
-ARCHIVE_SIZE=$(curl -s http://127.0.0.1:8080/config/archive | wc -c)
-echo "Archive size: $ARCHIVE_SIZE bytes"
-if [ "$ARCHIVE_SIZE" -gt 100 ]; then
-    echo -e "${GREEN}✓ Archive endpoint working${NC}\n"
+if kill -0 "$LEADER_PID" 2>/dev/null; then
+    pass "Leader started (PID: $LEADER_PID)"
 else
-    echo -e "${RED}✗ Archive seems too small${NC}\n"
-    exit 1
-fi
-
-# Test bootstrap functionality
-echo -e "${YELLOW}Step 5: Testing follower bootstrap...${NC}"
-# Remove any existing config in follower directory
-rm -f follower/config.yaml
-# The follower will bootstrap on startup
-../../bot-detector --config follower/config.yaml --dry-run /tmp/bot-detector-test.log --http-server :9090 &
-FOLLOWER_PID=$!
-sleep 5
-
-# Check if follower bootstrapped config
-if [ -f follower/config.yaml ]; then
-    echo -e "${GREEN}✓ Follower bootstrapped config from leader${NC}"
-    echo "Config file size: $(wc -c < follower/config.yaml) bytes"
-else
-    echo -e "${RED}✗ Follower failed to bootstrap config${NC}"
+    fail "Leader failed to start"
+    cat "$SCRIPT_DIR/leader.log"
     exit 1
 fi
 echo ""
 
-# Test follower status
-echo -e "${YELLOW}Step 6: Testing follower status endpoint...${NC}"
-FOLLOWER_STATUS=$(curl -s http://127.0.0.1:9090/cluster/status)
-echo "$FOLLOWER_STATUS" | python3 -m json.tool
-echo -e "${GREEN}✓ Follower is responding${NC}\n"
+# --- Feed log lines to trigger blocks ---
+echo -e "${YELLOW}Step 4: Feeding log lines to block 5 IPs...${NC}"
+TS=$(LC_ALL=C date -u +"%d/%b/%Y:%H:%M:%S +0000")
+for i in $(seq 1 5); do
+    for j in $(seq 1 3); do
+        echo "example.com 10.0.0.$i - - [$TS] \"GET /page/$j HTTP/1.1\" 429 568 \"-\" \"TestBot/1.0\"" >> "$LOG_FILE"
+    done
+done
+sleep 2
 
-# Test config synchronization
-echo -e "${YELLOW}Step 7: Testing config synchronization...${NC}"
-echo "Waiting 6 seconds for config poll..."
-sleep 6
-echo -e "${GREEN}✓ Config poller should have run (check logs above)${NC}\n"
+BLOCKED=0
+for i in $(seq 1 5); do
+    STATUS=$(curl -s "http://127.0.0.1:8080/api/v1/cluster/internal/ip/10.0.0.$i" 2>/dev/null || echo '{}')
+    if echo "$STATUS" | grep -q '"blocked"'; then
+        BLOCKED=$((BLOCKED + 1))
+    fi
+done
+if [ "$BLOCKED" -ge 4 ]; then
+    pass "Leader blocked $BLOCKED/5 IPs"
+else
+    fail "Leader only blocked $BLOCKED/5 IPs (expected ≥4)"
+    grep -E "BLOCK|PARSE|UNKNOWN" "$SCRIPT_DIR/leader.log" 2>/dev/null | tail -5 | sed 's/^/    /'
+fi
+echo ""
 
-# Test FOLLOW file detection
-echo -e "${YELLOW}Step 8: Testing FOLLOW file change detection...${NC}"
-echo "Modifying FOLLOW file to point to different leader..."
-echo "http://127.0.0.1:7070" > follower/FOLLOW
-echo "Waiting 6 seconds for change detection..."
-sleep 6
-echo -e "${GREEN}✓ FOLLOW file change should be detected (check logs above)${NC}\n"
+# --- Test cluster status ---
+echo -e "${YELLOW}Step 5: Testing leader cluster status...${NC}"
+CLUSTER_STATUS=$(curl -s http://127.0.0.1:8080/api/v1/cluster/status 2>/dev/null || echo '{}')
+if echo "$CLUSTER_STATUS" | grep -q '"role":"leader"'; then
+    pass "Leader reports role=leader"
+else
+    fail "Leader cluster status unexpected: $CLUSTER_STATUS"
+fi
+echo ""
 
-echo -e "${YELLOW}Step 9: Testing FOLLOW file deletion (role change)...${NC}"
-rm follower/FOLLOW
-echo "Waiting 6 seconds for change detection..."
-sleep 6
-echo -e "${GREEN}✓ FOLLOW file deletion should be detected (check logs above)${NC}\n"
+# --- Test config archive ---
+echo -e "${YELLOW}Step 6: Testing config archive endpoint...${NC}"
+ARCHIVE_SIZE=$(curl -s http://127.0.0.1:8080/config/archive 2>/dev/null | wc -c)
+if [ "$ARCHIVE_SIZE" -gt 100 ]; then
+    pass "Config archive endpoint working ($ARCHIVE_SIZE bytes)"
+else
+    fail "Config archive too small ($ARCHIVE_SIZE bytes)"
+fi
+echo ""
 
-echo -e "${GREEN}=== All tests completed successfully! ===${NC}"
-echo -e "\nLeader PID: $LEADER_PID"
-echo -e "Follower PID: $FOLLOWER_PID"
-echo -e "\nPress Ctrl+C to stop the nodes and exit"
+# --- Start follower ---
+echo -e "${YELLOW}Step 7: Starting follower with state sync...${NC}"
+mkdir -p "$FOLLOWER_STATE"
+rm -f "$FOLLOWER_DIR/config.yaml"
 
-# Keep script running
-wait
+SYNC_START=$(date +%s%N)
+"$BINARY" \
+    --config-dir "$FOLLOWER_DIR" \
+    --listen 127.0.0.1:9090 \
+    --state-dir "$FOLLOWER_STATE" \
+    --cluster-node-name follower \
+    > "$SCRIPT_DIR/follower.log" 2>&1 &
+FOLLOWER_PID=$!
+sleep 3
+
+if kill -0 "$FOLLOWER_PID" 2>/dev/null; then
+    pass "Follower started (PID: $FOLLOWER_PID)"
+else
+    fail "Follower failed to start"
+    cat "$SCRIPT_DIR/follower.log"
+    exit 1
+fi
+echo ""
+
+# --- Verify follower bootstrapped config ---
+echo -e "${YELLOW}Step 8: Verifying follower config bootstrap...${NC}"
+if [ -f "$FOLLOWER_DIR/config.yaml" ]; then
+    CONFIG_SIZE=$(wc -c < "$FOLLOWER_DIR/config.yaml")
+    pass "Follower bootstrapped config ($CONFIG_SIZE bytes)"
+else
+    fail "Follower did not bootstrap config"
+fi
+echo ""
+
+# --- Wait for state sync and verify ---
+echo -e "${YELLOW}Step 9: Waiting for state sync...${NC}"
+MAX_WAIT=30
+SYNCED=false
+for attempt in $(seq 1 $MAX_WAIT); do
+    SYNC_BLOCKED=0
+    for i in $(seq 1 5); do
+        STATUS=$(curl -s "http://127.0.0.1:9090/api/v1/cluster/internal/ip/10.0.0.$i" 2>/dev/null || echo '{}')
+        if echo "$STATUS" | grep -q '"blocked"'; then
+            SYNC_BLOCKED=$((SYNC_BLOCKED + 1))
+        fi
+    done
+    if [ "$SYNC_BLOCKED" -ge 4 ]; then
+        SYNC_END=$(date +%s%N)
+        SYNC_MS=$(( (SYNC_END - SYNC_START) / 1000000 ))
+        pass "Follower synced $SYNC_BLOCKED/5 blocked IPs (${SYNC_MS}ms from follower start)"
+        SYNCED=true
+        break
+    fi
+    sleep 1
+done
+if [ "$SYNCED" = false ]; then
+    fail "Follower did not sync blocked IPs within ${MAX_WAIT}s (got $SYNC_BLOCKED/5)"
+    echo "  Follower log tail:"
+    grep -E "STATE_SYNC|BLOCK|ERROR" "$SCRIPT_DIR/follower.log" 2>/dev/null | tail -10 | sed 's/^/    /'
+fi
+echo ""
+
+# --- Show state sync metrics ---
+echo -e "${YELLOW}Step 10: State sync metrics...${NC}"
+SYNC_LINE=$(grep "STATE_SYNC.*Merged from leader\|STATE_SYNC.*Fetched initial state" "$SCRIPT_DIR/follower.log" 2>/dev/null | tail -1)
+if [ -n "$SYNC_LINE" ]; then
+    pass "State sync completed"
+    echo "  $SYNC_LINE"
+else
+    SYNC_LINE=$(grep "STATE_SYNC" "$SCRIPT_DIR/follower.log" 2>/dev/null | tail -3)
+    if [ -n "$SYNC_LINE" ]; then
+        fail "State sync may not have completed"
+        echo "$SYNC_LINE" | sed 's/^/    /'
+    else
+        fail "No state sync activity found in follower logs"
+    fi
+fi
+echo ""
+
+# --- Block more IPs on leader and verify incremental sync ---
+echo -e "${YELLOW}Step 11: Testing incremental sync...${NC}"
+TS2=$(LC_ALL=C date -u +"%d/%b/%Y:%H:%M:%S +0000")
+for i in $(seq 6 10); do
+    for j in $(seq 1 3); do
+        echo "example.com 10.0.0.$i - - [$TS2] \"GET /page/$j HTTP/1.1\" 429 568 \"-\" \"TestBot/1.0\"" >> "$LOG_FILE"
+    done
+done
+sleep 8  # Wait for leader to process + follower sync tick
+
+INCR_BLOCKED=0
+for i in $(seq 6 10); do
+    STATUS=$(curl -s "http://127.0.0.1:9090/api/v1/cluster/internal/ip/10.0.0.$i" 2>/dev/null || echo '{}')
+    if echo "$STATUS" | grep -q '"blocked"'; then
+        INCR_BLOCKED=$((INCR_BLOCKED + 1))
+    fi
+done
+if [ "$INCR_BLOCKED" -ge 4 ]; then
+    pass "Incremental sync: follower received $INCR_BLOCKED/5 new blocked IPs"
+else
+    fail "Incremental sync: follower only has $INCR_BLOCKED/5 new IPs (expected ≥4)"
+    grep "STATE_SYNC.*Merged" "$SCRIPT_DIR/follower.log" 2>/dev/null | tail -3 | sed 's/^/    /'
+fi
+echo ""
+
+# --- Verify incremental sync used delta (not full) ---
+echo -e "${YELLOW}Step 12: Verifying incremental sync mode...${NC}"
+INCR_LINE=$(grep "STATE_SYNC.*Merged from leader.*incr" "$SCRIPT_DIR/follower.log" 2>/dev/null | tail -1)
+if [ -n "$INCR_LINE" ]; then
+    pass "Follower used incremental sync"
+    echo "  $INCR_LINE"
+else
+    fail "No incremental sync found in follower logs"
+fi
+echo ""
+
+# --- Verify all 10 IPs are blocked on both nodes ---
+echo -e "${YELLOW}Step 13: Verifying full state consistency...${NC}"
+LEADER_TOTAL=0
+FOLLOWER_TOTAL=0
+for i in $(seq 1 10); do
+    L=$(curl -s "http://127.0.0.1:8080/api/v1/cluster/internal/ip/10.0.0.$i" 2>/dev/null || echo '{}')
+    F=$(curl -s "http://127.0.0.1:9090/api/v1/cluster/internal/ip/10.0.0.$i" 2>/dev/null || echo '{}')
+    echo "$L" | grep -q '"blocked"' && LEADER_TOTAL=$((LEADER_TOTAL + 1))
+    echo "$F" | grep -q '"blocked"' && FOLLOWER_TOTAL=$((FOLLOWER_TOTAL + 1))
+done
+if [ "$LEADER_TOTAL" -ge 9 ] && [ "$FOLLOWER_TOTAL" -ge 9 ]; then
+    pass "State consistent: leader=$LEADER_TOTAL/10, follower=$FOLLOWER_TOTAL/10"
+else
+    fail "State inconsistent: leader=$LEADER_TOTAL/10, follower=$FOLLOWER_TOTAL/10"
+fi
+echo ""
+
+# --- Summary ---
+echo -e "${GREEN}=== Results: $PASS passed, $FAIL failed ===${NC}"
+[ "$FAIL" -gt 0 ] && exit 1
+exit 0

@@ -9,12 +9,18 @@ import (
 // ForLog removes non-printable characters from a string, making it safe for
 // internal use and logging. It allows common characters and replaces others.
 func ForLog(s string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsPrint(r) {
-			return r
+	// Fast path: scan first, only allocate if needed.
+	for _, r := range s {
+		if !unicode.IsPrint(r) {
+			return strings.Map(func(r rune) rune {
+				if unicode.IsPrint(r) {
+					return r
+				}
+				return -1
+			}, s)
 		}
-		return -1 // Discard non-printable runes
-	}, s)
+	}
+	return s
 }
 
 // ForHTML prepares a string for safe rendering within HTML content. It first

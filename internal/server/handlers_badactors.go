@@ -105,8 +105,11 @@ func badActorsDeleteByReasonHandler(p Provider) http.HandlerFunc {
 
 		// Broadcast removal to followers
 		if p.GetNodeRole() == "leader" {
-			go broadcastToFollowers(p, "DELETE",
-				fmt.Sprintf("/api/v1/cluster/internal/bad-actors?reason=%s", url.QueryEscape(reason)), nil)
+			broadcastPath := fmt.Sprintf("/api/v1/cluster/internal/bad-actors?reason=%s", url.QueryEscape(reason))
+			if _, ok := r.URL.Query()["unblock"]; ok {
+				broadcastPath += "&unblock"
+			}
+			go broadcastToFollowers(p, "DELETE", broadcastPath, nil)
 		}
 
 		// If &unblock is present, also unblock the removed IPs from HAProxy
@@ -155,6 +158,15 @@ func internalBadActorsDeleteHandler(p Provider) http.HandlerFunc {
 			p.Log(logging.LevelError, "CLUSTER_BAD_ACTORS", "Failed to remove bad actors by reason %q: %v", reason, err)
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+
+		// Also unblock from HAProxy if requested
+		if _, ok := r.URL.Query()["unblock"]; ok {
+			for _, ip := range removed {
+				if err := unblockIP(p, ip); err != nil {
+					p.Log(logging.LevelError, "CLUSTER_BAD_ACTORS", "Failed to unblock %s: %v", ip, err)
+				}
+			}
 		}
 
 		p.Log(logging.LevelInfo, "CLUSTER_BAD_ACTORS", "Removed %d bad actors by reason %q", len(removed), reason)

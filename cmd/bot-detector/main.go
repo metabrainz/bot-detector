@@ -397,97 +397,111 @@ func restorePersistenceState(p *app.Processor) error {
 		UnblockDirect(ipInfo utils.IPInfo, reason string) error
 	}
 	directB, hasDirectMethods := p.Blocker.(directBlocker)
+	_, _ = directB, hasDirectMethods // used below
 
-	skipped := 0
+	// Pre-filter: count what needs restoring (fast, no HAProxy calls)
+	type restoreCmd struct {
+		action   string // "block" or "unblock"
+		ip       string
+		duration time.Duration
+		reason   string
+	}
+	var cmds []restoreCmd
+
 	skippedGoodActor := 0
 	skippedAlreadyBlocked := 0
 	skippedAlreadyUnblocked := 0
 	skippedExpired := 0
-	restored := 0
 	for ip, state := range allStates {
 		tempEntry := &app.LogEntry{IPInfo: utils.NewIPInfo(ip)}
 		if isGood, reason := checker.IsGoodActor(p, tempEntry); isGood {
 			p.LogFunc(logging.LevelInfo, "STATE_RESTORE_SKIP", "Skipping restore for %s (good_actor: %s)", ip, reason)
-			skipped++
 			skippedGoodActor++
 			continue
 		}
 
 		if state.State == persistence.BlockStateBlocked {
 			if gpc0, exists := currentState[ip]; exists && gpc0 > 0 {
-				skipped++
 				skippedAlreadyBlocked++
 				continue
 			}
-
 			remainingDuration := time.Until(state.ExpireTime)
-			if remainingDuration > 0 {
-				bestFitDuration := p.Config.Blockers.DefaultDuration
-				for _, t := range sortedTables {
-					if remainingDuration <= t.duration {
-						bestFitDuration = t.duration
-						break
-					}
-				}
-				var blockErr error
-				if hasDirectMethods {
-					blockErr = directB.BlockDirect(utils.NewIPInfo(ip), bestFitDuration, state.Reason)
-				} else {
-					blockErr = p.Blocker.Block(utils.NewIPInfo(ip), bestFitDuration, state.Reason)
-				}
-				if blockErr != nil {
-					p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore block for IP %s: %v", ip, blockErr)
-				} else {
-					restored++
-				}
-			} else {
-				skipped++
+			if remainingDuration <= 0 {
 				skippedExpired++
+				continue
 			}
+			bestFitDuration := p.Config.Blockers.DefaultDuration
+			for _, t := range sortedTables {
+				if remainingDuration <= t.duration {
+					bestFitDuration = t.duration
+					break
+				}
+			}
+			cmds = append(cmds, restoreCmd{"block", ip, bestFitDuration, state.Reason})
 		} else if state.State == persistence.BlockStateUnblocked {
 			if gpc0, exists := currentState[ip]; exists && gpc0 == 0 {
-				skipped++
 				skippedAlreadyUnblocked++
 				continue
 			}
-
-			var unblockErr error
-			if hasDirectMethods {
-				unblockErr = directB.UnblockDirect(utils.NewIPInfo(ip), state.Reason)
-			} else {
-				unblockErr = p.Blocker.Unblock(utils.NewIPInfo(ip), state.Reason)
-			}
-			if unblockErr != nil {
-				p.LogFunc(logging.LevelError, "STATE_RESTORE_FAIL", "Failed to restore unblock for IP %s: %v", ip, unblockErr)
-			} else {
-				restored++
-			}
+			cmds = append(cmds, restoreCmd{"unblock", ip, 0, state.Reason})
 		}
 	}
 
-	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "State restoration complete: %d restored, %d skipped (already_blocked=%d, already_unblocked=%d, expired=%d, good_actors=%d)",
-		restored, skipped, skippedAlreadyBlocked, skippedAlreadyUnblocked, skippedExpired, skippedGoodActor)
-
-	if restored > 50000 {
-		p.LogFunc(logging.LevelWarning, "STATE_RESTORE", "Restored %d IPs. Verify HAProxy stick table capacity.", restored)
-	}
-
-	// Restore bad actors
+	// Add bad actors
+	baCmds := 0
 	if p.Config.BadActors.Enabled {
 		badActors, baErr := persistence.GetAllBadActors(p.DB)
 		if baErr != nil {
 			p.LogFunc(logging.LevelError, "STATE_RESTORE", "Failed to load bad actors: %v", baErr)
-		} else if len(badActors) > 0 {
-			baRestored := 0
+		} else {
+			skippedBA := 0
 			for _, ba := range badActors {
-				if !p.DryRun && p.Blocker != nil {
-					ipInfo := utils.NewIPInfo(ba.IP)
-					if blockErr := p.Blocker.Block(ipInfo, p.Config.BadActors.BlockDuration, "bad-actor"); blockErr == nil {
-						baRestored++
-					}
+				if gpc0, exists := currentState[ba.IP]; exists && gpc0 > 0 {
+					skippedBA++
+					continue
+				}
+				cmds = append(cmds, restoreCmd{"block", ba.IP, p.Config.BadActors.BlockDuration, "bad-actor"})
+			}
+			baCmds = len(badActors) - skippedBA
+			if skippedBA > 0 {
+				skippedAlreadyBlocked += skippedBA
+			}
+		}
+	}
+
+	skipped := skippedGoodActor + skippedAlreadyBlocked + skippedAlreadyUnblocked + skippedExpired
+	p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Queuing %d commands in background (%d bad actors), skipped %d (already_blocked=%d, already_unblocked=%d, expired=%d, good_actors=%d)",
+		len(cmds), baCmds, skipped, skippedAlreadyBlocked, skippedAlreadyUnblocked, skippedExpired, skippedGoodActor)
+
+	if len(cmds) > 0 {
+		rlb, ok := p.Blocker.(*blocker.RateLimitedBlocker)
+		if !ok {
+			p.LogFunc(logging.LevelWarning, "STATE_RESTORE", "Blocker does not support background restore, restoring synchronously")
+			for _, c := range cmds {
+				ipInfo := utils.NewIPInfo(c.ip)
+				if c.action == "block" {
+					_ = p.Blocker.Block(ipInfo, c.duration, c.reason)
+				} else {
+					_ = p.Blocker.Unblock(ipInfo, c.reason)
 				}
 			}
-			p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Restored %d bad actors (%d total in database)", baRestored, len(badActors))
+		} else {
+			go func() {
+				for _, c := range cmds {
+					// Yield when queue is >50% full to leave room for live traffic
+					for len(rlb.CommandQueue) > cap(rlb.CommandQueue)/2 {
+						time.Sleep(100 * time.Millisecond)
+					}
+					cmd := blocker.BlockerCommand{
+						Action:   c.action,
+						IPInfo:   utils.NewIPInfo(c.ip),
+						Duration: c.duration,
+						Reason:   c.reason,
+					}
+					rlb.CommandQueue <- cmd
+				}
+				p.LogFunc(logging.LevelInfo, "STATE_RESTORE", "Background restore complete: %d commands sent", len(cmds))
+			}()
 		}
 	}
 
@@ -543,6 +557,11 @@ func execute(params *commandline.AppParameters) error {
 			return nil
 		}
 		return err
+	}
+
+	// Initialize merged state cache in state directory
+	if params.StateDir != "" {
+		server.InitMergedStateCache(params.StateDir)
 	}
 
 	// Log build information (after handling --version and --check)
@@ -1108,6 +1127,8 @@ func start(p *app.Processor) {
 				LogPath: p.LogPath,
 				VHosts:  []string{}, // Empty = catch-all
 			}}
+			p.VHostToWebsite, p.CatchAllWebsite = app.BuildVHostMap(p.Websites)
+			p.WebsiteChains, p.GlobalChains = app.CategorizeChains(p.Chains)
 			p.LogFunc(logging.LevelInfo, "SETUP", "Starting single-website mode on %s", p.LogPath)
 		}
 		processor.MultiLogTailer(p, p.SignalCh)

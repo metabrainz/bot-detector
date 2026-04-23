@@ -125,7 +125,7 @@ musicbrainz.org 10.0.0.13 - - [28/Oct/2025:17:04:00 +0000] "GET /chain-order-tes
 # ===
 # --- This single hit should trigger the first two chains, but the second chain's `on_match: "stop"` will prevent the third from running. ---
 # === EXPECTED LOG: DRY_RUN: LOG: Chain: OnMatchStop_ChainA_Log completed by IP 10.0.0.14. Action set to 'log' (DryRun)
-# === EXPECTED LOG: DRY_RUN: LOG: Chain: OnMatchStop_ChainB_Stop completed by IP 10.0.0.14. Action set to 'log' (DryRun) (on_match: stop)
+# === EXPECTED LOG: DRY_RUN: BLOCK: Chain: OnMatchStop_ChainB_Stop completed by IP 10.0.0.14. Blocking for 5m0s (DryRun) (on_match: stop)
 musicbrainz.org 10.0.0.14 - - [28/Oct/2025:17:05:00 +0000] "GET /on-match-stop-test HTTP/1.1" 200 100 "-" "OnMatchBot"
 
 # ======================================================================================

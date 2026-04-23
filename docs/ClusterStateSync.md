@@ -355,7 +355,8 @@ cluster:
     interval: "60s"            # How often to sync (leader queries followers, followers query leader)
     compression: true          # Use gzip compression for state transfer
     timeout: "30s"             # HTTP timeout for state queries
-    incremental: false         # Use incremental sync (not yet implemented)
+    incremental: true          # Use incremental sync (only changed IPs)
+    batch_size: 10000          # Rows per DB transaction batch on follower (default: 10000)
 ```
 
 **Requirements:**

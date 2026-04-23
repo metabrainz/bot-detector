@@ -2342,3 +2342,148 @@ chains:
 		t.Errorf("Expected error about duplicate good_actors name, got: %v", err)
 	}
 }
+
+func TestLoadConfigFromYAML_ChainDefaults(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+chain_defaults:
+  action: "block"
+  block_duration: "1h"
+  match_key: "ip"
+  on_match: "stop"
+  bad_actor_weight: 0.5
+blockers:
+  backends:
+    haproxy:
+      addresses: ["127.0.0.1:9999"]
+      duration_tables:
+        "1h": "table_1h"
+        "5m": "table_5m"
+chains:
+  - name: "UsesDefaults"
+    steps:
+      - field_matches: { statuscode: 429 }
+  - name: "OverridesAll"
+    action: "log"
+    block_duration: "5m"
+    match_key: "ip_ua"
+    on_match: "continue"
+    bad_actor_weight: 0.1
+    steps:
+      - field_matches: { statuscode: 503 }
+`
+	tmpConfigFilePath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: tmpConfigFilePath})
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if len(loadedCfg.Chains) != 2 {
+		t.Fatalf("Expected 2 chains, got %d", len(loadedCfg.Chains))
+	}
+
+	// Chain that uses all defaults
+	c := loadedCfg.Chains[0]
+	if c.Action != "block" {
+		t.Errorf("Expected action 'block', got '%s'", c.Action)
+	}
+	if c.BlockDuration != 1*time.Hour {
+		t.Errorf("Expected block_duration 1h, got %v", c.BlockDuration)
+	}
+	if c.MatchKey != "ip" {
+		t.Errorf("Expected match_key 'ip', got '%s'", c.MatchKey)
+	}
+	if c.OnMatch != "stop" {
+		t.Errorf("Expected on_match 'stop', got '%s'", c.OnMatch)
+	}
+	if c.BadActorWeight != 0.5 {
+		t.Errorf("Expected bad_actor_weight 0.5, got %f", c.BadActorWeight)
+	}
+
+	// Chain that overrides all defaults
+	c2 := loadedCfg.Chains[1]
+	if c2.Action != "log" {
+		t.Errorf("Expected action 'log', got '%s'", c2.Action)
+	}
+	if c2.BlockDuration != 5*time.Minute {
+		t.Errorf("Expected block_duration 5m, got %v", c2.BlockDuration)
+	}
+	if c2.MatchKey != "ip_ua" {
+		t.Errorf("Expected match_key 'ip_ua', got '%s'", c2.MatchKey)
+	}
+	if c2.OnMatch != "continue" {
+		t.Errorf("Expected on_match 'continue', got '%s'", c2.OnMatch)
+	}
+	if c2.BadActorWeight != 0.1 {
+		t.Errorf("Expected bad_actor_weight 0.1, got %f", c2.BadActorWeight)
+	}
+}
+
+func TestLoadConfigFromYAML_ChainDefaultsPartial(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+chain_defaults:
+  action: "block"
+  match_key: "ip"
+chains:
+  - name: "PartialDefaults"
+    block_duration: "5m"
+    on_match: "stop"
+    steps:
+      - field_matches: { statuscode: 429 }
+`
+	tmpConfigFilePath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: tmpConfigFilePath})
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	c := loadedCfg.Chains[0]
+	if c.Action != "block" {
+		t.Errorf("Expected action 'block', got '%s'", c.Action)
+	}
+	if c.MatchKey != "ip" {
+		t.Errorf("Expected match_key 'ip', got '%s'", c.MatchKey)
+	}
+	if c.OnMatch != "stop" {
+		t.Errorf("Expected on_match 'stop', got '%s'", c.OnMatch)
+	}
+	if c.BlockDuration != 5*time.Minute {
+		t.Errorf("Expected block_duration 5m, got %v", c.BlockDuration)
+	}
+}
+
+func TestLoadConfigFromYAML_NoChainDefaults(t *testing.T) {
+	// Ensure existing behavior is unchanged when chain_defaults is absent
+	yamlContent := `
+version: "1.0"
+chains:
+  - name: "NoDefaults"
+    action: "log"
+    match_key: "ip"
+    steps:
+      - field_matches: { statuscode: 200 }
+`
+	tmpConfigFilePath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	loadedCfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: tmpConfigFilePath})
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	c := loadedCfg.Chains[0]
+	if c.Action != "log" {
+		t.Errorf("Expected action 'log', got '%s'", c.Action)
+	}
+	if c.OnMatch != "" {
+		t.Errorf("Expected on_match '', got '%s'", c.OnMatch)
+	}
+	if c.BadActorWeight != 1.0 {
+		t.Errorf("Expected default bad_actor_weight 1.0, got %f", c.BadActorWeight)
+	}
+}

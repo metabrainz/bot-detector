@@ -19,6 +19,7 @@ The configuration is structured as a top-level map containing settings for the a
 | **blockers** | object | Configuration for the blocking backend(s). See table [`blockers`](#blockers). |
 | **cluster** | object | Optional. Cluster configuration for multi-node deployments. See table [`cluster`](#cluster). |
 | **good_actors** | list of objects | Optional. A list of trusted actors to skip from all processing. See table [`good_actors`](#good_actors). |
+| **chain_defaults** | object | Optional. Default values for chain fields. See table [`chain_defaults`](#chain_defaults). |
 | **chains** | list of objects | The list of behavioral chains to be loaded. See table [`chains`](#chains). |
 
 ### `websites`
@@ -101,9 +102,9 @@ websites:
 | Field | Type | Description |
 | :---- | :---- | :---- |
 | **default_duration** | string | Optional. A global block duration to apply to any `block` action chain that does not define its own `block_duration`. Format: Go duration string (e.g., "5m", "1h"). |
-| **commands_per_second** | int | Optional. The maximum number of commands per second to send to the blocker. Default: `100`. |
-| **command_queue_size** | int | Optional. The maximum number of commands that can be queued for the blocker. Default: `10000`. |
-| **max_commands_per_batch** | int | Optional. The maximum number of commands to batch together in a single request to the backend. HAProxy CLI supports semicolon-separated commands. Tested successfully with 1000. Default: `500`. |
+| **commands_per_second** | int | Optional. The maximum number of commands per second to send to the blocker. Default: `5000`. |
+| **command_queue_size** | int | Optional. The maximum number of commands that can be queued for the blocker. Default: `100000`. |
+| **max_commands_per_batch** | int | Optional. The maximum number of commands to batch together in a single request to the backend. HAProxy CLI supports semicolon-separated commands. Default: `100` (optimal throughput). |
 | **dial_timeout** | string | Optional. Timeout for establishing a connection to a blocker socket. Default: `5s`. |
 | **max_retries** | int | Optional. Number of attempts to send a command to a blocker instance. Default: `3`. |
 | **retry_delay** | string | Optional. Duration to wait between retry attempts. Default: `200ms`. |
@@ -152,11 +153,50 @@ For cluster communication, you can dedicate a specific listener using `--listen 
 | **useragent** | string or list | A string, `file:` path, or `regex:` pattern to match against the log entry's User-Agent. Can be a single string or a list of strings. |
 
 
+### `chain_defaults`
+
+Optional. Provides default values for chain fields. Any field set here will be used as the default for chains that don't explicitly specify it. This reduces repetition when many chains share the same settings.
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
+| **action** | string | Default action for chains (`block` or `log`). |
+| **block_duration** | string | Default block duration. Takes precedence over `blockers.default_duration`. |
+| **match_key** | string | Default match key (e.g., `ip`, `ip_ua`). |
+| **on_match** | string | Default on_match behavior (`stop` or `continue`). |
+| **bad_actor_weight** | float | Default bad actor weight (0.0–1.0). |
+
+To override a default back to the "no value" behavior, use the explicit opposite value. For example, if `chain_defaults` sets `on_match: "stop"`, a chain can use `on_match: "continue"` to keep processing subsequent chains after a match.
+
+**Example:**
+```yaml
+chain_defaults:
+  action: "block"
+  match_key: "ip"
+  on_match: "stop"
+
+chains:
+  # This chain inherits action: block, match_key: ip, on_match: stop
+  - name: "Simple-Bot"
+    block_duration: "1h"
+    steps:
+      - field_matches:
+          useragent: "BadBot/1.0"
+
+  # This chain overrides on_match to continue processing
+  - name: "Log-Only-Scanner"
+    action: "log"
+    on_match: "continue"
+    steps:
+      - field_matches:
+          statuscode: 429
+```
+
+
 ### `chains`
 
 The `chains` key is a list of behavioral chain definitions. Each chain represents a sequential pattern of log entries that, when completed, triggers an action (block or log).
 
-Chains are processed in the order they are defined. Each chain definition must include a unique name, an action, a match key, and a list of steps. See table [`chains[].fields`](#chainsfields) for detailed field descriptions.
+Chains are processed in the order they are defined. Each chain definition must include a unique name, an action, a match key, and a list of steps (unless provided by `chain_defaults`). See table [`chains[].fields`](#chainsfields) for detailed field descriptions.
 
 **Important:** Chain names must be unique. Duplicate names will cause a configuration error.
 
@@ -168,7 +208,7 @@ Chains are processed in the order they are defined. Each chain definition must i
 | **action** | string | Yes | The action to take when the chain is completed: `block` or `log`. To temporarily disable a chain, prefix the action with `!` (e.g., `!block`). |
 | **block_duration** | string | No | The duration for which the IP should be blocked if `action` is `block`. Format: Go duration string (e.g., `5m`, `1h`, `30m`, `1h30m`). If not specified, uses `blockers.default_duration`. |
 | **match_key** | string | Yes | The key used to track activity. Determines if behavior is tracked per IP, per IP version, or per unique client (IP + User-Agent). See [`match_key` values](#match_key-values) below. |
-| **on_match** | string | No | If set to `stop`, no further chains will be processed for the current log entry after this chain completes. |
+| **on_match** | string | No | If set to `stop`, no further chains will be processed for the current log entry after this chain completes. Only effective for `block` actions — log-only chains never stop further processing. |
 | **bad_actor_weight** | float | No | Weight added to the bad actor score when this chain blocks an IP (0.0–1.0). Default: `1.0`. Only relevant when `bad_actors` is enabled. See [BAD_ACTORS.md](BAD_ACTORS.md). |
 | **websites** | list of strings | No | **Multi-website mode only.** List of website names (from `websites` section) where this chain applies. If omitted or empty, the chain applies to all websites (global chain). Example: `["main_site", "api_site"]`. |
 | **steps** | list of objects | Yes | The sequential list of steps that define the malicious pattern. See table [`chains[].steps[].fields`](#chainsstepsfields). |
@@ -177,7 +217,7 @@ Chains are processed in the order they are defined. Each chain definition must i
 
 Chains are processed for each log entry in the order they are defined in the `chains` array. Place more specific or higher-priority chains before more general ones.
 
-When a chain with `on_match: "stop"` is completed, the application immediately stops evaluating subsequent chains for that log entry. For example, you might place a very specific, high-confidence "block" chain first, followed by more general "log-only" chains.
+When a chain with `on_match: "stop"` is completed, the application immediately stops evaluating subsequent chains for that log entry. This only applies to `block` actions — log-only chains always continue processing regardless of `on_match`. For example, you might place a very specific, high-confidence "block" chain first, followed by more general "log-only" chains.
 
 ##### Multi-Website Chain Filtering
 
@@ -271,7 +311,26 @@ See table [`chains[].steps[].fields`](#chainsstepsfields) for detailed field des
 | **max_delay** | string | No | **(Steps 2+)** The maximum allowed time between the previous step and this one. If exceeded, the chain resets. Ignored on the first step. Format: Go duration string (e.g., `10s`, `1m`). |
 | **min_delay** | string | No | **(Steps 2+)** The minimum required time between the previous step and the current step. If not met, the chain resets. Ignored on the first step. Format: Go duration string. |
 | **min_time_since_last_hit** | string | No | **(First Step Only)** The first step will only match if the time since the last overall request from the same actor is **greater than** this duration. Useful for detecting "sleepy" bots with long periods of inactivity. Ignored on subsequent steps. Format: Go duration string (e.g., `30m`, `12h`). |
-| **repeated** | int | No | If `> 1`, this step definition will be repeated the specified number of times when the chain is compiled. Simplifies defining sequences of identical steps. Default: `1`. |
+| **repeated** | int | No | If `> 1`, this step definition will be repeated the specified number of times when the chain is compiled. Simplifies defining sequences of identical steps. Default: `1`. Can be used on the first step (see tip below). |
+
+> **Tip: Using `repeated` on the first step.** When `repeated` is used on the first step together with `max_delay`, the timing constraint only applies from the 2nd repetition onward (since `max_delay` is always ignored on the very first compiled step). This allows you to write a single step instead of two:
+> ```yaml
+> # Instead of this:
+> steps:
+>   - field_matches:
+>       statuscode: 429
+>   - field_matches:
+>       statuscode: 429
+>     max_delay: "5s"
+>     repeated: 9
+>
+> # You can write this (equivalent — 10 matches, first unconstrained, rest within 5s):
+> steps:
+>   - field_matches:
+>       statuscode: 429
+>     max_delay: "5s"
+>     repeated: 10
+> ```
 
 ##### `chains[].steps[].field_matches`
 
@@ -570,7 +629,7 @@ checker:
 # Blocker configuration
 blockers:
   default_duration: "30m"  # Used by chains without a specific block_duration
-  commands_per_second: 100
+  commands_per_second: 5000
   command_queue_size: 10000
   max_commands_per_batch: 500
   dial_timeout: "5s"

@@ -15,6 +15,18 @@ import (
 	"bot-detector/internal/persistence"
 )
 
+// countingReader wraps a reader and counts bytes read.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
 // StateSyncManager manages periodic state synchronization
 type StateSyncManager struct {
 	config           *ClusterConfig
@@ -82,11 +94,8 @@ func FetchMergedState(url string, client *http.Client, requestCompression bool) 
 		reader = gz
 	}
 
-	bodyBytes, err := io.ReadAll(reader)
-	if err != nil {
-		return nil, nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to read response: %w", err)
-	}
-	duration := time.Since(startTime)
+	// Use a counting reader to track bytes read for metrics
+	cr := &countingReader{r: reader}
 
 	var mergedResp struct {
 		Version   string                         `json:"version"`
@@ -95,11 +104,12 @@ func FetchMergedState(url string, client *http.Client, requestCompression bool) 
 		BadActors []persistence.BadActorInfo     `json:"bad_actors,omitempty"`
 	}
 
-	if err := json.Unmarshal(bodyBytes, &mergedResp); err != nil {
+	if err := json.NewDecoder(cr).Decode(&mergedResp); err != nil {
 		return nil, nil, time.Time{}, FetchMetrics{}, fmt.Errorf("failed to decode: %w", err)
 	}
 
-	sizeKB := float64(len(bodyBytes)) / 1024.0
+	duration := time.Since(startTime)
+	sizeKB := float64(cr.n) / 1024.0
 	var rateKBps float64
 	if duration.Seconds() > 0 {
 		rateKBps = sizeKB / duration.Seconds()
@@ -373,30 +383,72 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	m.lastSyncTime = responseTimestamp
 	m.lastSyncMutex.Unlock()
 
-	// Merge with local state
+	// Merge with local state using a single transaction for performance
 	now := time.Now()
 	m.dbMutex.Lock()
+	const defaultBatchSize = 10000
+	batchSize := m.config.StateSync.BatchSize
+	if batchSize <= 0 {
+		batchSize = defaultBatchSize
+	}
+	count := 0
+
+	beginBatch := func() (*sql.Tx, *sql.Stmt, error) {
+		tx, err := m.db.Begin()
+		if err != nil {
+			return nil, nil, err
+		}
+		stmt, err := tx.Prepare(`INSERT INTO ips (ip, state, expire_time, reason_id, modified_at, first_blocked_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(ip) DO UPDATE SET
+				state = excluded.state,
+				expire_time = MAX(ips.expire_time, excluded.expire_time),
+				reason_id = excluded.reason_id,
+				modified_at = MAX(ips.modified_at, excluded.modified_at),
+				first_blocked_at = CASE
+					WHEN ips.first_blocked_at IS NOT NULL AND ips.first_blocked_at > 0 AND ips.first_blocked_at < excluded.first_blocked_at
+					THEN ips.first_blocked_at
+					ELSE excluded.first_blocked_at
+				END`)
+		if err != nil {
+			_ = tx.Rollback()
+			return nil, nil, err
+		}
+		return tx, stmt, nil
+	}
+
+	tx, upsertStmt, err := beginBatch()
+	if err != nil {
+		m.dbMutex.Unlock()
+		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to begin transaction: %v", err)
+		return
+	}
+
 	for ip, state := range states {
 		if state.ExpireTime.After(now) {
-			existing, err := persistence.GetIPState(m.db, ip)
-			if err == nil && existing != nil {
-				// Merge reasons, keep longest expiry, latest modification, earliest block
-				mergedState := persistence.IPState{
-					Reason:         MergeReasons(existing.Reason, state.Reason),
-					ExpireTime:     maxTime(existing.ExpireTime, state.ExpireTime),
-					ModifiedAt:     maxTime(existing.ModifiedAt, state.ModifiedAt),
-					FirstBlockedAt: minTime(existing.FirstBlockedAt, state.FirstBlockedAt),
+			reasonID := persistence.ReasonHash(state.Reason)
+			_, _ = tx.Exec("INSERT OR IGNORE INTO reasons (id, reason) VALUES (?, ?)", reasonID, state.Reason)
+			_, _ = upsertStmt.Exec(ip, state.State.String(), persistence.TimeToUnix(state.ExpireTime), reasonID, persistence.TimeToUnix(state.ModifiedAt), persistence.TimeToUnix(state.FirstBlockedAt))
+			count++
+
+			if count%batchSize == 0 {
+				_ = upsertStmt.Close()
+				if err := tx.Commit(); err != nil {
+					m.log(logging.LevelWarning, "STATE_SYNC", "Failed to commit batch: %v", err)
 				}
-				if state.ExpireTime.After(existing.ExpireTime) {
-					mergedState.State = state.State
-				} else {
-					mergedState.State = existing.State
+				tx, upsertStmt, err = beginBatch()
+				if err != nil {
+					m.dbMutex.Unlock()
+					m.log(logging.LevelWarning, "STATE_SYNC", "Failed to begin batch: %v", err)
+					return
 				}
-				_ = persistence.UpsertIPState(m.db, ip, mergedState.State, mergedState.ExpireTime, mergedState.Reason, mergedState.ModifiedAt, mergedState.FirstBlockedAt)
-			} else {
-				_ = persistence.UpsertIPState(m.db, ip, state.State, state.ExpireTime, state.Reason, state.ModifiedAt, state.FirstBlockedAt)
 			}
 		}
+	}
+
+	_ = upsertStmt.Close()
+	if err := tx.Commit(); err != nil {
+		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to commit final batch: %v", err)
 	}
 	m.dbMutex.Unlock()
 

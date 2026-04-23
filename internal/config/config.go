@@ -875,7 +875,8 @@ func parseStateSyncConfig(yamlConfig *StateSyncConfigYAML) cluster.StateSyncConf
 		Interval:    60 * time.Second,
 		Compression: true, // Default: enabled
 		Timeout:     30 * time.Second,
-		Incremental: true, // Default: incremental sync (more efficient)
+		Incremental: true,  // Default: incremental sync (more efficient)
+		BatchSize:   10000, // Default: 10,000 rows per transaction batch
 	}
 
 	if yamlConfig == nil {
@@ -911,6 +912,11 @@ func parseStateSyncConfig(yamlConfig *StateSyncConfigYAML) cluster.StateSyncConf
 		config.Incremental = *yamlConfig.Incremental
 	}
 
+	// Parse batch size
+	if yamlConfig.BatchSize > 0 {
+		config.BatchSize = yamlConfig.BatchSize
+	}
+
 	return config
 }
 
@@ -929,6 +935,7 @@ func NewClusterConfigWithDefaults(nodes []cluster.NodeConfig) *cluster.ClusterCo
 			Compression: true,
 			Timeout:     30 * time.Second,
 			Incremental: true,
+			BatchSize:   10000,
 		},
 	}
 }
@@ -1079,6 +1086,25 @@ func parseChains(config *TopLevelConfig, fileDeps map[string]*types.FileDependen
 	}
 
 	for _, yamlChain := range config.Chains {
+		// Apply chain_defaults for any unset fields.
+		if d := config.ChainDefaults; d != nil {
+			if yamlChain.Action == "" {
+				yamlChain.Action = d.Action
+			}
+			if yamlChain.BlockDuration == "" {
+				yamlChain.BlockDuration = d.BlockDuration
+			}
+			if yamlChain.MatchKey == "" {
+				yamlChain.MatchKey = d.MatchKey
+			}
+			if yamlChain.OnMatch == "" {
+				yamlChain.OnMatch = d.OnMatch
+			}
+			if yamlChain.BadActorWeight == nil && d.BadActorWeight != nil {
+				yamlChain.BadActorWeight = d.BadActorWeight
+			}
+		}
+
 		if strings.HasPrefix(yamlChain.Action, "!") {
 			logging.LogOutput(logging.LevelDebug, "CONFIG_SKIP", "Skipping disabled chain '%s' (action: %s)", yamlChain.Name, yamlChain.Action)
 			continue

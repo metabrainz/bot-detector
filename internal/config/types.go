@@ -121,17 +121,28 @@ type WebsiteConfig struct {
 }
 
 type TopLevelConfig struct {
-	Version     string                   `yaml:"version"`
-	Websites    []WebsiteConfig          `yaml:"websites"` // Optional: multi-website support
-	RootDir     string                   `yaml:"root_dir"` // Optional: root directory for relative log paths (defaults to config dir)
-	Application ApplicationConfigYAML    `yaml:"application"`
-	Parser      ParserConfigYAML         `yaml:"parser"`
-	Checker     CheckerConfigYAML        `yaml:"checker"`
-	Blockers    BlockersConfigYAML       `yaml:"blockers"`
-	Cluster     *ClusterConfigYAML       `yaml:"cluster"`    // Optional cluster configuration
-	BadActors   *BadActorsConfigYAML     `yaml:"bad_actors"` // Optional bad actors configuration
-	GoodActors  []map[string]interface{} `yaml:"good_actors"`
-	Chains      []BehavioralChainYAML    `yaml:"chains"`
+	Version       string                   `yaml:"version"`
+	Websites      []WebsiteConfig          `yaml:"websites"`       // Optional: multi-website support
+	RootDir       string                   `yaml:"root_dir"`       // Optional: root directory for relative log paths (defaults to config dir)
+	ChainDefaults *ChainDefaultsYAML       `yaml:"chain_defaults"` // Optional: default values for chain fields
+	Application   ApplicationConfigYAML    `yaml:"application"`
+	Parser        ParserConfigYAML         `yaml:"parser"`
+	Checker       CheckerConfigYAML        `yaml:"checker"`
+	Blockers      BlockersConfigYAML       `yaml:"blockers"`
+	Cluster       *ClusterConfigYAML       `yaml:"cluster"`    // Optional cluster configuration
+	BadActors     *BadActorsConfigYAML     `yaml:"bad_actors"` // Optional bad actors configuration
+	GoodActors    []map[string]interface{} `yaml:"good_actors"`
+	Chains        []BehavioralChainYAML    `yaml:"chains"`
+}
+
+// ChainDefaultsYAML provides default values for chain fields.
+// Any field set here will be used as the default for chains that don't specify it.
+type ChainDefaultsYAML struct {
+	Action         string   `yaml:"action"`
+	BlockDuration  string   `yaml:"block_duration"`
+	MatchKey       string   `yaml:"match_key"`
+	OnMatch        string   `yaml:"on_match"`
+	BadActorWeight *float64 `yaml:"bad_actor_weight"`
 }
 
 // BadActorsConfigYAML represents the bad_actors configuration in YAML format.
@@ -218,6 +229,7 @@ type StateSyncConfigYAML struct {
 	Compression *bool  `yaml:"compression"`
 	Timeout     string `yaml:"timeout"`
 	Incremental *bool  `yaml:"incremental"`
+	BatchSize   int    `yaml:"batch_size"`
 }
 
 // NodeConfigYAML represents a single node in the cluster in YAML format.
