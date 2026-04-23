@@ -324,6 +324,110 @@ func TestCleanupOldEvents(t *testing.T) {
 	assert.Equal(t, 1, count)
 }
 
+func TestCleanupStaleBadActors(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().Truncate(time.Second)
+
+	// IP still actively blocked — bad actor should be kept
+	require.NoError(t, UpsertIPState(db, "1.1.1.1", BlockStateBlocked, now.Add(1*time.Hour), "chain1", now, now))
+	require.NoError(t, PromoteToBadActor(db, "1.1.1.1", 5.0, 3, now))
+
+	// IP not in ips table at all — bad actor should be removed
+	require.NoError(t, PromoteToBadActor(db, "2.2.2.2", 6.0, 4, now))
+
+	// IP unblocked — bad actor should be removed
+	require.NoError(t, UpsertIPState(db, "3.3.3.3", BlockStateUnblocked, now, "good-actor", now, time.Time{}))
+	require.NoError(t, PromoteToBadActor(db, "3.3.3.3", 7.0, 5, now))
+
+	deleted, err := CleanupStaleBadActors(db)
+	require.NoError(t, err)
+	assert.Equal(t, 2, deleted)
+
+	// Only 1.1.1.1 should remain
+	is1, err := IsBadActor(db, "1.1.1.1")
+	require.NoError(t, err)
+	assert.True(t, is1)
+
+	is2, err := IsBadActor(db, "2.2.2.2")
+	require.NoError(t, err)
+	assert.False(t, is2)
+
+	is3, err := IsBadActor(db, "3.3.3.3")
+	require.NoError(t, err)
+	assert.False(t, is3)
+}
+
+func TestCleanupPromotedScores(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().Truncate(time.Second)
+
+	// IP promoted to bad_actor — score should be removed
+	require.NoError(t, PromoteToBadActor(db, "1.1.1.1", 5.0, 3, now))
+	_, _, err := IncrementScore(db, "1.1.1.1", 5.0, now)
+	require.NoError(t, err)
+
+	// IP NOT a bad_actor — score should be kept
+	_, _, err = IncrementScore(db, "2.2.2.2", 3.0, now)
+	require.NoError(t, err)
+
+	deleted, err := CleanupPromotedScores(db)
+	require.NoError(t, err)
+	assert.Equal(t, 1, deleted)
+
+	s1, err := GetScore(db, "1.1.1.1")
+	require.NoError(t, err)
+	assert.Nil(t, s1)
+
+	s2, err := GetScore(db, "2.2.2.2")
+	require.NoError(t, err)
+	assert.NotNil(t, s2)
+}
+
+func TestCleanupStaleScores(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().Truncate(time.Second)
+	retention := 7 * 24 * time.Hour
+
+	// IP actively blocked — score should be kept regardless of age
+	require.NoError(t, UpsertIPState(db, "1.1.1.1", BlockStateBlocked, now.Add(1*time.Hour), "chain1", now, now))
+	_, _, err := IncrementScore(db, "1.1.1.1", 2.0, now.Add(-10*24*time.Hour))
+	require.NoError(t, err)
+
+	// IP not blocked, score recent — should be kept
+	_, _, err = IncrementScore(db, "2.2.2.2", 3.0, now.Add(-1*time.Hour))
+	require.NoError(t, err)
+
+	// IP not blocked, score old — should be removed
+	_, _, err = IncrementScore(db, "3.3.3.3", 4.0, now.Add(-10*24*time.Hour))
+	require.NoError(t, err)
+
+	// IP unblocked, score old — should be removed
+	require.NoError(t, UpsertIPState(db, "4.4.4.4", BlockStateUnblocked, now, "good-actor", now, time.Time{}))
+	_, _, err = IncrementScore(db, "4.4.4.4", 5.0, now.Add(-10*24*time.Hour))
+	require.NoError(t, err)
+
+	deleted, err := CleanupStaleScores(db, retention)
+	require.NoError(t, err)
+	assert.Equal(t, 2, deleted)
+
+	// 1.1.1.1 (blocked) and 2.2.2.2 (recent) should remain
+	s1, err := GetScore(db, "1.1.1.1")
+	require.NoError(t, err)
+	assert.NotNil(t, s1)
+
+	s2, err := GetScore(db, "2.2.2.2")
+	require.NoError(t, err)
+	assert.NotNil(t, s2)
+
+	s3, err := GetScore(db, "3.3.3.3")
+	require.NoError(t, err)
+	assert.Nil(t, s3)
+
+	s4, err := GetScore(db, "4.4.4.4")
+	require.NoError(t, err)
+	assert.Nil(t, s4)
+}
+
 func TestCleanupOrphanedReasons(t *testing.T) {
 	db := openTestDB(t)
 	now := time.Now().Truncate(time.Second)

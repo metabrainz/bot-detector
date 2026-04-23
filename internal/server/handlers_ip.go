@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"bot-detector/internal/blocker"
@@ -894,8 +895,10 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 
 		// If GET request, show status after unblocking
 		if r.Method == "GET" {
-			// Small delay to let unblock propagate
-			time.Sleep(100 * time.Millisecond)
+			// Wait for follower broadcasts to complete before querying node status
+			if p.GetNodeRole() == "leader" {
+				broadcastUnblockToFollowersSync(p, canonical)
+			}
 
 			// Show cluster-wide status
 			renderClusterIPStatus(w, p, canonical)
@@ -903,6 +906,9 @@ func unblockIPHandler(p Provider) http.HandlerFunc {
 		}
 
 		// POST request: simple confirmation
+		if p.GetNodeRole() == "leader" {
+			go broadcastUnblockToFollowers(p, canonical)
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = fmt.Fprintf(w, "IP %s unblocked (gpc0 set to 0, entry will expire naturally)\n", canonical)
@@ -1027,6 +1033,10 @@ func apiUnblockIPHandler(p Provider) http.HandlerFunc {
 			return
 		}
 
+		if p.GetNodeRole() == "leader" {
+			go broadcastUnblockToFollowers(p, canonical)
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
 			"ip":     canonical,
@@ -1073,6 +1083,12 @@ func unblockByReasonHandler(p Provider) http.HandlerFunc {
 				errors = append(errors, ip)
 			} else {
 				unblocked = append(unblocked, ip)
+			}
+		}
+
+		if p.GetNodeRole() == "leader" {
+			for _, ip := range unblocked {
+				go broadcastUnblockToFollowers(p, ip)
 			}
 		}
 
@@ -1425,6 +1441,13 @@ func broadcastUnblockToFollowers(p Provider, ip string) {
 	broadcastToFollowers(p, "POST", path, nil)
 }
 
+// broadcastUnblockToFollowersSync sends the unblock to all followers and
+// blocks until every request has completed (or timed out).
+func broadcastUnblockToFollowersSync(p Provider, ip string) {
+	path := fmt.Sprintf("/api/v1/cluster/internal/ip/%s/unblock", ip)
+	broadcastToFollowersSync(p, "POST", path)
+}
+
 // clearIPFromActivityStore removes all actors with the given IP from ActivityStore
 // clearIP performs the core clear logic for a single IP: HAProxy table removal, persistence removal,
 // activity store cleanup, and follower broadcast. Returns the found table info and any error.
@@ -1493,10 +1516,6 @@ func unblockIP(p Provider, canonical string) error {
 	}
 
 	clearIPFromActivityStore(p, canonical)
-
-	if p.GetNodeRole() == "leader" {
-		go broadcastUnblockToFollowers(p, canonical)
-	}
 
 	p.Log(logging.LevelInfo, "API", "IP %s unblocked via API", canonical)
 	return nil
@@ -1577,4 +1596,49 @@ func broadcastToFollowers(p Provider, method, path string, body io.Reader) {
 			}
 		}(node.Name, node.Address)
 	}
+}
+
+// broadcastToFollowersSync is like broadcastToFollowers but waits for all
+// requests to complete before returning.
+func broadcastToFollowersSync(p Provider, method, path string) {
+	nodes := extractNodeInfo(p.GetClusterNodes())
+	if nodes == nil {
+		return
+	}
+
+	protocol := p.GetClusterProtocol()
+	nodeName := p.GetNodeName()
+
+	var wg sync.WaitGroup
+	for _, node := range nodes {
+		if node.Name == nodeName {
+			continue
+		}
+		wg.Add(1)
+		go func(name, addr string) {
+			defer wg.Done()
+			url := fmt.Sprintf("%s://%s%s", protocol, addr, path)
+			client := &http.Client{Timeout: 5 * time.Second}
+
+			req, err := http.NewRequest(method, url, nil)
+			if err != nil {
+				p.Log(logging.LevelWarning, "CLUSTER_BROADCAST", "Failed to create request for node %s: %v", name, err)
+				return
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				p.Log(logging.LevelWarning, "CLUSTER_BROADCAST", "Failed to send %s %s to node %s: %v", method, path, name, err)
+				return
+			}
+			_ = resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				p.Log(logging.LevelWarning, "CLUSTER_BROADCAST", "Node %s returned status %d for %s %s", name, resp.StatusCode, method, path)
+			} else {
+				p.Log(logging.LevelDebug, "CLUSTER_BROADCAST", "Successfully sent %s %s to node %s", method, path, name)
+			}
+		}(node.Name, node.Address)
+	}
+	wg.Wait()
 }

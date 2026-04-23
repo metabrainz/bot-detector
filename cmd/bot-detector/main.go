@@ -878,16 +878,31 @@ func runCleanup(p *app.Processor) {
 
 	// Cleanup low bad actor scores (> 30 days old, score < 2.0)
 	cleanedScores := 0
+	staleBadActors := 0
+	staleScores := 0
+	promotedScores := 0
 	if p.Config.BadActors.Enabled {
 		cleanedScores, err = persistence.CleanupLowScores(p.DB, p.Config.BadActors.ScoreMaxAge, p.Config.BadActors.ScoreMinCleanup)
 		if err != nil {
 			p.LogFunc(logging.LevelError, "CLEANUP_FAIL", "Failed to cleanup low scores: %v", err)
 		}
+		staleBadActors, err = persistence.CleanupStaleBadActors(p.DB)
+		if err != nil {
+			p.LogFunc(logging.LevelError, "CLEANUP_FAIL", "Failed to cleanup stale bad actors: %v", err)
+		}
+		staleScores, err = persistence.CleanupStaleScores(p.DB, retentionPeriod)
+		if err != nil {
+			p.LogFunc(logging.LevelError, "CLEANUP_FAIL", "Failed to cleanup stale scores: %v", err)
+		}
+		promotedScores, err = persistence.CleanupPromotedScores(p.DB)
+		if err != nil {
+			p.LogFunc(logging.LevelError, "CLEANUP_FAIL", "Failed to cleanup promoted scores: %v", err)
+		}
 	}
 
-	if expiredBlocks > 0 || cleanedUnblocked > 0 || cleanedEvents > 0 || cleanedReasons > 0 || cleanedScores > 0 {
-		p.LogFunc(logging.LevelInfo, "CLEANUP", "Cleanup completed: expired_blocks=%d, old_unblocked=%d, old_events=%d, orphaned_reasons=%d, low_scores=%d",
-			expiredBlocks, cleanedUnblocked, cleanedEvents, cleanedReasons, cleanedScores)
+	if expiredBlocks > 0 || cleanedUnblocked > 0 || cleanedEvents > 0 || cleanedReasons > 0 || cleanedScores > 0 || staleBadActors > 0 || staleScores > 0 || promotedScores > 0 {
+		p.LogFunc(logging.LevelInfo, "CLEANUP", "Cleanup completed: expired_blocks=%d, old_unblocked=%d, old_events=%d, orphaned_reasons=%d, low_scores=%d, stale_bad_actors=%d, stale_scores=%d, promoted_scores=%d",
+			expiredBlocks, cleanedUnblocked, cleanedEvents, cleanedReasons, cleanedScores, staleBadActors, staleScores, promotedScores)
 	}
 
 	if err := persistence.CheckpointWAL(p.DB); err != nil {

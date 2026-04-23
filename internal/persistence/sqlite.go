@@ -773,6 +773,40 @@ func cleanupBatch(db *sql.DB, table, where string, args ...interface{}) (int, er
 	}
 }
 
+// CleanupStaleBadActors removes bad_actors whose IP is no longer actively blocked in the ips table.
+func CleanupStaleBadActors(db *sql.DB) (int, error) {
+	n, err := cleanupBatch(db, "bad_actors",
+		"ip NOT IN (SELECT ip FROM ips WHERE state = 'blocked')")
+	if err != nil {
+		return n, fmt.Errorf("failed to cleanup stale bad actors: %w", err)
+	}
+	return n, nil
+}
+
+// CleanupStaleScores removes ip_scores whose IP is no longer actively blocked
+// and whose last_block_time is older than the retention period.
+func CleanupStaleScores(db *sql.DB, retentionPeriod time.Duration) (int, error) {
+	cutoff := time.Now().Add(-retentionPeriod)
+	n, err := cleanupBatch(db, "ip_scores",
+		"ip NOT IN (SELECT ip FROM ips WHERE state = 'blocked') AND last_block_time < ?",
+		timeToUnix(cutoff))
+	if err != nil {
+		return n, fmt.Errorf("failed to cleanup stale scores: %w", err)
+	}
+	return n, nil
+}
+
+// CleanupPromotedScores removes ip_scores for IPs that have already been
+// promoted to bad_actors, since the score is redundant after promotion.
+func CleanupPromotedScores(db *sql.DB) (int, error) {
+	n, err := cleanupBatch(db, "ip_scores",
+		"ip IN (SELECT ip FROM bad_actors)")
+	if err != nil {
+		return n, fmt.Errorf("failed to cleanup promoted scores: %w", err)
+	}
+	return n, nil
+}
+
 // CleanupExpiredBlocks removes blocked IPs whose expire_time has passed.
 func CleanupExpiredBlocks(db *sql.DB, now time.Time) (int, error) {
 	n, err := cleanupBatch(db, "ips", "state = 'blocked' AND expire_time < ?", timeToUnix(now))
