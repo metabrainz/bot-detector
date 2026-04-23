@@ -970,6 +970,7 @@ func start(p *app.Processor) {
 					ticker := time.NewTicker(p.CompactionInterval)
 					defer ticker.Stop()
 					p.LogFunc(logging.LevelInfo, "SETUP", "Database cleanup enabled, running every %v.", p.CompactionInterval)
+					runCleanup(p)
 					for {
 						select {
 						case <-ticker.C:
