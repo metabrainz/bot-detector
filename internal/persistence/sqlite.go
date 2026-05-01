@@ -803,17 +803,29 @@ func CleanupStaleBadActors(db *sql.DB) (int, error) {
 	return n, nil
 }
 
-// CleanupStaleScores removes ip_scores whose IP is no longer actively blocked
-// and whose last_block_time is older than the retention period.
+// CleanupStaleScores removes ip_scores that are no longer useful:
+//   - Orphaned scores: IP no longer exists in the ips table at all (removed immediately)
+//   - Stale scores: IP exists but is not actively blocked, and last_block_time
+//     is older than the retention period
 func CleanupStaleScores(db *sql.DB, retentionPeriod time.Duration) (int, error) {
 	cutoff := time.Now().Add(-retentionPeriod)
-	n, err := cleanupBatch(db, "ip_scores",
+
+	// Remove orphaned scores (IP completely gone from ips table)
+	orphaned, err := cleanupBatch(db, "ip_scores",
+		"ip NOT IN (SELECT ip FROM ips)")
+	if err != nil {
+		return orphaned, fmt.Errorf("failed to cleanup orphaned scores: %w", err)
+	}
+
+	// Remove stale scores (IP exists but not blocked, and score is old)
+	stale, err := cleanupBatch(db, "ip_scores",
 		"ip NOT IN (SELECT ip FROM ips WHERE state = 'blocked') AND last_block_time < ?",
 		timeToUnix(cutoff))
 	if err != nil {
-		return n, fmt.Errorf("failed to cleanup stale scores: %w", err)
+		return orphaned + stale, fmt.Errorf("failed to cleanup stale scores: %w", err)
 	}
-	return n, nil
+
+	return orphaned + stale, nil
 }
 
 // CleanupPromotedScores removes ip_scores for IPs that have already been
