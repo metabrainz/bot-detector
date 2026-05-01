@@ -282,6 +282,7 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 
 		// Merge node state
 		nodeIPCount := 0
+		nodeNewCount := 0
 		for ip, state := range nodeState {
 			if state.ExpireTime.After(now) {
 				nodeIPCount++
@@ -303,10 +304,14 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 					merged[ip] = mergedState
 				} else {
 					merged[ip] = state
+					nodeNewCount++
 					remoteCount++
 				}
 			}
 		}
+
+		m.log(logging.LevelInfo, "STATE_SYNC", "Collected from %s: %d IPs (%d new), %d bad actors",
+			node.Name, nodeIPCount, nodeNewCount, len(nodeBadActors))
 	}
 
 	// Update last sync time
@@ -452,6 +457,11 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	}
 	m.dbMutex.Unlock()
 
+	// Query local DB size for context
+	m.dbMutex.Lock()
+	localTotal, _ := persistence.CountIPStates(m.db)
+	m.dbMutex.Unlock()
+
 	// Count blocked vs unblocked in received states
 	blockedCount := 0
 	unblockedCount := 0
@@ -478,8 +488,8 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 		}
 	}
 
-	m.log(logging.LevelInfo, "STATE_SYNC", "Merged from leader: %d IPs (%d blocked + %d unblocked%s), %d bad actors, size: %.1f KB, rate: %.1f KB/s, duration: %v, mode: %s",
-		len(states), blockedCount, unblockedCount, deltaStr, len(peerBadActors), metrics.SizeKB, metrics.RateKBps, metrics.Duration.Round(time.Millisecond), modeStr)
+	m.log(logging.LevelInfo, "STATE_SYNC", "Merged from leader: %d IPs (%d blocked + %d unblocked%s), %d applied, local_total: %d, %d bad actors, size: %.1f KB, rate: %.1f KB/s, duration: %v, mode: %s",
+		len(states), blockedCount, unblockedCount, deltaStr, count, localTotal, len(peerBadActors), metrics.SizeKB, metrics.RateKBps, metrics.Duration.Round(time.Millisecond), modeStr)
 }
 
 // fetchNodeState fetches state from a specific node
