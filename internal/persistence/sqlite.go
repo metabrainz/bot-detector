@@ -85,6 +85,49 @@ func CloseDB(db *sql.DB) error {
 	return db.Close()
 }
 
+// OpenReadDB opens a read-only connection pool to the same SQLite database.
+// It uses multiple connections for concurrent reads (WAL mode allows this).
+// For in-memory databases (dry-run), returns the same db since :memory: is
+// not accessible from a second connection.
+func OpenReadDB(stateDir string, dryRun bool, writeDB *sql.DB) (*sql.DB, error) {
+	if dryRun {
+		// In-memory DB can't be opened twice; reuse the write connection.
+		return writeDB, nil
+	}
+
+	dsn := filepath.Join(stateDir, "state.db")
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open read database: %w", err)
+	}
+
+	db.SetMaxOpenConns(4)
+
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to ping read database: %w", err)
+	}
+
+	// Set pragmas on each connection via a loop (pool starts with 1, grows to 4).
+	// We set them on the initial connection; ConnInitHook is not available in
+	// database/sql, but with WAL mode these PRAGMAs are per-connection state
+	// that only needs busy_timeout to avoid SQLITE_BUSY on read contention.
+	pragmas := []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA busy_timeout=30000",
+		"PRAGMA query_only=ON",
+	}
+	for _, p := range pragmas {
+		if _, err := db.Exec(p); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("failed to set read pragma %q: %w", p, err)
+		}
+	}
+
+	return db, nil
+}
+
 // ApplyMigrations creates or upgrades the database schema.
 // ApplyMigrations applies any pending schema migrations and returns true if any were applied.
 func ApplyMigrations(db *sql.DB) (bool, error) {

@@ -24,6 +24,7 @@ func TestSQLiteRaceConditions(t *testing.T) {
 
 	p := &app.Processor{
 		DB:                 db,
+		ReadDB:             db,
 		PersistenceEnabled: true,
 		NowFunc:            time.Now,
 	}

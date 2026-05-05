@@ -321,6 +321,14 @@ func restorePersistenceState(p *app.Processor) error {
 	}
 	p.DB = db
 
+	// 1b. Open read-only connection pool for concurrent reads
+	readDB, err := persistence.OpenReadDB(p.StateDir, p.DryRun, p.DB)
+	if err != nil {
+		p.LogFunc(logging.LevelError, "SQLITE_INIT_FAIL", "Failed to initialize SQLite read pool: %v", err)
+		return err
+	}
+	p.ReadDB = readDB
+
 	// 2. Migrate from legacy format if needed (skip in dry-run to avoid modifying files)
 	if !p.DryRun && persistence.ShouldMigrate(p.StateDir) {
 		p.LogFunc(logging.LevelInfo, "MIGRATION", "Legacy persistence files detected, migrating to SQLite...")
@@ -732,7 +740,7 @@ func execute(params *commandline.AppParameters) error {
 		// Use persistence state if available, otherwise use activity store
 		if p.PersistenceEnabled {
 			// Resync from persistence state (more reliable)
-			allStates, err := persistence.GetAllIPStates(p.DB)
+			allStates, err := persistence.GetAllIPStates(p.ReadDB)
 			if err != nil {
 				p.LogFunc(logging.LevelError, "RESYNC", "Failed to query IP states for resync: %v", err)
 			} else {
@@ -864,6 +872,9 @@ func performGracefulShutdown(p *app.Processor) {
 		}
 
 		p.LogFunc(logging.LevelInfo, "PERSISTENCE", "Closing database.")
+		if p.ReadDB != nil && p.ReadDB != p.DB {
+			_ = p.ReadDB.Close()
+		}
 		if err := persistence.CloseDB(p.DB); err != nil {
 			p.LogFunc(logging.LevelError, "PERSISTENCE", "Error closing database: %v", err)
 		}
@@ -1088,6 +1099,7 @@ func start(p *app.Processor) {
 					p.NodeName,
 					p.NodeAddress,
 					p.DB,
+					p.ReadDB,
 					&p.PersistenceMutex,
 					p.LogFunc,
 				)

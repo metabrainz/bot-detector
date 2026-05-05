@@ -164,6 +164,7 @@ func TestCleanup(t *testing.T) {
 	}
 	defer func() { _ = persistence.CloseDB(db) }()
 	p.DB = db
+	p.ReadDB = db
 
 	now := p.NowFunc()
 	// Active block

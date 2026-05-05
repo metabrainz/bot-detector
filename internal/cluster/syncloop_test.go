@@ -102,6 +102,7 @@ func TestStateSyncManager_LeaderCollectsFromFollower(t *testing.T) {
 		"leader",
 		"localhost:8080",
 		testDB(t, leaderStates),
+		testDB(t, leaderStates),
 		leaderMutex,
 		logFunc,
 	)
@@ -206,6 +207,7 @@ func TestStateSyncManager_FollowerFetchesFromLeader(t *testing.T) {
 		"follower",
 		"localhost:8081",
 		followerDB,
+		followerDB,
 		followerMutex,
 		logFunc,
 	)
@@ -303,6 +305,7 @@ func TestStateSyncManager_ConflictResolution(t *testing.T) {
 		"leader",
 		"localhost:8080",
 		testDB(t, leaderStates),
+		testDB(t, leaderStates),
 		leaderMutex,
 		logFunc,
 	)
@@ -397,6 +400,7 @@ func TestStateSyncManager_ExpiredEntriesFiltered(t *testing.T) {
 		"leader",
 		"localhost:8080",
 		testDB(t, leaderStates),
+		testDB(t, leaderStates),
 		leaderMutex,
 		logFunc,
 	)
@@ -447,6 +451,7 @@ func TestStateSyncManager_StartStop(t *testing.T) {
 		"leader",
 		"leader",
 		"localhost:8080",
+		testDB(t, states),
 		testDB(t, states),
 		mutex,
 		logFunc,
@@ -556,6 +561,7 @@ func TestStateSyncManager_IncrementalSync(t *testing.T) {
 		"leader",
 		"localhost:8080",
 		testDB(t, leaderStates),
+		testDB(t, leaderStates),
 		leaderMutex,
 		logFunc,
 	)
@@ -640,6 +646,7 @@ func TestStateSyncManager_VersionMismatch(t *testing.T) {
 		"leader",
 		"leader",
 		"localhost:8080",
+		testDB(t, leaderStates),
 		testDB(t, leaderStates),
 		leaderMutex,
 		logFunc,
@@ -727,6 +734,7 @@ func TestStateSyncManager_ModifiedAtPreserved(t *testing.T) {
 		"leader",
 		"leader",
 		"localhost:8080",
+		testDB(t, leaderStates),
 		testDB(t, leaderStates),
 		leaderMutex,
 		logFunc,
@@ -821,6 +829,7 @@ func TestStateSyncManager_StateFieldPreserved(t *testing.T) {
 		"leader",
 		"localhost:8080",
 		testDB(t, leaderStates),
+		testDB(t, leaderStates),
 		leaderMutex,
 		logFunc,
 	)
@@ -873,7 +882,7 @@ func TestStateSyncManager_LeaderCollectsBadActorsFromFollower(t *testing.T) {
 	var mu sync.Mutex
 
 	syncMgr := NewStateSyncManager(config, "leader", "leader", "localhost:8080",
-		testDB(t, nil), &sync.Mutex{},
+		testDB(t, nil), testDB(t, nil), &sync.Mutex{},
 		func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 			t.Logf("[%s] "+format, append([]interface{}{tag}, args...)...)
 		},
@@ -933,7 +942,7 @@ func TestStateSyncManager_FollowerReceivesBadActorsFromLeader(t *testing.T) {
 	var appliedScore float64
 
 	syncMgr := NewStateSyncManager(config, "follower", "follower", "localhost:9090",
-		testDB(t, nil), &sync.Mutex{},
+		testDB(t, nil), testDB(t, nil), &sync.Mutex{},
 		func(level logging.LogLevel, tag string, format string, args ...interface{}) {
 			t.Logf("[%s] "+format, append([]interface{}{tag}, args...)...)
 		},
@@ -983,7 +992,7 @@ func TestStateSyncManager_NoBadActorApplyFunc(t *testing.T) {
 	}
 
 	syncMgr := NewStateSyncManager(config, "leader", "leader", "localhost:8080",
-		testDB(t, nil), &sync.Mutex{},
+		testDB(t, nil), testDB(t, nil), &sync.Mutex{},
 		func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 	)
 	// BadActorApplyFunc intentionally left nil
@@ -1020,7 +1029,7 @@ func TestStateSyncManager_OldPeerWithoutBadActors(t *testing.T) {
 
 	applied := false
 	syncMgr := NewStateSyncManager(config, "leader", "leader", "localhost:8080",
-		testDB(t, nil), &sync.Mutex{},
+		testDB(t, nil), testDB(t, nil), &sync.Mutex{},
 		func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 	)
 	syncMgr.BadActorApplyFunc = func(ip string, score float64, blockCount int, promotedAt time.Time) error {

@@ -877,7 +877,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 			var isBlocked bool
 			var lastUnblockTime time.Time
 			if p.PersistenceEnabled {
-				ipState, err := persistence.GetIPState(p.DB, entry.IPInfo.Address)
+				ipState, err := persistence.GetIPState(p.ReadDB, entry.IPInfo.Address)
 				if err == nil && ipState != nil {
 					isBlocked = ipState.State == persistence.BlockStateBlocked
 					if ipState.State == persistence.BlockStateUnblocked {
@@ -952,7 +952,7 @@ func CheckChains(p *app.Processor, entry *app.LogEntry) {
 		if baConfig.Enabled {
 			// SQLite WAL mode allows concurrent reads — no exclusive lock needed for SELECT.
 			// The ActivityStore caches the result, so this only hits SQLite once per unique IP.
-			isBad, _ := persistence.IsBadActor(p.DB, entry.IPInfo.Address)
+			isBad, _ := persistence.IsBadActor(p.ReadDB, entry.IPInfo.Address)
 			if isBad {
 				// Ensure block is active in ActivityStore (cached for subsequent lines)
 				if !activity.IsBlocked {
