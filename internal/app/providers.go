@@ -425,6 +425,15 @@ func (p *Processor) GetIPStates() map[string]persistence.IPState {
 	return states
 }
 
+func (p *Processor) GetIPStatesModifiedSince(since time.Time) map[string]persistence.IPState {
+	states, err := persistence.GetIPStatesModifiedSince(p.ReadDB, since)
+	if err != nil {
+		p.LogFunc(logging.LevelError, "PERSISTENCE", "Failed to get modified IP states: %v", err)
+		return make(map[string]persistence.IPState)
+	}
+	return states
+}
+
 // GetPersistenceMutex returns the mutex for IPStates.
 func (p *Processor) GetPersistenceMutex() *sync.Mutex {
 	return &p.PersistenceMutex

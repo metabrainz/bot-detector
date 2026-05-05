@@ -59,6 +59,9 @@ func (m *MockProvider) RemoveFromPersistence(ip string) error                  {
 func (m *MockProvider) GetIPStates() map[string]persistence.IPState {
 	return make(map[string]persistence.IPState)
 }
+func (m *MockProvider) GetIPStatesModifiedSince(since time.Time) map[string]persistence.IPState {
+	return make(map[string]persistence.IPState)
+}
 func (m *MockProvider) GetPersistenceMutex() *sync.Mutex { return &sync.Mutex{} }
 func (m *MockProvider) GetClusterConfig() interface{}    { return nil }
 func (m *MockProvider) GetStateSyncConfig() (bool, bool, time.Duration, bool) {

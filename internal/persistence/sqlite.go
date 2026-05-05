@@ -13,7 +13,7 @@ import (
 )
 
 // SchemaVersion is the current database schema version.
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 // OpenDB opens (or creates) the SQLite database with WAL mode.
 // In dry-run mode, uses an in-memory database.
@@ -180,6 +180,12 @@ func ApplyMigrations(db *sql.DB) (bool, error) {
 	if currentVersion < 5 {
 		if err := migrateV5(db); err != nil {
 			return false, fmt.Errorf("migration v5 failed: %w", err)
+		}
+	}
+
+	if currentVersion < 6 {
+		if err := migrateV6(db); err != nil {
+			return false, fmt.Errorf("migration v6 failed: %w", err)
 		}
 	}
 
@@ -424,6 +430,26 @@ func migrateV5(db *sql.DB) error {
 	stmts := []string{
 		`DROP INDEX IF EXISTS idx_events_timestamp`,
 		`INSERT INTO schema_version (version, description) VALUES (5, 'Drop redundant idx_events_timestamp')`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("failed to execute %q: %w", stmt, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// migrateV6 adds an index on ips.modified_at for efficient incremental state sync.
+func migrateV6(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []string{
+		`CREATE INDEX IF NOT EXISTS idx_ips_modified_at ON ips(modified_at)`,
+		`INSERT INTO schema_version (version, description) VALUES (6, 'Add index on ips.modified_at for incremental sync')`,
 	}
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(stmt); err != nil {
@@ -782,6 +808,21 @@ func GetAllIPStates(db *sql.DB) (map[string]IPState, error) {
 		FROM ips i LEFT JOIN reasons r ON r.id = i.reason_id`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query IP states: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanIPStates(rows)
+}
+
+// GetIPStatesModifiedSince returns IP states modified after the given time.
+// Uses the idx_ips_modified_at index for efficient incremental queries.
+func GetIPStatesModifiedSince(db *sql.DB, since time.Time) (map[string]IPState, error) {
+	rows, err := db.Query(`
+		SELECT i.ip, i.state, i.expire_time, r.reason, i.modified_at, i.first_blocked_at
+		FROM ips i LEFT JOIN reasons r ON r.id = i.reason_id
+		WHERE i.modified_at > ?`, timeToUnix(since))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query modified IP states: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 

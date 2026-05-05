@@ -167,6 +167,9 @@ func (m *mockProvider) RemoveFromPersistence(ip string) error {
 func (m *mockProvider) GetIPStates() map[string]persistence.IPState {
 	return make(map[string]persistence.IPState)
 }
+func (m *mockProvider) GetIPStatesModifiedSince(since time.Time) map[string]persistence.IPState {
+	return make(map[string]persistence.IPState)
+}
 
 func (m *mockProvider) GetPersistenceMutex() *sync.Mutex {
 	return &sync.Mutex{}

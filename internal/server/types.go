@@ -98,6 +98,9 @@ type Provider interface {
 	// GetIPStates returns the complete IPStates map for state sync.
 	GetIPStates() map[string]persistence.IPState
 
+	// GetIPStatesModifiedSince returns IP states modified after the given time.
+	GetIPStatesModifiedSince(since time.Time) map[string]persistence.IPState
+
 	// GetPersistenceMutex returns the mutex for IPStates.
 	GetPersistenceMutex() *sync.Mutex
 

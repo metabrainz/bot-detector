@@ -50,7 +50,7 @@ func TestApplyMigrations_Idempotent(t *testing.T) {
 	var version int
 	err = db.QueryRow("SELECT MAX(version) FROM schema_version").Scan(&version)
 	require.NoError(t, err)
-	assert.Equal(t, 5, version)
+	assert.Equal(t, SchemaVersion, version)
 }
 
 func TestApplyMigrations_TablesExist(t *testing.T) {

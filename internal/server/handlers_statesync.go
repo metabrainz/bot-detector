@@ -388,23 +388,23 @@ func collectAndMergeStates(p Provider, since time.Time) (map[string]persistence.
 	nodeName := p.GetNodeName()
 
 	// Add leader's own state first
-	p.GetPersistenceMutex().Lock()
-	for ip, state := range p.GetIPStates() {
+	var leaderStates map[string]persistence.IPState
+	if incremental && !since.IsZero() {
+		leaderStates = p.GetIPStatesModifiedSince(since)
+	} else {
+		leaderStates = p.GetIPStates()
+	}
+	for ip, state := range leaderStates {
 		// Skip expired blocked entries, but keep unblocked entries (good actors)
 		if state.State == persistence.BlockStateBlocked {
 			if !state.ExpireTime.IsZero() && time.Now().After(state.ExpireTime) {
 				continue
 			}
 		}
-		// For incremental, filter by modification time
-		if incremental && !since.IsZero() && !state.ModifiedAt.IsZero() && !state.ModifiedAt.After(since) {
-			continue
-		}
 		// Add source node to reason
 		state.Reason = addSourceNode(state.Reason, nodeName, "")
 		merged[ip] = state
 	}
-	p.GetPersistenceMutex().Unlock()
 	nodesQueried = append(nodesQueried, nodeName)
 
 	// Query each follower
