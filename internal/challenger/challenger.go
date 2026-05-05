@@ -18,29 +18,6 @@ type Challenger struct {
 	timeout   time.Duration
 }
 
-// Config holds challenger configuration.
-type Config struct {
-	Backends        []string `yaml:"backends"`
-	KeyPrefix       string   `yaml:"key_prefix"`
-	DefaultDuration Duration `yaml:"default_duration"`
-}
-
-// Duration is a time.Duration that supports YAML unmarshaling.
-type Duration time.Duration
-
-func (d *Duration) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	var s string
-	if err := unmarshal(&s); err != nil {
-		return err
-	}
-	parsed, err := time.ParseDuration(s)
-	if err != nil {
-		return err
-	}
-	*d = Duration(parsed)
-	return nil
-}
-
 // New creates a new Challenger with the given backends and key prefix.
 func New(addresses []string, keyPrefix string) *Challenger {
 	c := &Challenger{
@@ -106,7 +83,7 @@ func (c *Challenger) Challenge(ip, website string, duration time.Duration, reaso
 
 	var lastErr error
 	for _, client := range clients {
-		if err := client.SetEx(ctx, key, reason, duration).Err(); err != nil {
+		if err := client.Set(ctx, key, reason, duration).Err(); err != nil {
 			lastErr = err
 		}
 	}

@@ -49,13 +49,3 @@ func TestIsChallenged_NoBackends(t *testing.T) {
 	assert.False(t, challenged)
 	assert.Empty(t, reason)
 }
-
-func TestDuration_UnmarshalYAML(t *testing.T) {
-	var d Duration
-	err := d.UnmarshalYAML(func(v interface{}) error {
-		*(v.(*string)) = "24h"
-		return nil
-	})
-	require.NoError(t, err)
-	assert.Equal(t, 24*time.Hour, time.Duration(d))
-}
