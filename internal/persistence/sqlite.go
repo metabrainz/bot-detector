@@ -893,6 +893,69 @@ func InsertEvent(db *sql.DB, timestamp time.Time, eventType EventType, ip string
 	return nil
 }
 
+// BlockIPBatch performs InsertEvent + UpsertIPState + IncrementScore in a single
+// transaction, reducing write lock acquisitions from 3 to 1 per block action.
+// Returns the new score and block count (for bad actor evaluation).
+func BlockIPBatch(db *sql.DB, ip string, state BlockState, expireTime time.Time, reason string, timestamp time.Time, duration time.Duration, weight float64) (float64, int, error) {
+	reasonID, err := GetOrCreateReasonID(db, reason)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Insert event
+	var durNanos *int64
+	if duration > 0 {
+		d := int64(duration)
+		durNanos = &d
+	}
+	_, _ = tx.Exec(`INSERT OR IGNORE INTO events (timestamp, event_type, ip, reason_id, duration, node_name)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		timeToUnix(timestamp), string(EventTypeBlock), ip, reasonID, durNanos, nil)
+
+	// Upsert IP state
+	_, _ = tx.Exec(`INSERT INTO ips (ip, state, expire_time, reason_id, modified_at, first_blocked_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(ip) DO UPDATE SET
+			state = excluded.state,
+			expire_time = excluded.expire_time,
+			reason_id = excluded.reason_id,
+			modified_at = excluded.modified_at,
+			first_blocked_at = CASE
+				WHEN ips.first_blocked_at IS NOT NULL AND ips.first_blocked_at > 0 AND ips.first_blocked_at < excluded.first_blocked_at
+				THEN ips.first_blocked_at
+				ELSE excluded.first_blocked_at
+			END`,
+		ip, state.String(), timeToUnix(expireTime), reasonID, timeToUnix(timestamp), timeToUnix(timestamp))
+
+	// Increment score (if weight > 0)
+	var score float64
+	var blockCount int
+	if weight > 0 {
+		err = tx.QueryRow(`INSERT INTO ip_scores (ip, score, block_count, last_block_time)
+			VALUES (?, ?, 1, ?)
+			ON CONFLICT(ip) DO UPDATE SET
+				score = ip_scores.score + excluded.score,
+				block_count = ip_scores.block_count + 1,
+				last_block_time = excluded.last_block_time
+			RETURNING score, block_count`,
+			ip, weight, timeToUnix(timestamp)).Scan(&score, &blockCount)
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed to increment score in batch: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("failed to commit block batch: %w", err)
+	}
+	return score, blockCount, nil
+}
+
 // cleanupBatch deletes rows in batches to avoid holding the write lock for too long.
 func cleanupBatch(db *sql.DB, table, where string, args ...interface{}) (int, error) {
 	const batchSize = 5000
