@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"bot-detector/internal/challenger"
 	"bot-detector/internal/config"
 	"bot-detector/internal/logging"
 	"bot-detector/internal/metrics"
@@ -322,9 +323,19 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	logging.SetLogLevel(loadedCfg.Application.LogLevel)
 	p.ConfigMutex.Unlock()
 
-	// Update challenger backends if configured
-	if p.Challenger != nil {
-		p.Challenger.UpdateAddresses(p.Config.Challenge.Backends)
+	// Update or create challenger if configured
+	if len(p.Config.Challenge.Backends) > 0 {
+		if p.Challenger != nil {
+			p.Challenger.UpdateAddresses(p.Config.Challenge.Backends)
+		} else {
+			p.Challenger = challenger.New(p.Config.Challenge.Backends, p.Config.Challenge.KeyPrefix)
+			p.LogFunc(logging.LevelInfo, "SETUP", "Challenger initialized with %d backend(s), key prefix: %s",
+				len(p.Config.Challenge.Backends), p.Config.Challenge.KeyPrefix)
+		}
+	} else if p.Challenger != nil {
+		p.Challenger.Close()
+		p.Challenger = nil
+		p.LogFunc(logging.LevelInfo, "SETUP", "Challenger disabled (no backends configured)")
 	}
 
 	// Update website tailers if in multi-website mode
