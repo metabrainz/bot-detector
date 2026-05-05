@@ -2487,3 +2487,106 @@ chains:
 		t.Errorf("Expected default bad_actor_weight 1.0, got %f", c.BadActorWeight)
 	}
 }
+
+func TestLoadConfigFromYAML_ChallengeAction(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+
+blockers:
+  backends:
+    haproxy:
+      addresses:
+        - "127.0.0.1:9999"
+      duration_tables:
+        "5m": "table_5m"
+  default_duration: "5m"
+
+challenge:
+  backends:
+    - "10.2.3.254:6379"
+  key_prefix: "antibot:challenge"
+  default_duration: "24h"
+
+chains:
+  - name: "ChallengeChain"
+    match_key: "ip"
+    action: "challenge"
+    challenge_duration: "12h"
+    steps:
+      - field_matches:
+          path: "/artist/"
+  - name: "ChallengeDefaultDuration"
+    match_key: "ip"
+    action: "challenge"
+    steps:
+      - field_matches:
+          path: "/release/"
+`
+	tmpConfigFilePath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	cfg, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: tmpConfigFilePath})
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	// Verify challenge config
+	if len(cfg.Challenge.Backends) != 1 || cfg.Challenge.Backends[0] != "10.2.3.254:6379" {
+		t.Errorf("Expected challenge backend '10.2.3.254:6379', got %v", cfg.Challenge.Backends)
+	}
+	if cfg.Challenge.KeyPrefix != "antibot:challenge" {
+		t.Errorf("Expected key_prefix 'antibot:challenge', got '%s'", cfg.Challenge.KeyPrefix)
+	}
+	if cfg.Challenge.DefaultDuration != 24*time.Hour {
+		t.Errorf("Expected default_duration 24h, got %v", cfg.Challenge.DefaultDuration)
+	}
+
+	// Verify chain with explicit challenge_duration
+	if len(cfg.Chains) != 2 {
+		t.Fatalf("Expected 2 chains, got %d", len(cfg.Chains))
+	}
+	if cfg.Chains[0].Action != "challenge" {
+		t.Errorf("Expected action 'challenge', got '%s'", cfg.Chains[0].Action)
+	}
+	if cfg.Chains[0].ChallengeDuration != 12*time.Hour {
+		t.Errorf("Expected challenge_duration 12h, got %v", cfg.Chains[0].ChallengeDuration)
+	}
+
+	// Verify chain using default challenge_duration
+	if cfg.Chains[1].ChallengeDuration != 24*time.Hour {
+		t.Errorf("Expected default challenge_duration 24h, got %v", cfg.Chains[1].ChallengeDuration)
+	}
+}
+
+func TestLoadConfigFromYAML_ChallengeAction_NoDuration(t *testing.T) {
+	yamlContent := `
+version: "1.0"
+
+blockers:
+  backends:
+    haproxy:
+      addresses:
+        - "127.0.0.1:9999"
+      duration_tables:
+        "5m": "table_5m"
+  default_duration: "5m"
+
+chains:
+  - name: "BadChain"
+    match_key: "ip"
+    action: "challenge"
+    steps:
+      - field_matches:
+          path: "/test"
+`
+	tmpConfigFilePath := setupTestYAML(t, yamlContent)
+	t.Cleanup(testutil.ResetGlobalState)
+
+	_, err := config.LoadConfigFromYAML(config.LoadConfigOptions{ConfigFilePath: tmpConfigFilePath})
+	if err == nil {
+		t.Fatal("Expected error for challenge chain without duration, got nil")
+	}
+	if !strings.Contains(err.Error(), "no challenge_duration and no default configured") {
+		t.Errorf("Expected error about missing challenge_duration, got: %v", err)
+	}
+}

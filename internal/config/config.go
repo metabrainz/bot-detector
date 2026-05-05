@@ -1138,6 +1138,27 @@ func parseChains(config *TopLevelConfig, fileDeps map[string]*types.FileDependen
 			}
 		}
 
+		// Parse challenge_duration
+		var challengeDuration time.Duration
+		if yamlChain.Action == "challenge" {
+			if yamlChain.ChallengeDuration != "" {
+				var cdErr error
+				challengeDuration, cdErr = utils.ParseDuration(yamlChain.ChallengeDuration)
+				if cdErr != nil {
+					return nil, fmt.Errorf("chain '%s': invalid challenge_duration '%s': %w", yamlChain.Name, yamlChain.ChallengeDuration, cdErr)
+				}
+			} else if config.Challenge != nil && config.Challenge.DefaultDuration != "" {
+				var cdErr error
+				challengeDuration, cdErr = utils.ParseDuration(config.Challenge.DefaultDuration)
+				if cdErr != nil {
+					return nil, fmt.Errorf("challenge.default_duration '%s': %w", config.Challenge.DefaultDuration, cdErr)
+				}
+			}
+			if challengeDuration == 0 {
+				return nil, fmt.Errorf("chain '%s' has action 'challenge' but no challenge_duration and no default configured", yamlChain.Name)
+			}
+		}
+
 		if yamlChain.MatchKey == "" {
 			return nil, fmt.Errorf("chain '%s': match_key cannot be empty", yamlChain.Name)
 		}
@@ -1148,6 +1169,7 @@ func parseChains(config *TopLevelConfig, fileDeps map[string]*types.FileDependen
 			BlockDuration:            blockDuration,
 			BlockDurationStr:         blockDurationStr,
 			UsesDefaultBlockDuration: usesDefault,
+			ChallengeDuration:        challengeDuration,
 			MatchKey:                 yamlChain.MatchKey,
 			OnMatch:                  yamlChain.OnMatch,
 			Websites:                 yamlChain.Websites,
@@ -1642,6 +1664,7 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		},
 		Cluster:          clusterConfig,
 		BadActors:        badActorsConfig,
+		Challenge:        buildChallengeConfig(config.Challenge),
 		Websites:         resolvedWebsites,
 		GoodActors:       newGoodActors,
 		Chains:           newChains,
@@ -1649,6 +1672,26 @@ func LoadConfigFromYAML(opts LoadConfigOptions) (*LoadedConfig, error) {
 		LogFormatRegex:   customLogRegex,
 		YAMLContent:      data,
 	}, nil
+}
+
+// buildChallengeConfig converts the YAML challenge config to the runtime config.
+func buildChallengeConfig(yaml *ChallengeConfigYAML) ChallengeConfig {
+	if yaml == nil {
+		return ChallengeConfig{}
+	}
+	var defaultDuration time.Duration
+	if yaml.DefaultDuration != "" {
+		defaultDuration, _ = utils.ParseDuration(yaml.DefaultDuration)
+	}
+	keyPrefix := yaml.KeyPrefix
+	if keyPrefix == "" {
+		keyPrefix = "antibot:challenge"
+	}
+	return ChallengeConfig{
+		Backends:        yaml.Backends,
+		KeyPrefix:       keyPrefix,
+		DefaultDuration: defaultDuration,
+	}
 }
 
 // validateUniqueNames checks that chain names and good actor names are unique

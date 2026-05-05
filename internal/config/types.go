@@ -28,6 +28,7 @@ type AppConfig struct {
 	Parser           ParserConfig                      `config:"compare"`
 	Checker          CheckerConfig                     `config:"compare"`
 	Blockers         BlockersConfig                    `config:"compare"`
+	Challenge        ChallengeConfig                   `config:"compare"` // Challenge action configuration (optional)
 	Cluster          *cluster.ClusterConfig            `config:"compare"` // Cluster configuration (optional)
 	BadActors        BadActorsConfig                   `config:"compare"` // Bad actors configuration
 	GoodActors       []GoodActorDef                    `config:"compare"`
@@ -78,6 +79,13 @@ type BlockersConfig struct {
 	Backends            Backends      `config:"compare"`
 }
 
+// ChallengeConfig holds configuration for the challenge action (redis-compatible backends).
+type ChallengeConfig struct {
+	Backends        []string      `config:"compare" yaml:"backends"`
+	KeyPrefix       string        `config:"compare" yaml:"key_prefix"`
+	DefaultDuration time.Duration `config:"compare" yaml:"default_duration"`
+}
+
 type BlockerSettings struct {
 	MaxRetries          int
 	RetryDelay          time.Duration
@@ -103,6 +111,7 @@ type LoadedConfig struct {
 	Parser           ParserConfig
 	Checker          CheckerConfig
 	Blockers         BlockersConfig
+	Challenge        ChallengeConfig        // Challenge action configuration (optional)
 	Cluster          *cluster.ClusterConfig // Cluster configuration (optional)
 	BadActors        BadActorsConfig        // Bad actors configuration
 	Websites         []WebsiteConfig        // Optional: multi-website configuration
@@ -129,6 +138,7 @@ type TopLevelConfig struct {
 	Parser        ParserConfigYAML         `yaml:"parser"`
 	Checker       CheckerConfigYAML        `yaml:"checker"`
 	Blockers      BlockersConfigYAML       `yaml:"blockers"`
+	Challenge     *ChallengeConfigYAML     `yaml:"challenge"`  // Optional: challenge action configuration
 	Cluster       *ClusterConfigYAML       `yaml:"cluster"`    // Optional cluster configuration
 	BadActors     *BadActorsConfigYAML     `yaml:"bad_actors"` // Optional bad actors configuration
 	GoodActors    []map[string]interface{} `yaml:"good_actors"`
@@ -213,6 +223,13 @@ type HAProxyConfigYAML struct {
 	DurationTables map[string]string `yaml:"duration_tables"`
 }
 
+// ChallengeConfigYAML is the YAML representation of challenge action configuration.
+type ChallengeConfigYAML struct {
+	Backends        []string `yaml:"backends"`         // Redis-compatible backend addresses
+	KeyPrefix       string   `yaml:"key_prefix"`       // Key prefix (default: "antibot:challenge")
+	DefaultDuration string   `yaml:"default_duration"` // Default challenge TTL (e.g., "24h")
+}
+
 // ClusterConfigYAML represents the cluster configuration in YAML format.
 type ClusterConfigYAML struct {
 	Nodes                 []NodeConfigYAML     `yaml:"nodes"`
@@ -248,14 +265,15 @@ type StepDefYAML struct {
 }
 
 type BehavioralChainYAML struct {
-	Name           string        `yaml:"name"`
-	Action         string        `yaml:"action"`
-	BlockDuration  string        `yaml:"block_duration"`
-	MatchKey       string        `yaml:"match_key"`
-	OnMatch        string        `yaml:"on_match"`
-	Websites       []string      `yaml:"websites"`         // Optional: restrict chain to specific websites
-	BadActorWeight *float64      `yaml:"bad_actor_weight"` // Optional: weight for bad actor scoring (default 1.0)
-	Steps          []StepDefYAML `yaml:"steps"`
+	Name              string        `yaml:"name"`
+	Action            string        `yaml:"action"`
+	BlockDuration     string        `yaml:"block_duration"`
+	ChallengeDuration string        `yaml:"challenge_duration"` // TTL for challenge action
+	MatchKey          string        `yaml:"match_key"`
+	OnMatch           string        `yaml:"on_match"`
+	Websites          []string      `yaml:"websites"`         // Optional: restrict chain to specific websites
+	BadActorWeight    *float64      `yaml:"bad_actor_weight"` // Optional: weight for bad actor scoring (default 1.0)
+	Steps             []StepDefYAML `yaml:"steps"`
 }
 
 // --- RUNTIME DATA STRUCTURES ---
@@ -277,6 +295,7 @@ type BehavioralChain struct {
 	BlockDuration            time.Duration
 	BlockDurationStr         string        // The original string representation of the duration (e.g., "1w")
 	UsesDefaultBlockDuration bool          // True if the chain is using the global default_block_duration.
+	ChallengeDuration        time.Duration // Duration for challenge action (Redis TTL)
 	MatchKey                 string        // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
 	OnMatch                  string        // "stop" to halt processing of other chains on match.
 	Websites                 []string      // Optional: restrict chain to specific websites (empty = global)
