@@ -13,7 +13,7 @@ import (
 )
 
 // SchemaVersion is the current database schema version.
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 // OpenDB opens (or creates) the SQLite database with WAL mode.
 // In dry-run mode, uses an in-memory database.
@@ -125,6 +125,12 @@ func ApplyMigrations(db *sql.DB) (bool, error) {
 	if currentVersion < 4 {
 		if err := migrateV4(db); err != nil {
 			return false, fmt.Errorf("migration v4 failed: %w", err)
+		}
+	}
+
+	if currentVersion < 5 {
+		if err := migrateV5(db); err != nil {
+			return false, fmt.Errorf("migration v5 failed: %w", err)
 		}
 	}
 
@@ -353,6 +359,28 @@ func migrateV4(db *sql.DB) error {
 		return fmt.Errorf("failed to insert schema version: %w", err)
 	}
 
+	return tx.Commit()
+}
+
+// migrateV5 drops the redundant idx_events_timestamp index.
+// CleanupOldEvents (the only consumer) can use the autoindex on
+// (timestamp, ip, node_name, event_type) from the UNIQUE constraint instead.
+func migrateV5(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []string{
+		`DROP INDEX IF EXISTS idx_events_timestamp`,
+		`INSERT INTO schema_version (version, description) VALUES (5, 'Drop redundant idx_events_timestamp')`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("failed to execute %q: %w", stmt, err)
+		}
+	}
 	return tx.Commit()
 }
 
@@ -803,17 +831,29 @@ func CleanupStaleBadActors(db *sql.DB) (int, error) {
 	return n, nil
 }
 
-// CleanupStaleScores removes ip_scores whose IP is no longer actively blocked
-// and whose last_block_time is older than the retention period.
+// CleanupStaleScores removes ip_scores that are no longer useful:
+//   - Orphaned scores: IP no longer exists in the ips table at all (removed immediately)
+//   - Stale scores: IP exists but is not actively blocked, and last_block_time
+//     is older than the retention period
 func CleanupStaleScores(db *sql.DB, retentionPeriod time.Duration) (int, error) {
 	cutoff := time.Now().Add(-retentionPeriod)
-	n, err := cleanupBatch(db, "ip_scores",
+
+	// Remove orphaned scores (IP completely gone from ips table)
+	orphaned, err := cleanupBatch(db, "ip_scores",
+		"ip NOT IN (SELECT ip FROM ips)")
+	if err != nil {
+		return orphaned, fmt.Errorf("failed to cleanup orphaned scores: %w", err)
+	}
+
+	// Remove stale scores (IP exists but not blocked, and score is old)
+	stale, err := cleanupBatch(db, "ip_scores",
 		"ip NOT IN (SELECT ip FROM ips WHERE state = 'blocked') AND last_block_time < ?",
 		timeToUnix(cutoff))
 	if err != nil {
-		return n, fmt.Errorf("failed to cleanup stale scores: %w", err)
+		return orphaned + stale, fmt.Errorf("failed to cleanup stale scores: %w", err)
 	}
-	return n, nil
+
+	return orphaned + stale, nil
 }
 
 // CleanupPromotedScores removes ip_scores for IPs that have already been

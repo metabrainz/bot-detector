@@ -410,7 +410,7 @@ func TestRotation_RapidSequential(t *testing.T) {
 		originalLogFunc(level, tag, format, args...)
 		msg := fmt.Sprintf(format, args...)
 		isRotation := (tag == "TAIL" && (strings.Contains(msg, "Detected log file rotation") || strings.Contains(msg, "Detected log file size reduction"))) ||
-			(tag == "TAIL_ERROR" && strings.Contains(msg, "Failed to stat log path during EOF check"))
+			(tag == "TAIL_FAIL" && strings.Contains(msg, "Failed to stat log path during EOF check"))
 		if isRotation {
 			if atomic.AddInt32(&rotationsDetected, 1) <= numRotations {
 				select {

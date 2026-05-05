@@ -50,7 +50,7 @@ func TestApplyMigrations_Idempotent(t *testing.T) {
 	var version int
 	err = db.QueryRow("SELECT MAX(version) FROM schema_version").Scan(&version)
 	require.NoError(t, err)
-	assert.Equal(t, 4, version)
+	assert.Equal(t, 5, version)
 }
 
 func TestApplyMigrations_TablesExist(t *testing.T) {
@@ -393,39 +393,52 @@ func TestCleanupStaleScores(t *testing.T) {
 	_, _, err := IncrementScore(db, "1.1.1.1", 2.0, now.Add(-10*24*time.Hour))
 	require.NoError(t, err)
 
-	// IP not blocked, score recent — should be kept
+	// IP not in ips at all, score recent — should be removed (orphaned)
 	_, _, err = IncrementScore(db, "2.2.2.2", 3.0, now.Add(-1*time.Hour))
 	require.NoError(t, err)
 
-	// IP not blocked, score old — should be removed
+	// IP not in ips at all, score old — should be removed (orphaned)
 	_, _, err = IncrementScore(db, "3.3.3.3", 4.0, now.Add(-10*24*time.Hour))
 	require.NoError(t, err)
 
-	// IP unblocked, score old — should be removed
+	// IP unblocked, score old — should be removed (stale)
 	require.NoError(t, UpsertIPState(db, "4.4.4.4", BlockStateUnblocked, now, "good-actor", now, time.Time{}))
 	_, _, err = IncrementScore(db, "4.4.4.4", 5.0, now.Add(-10*24*time.Hour))
 	require.NoError(t, err)
 
+	// IP unblocked, score recent — should be kept (within retention)
+	require.NoError(t, UpsertIPState(db, "5.5.5.5", BlockStateUnblocked, now, "good-actor", now, time.Time{}))
+	_, _, err = IncrementScore(db, "5.5.5.5", 6.0, now.Add(-1*time.Hour))
+	require.NoError(t, err)
+
 	deleted, err := CleanupStaleScores(db, retention)
 	require.NoError(t, err)
-	assert.Equal(t, 2, deleted)
+	assert.Equal(t, 3, deleted) // 2.2.2.2 (orphaned) + 3.3.3.3 (orphaned) + 4.4.4.4 (stale)
 
-	// 1.1.1.1 (blocked) and 2.2.2.2 (recent) should remain
+	// 1.1.1.1 (blocked) should remain
 	s1, err := GetScore(db, "1.1.1.1")
 	require.NoError(t, err)
 	assert.NotNil(t, s1)
 
+	// 2.2.2.2 (orphaned, not in ips) should be removed
 	s2, err := GetScore(db, "2.2.2.2")
 	require.NoError(t, err)
-	assert.NotNil(t, s2)
+	assert.Nil(t, s2)
 
+	// 3.3.3.3 (orphaned, not in ips) should be removed
 	s3, err := GetScore(db, "3.3.3.3")
 	require.NoError(t, err)
 	assert.Nil(t, s3)
 
+	// 4.4.4.4 (unblocked, old score) should be removed
 	s4, err := GetScore(db, "4.4.4.4")
 	require.NoError(t, err)
 	assert.Nil(t, s4)
+
+	// 5.5.5.5 (unblocked, recent score) should remain
+	s5, err := GetScore(db, "5.5.5.5")
+	require.NoError(t, err)
+	assert.NotNil(t, s5)
 }
 
 func TestCleanupOrphanedReasons(t *testing.T) {
