@@ -13,7 +13,7 @@ import (
 )
 
 // SchemaVersion is the current database schema version.
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 // OpenDB opens (or creates) the SQLite database with WAL mode.
 // In dry-run mode, uses an in-memory database.
@@ -49,6 +49,9 @@ func OpenDB(stateDir string, dryRun bool) (*sql.DB, error) {
 		"PRAGMA synchronous=NORMAL",
 		"PRAGMA busy_timeout=30000",
 		"PRAGMA auto_vacuum=INCREMENTAL",
+		"PRAGMA cache_size=-64000",    // 64MB page cache (default is 2MB)
+		"PRAGMA mmap_size=1073741824", // 1GB memory-mapped I/O
+		"PRAGMA temp_store=MEMORY",    // temp tables in RAM
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
@@ -83,6 +86,52 @@ func CloseDB(db *sql.DB) error {
 	}
 	_ = CheckpointWAL(db)
 	return db.Close()
+}
+
+// OpenReadDB opens a read-only connection pool to the same SQLite database.
+// It uses multiple connections for concurrent reads (WAL mode allows this).
+// For in-memory databases (dry-run), returns the same db since :memory: is
+// not accessible from a second connection.
+func OpenReadDB(stateDir string, dryRun bool, writeDB *sql.DB) (*sql.DB, error) {
+	if dryRun {
+		// In-memory DB can't be opened twice; reuse the write connection.
+		return writeDB, nil
+	}
+
+	dsn := filepath.Join(stateDir, "state.db")
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open read database: %w", err)
+	}
+
+	db.SetMaxOpenConns(4)
+
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to ping read database: %w", err)
+	}
+
+	// Set pragmas on each connection via a loop (pool starts with 1, grows to 4).
+	// We set them on the initial connection; ConnInitHook is not available in
+	// database/sql, but with WAL mode these PRAGMAs are per-connection state
+	// that only needs busy_timeout to avoid SQLITE_BUSY on read contention.
+	pragmas := []string{
+		"PRAGMA journal_mode=WAL",
+		"PRAGMA synchronous=NORMAL",
+		"PRAGMA busy_timeout=30000",
+		"PRAGMA query_only=ON",
+		"PRAGMA cache_size=-64000",    // 64MB page cache (default is 2MB)
+		"PRAGMA mmap_size=1073741824", // 1GB memory-mapped I/O
+		"PRAGMA temp_store=MEMORY",    // temp tables in RAM
+	}
+	for _, p := range pragmas {
+		if _, err := db.Exec(p); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("failed to set read pragma %q: %w", p, err)
+		}
+	}
+
+	return db, nil
 }
 
 // ApplyMigrations creates or upgrades the database schema.
@@ -131,6 +180,12 @@ func ApplyMigrations(db *sql.DB) (bool, error) {
 	if currentVersion < 5 {
 		if err := migrateV5(db); err != nil {
 			return false, fmt.Errorf("migration v5 failed: %w", err)
+		}
+	}
+
+	if currentVersion < 6 {
+		if err := migrateV6(db); err != nil {
+			return false, fmt.Errorf("migration v6 failed: %w", err)
 		}
 	}
 
@@ -384,6 +439,26 @@ func migrateV5(db *sql.DB) error {
 	return tx.Commit()
 }
 
+// migrateV6 adds an index on ips.modified_at for efficient incremental state sync.
+func migrateV6(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []string{
+		`CREATE INDEX IF NOT EXISTS idx_ips_modified_at ON ips(modified_at)`,
+		`INSERT INTO schema_version (version, description) VALUES (6, 'Add index on ips.modified_at for incremental sync')`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("failed to execute %q: %w", stmt, err)
+		}
+	}
+	return tx.Commit()
+}
+
 // CheckpointWAL forces a WAL checkpoint to merge the WAL back into the main database file.
 func CheckpointWAL(db *sql.DB) error {
 	_, err := db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -544,6 +619,29 @@ func GetAllBadActors(db *sql.DB) ([]BadActorInfo, error) {
 	rows, err := db.Query("SELECT ip, promoted_at, total_score, block_count, history_json FROM bad_actors ORDER BY promoted_at DESC")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query bad actors: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var result []BadActorInfo
+	for rows.Next() {
+		var ba BadActorInfo
+		var histJSON sql.NullString
+		var promotedAt int64
+		if err := rows.Scan(&ba.IP, &promotedAt, &ba.TotalScore, &ba.BlockCount, &histJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan bad actor: %w", err)
+		}
+		ba.PromotedAt = unixToTime(promotedAt)
+		ba.HistoryJSON = nullStringValue(histJSON)
+		result = append(result, ba)
+	}
+	return result, rows.Err()
+}
+
+// GetBadActorsPromotedSince returns bad actors promoted after the given time.
+func GetBadActorsPromotedSince(db *sql.DB, since time.Time) ([]BadActorInfo, error) {
+	rows, err := db.Query("SELECT ip, promoted_at, total_score, block_count, history_json FROM bad_actors WHERE promoted_at > ? ORDER BY promoted_at DESC", timeToUnix(since))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recent bad actors: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -739,6 +837,21 @@ func GetAllIPStates(db *sql.DB) (map[string]IPState, error) {
 	return scanIPStates(rows)
 }
 
+// GetIPStatesModifiedSince returns IP states modified after the given time.
+// Uses the idx_ips_modified_at index for efficient incremental queries.
+func GetIPStatesModifiedSince(db *sql.DB, since time.Time) (map[string]IPState, error) {
+	rows, err := db.Query(`
+		SELECT i.ip, i.state, i.expire_time, r.reason, i.modified_at, i.first_blocked_at
+		FROM ips i LEFT JOIN reasons r ON r.id = i.reason_id
+		WHERE i.modified_at > ?`, timeToUnix(since))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query modified IP states: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanIPStates(rows)
+}
+
 // GetBlockedIPs returns only blocked, non-expired IPs.
 func GetBlockedIPs(db *sql.DB, now time.Time) (map[string]IPState, error) {
 	rows, err := db.Query(`
@@ -803,9 +916,72 @@ func InsertEvent(db *sql.DB, timestamp time.Time, eventType EventType, ip string
 	return nil
 }
 
+// BlockIPBatch performs InsertEvent + UpsertIPState + IncrementScore in a single
+// transaction, reducing write lock acquisitions from 3 to 1 per block action.
+// Returns the new score and block count (for bad actor evaluation).
+func BlockIPBatch(db *sql.DB, ip string, state BlockState, expireTime time.Time, reason string, timestamp time.Time, duration time.Duration, weight float64) (float64, int, error) {
+	reasonID, err := GetOrCreateReasonID(db, reason)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Insert event
+	var durNanos *int64
+	if duration > 0 {
+		d := int64(duration)
+		durNanos = &d
+	}
+	_, _ = tx.Exec(`INSERT OR IGNORE INTO events (timestamp, event_type, ip, reason_id, duration, node_name)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		timeToUnix(timestamp), string(EventTypeBlock), ip, reasonID, durNanos, nil)
+
+	// Upsert IP state
+	_, _ = tx.Exec(`INSERT INTO ips (ip, state, expire_time, reason_id, modified_at, first_blocked_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(ip) DO UPDATE SET
+			state = excluded.state,
+			expire_time = excluded.expire_time,
+			reason_id = excluded.reason_id,
+			modified_at = excluded.modified_at,
+			first_blocked_at = CASE
+				WHEN ips.first_blocked_at IS NOT NULL AND ips.first_blocked_at > 0 AND ips.first_blocked_at < excluded.first_blocked_at
+				THEN ips.first_blocked_at
+				ELSE excluded.first_blocked_at
+			END`,
+		ip, state.String(), timeToUnix(expireTime), reasonID, timeToUnix(timestamp), timeToUnix(timestamp))
+
+	// Increment score (if weight > 0)
+	var score float64
+	var blockCount int
+	if weight > 0 {
+		err = tx.QueryRow(`INSERT INTO ip_scores (ip, score, block_count, last_block_time)
+			VALUES (?, ?, 1, ?)
+			ON CONFLICT(ip) DO UPDATE SET
+				score = ip_scores.score + excluded.score,
+				block_count = ip_scores.block_count + 1,
+				last_block_time = excluded.last_block_time
+			RETURNING score, block_count`,
+			ip, weight, timeToUnix(timestamp)).Scan(&score, &blockCount)
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed to increment score in batch: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("failed to commit block batch: %w", err)
+	}
+	return score, blockCount, nil
+}
+
 // cleanupBatch deletes rows in batches to avoid holding the write lock for too long.
 func cleanupBatch(db *sql.DB, table, where string, args ...interface{}) (int, error) {
-	const batchSize = 1000
+	const batchSize = 5000
 	query := fmt.Sprintf("DELETE FROM %s WHERE rowid IN (SELECT rowid FROM %s WHERE %s LIMIT %d)", table, table, where, batchSize)
 	total := 0
 	for {

@@ -571,6 +571,7 @@ func TestCheckChains_UnblockOnGoodActor(t *testing.T) {
 	}
 	defer func() { _ = persistence.CloseDB(db) }()
 	h.processor.DB = db
+	h.processor.ReadDB = db
 	_ = persistence.UpsertIPState(db, goodIP, persistence.BlockStateBlocked, time.Now().Add(1*time.Hour), "test-block", time.Now(), time.Now())
 
 	// Process entry immediately (within cooldown period)

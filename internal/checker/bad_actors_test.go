@@ -52,6 +52,7 @@ func newBAHarness(t *testing.T, threshold float64) *baHarness {
 
 	h.p = testutil.NewTestProcessor(cfg, nil)
 	h.p.DB = db
+	h.p.ReadDB = db
 	h.p.PersistenceEnabled = true
 	h.p.Blocker = &baMockBlocker{
 		blockFunc: func(ipInfo utils.IPInfo, d time.Duration, reason string) error {
@@ -298,6 +299,7 @@ func TestBadActor_DisabledConfig(t *testing.T) {
 		BadActors: config.BadActorsConfig{Enabled: false},
 	}, nil)
 	p.DB = db
+	p.ReadDB = db
 	p.PersistenceEnabled = true
 	p.Blocker = &baMockBlocker{
 		blockFunc:   func(utils.IPInfo, time.Duration, string) error { return nil },

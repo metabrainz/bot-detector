@@ -34,6 +34,7 @@ type StateSyncManager struct {
 	nodeName         string
 	nodeAddress      string
 	db               *sql.DB
+	readDB           *sql.DB
 	dbMutex          *sync.Mutex
 	log              func(level logging.LogLevel, tag string, format string, args ...interface{})
 	httpClient       *http.Client
@@ -146,6 +147,7 @@ func NewStateSyncManager(
 	nodeName string,
 	nodeAddress string,
 	db *sql.DB,
+	readDB *sql.DB,
 	dbMutex *sync.Mutex,
 	logFunc func(level logging.LogLevel, tag string, format string, args ...interface{}),
 ) *StateSyncManager {
@@ -155,6 +157,7 @@ func NewStateSyncManager(
 		nodeName:    nodeName,
 		nodeAddress: nodeAddress,
 		db:          db,
+		readDB:      readDB,
 		dbMutex:     dbMutex,
 		log:         logFunc,
 		httpClient: &http.Client{
@@ -226,10 +229,8 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 	nodesSucceeded := 0
 	nodesFailed := 0
 
-	// Add local state
-	m.dbMutex.Lock()
-	localStates, err := persistence.GetAllIPStates(m.db)
-	m.dbMutex.Unlock()
+	// Add local state (readDB supports concurrent access, no mutex needed)
+	localStates, err := persistence.GetAllIPStates(m.readDB)
 	if err != nil {
 		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to query local states: %v", err)
 	} else {
@@ -458,9 +459,7 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	m.dbMutex.Unlock()
 
 	// Query local DB size for context
-	m.dbMutex.Lock()
-	localTotal, _ := persistence.CountIPStates(m.db)
-	m.dbMutex.Unlock()
+	localTotal, _ := persistence.CountIPStates(m.readDB)
 
 	// Count blocked vs unblocked in received states
 	blockedCount := 0

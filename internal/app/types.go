@@ -87,7 +87,8 @@ type Processor struct {
 	StateDir           string
 	CompactionInterval time.Duration
 	PersistenceMutex   sync.Mutex
-	DB                 *sql.DB // SQLite database handle
+	DB                 *sql.DB // SQLite database handle (writes)
+	ReadDB             *sql.DB // SQLite read-only pool (concurrent reads)
 
 	// String interning for memory optimization
 	ReasonCache      map[string]*string // Canonical reason strings

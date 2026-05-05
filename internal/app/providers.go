@@ -417,9 +417,18 @@ func (p *Processor) RemoveFromPersistence(ip string) error {
 
 // GetIPStates returns the complete IPStates map for state sync.
 func (p *Processor) GetIPStates() map[string]persistence.IPState {
-	states, err := persistence.GetAllIPStates(p.DB)
+	states, err := persistence.GetAllIPStates(p.ReadDB)
 	if err != nil {
 		p.LogFunc(logging.LevelError, "PERSISTENCE", "Failed to get all IP states: %v", err)
+		return make(map[string]persistence.IPState)
+	}
+	return states
+}
+
+func (p *Processor) GetIPStatesModifiedSince(since time.Time) map[string]persistence.IPState {
+	states, err := persistence.GetIPStatesModifiedSince(p.ReadDB, since)
+	if err != nil {
+		p.LogFunc(logging.LevelError, "PERSISTENCE", "Failed to get modified IP states: %v", err)
 		return make(map[string]persistence.IPState)
 	}
 	return states
@@ -454,8 +463,8 @@ func (p *Processor) GetBadActorInfo(ip string) (interface{}, interface{}) {
 	if !p.PersistenceEnabled {
 		return nil, nil
 	}
-	ba, _ := persistence.GetBadActor(p.DB, ip)
-	score, _ := persistence.GetScore(p.DB, ip)
+	ba, _ := persistence.GetBadActor(p.ReadDB, ip)
+	score, _ := persistence.GetScore(p.ReadDB, ip)
 	return ba, score
 }
 
@@ -463,7 +472,22 @@ func (p *Processor) GetAllBadActors() ([]interface{}, error) {
 	if !p.PersistenceEnabled {
 		return nil, nil
 	}
-	actors, err := persistence.GetAllBadActors(p.DB)
+	actors, err := persistence.GetAllBadActors(p.ReadDB)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]interface{}, len(actors))
+	for i, a := range actors {
+		result[i] = a
+	}
+	return result, nil
+}
+
+func (p *Processor) GetBadActorsPromotedSince(since time.Time) ([]interface{}, error) {
+	if !p.PersistenceEnabled {
+		return nil, nil
+	}
+	actors, err := persistence.GetBadActorsPromotedSince(p.ReadDB, since)
 	if err != nil {
 		return nil, err
 	}
@@ -487,9 +511,7 @@ func (p *Processor) GetBlockedIPsByReason(reason string) ([]string, error) {
 	if !p.PersistenceEnabled {
 		return nil, nil
 	}
-	p.PersistenceMutex.Lock()
-	defer p.PersistenceMutex.Unlock()
-	return persistence.GetBlockedIPsByReason(p.DB, reason, p.NowFunc())
+	return persistence.GetBlockedIPsByReason(p.ReadDB, reason, p.NowFunc())
 }
 
 func (p *Processor) GetBadActorsThreshold() float64 {

@@ -98,6 +98,9 @@ type Provider interface {
 	// GetIPStates returns the complete IPStates map for state sync.
 	GetIPStates() map[string]persistence.IPState
 
+	// GetIPStatesModifiedSince returns IP states modified after the given time.
+	GetIPStatesModifiedSince(since time.Time) map[string]persistence.IPState
+
 	// GetPersistenceMutex returns the mutex for IPStates.
 	GetPersistenceMutex() *sync.Mutex
 
@@ -119,6 +122,9 @@ type Provider interface {
 
 	// GetAllBadActors returns all bad actors.
 	GetAllBadActors() ([]interface{}, error)
+
+	// GetBadActorsPromotedSince returns bad actors promoted after the given time.
+	GetBadActorsPromotedSince(since time.Time) ([]interface{}, error)
 
 	// RemoveBadActorsByReason removes bad actors whose history contains the given reason.
 	// Returns the list of removed IPs.

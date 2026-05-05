@@ -43,31 +43,38 @@ func clusterPersistenceStateHandler(p Provider) http.HandlerFunc {
 		}
 
 		// Collect local IPStates
-		p.GetPersistenceMutex().Lock()
-		states := make(map[string]persistence.IPState)
-		ipStates := p.GetIPStates()
+		var states map[string]persistence.IPState
+		if incremental {
+			states = p.GetIPStatesModifiedSince(since)
+		} else {
+			states = make(map[string]persistence.IPState)
+			for ip, state := range p.GetIPStates() {
+				// Skip expired blocked entries, but keep unblocked entries (good actors)
+				if state.State == persistence.BlockStateBlocked {
+					if !state.ExpireTime.IsZero() && time.Now().After(state.ExpireTime) {
+						continue
+					}
+				}
+				states[ip] = state
+			}
+		}
 
-		for ip, state := range ipStates {
-			// Skip expired blocked entries, but keep unblocked entries (good actors)
-			if state.State == persistence.BlockStateBlocked {
-				if !state.ExpireTime.IsZero() && time.Now().After(state.ExpireTime) {
-					continue
+		// Only include bad actors on full sync (they rarely change)
+		var baList []persistence.BadActorInfo
+		if !incremental {
+			badActors, _ := p.GetAllBadActors()
+			for _, a := range badActors {
+				if ba, ok := a.(persistence.BadActorInfo); ok {
+					baList = append(baList, ba)
 				}
 			}
-			// For incremental sync, only include modified after 'since'
-			if incremental && !state.ModifiedAt.IsZero() && !state.ModifiedAt.After(since) {
-				continue
-			}
-			states[ip] = state
-		}
-		p.GetPersistenceMutex().Unlock()
-
-		// Collect bad actors
-		badActors, _ := p.GetAllBadActors()
-		var baList []persistence.BadActorInfo
-		for _, a := range badActors {
-			if ba, ok := a.(persistence.BadActorInfo); ok {
-				baList = append(baList, ba)
+		} else {
+			// Incremental: only send newly promoted bad actors
+			recentBadActors, _ := p.GetBadActorsPromotedSince(since)
+			for _, a := range recentBadActors {
+				if ba, ok := a.(persistence.BadActorInfo); ok {
+					baList = append(baList, ba)
+				}
 			}
 		}
 
@@ -267,11 +274,22 @@ func serveGzFileDecompressed(w http.ResponseWriter, path string) {
 func serveMergedStateFresh(p Provider, w http.ResponseWriter, r *http.Request, since time.Time) {
 	merged, nodesQueried, nodesFailed := collectAndMergeStates(p, since)
 
-	allBadActors, _ := p.GetAllBadActors()
+	// Only include bad actors on full sync (they rarely change and add ~37MB)
 	var baList []persistence.BadActorInfo
-	for _, a := range allBadActors {
-		if ba, ok := a.(persistence.BadActorInfo); ok {
-			baList = append(baList, ba)
+	if since.IsZero() {
+		allBadActors, _ := p.GetAllBadActors()
+		for _, a := range allBadActors {
+			if ba, ok := a.(persistence.BadActorInfo); ok {
+				baList = append(baList, ba)
+			}
+		}
+	} else {
+		// Incremental: only send newly promoted bad actors
+		recentBadActors, _ := p.GetBadActorsPromotedSince(since)
+		for _, a := range recentBadActors {
+			if ba, ok := a.(persistence.BadActorInfo); ok {
+				baList = append(baList, ba)
+			}
 		}
 	}
 
@@ -388,23 +406,23 @@ func collectAndMergeStates(p Provider, since time.Time) (map[string]persistence.
 	nodeName := p.GetNodeName()
 
 	// Add leader's own state first
-	p.GetPersistenceMutex().Lock()
-	for ip, state := range p.GetIPStates() {
+	var leaderStates map[string]persistence.IPState
+	if incremental && !since.IsZero() {
+		leaderStates = p.GetIPStatesModifiedSince(since)
+	} else {
+		leaderStates = p.GetIPStates()
+	}
+	for ip, state := range leaderStates {
 		// Skip expired blocked entries, but keep unblocked entries (good actors)
 		if state.State == persistence.BlockStateBlocked {
 			if !state.ExpireTime.IsZero() && time.Now().After(state.ExpireTime) {
 				continue
 			}
 		}
-		// For incremental, filter by modification time
-		if incremental && !since.IsZero() && !state.ModifiedAt.IsZero() && !state.ModifiedAt.After(since) {
-			continue
-		}
 		// Add source node to reason
 		state.Reason = addSourceNode(state.Reason, nodeName, "")
 		merged[ip] = state
 	}
-	p.GetPersistenceMutex().Unlock()
 	nodesQueried = append(nodesQueried, nodeName)
 
 	// Query each follower

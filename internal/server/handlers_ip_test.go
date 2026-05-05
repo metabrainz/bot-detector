@@ -240,6 +240,9 @@ func (m *mockIPProvider) RemoveFromPersistence(ip string) error             { re
 func (m *mockIPProvider) GetIPStates() map[string]persistence.IPState {
 	return make(map[string]persistence.IPState)
 }
+func (m *mockIPProvider) GetIPStatesModifiedSince(since time.Time) map[string]persistence.IPState {
+	return make(map[string]persistence.IPState)
+}
 func (m *mockIPProvider) GetPersistenceMutex() *sync.Mutex { return &sync.Mutex{} }
 func (m *mockIPProvider) GetClusterConfig() interface{}    { return nil }
 func (m *mockIPProvider) GetStateSyncConfig() (bool, bool, time.Duration, bool) {
@@ -249,8 +252,11 @@ func (m *mockIPProvider) GetStateSyncConfig() (bool, bool, time.Duration, bool) 
 func (m *mockIPProvider) GetStateSyncManager() interface{} {
 	return nil
 }
-func (m *mockIPProvider) GetBadActorInfo(ip string) (interface{}, interface{})    { return nil, nil }
-func (m *mockIPProvider) GetAllBadActors() ([]interface{}, error)                 { return nil, nil }
+func (m *mockIPProvider) GetBadActorInfo(ip string) (interface{}, interface{}) { return nil, nil }
+func (m *mockIPProvider) GetAllBadActors() ([]interface{}, error)              { return nil, nil }
+func (m *mockIPProvider) GetBadActorsPromotedSince(since time.Time) ([]interface{}, error) {
+	return nil, nil
+}
 func (m *mockIPProvider) RemoveBadActorsByReason(reason string) ([]string, error) { return nil, nil }
 func (m *mockIPProvider) GetBlockedIPsByReason(reason string) ([]string, error)   { return nil, nil }
 func (m *mockIPProvider) GetBadActorsThreshold() float64                          { return 0 }
