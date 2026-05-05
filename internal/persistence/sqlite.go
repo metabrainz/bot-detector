@@ -51,6 +51,7 @@ func OpenDB(stateDir string, dryRun bool) (*sql.DB, error) {
 		"PRAGMA auto_vacuum=INCREMENTAL",
 		"PRAGMA cache_size=-64000",       // 64MB page cache (default is 2MB)
 		"PRAGMA mmap_size=1073741824",    // 1GB memory-mapped I/O
+		"PRAGMA temp_store=MEMORY",          // temp tables in RAM
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
@@ -121,6 +122,7 @@ func OpenReadDB(stateDir string, dryRun bool, writeDB *sql.DB) (*sql.DB, error) 
 		"PRAGMA query_only=ON",
 		"PRAGMA cache_size=-64000",       // 64MB page cache (default is 2MB)
 		"PRAGMA mmap_size=1073741824",    // 1GB memory-mapped I/O
+		"PRAGMA temp_store=MEMORY",          // temp tables in RAM
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
