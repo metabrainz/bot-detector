@@ -38,6 +38,7 @@ type Metrics struct {
 	ActorsCleaned       atomic.Int64 `metric:"Actors Cleaned" dryrun:"true"`
 	BlockActions        atomic.Int64 `metric:"Block Actions Triggered" dryrun:"true"`
 	LogActions          atomic.Int64 `metric:"Log Actions Triggered" dryrun:"true"`
+	ChallengeActions    atomic.Int64 `metric:"Challenge Actions Triggered" dryrun:"true"`
 	BlockerCmdsQueued   atomic.Int64 `metric:"Blocker Commands Queued" dryrun:"false"`
 	BlockerCmdsDropped  atomic.Int64 `metric:"Blocker Commands Dropped" dryrun:"false"`
 	BlockerCmdsExecuted atomic.Int64 `metric:"Blocker Commands Executed" dryrun:"false"`

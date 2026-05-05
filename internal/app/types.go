@@ -2,6 +2,7 @@ package app
 
 import (
 	"bot-detector/internal/blocker"
+	"bot-detector/internal/challenger"
 	"bot-detector/internal/cluster"
 	"bot-detector/internal/commandline"
 	"bot-detector/internal/config"
@@ -56,6 +57,7 @@ type Processor struct {
 	ActivityMutex *sync.RWMutex
 	ActivityStore map[store.Actor]*store.ActorActivity
 	Blocker       blocker.Blocker
+	Challenger    *challenger.Challenger
 	ConfigMutex   *sync.RWMutex
 	Metrics       *metrics.Metrics
 	Chains        []config.BehavioralChain

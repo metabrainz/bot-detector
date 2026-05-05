@@ -26,6 +26,8 @@ const (
 	EventTypeBlock EventType = "block"
 	// EventTypeUnblock represents an unblock action.
 	EventTypeUnblock EventType = "unblock"
+	// EventTypeChallenge represents a challenge action.
+	EventTypeChallenge EventType = "challenge"
 )
 
 // AuditEvent is used internally for writing journal entries.

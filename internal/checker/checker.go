@@ -355,6 +355,11 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 		if p.EnableMetrics {
 			p.Metrics.LogActions.Add(1)
 		}
+	case "challenge":
+		if p.EnableMetrics {
+			p.Metrics.ChallengeActions.Add(1)
+		}
+		executeChallenge(p, entry, chain)
 	}
 
 	// Return true if OnMatch is "stop" to halt further chain processing.
@@ -418,6 +423,42 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 	}
 	if err := p.Blocker.Block(blockerIPInfo, chain.BlockDuration, chain.Name); err != nil {
 		p.LogFunc(logging.LevelError, "BLOCK_FAIL", "Failed to queue block command for %s: %v", entry.IPInfo.Address, err)
+	}
+}
+
+// executeChallenge writes a challenge key to the redis-compatible backend.
+func executeChallenge(p *app.Processor, entry *app.LogEntry, chain *config.BehavioralChain) {
+	if p.Challenger == nil {
+		return
+	}
+
+	reason := formatChainKey(chain.Name, entry)
+
+	// Determine which websites to challenge on
+	var websites []string
+	if len(chain.Websites) > 0 {
+		websites = chain.Websites
+	} else if entry.Website != "" {
+		websites = []string{entry.Website}
+	} else if entry.VHost != "" {
+		websites = []string{entry.VHost}
+	} else if len(p.Websites) > 0 {
+		for _, ws := range p.Websites {
+			websites = append(websites, ws.Name)
+		}
+	}
+
+	for _, website := range websites {
+		if err := p.Challenger.Challenge(entry.IPInfo.Address, website, chain.ChallengeDuration, reason); err != nil {
+			p.LogFunc(logging.LevelError, "CHALLENGE_FAIL", "Failed to challenge %s on %s: %v", entry.IPInfo.Address, website, err)
+		}
+	}
+
+	if p.PersistenceEnabled {
+		p.PersistenceMutex.Lock()
+		now := p.NowFunc()
+		_ = persistence.InsertEvent(p.DB, now, persistence.EventTypeChallenge, entry.IPInfo.Address, reason, chain.ChallengeDuration, "")
+		p.PersistenceMutex.Unlock()
 	}
 }
 

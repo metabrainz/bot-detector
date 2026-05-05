@@ -13,7 +13,7 @@ import (
 )
 
 // SchemaVersion is the current database schema version.
-const SchemaVersion = 6
+const SchemaVersion = 7
 
 // OpenDB opens (or creates) the SQLite database with WAL mode.
 // In dry-run mode, uses an in-memory database.
@@ -186,6 +186,12 @@ func ApplyMigrations(db *sql.DB) (bool, error) {
 	if currentVersion < 6 {
 		if err := migrateV6(db); err != nil {
 			return false, fmt.Errorf("migration v6 failed: %w", err)
+		}
+	}
+
+	if currentVersion < 7 {
+		if err := migrateV7(db); err != nil {
+			return false, fmt.Errorf("migration v7 failed: %w", err)
 		}
 	}
 
@@ -454,6 +460,39 @@ func migrateV6(db *sql.DB) error {
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("failed to execute %q: %w", stmt, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// migrateV7 updates the events table CHECK constraint to allow 'challenge' event type.
+func migrateV7(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmts := []string{
+		`CREATE TABLE events_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			timestamp TIMESTAMP NOT NULL,
+			event_type TEXT NOT NULL CHECK(event_type IN ('block', 'unblock', 'challenge')),
+			ip TEXT NOT NULL,
+			reason_id INTEGER REFERENCES reasons(id),
+			duration INTEGER,
+			node_name TEXT,
+			UNIQUE(timestamp, ip, node_name, event_type)
+		)`,
+		`INSERT INTO events_new SELECT * FROM events`,
+		`DROP TABLE events`,
+		`ALTER TABLE events_new RENAME TO events`,
+		`CREATE INDEX idx_events_ip_timestamp ON events(ip, timestamp)`,
+		`INSERT INTO schema_version (version, description) VALUES (7, 'Add challenge event type')`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("failed to execute %q: %w", stmt[:min(len(stmt), 60)], err)
 		}
 	}
 	return tx.Commit()
