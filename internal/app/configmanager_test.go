@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"syscall"
 	"testing"
@@ -201,4 +202,34 @@ application:
 	_, err = reloadedFileOpener(configFilePath)
 	assert.NoError(t, err, "FileOpener should be callable")
 	assert.True(t, fileOpenerCalled, "The mocked FileOpener function should have been called")
+}
+
+func TestAppConfig_HasAllLoadedConfigFields(t *testing.T) {
+	// This test ensures that when new fields are added to LoadedConfig,
+	// they are also added to AppConfig (and thus copied in main.go and
+	// configmanager.go). Fields that are intentionally excluded are listed below.
+	excluded := map[string]bool{
+		"Websites":       true, // handled separately in Processor
+		"Chains":         true, // handled separately in Processor
+		"LogFormatRegex": true, // handled separately in Processor
+		"StatFunc":       true, // set independently
+	}
+
+	loadedType := reflect.TypeOf(config.LoadedConfig{})
+	appType := reflect.TypeOf(config.AppConfig{})
+
+	appFields := make(map[string]bool)
+	for i := 0; i < appType.NumField(); i++ {
+		appFields[appType.Field(i).Name] = true
+	}
+
+	for i := 0; i < loadedType.NumField(); i++ {
+		field := loadedType.Field(i).Name
+		if excluded[field] {
+			continue
+		}
+		if !appFields[field] {
+			t.Errorf("LoadedConfig has field %q that is missing from AppConfig (add it or exclude it in this test)", field)
+		}
+	}
 }

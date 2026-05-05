@@ -284,6 +284,7 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 		Parser:           loadedCfg.Parser,
 		Checker:          loadedCfg.Checker,
 		Blockers:         loadedCfg.Blockers,
+		Challenge:        loadedCfg.Challenge,
 		BadActors:        loadedCfg.BadActors,
 		Cluster:          oldConfig.Cluster, // Cluster config is not reloadable
 		GoodActors:       loadedCfg.GoodActors,
