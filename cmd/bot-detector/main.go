@@ -682,6 +682,7 @@ func execute(params *commandline.AppParameters) error {
 		Parser:           loadedCfg.Parser,
 		Checker:          loadedCfg.Checker,
 		Blockers:         loadedCfg.Blockers,
+		Challenge:        loadedCfg.Challenge,
 		BadActors:        loadedCfg.BadActors,
 		GoodActors:       loadedCfg.GoodActors,
 		FileDependencies: loadedCfg.FileDependencies,
