@@ -3,6 +3,7 @@ package main
 import (
 	"bot-detector/internal/app"
 	"bot-detector/internal/blocker"
+	"bot-detector/internal/challenger"
 	"bot-detector/internal/checker"
 	"bot-detector/internal/cluster"
 	"bot-detector/internal/commandline"
@@ -792,6 +793,13 @@ func execute(params *commandline.AppParameters) error {
 	haproxyBlocker.StartHealthCheck(p.Config.Blockers.HealthCheckInterval)
 	rateLimitedBlocker := blocker.NewRateLimitedBlocker(p, p, haproxyBlocker, p.Config.Blockers.CommandQueueSize, p.Config.Blockers.CommandsPerSecond)
 	p.Blocker = rateLimitedBlocker
+
+	// Initialize challenger if configured
+	if len(p.Config.Challenge.Backends) > 0 {
+		p.Challenger = challenger.New(p.Config.Challenge.Backends, p.Config.Challenge.KeyPrefix)
+		p.LogFunc(logging.LevelInfo, "SETUP", "Challenger initialized with %d backend(s), key prefix: %s",
+			len(p.Config.Challenge.Backends), p.Config.Challenge.KeyPrefix)
+	}
 
 	if p.PersistenceEnabled {
 		if err := restorePersistenceState(p); err != nil {

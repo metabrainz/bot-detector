@@ -309,6 +309,14 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 				p.LogFunc(logLevel, "LOG", "Chain: %s completed by IP %s. Action set to 'log'%s",
 					formattedReason, entry.IPInfo.Address, getOnMatchSuffix(chain))
 			}
+		case "challenge":
+			if websiteName != "" {
+				p.LogFunc(logLevel, "CHALLENGE", "Chain: %s completed by IP %s on website '%s'. Challenging for %v%s",
+					formattedReason, entry.IPInfo.Address, websiteName, chain.ChallengeDuration, getOnMatchSuffix(chain))
+			} else {
+				p.LogFunc(logLevel, "CHALLENGE", "Chain: %s completed by IP %s. Challenging for %v%s",
+					formattedReason, entry.IPInfo.Address, chain.ChallengeDuration, getOnMatchSuffix(chain))
+			}
 		}
 	}
 
@@ -364,7 +372,7 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 
 	// Return true if OnMatch is "stop" to halt further chain processing.
 	// Log-only chains never stop processing — on_match is only effective for block actions.
-	return chain.OnMatch == "stop" && chain.Action == "block"
+	return chain.OnMatch == "stop" && (chain.Action == "block" || chain.Action == "challenge")
 }
 
 // executeBlock calls the external blocker unless in DryRun mode.
@@ -428,7 +436,7 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 
 // executeChallenge writes a challenge key to the redis-compatible backend.
 func executeChallenge(p *app.Processor, entry *app.LogEntry, chain *config.BehavioralChain) {
-	if p.Challenger == nil {
+	if p.Challenger == nil || p.DryRun {
 		return
 	}
 
@@ -513,6 +521,9 @@ func logDryRunCompletion(p *app.Processor, chain *config.BehavioralChain, entry 
 	case "block":
 		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK: Chain: %s completed by IP %s%s. Blocking for %v (DryRun)%s",
 			chain.Name, entry.IPInfo.Address, websiteContext, chain.BlockDuration, onMatchSuffix)
+	case "challenge":
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "CHALLENGE: Chain: %s completed by IP %s%s. Challenging for %v (DryRun)%s",
+			chain.Name, entry.IPInfo.Address, websiteContext, chain.ChallengeDuration, onMatchSuffix)
 	case "log":
 		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG: Chain: %s completed by IP %s%s. Action set to 'log' (DryRun)%s",
 			chain.Name, entry.IPInfo.Address, websiteContext, onMatchSuffix)

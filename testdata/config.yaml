@@ -15,6 +15,12 @@ checker:
   actor_cleanup_interval: "1m"
   actor_state_idle_timeout: "30m"
 
+challenge:
+  backends:
+    - "127.0.0.1:6379"
+  key_prefix: "test:challenge"
+  default_duration: "1h"
+
 blockers:
   default_duration: "30m"
   commands_per_second: 100
@@ -208,3 +214,10 @@ chains:
           path: "regex:^/ws/\\d+/"
         max_delay: "1s"
         repeated: 5
+  - name: "Test-Challenge-Chain"
+    action: "challenge"
+    challenge_duration: "5m"
+    match_key: "ip"
+    steps:
+      - field_matches:
+          path: "/challenge-test"

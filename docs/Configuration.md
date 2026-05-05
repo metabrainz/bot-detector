@@ -119,6 +119,24 @@ websites:
 | **duration_tables** | map | A map of Go duration strings to HAProxy stick table names (e.g., `"30m": "thirty_min_blocks"`). |
 
 
+### `challenge`
+
+Optional configuration for the `challenge` action. When a chain with `action: "challenge"` completes, bot-detector writes a key to a redis-compatible backend. An external system (e.g., OpenResty) reads these keys to force a proof-of-work challenge on the flagged IP.
+
+| Field | Type | Description |
+| :---- | :---- | :---- |
+| **backends** | list of strings | Redis-compatible backend addresses (e.g., `["10.2.3.254:6379"]`). Writes are fanned out to all backends. |
+| **key_prefix** | string | Prefix for challenge keys. Default: `antibot:challenge`. Key format: `<prefix>:<website>:<ip>`. |
+| **default_duration** | string | Default TTL for challenge keys. Used when a chain does not specify `challenge_duration`. Format: Go duration string. |
+
+```yaml
+challenge:
+  backends:
+    - "10.2.3.254:6379"
+  key_prefix: "antibot:challenge"
+  default_duration: "24h"
+```
+
 ### `cluster`
 
 Optional cluster configuration for running multiple bot-detector nodes in a leader-follower architecture.
@@ -159,7 +177,7 @@ Optional. Provides default values for chain fields. Any field set here will be u
 
 | Field | Type | Description |
 | :---- | :---- | :---- |
-| **action** | string | Default action for chains (`block` or `log`). |
+| **action** | string | Default action for chains (`block`, `challenge`, or `log`). |
 | **block_duration** | string | Default block duration. Takes precedence over `blockers.default_duration`. |
 | **match_key** | string | Default match key (e.g., `ip`, `ip_ua`). |
 | **on_match** | string | Default on_match behavior (`stop` or `continue`). |
@@ -205,10 +223,11 @@ Chains are processed in the order they are defined. Each chain definition must i
 | Field | Type | Required | Description |
 | :---- | :---- | :---- | :---- |
 | **name** | string | Yes | A unique, descriptive name for the chain (e.g., `API-Abuse-Low-Agent`). Must be unique across all chains. |
-| **action** | string | Yes | The action to take when the chain is completed: `block` or `log`. To temporarily disable a chain, prefix the action with `!` (e.g., `!block`). |
+| **action** | string | Yes | The action to take when the chain is completed: `block`, `challenge`, or `log`. To temporarily disable a chain, prefix the action with `!` (e.g., `!block`). |
 | **block_duration** | string | No | The duration for which the IP should be blocked if `action` is `block`. Format: Go duration string (e.g., `5m`, `1h`, `30m`, `1h30m`). If not specified, uses `blockers.default_duration`. |
+| **challenge_duration** | string | No | The TTL for the challenge key if `action` is `challenge`. Format: Go duration string. If not specified, uses `challenge.default_duration`. |
 | **match_key** | string | Yes | The key used to track activity. Determines if behavior is tracked per IP, per IP version, or per unique client (IP + User-Agent). See [`match_key` values](#match_key-values) below. |
-| **on_match** | string | No | If set to `stop`, no further chains will be processed for the current log entry after this chain completes. Only effective for `block` actions — log-only chains never stop further processing. |
+| **on_match** | string | No | If set to `stop`, no further chains will be processed for the current log entry after this chain completes. Effective for `block` and `challenge` actions — log-only chains never stop further processing. |
 | **bad_actor_weight** | float | No | Weight added to the bad actor score when this chain blocks an IP (0.0–1.0). Default: `1.0`. Only relevant when `bad_actors` is enabled. See [BAD_ACTORS.md](BAD_ACTORS.md). |
 | **websites** | list of strings | No | **Multi-website mode only.** List of website names (from `websites` section) where this chain applies. If omitted or empty, the chain applies to all websites (global chain). Example: `["main_site", "api_site"]`. |
 | **steps** | list of objects | Yes | The sequential list of steps that define the malicious pattern. See table [`chains[].steps[].fields`](#chainsstepsfields). |

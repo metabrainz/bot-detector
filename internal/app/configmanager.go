@@ -322,6 +322,11 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	logging.SetLogLevel(loadedCfg.Application.LogLevel)
 	p.ConfigMutex.Unlock()
 
+	// Update challenger backends if configured
+	if p.Challenger != nil {
+		p.Challenger.UpdateAddresses(p.Config.Challenge.Backends)
+	}
+
 	// Update website tailers if in multi-website mode
 	if p.WebsiteTailerMgr != nil {
 		// Type assert to the manager (we know the type but use interface{} to avoid import cycle)
