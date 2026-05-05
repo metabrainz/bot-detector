@@ -20,6 +20,7 @@ type mockBadActorsProvider struct {
 }
 
 func (m *mockBadActorsProvider) GetAllBadActors() ([]interface{}, error) { return m.badActors, nil }
+func (m *mockBadActorsProvider) GetBadActorsPromotedSince(since time.Time) ([]interface{}, error) { return nil, nil }
 func (m *mockBadActorsProvider) RemoveBadActorsByReason(reason string) ([]string, error) {
 	return m.removedByReason, nil
 }

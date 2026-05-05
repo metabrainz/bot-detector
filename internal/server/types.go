@@ -123,6 +123,9 @@ type Provider interface {
 	// GetAllBadActors returns all bad actors.
 	GetAllBadActors() ([]interface{}, error)
 
+	// GetBadActorsPromotedSince returns bad actors promoted after the given time.
+	GetBadActorsPromotedSince(since time.Time) ([]interface{}, error)
+
 	// RemoveBadActorsByReason removes bad actors whose history contains the given reason.
 	// Returns the list of removed IPs.
 	RemoveBadActorsByReason(reason string) ([]string, error)

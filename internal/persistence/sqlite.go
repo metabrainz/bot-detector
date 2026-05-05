@@ -637,6 +637,29 @@ func GetAllBadActors(db *sql.DB) ([]BadActorInfo, error) {
 	return result, rows.Err()
 }
 
+// GetBadActorsPromotedSince returns bad actors promoted after the given time.
+func GetBadActorsPromotedSince(db *sql.DB, since time.Time) ([]BadActorInfo, error) {
+	rows, err := db.Query("SELECT ip, promoted_at, total_score, block_count, history_json FROM bad_actors WHERE promoted_at > ? ORDER BY promoted_at DESC", timeToUnix(since))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recent bad actors: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var result []BadActorInfo
+	for rows.Next() {
+		var ba BadActorInfo
+		var histJSON sql.NullString
+		var promotedAt int64
+		if err := rows.Scan(&ba.IP, &promotedAt, &ba.TotalScore, &ba.BlockCount, &histJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan bad actor: %w", err)
+		}
+		ba.PromotedAt = unixToTime(promotedAt)
+		ba.HistoryJSON = nullStringValue(histJSON)
+		result = append(result, ba)
+	}
+	return result, rows.Err()
+}
+
 // RemoveBadActor removes an IP from bad_actors and resets its score.
 func RemoveBadActor(db *sql.DB, ip string) error {
 	_, err := db.Exec("DELETE FROM bad_actors WHERE ip = ?", ip)

@@ -483,6 +483,21 @@ func (p *Processor) GetAllBadActors() ([]interface{}, error) {
 	return result, nil
 }
 
+func (p *Processor) GetBadActorsPromotedSince(since time.Time) ([]interface{}, error) {
+	if !p.PersistenceEnabled {
+		return nil, nil
+	}
+	actors, err := persistence.GetBadActorsPromotedSince(p.ReadDB, since)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]interface{}, len(actors))
+	for i, a := range actors {
+		result[i] = a
+	}
+	return result, nil
+}
+
 func (p *Processor) RemoveBadActorsByReason(reason string) ([]string, error) {
 	if !p.PersistenceEnabled {
 		return nil, nil

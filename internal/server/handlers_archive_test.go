@@ -73,6 +73,7 @@ func (m *MockProvider) GetStateSyncManager() interface{} {
 }
 func (m *MockProvider) GetBadActorInfo(ip string) (interface{}, interface{})    { return nil, nil }
 func (m *MockProvider) GetAllBadActors() ([]interface{}, error)                 { return nil, nil }
+func (m *MockProvider) GetBadActorsPromotedSince(since time.Time) ([]interface{}, error) { return nil, nil }
 func (m *MockProvider) RemoveBadActorsByReason(reason string) ([]string, error) { return nil, nil }
 func (m *MockProvider) GetBlockedIPsByReason(reason string) ([]string, error)   { return nil, nil }
 func (m *MockProvider) GetBadActorsThreshold() float64                          { return 0 }
