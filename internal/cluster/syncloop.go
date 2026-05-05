@@ -229,10 +229,8 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 	nodesSucceeded := 0
 	nodesFailed := 0
 
-	// Add local state
-	m.dbMutex.Lock()
+	// Add local state (readDB supports concurrent access, no mutex needed)
 	localStates, err := persistence.GetAllIPStates(m.readDB)
-	m.dbMutex.Unlock()
 	if err != nil {
 		m.log(logging.LevelWarning, "STATE_SYNC", "Failed to query local states: %v", err)
 	} else {
@@ -461,9 +459,7 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	m.dbMutex.Unlock()
 
 	// Query local DB size for context
-	m.dbMutex.Lock()
 	localTotal, _ := persistence.CountIPStates(m.readDB)
-	m.dbMutex.Unlock()
 
 	// Count blocked vs unblocked in received states
 	blockedCount := 0
