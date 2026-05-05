@@ -80,6 +80,14 @@ func (m *MockProvider) RemoveBadActorsByReason(reason string) ([]string, error) 
 func (m *MockProvider) GetBlockedIPsByReason(reason string) ([]string, error)   { return nil, nil }
 func (m *MockProvider) GetBadActorsThreshold() float64                          { return 0 }
 func (m *MockProvider) GetRecentParseErrors() []string                          { return nil }
+func (m *MockProvider) GetChallengeStatus(ip, website string) (bool, string, error) {
+	return false, "", nil
+}
+func (m *MockProvider) ChallengeIP(ip, website string, duration time.Duration, reason string) error {
+	return nil
+}
+func (m *MockProvider) UnchallengeIP(ip, website string) error { return nil }
+func (m *MockProvider) GetWebsiteNames() []string              { return nil }
 
 func TestArchiveHandler_StableETag(t *testing.T) {
 	// Common setup

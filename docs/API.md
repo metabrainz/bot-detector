@@ -950,6 +950,40 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `400 Bad Request`: Invalid IP address format.
 
 
+## Challenge API
+
+### `GET /api/v1/challenge/{website}/{ip}`
+
+Check if an IP is currently challenged on a website.
+
+**Response:**
+```json
+{"ip": "1.2.3.4", "website": "mb_prod", "challenged": true, "reason": "Distributed-Entity-SubPage-Scraper"}
+```
+
+### `POST /api/v1/challenge/{website}/{ip}`
+
+Manually challenge an IP on a website.
+
+**Query parameters:**
+- `duration` (optional): Challenge TTL, e.g. `12h`. Default: `24h`.
+- `reason` (optional): Reason string. Default: `manual`.
+
+**Response:**
+```json
+{"ip": "1.2.3.4", "website": "mb_prod", "duration": "24h0m0s", "reason": "manual", "status": "challenged"}
+```
+
+### `DELETE /api/v1/challenge/{website}/{ip}`
+
+Remove a challenge for an IP on a website.
+
+**Response:**
+```json
+{"ip": "1.2.3.4", "website": "mb_prod", "status": "unchallenged"}
+```
+
+
 ## Usage Examples
 
 ### Query IP status (cluster-aware)

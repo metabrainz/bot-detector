@@ -481,6 +481,7 @@ type IPStatusResponse struct {
 	PersistenceReason  string            `json:"persistence_reason,omitempty"`
 	BadActor           *BadActorStatus   `json:"bad_actor,omitempty"`
 	Score              *ScoreStatus      `json:"score,omitempty"`
+	Challenge          []ChallengeStatus `json:"challenge,omitempty"`
 }
 
 // BadActorStatus is included in IP lookup when the IP is a bad actor.
@@ -496,6 +497,12 @@ type ScoreStatus struct {
 	CurrentScore float64 `json:"current_score"`
 	BlockCount   int     `json:"block_count"`
 	Threshold    float64 `json:"threshold"`
+}
+
+// ChallengeStatus shows challenge state for a website.
+type ChallengeStatus struct {
+	Website string `json:"website"`
+	Reason  string `json:"reason"`
 }
 
 // apiIPLookupHandler returns IP status as JSON (cluster-aware)
@@ -711,6 +718,16 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 
 	// Add bad actor / score info
 	populateBadActorInfo(p, &response, ip)
+
+	// Add challenge info
+	for _, website := range p.GetWebsiteNames() {
+		if challenged, reason, err := p.GetChallengeStatus(ip, website); err == nil && challenged {
+			response.Challenge = append(response.Challenge, ChallengeStatus{
+				Website: website,
+				Reason:  reason,
+			})
+		}
+	}
 
 	return response
 }

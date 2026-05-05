@@ -195,6 +195,14 @@ func (m *mockProvider) RemoveBadActorsByReason(reason string) ([]string, error) 
 func (m *mockProvider) GetBlockedIPsByReason(reason string) ([]string, error)   { return nil, nil }
 func (m *mockProvider) GetBadActorsThreshold() float64                          { return 0 }
 func (m *mockProvider) GetRecentParseErrors() []string                          { return nil }
+func (m *mockProvider) GetChallengeStatus(ip, website string) (bool, string, error) {
+	return false, "", nil
+}
+func (m *mockProvider) ChallengeIP(ip, website string, duration time.Duration, reason string) error {
+	return nil
+}
+func (m *mockProvider) UnchallengeIP(ip, website string) error { return nil }
+func (m *mockProvider) GetWebsiteNames() []string              { return nil }
 
 // TestServer_StartAndShutdown verifies the full lifecycle of the stats server.
 func TestServer_StartAndShutdown(t *testing.T) {

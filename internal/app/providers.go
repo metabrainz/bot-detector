@@ -523,6 +523,35 @@ func (p *Processor) GetBadActorsThreshold() float64 {
 	return p.Config.BadActors.Threshold
 }
 
+func (p *Processor) GetChallengeStatus(ip, website string) (bool, string, error) {
+	if p.Challenger == nil {
+		return false, "", nil
+	}
+	return p.Challenger.IsChallenged(ip, website)
+}
+
+func (p *Processor) ChallengeIP(ip, website string, duration time.Duration, reason string) error {
+	if p.Challenger == nil {
+		return fmt.Errorf("challenger not configured")
+	}
+	return p.Challenger.Challenge(ip, website, duration, reason)
+}
+
+func (p *Processor) UnchallengeIP(ip, website string) error {
+	if p.Challenger == nil {
+		return fmt.Errorf("challenger not configured")
+	}
+	return p.Challenger.Unchallenge(ip, website)
+}
+
+func (p *Processor) GetWebsiteNames() []string {
+	var names []string
+	for _, ws := range p.Websites {
+		names = append(names, ws.Name)
+	}
+	return names
+}
+
 // GetRecentParseErrors returns the most recent parse error log lines (newest first).
 func (p *Processor) GetRecentParseErrors() []string {
 	if p.Metrics.RecentParseErrors == nil {

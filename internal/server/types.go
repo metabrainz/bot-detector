@@ -136,6 +136,19 @@ type Provider interface {
 	// GetBadActorsThreshold returns the configured bad actor threshold (0 if disabled).
 	GetBadActorsThreshold() float64
 
+	// GetChallengeStatus checks if an IP is challenged on a website.
+	// Returns (challenged bool, reason string, err error).
+	GetChallengeStatus(ip, website string) (bool, string, error)
+
+	// ChallengeIP manually challenges an IP on a website.
+	ChallengeIP(ip, website string, duration time.Duration, reason string) error
+
+	// UnchallengeIP removes a challenge for an IP on a website.
+	UnchallengeIP(ip, website string) error
+
+	// GetWebsiteNames returns the list of configured website names.
+	GetWebsiteNames() []string
+
 	// GetRecentParseErrors returns the most recent parse error log lines (newest first).
 	GetRecentParseErrors() []string
 }
