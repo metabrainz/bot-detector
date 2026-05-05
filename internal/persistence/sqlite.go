@@ -848,7 +848,7 @@ func InsertEvent(db *sql.DB, timestamp time.Time, eventType EventType, ip string
 
 // cleanupBatch deletes rows in batches to avoid holding the write lock for too long.
 func cleanupBatch(db *sql.DB, table, where string, args ...interface{}) (int, error) {
-	const batchSize = 1000
+	const batchSize = 5000
 	query := fmt.Sprintf("DELETE FROM %s WHERE rowid IN (SELECT rowid FROM %s WHERE %s LIMIT %d)", table, table, where, batchSize)
 	total := 0
 	for {
