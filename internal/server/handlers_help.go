@@ -54,6 +54,9 @@ var allEndpoints = []endpoint{
 	{"GET", "/api/v1/cluster/internal/persistence/state", "Internal: persistence state for sync", "application/json", "cluster"},
 	{"GET", "/api/v1/cluster/state/merged", "Merged cluster state", "application/json", "cluster"},
 	{"DELETE", "/api/v1/cluster/internal/bad-actors?reason=<reason>", "Internal: broadcast bad actor removal to follower", "text/plain", "cluster"},
+	{"GET", "/api/v1/challenge/{website}/{ip}", "Check if IP is challenged on website", "application/json", "api"},
+	{"POST", "/api/v1/challenge/{website}/{ip}", "Manually challenge IP on website", "application/json", "api"},
+	{"DELETE", "/api/v1/challenge/{website}/{ip}", "Remove challenge for IP on website", "application/json", "api"},
 }
 
 // helpHandler returns endpoint listing.
