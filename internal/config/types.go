@@ -84,6 +84,7 @@ type ChallengeConfig struct {
 	Backends        []string      `config:"compare" yaml:"backends"`
 	KeyPrefix       string        `config:"compare" yaml:"key_prefix"`
 	DefaultDuration time.Duration `config:"compare" yaml:"default_duration"`
+	DB              int           `config:"compare" yaml:"db"`
 }
 
 type BlockerSettings struct {
@@ -228,6 +229,7 @@ type ChallengeConfigYAML struct {
 	Backends        []string `yaml:"backends"`         // Redis-compatible backend addresses
 	KeyPrefix       string   `yaml:"key_prefix"`       // Key prefix (default: "antibot:challenge")
 	DefaultDuration string   `yaml:"default_duration"` // Default challenge TTL (e.g., "24h")
+	DB              int      `yaml:"db"`               // Redis database number (default: 0)
 }
 
 // ClusterConfigYAML represents the cluster configuration in YAML format.

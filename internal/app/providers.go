@@ -523,25 +523,25 @@ func (p *Processor) GetBadActorsThreshold() float64 {
 	return p.Config.BadActors.Threshold
 }
 
-func (p *Processor) GetChallengeStatus(ip, website string) (bool, string, error) {
+func (p *Processor) GetChallengeStatus(ip string) (bool, error) {
 	if p.Challenger == nil {
-		return false, "", nil
+		return false, nil
 	}
-	return p.Challenger.IsChallenged(ip, website)
+	return p.Challenger.IsChallenged(ip)
 }
 
-func (p *Processor) ChallengeIP(ip, website string, duration time.Duration, reason string) error {
+func (p *Processor) ChallengeIP(ip string, duration time.Duration) error {
 	if p.Challenger == nil {
 		return fmt.Errorf("challenger not configured")
 	}
-	return p.Challenger.Challenge(ip, website, duration, reason)
+	return p.Challenger.Challenge(ip, duration)
 }
 
-func (p *Processor) UnchallengeIP(ip, website string) error {
+func (p *Processor) UnchallengeIP(ip string) error {
 	if p.Challenger == nil {
 		return fmt.Errorf("challenger not configured")
 	}
-	return p.Challenger.Unchallenge(ip, website)
+	return p.Challenger.Unchallenge(ip)
 }
 
 func (p *Processor) GetWebsiteNames() []string {

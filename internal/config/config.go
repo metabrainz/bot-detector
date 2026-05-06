@@ -1685,12 +1685,13 @@ func buildChallengeConfig(yaml *ChallengeConfigYAML) ChallengeConfig {
 	}
 	keyPrefix := yaml.KeyPrefix
 	if keyPrefix == "" {
-		keyPrefix = "antibot:challenge"
+		keyPrefix = "ac"
 	}
 	return ChallengeConfig{
 		Backends:        yaml.Backends,
 		KeyPrefix:       keyPrefix,
 		DefaultDuration: defaultDuration,
+		DB:              yaml.DB,
 	}
 }
 

@@ -440,28 +440,11 @@ func executeChallenge(p *app.Processor, entry *app.LogEntry, chain *config.Behav
 		return
 	}
 
+	if err := p.Challenger.Challenge(entry.IPInfo.Address, chain.ChallengeDuration); err != nil {
+		p.LogFunc(logging.LevelError, "CHALLENGE_FAIL", "Failed to challenge %s: %v", entry.IPInfo.Address, err)
+	}
+
 	reason := formatChainKey(chain.Name, entry)
-
-	// Determine which websites to challenge on
-	var websites []string
-	if len(chain.Websites) > 0 {
-		websites = chain.Websites
-	} else if entry.Website != "" {
-		websites = []string{entry.Website}
-	} else if entry.VHost != "" {
-		websites = []string{entry.VHost}
-	} else if len(p.Websites) > 0 {
-		for _, ws := range p.Websites {
-			websites = append(websites, ws.Name)
-		}
-	}
-
-	for _, website := range websites {
-		if err := p.Challenger.Challenge(entry.IPInfo.Address, website, chain.ChallengeDuration, reason); err != nil {
-			p.LogFunc(logging.LevelError, "CHALLENGE_FAIL", "Failed to challenge %s on %s: %v", entry.IPInfo.Address, website, err)
-		}
-	}
-
 	if p.PersistenceEnabled {
 		p.PersistenceMutex.Lock()
 		now := p.NowFunc()

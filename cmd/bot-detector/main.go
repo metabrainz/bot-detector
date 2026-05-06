@@ -797,7 +797,7 @@ func execute(params *commandline.AppParameters) error {
 
 	// Initialize challenger if configured
 	if len(p.Config.Challenge.Backends) > 0 {
-		p.Challenger = challenger.New(p.Config.Challenge.Backends, p.Config.Challenge.KeyPrefix)
+		p.Challenger = challenger.New(p.Config.Challenge.Backends, p.Config.Challenge.KeyPrefix, p.Config.Challenge.DB)
 		p.LogFunc(logging.LevelInfo, "SETUP", "Challenger initialized with %d backend(s), key prefix: %s",
 			len(p.Config.Challenge.Backends), p.Config.Challenge.KeyPrefix)
 	}

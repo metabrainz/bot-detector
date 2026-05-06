@@ -9,17 +9,16 @@ import (
 	"bot-detector/internal/logging"
 )
 
-// GET /api/v2/challenge/{website}/{ip}
+// GET /api/v1/challenge/{ip}
 func challengeStatusHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		website := r.PathValue("website")
 		ip := r.PathValue("ip")
-		if website == "" || ip == "" {
-			jsonError(w, "website and ip required", http.StatusBadRequest)
+		if ip == "" {
+			jsonError(w, "ip required", http.StatusBadRequest)
 			return
 		}
 
-		challenged, reason, err := p.GetChallengeStatus(ip, website)
+		challenged, err := p.GetChallengeStatus(ip)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("failed to check challenge: %v", err), http.StatusInternalServerError)
 			return
@@ -28,20 +27,17 @@ func challengeStatusHandler(p Provider) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"ip":         ip,
-			"website":    website,
 			"challenged": challenged,
-			"reason":     reason,
 		})
 	}
 }
 
-// POST /api/v2/challenge/{website}/{ip}
+// POST /api/v1/challenge/{ip}
 func challengeIPHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		website := r.PathValue("website")
 		ip := r.PathValue("ip")
-		if website == "" || ip == "" {
-			jsonError(w, "website and ip required", http.StatusBadRequest)
+		if ip == "" {
+			jsonError(w, "ip required", http.StatusBadRequest)
 			return
 		}
 
@@ -56,51 +52,42 @@ func challengeIPHandler(p Provider) http.HandlerFunc {
 			duration = parsed
 		}
 
-		reason := r.URL.Query().Get("reason")
-		if reason == "" {
-			reason = "manual"
-		}
-
-		if err := p.ChallengeIP(ip, website, duration, reason); err != nil {
+		if err := p.ChallengeIP(ip, duration); err != nil {
 			jsonError(w, fmt.Sprintf("failed to challenge: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		p.Log(logging.LevelInfo, "API", "Manually challenged %s on %s for %v (reason: %s)", ip, website, duration, reason)
+		p.Log(logging.LevelInfo, "API", "Manually challenged %s for %v", ip, duration)
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"ip":       ip,
-			"website":  website,
 			"duration": duration.String(),
-			"reason":   reason,
 			"status":   "challenged",
 		})
 	}
 }
 
-// DELETE /api/v2/challenge/{website}/{ip}
+// DELETE /api/v1/challenge/{ip}
 func unchallengeIPHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		website := r.PathValue("website")
 		ip := r.PathValue("ip")
-		if website == "" || ip == "" {
-			jsonError(w, "website and ip required", http.StatusBadRequest)
+		if ip == "" {
+			jsonError(w, "ip required", http.StatusBadRequest)
 			return
 		}
 
-		if err := p.UnchallengeIP(ip, website); err != nil {
+		if err := p.UnchallengeIP(ip); err != nil {
 			jsonError(w, fmt.Sprintf("failed to unchallenge: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		p.Log(logging.LevelInfo, "API", "Removed challenge for %s on %s", ip, website)
+		p.Log(logging.LevelInfo, "API", "Removed challenge for %s", ip)
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"ip":      ip,
-			"website": website,
-			"status":  "unchallenged",
+			"ip":     ip,
+			"status": "unchallenged",
 		})
 	}
 }
