@@ -158,3 +158,9 @@ func (c *Challenger) Close() {
 func (c *Challenger) key(ip string) string {
 	return fmt.Sprintf("%s:%s", c.keyPrefix, ip)
 }
+
+// DB returns the configured database number.
+func (c *Challenger) DB() int { return c.db }
+
+// KeyPrefix returns the configured key prefix.
+func (c *Challenger) KeyPrefix() string { return c.keyPrefix }

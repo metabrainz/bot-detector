@@ -327,7 +327,15 @@ func ReloadConfiguration(p *Processor, mainConfigChanged bool, oldConfigForCompa
 	// Update or create challenger if configured
 	if len(p.Config.Challenge.Backends) > 0 {
 		if p.Challenger != nil {
-			p.Challenger.UpdateAddresses(p.Config.Challenge.Backends)
+			// Recreate if db or prefix changed, otherwise just update addresses
+			if p.Config.Challenge.DB != p.Challenger.DB() || p.Config.Challenge.KeyPrefix != p.Challenger.KeyPrefix() {
+				p.Challenger.Close()
+				p.Challenger = challenger.New(p.Config.Challenge.Backends, p.Config.Challenge.KeyPrefix, p.Config.Challenge.DB)
+				p.LogFunc(logging.LevelInfo, "SETUP", "Challenger recreated with db=%d, key prefix: %s",
+					p.Config.Challenge.DB, p.Config.Challenge.KeyPrefix)
+			} else {
+				p.Challenger.UpdateAddresses(p.Config.Challenge.Backends)
+			}
 		} else {
 			p.Challenger = challenger.New(p.Config.Challenge.Backends, p.Config.Challenge.KeyPrefix, p.Config.Challenge.DB)
 			p.LogFunc(logging.LevelInfo, "SETUP", "Challenger initialized with %d backend(s), key prefix: %s",
