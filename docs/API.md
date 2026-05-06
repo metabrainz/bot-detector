@@ -952,35 +952,34 @@ These endpoints allow you to query the block/unblock status of specific IP addre
 
 ## Challenge API
 
-### `GET /api/v1/challenge/{website}/{ip}`
+### `GET /api/v1/challenge/{ip}`
 
-Check if an IP is currently challenged on a website.
+Check if an IP is currently challenged.
 
 **Response:**
 ```json
-{"ip": "1.2.3.4", "website": "mb_prod", "challenged": true, "reason": "Distributed-Entity-SubPage-Scraper"}
+{"ip": "1.2.3.4", "challenged": true}
 ```
 
-### `POST /api/v1/challenge/{website}/{ip}`
+### `POST /api/v1/challenge/{ip}`
 
-Manually challenge an IP on a website.
+Manually challenge an IP.
 
 **Query parameters:**
 - `duration` (optional): Challenge TTL, e.g. `12h`. Default: `24h`.
-- `reason` (optional): Reason string. Default: `manual`.
 
 **Response:**
 ```json
-{"ip": "1.2.3.4", "website": "mb_prod", "duration": "24h0m0s", "reason": "manual", "status": "challenged"}
+{"ip": "1.2.3.4", "duration": "24h0m0s", "status": "challenged"}
 ```
 
-### `DELETE /api/v1/challenge/{website}/{ip}`
+### `DELETE /api/v1/challenge/{ip}`
 
-Remove a challenge for an IP on a website.
+Remove a challenge for an IP.
 
 **Response:**
 ```json
-{"ip": "1.2.3.4", "website": "mb_prod", "status": "unchallenged"}
+{"ip": "1.2.3.4", "status": "unchallenged"}
 ```
 
 

@@ -126,15 +126,17 @@ Optional configuration for the `challenge` action. When a chain with `action: "c
 | Field | Type | Description |
 | :---- | :---- | :---- |
 | **backends** | list of strings | Redis-compatible backend addresses (e.g., `["10.2.3.254:6379"]`). Writes are fanned out to all backends. |
-| **key_prefix** | string | Prefix for challenge keys. Default: `antibot:challenge`. Key format: `<prefix>:<website>:<ip>`. |
+| **key_prefix** | string | Prefix for challenge keys. Default: `ac`. Key format: `<prefix>:<ip>`. |
 | **default_duration** | string | Default TTL for challenge keys. Used when a chain does not specify `challenge_duration`. Format: Go duration string. |
+| **db** | int | Redis database number. Default: `0`. Use a separate DB to isolate from other keys. |
 
 ```yaml
 challenge:
   backends:
     - "10.2.3.254:6379"
-  key_prefix: "antibot:challenge"
+  key_prefix: "ac"
   default_duration: "24h"
+  db: 1
 ```
 
 ### `cluster`
