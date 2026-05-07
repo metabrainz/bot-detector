@@ -83,11 +83,14 @@ func (m *MockProvider) GetRecentParseErrors() []string                          
 func (m *MockProvider) GetChallengeStatus(ip string) (bool, error) {
 	return false, nil
 }
-func (m *MockProvider) ChallengeIP(ip string, duration time.Duration) error {
+func (m *MockProvider) GetChallengeDifficulty(ip string) (int, error) {
+	return -1, nil
+}
+func (m *MockProvider) ChallengeIP(ip string, duration time.Duration, difficulty int) error {
 	return nil
 }
 func (m *MockProvider) UnchallengeIP(ip string) error { return nil }
-func (m *MockProvider) GetWebsiteNames() []string              { return nil }
+func (m *MockProvider) GetWebsiteNames() []string     { return nil }
 
 func TestArchiveHandler_StableETag(t *testing.T) {
 	// Common setup

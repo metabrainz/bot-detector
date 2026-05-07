@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"bot-detector/internal/logging"
@@ -18,7 +19,7 @@ func challengeStatusHandler(p Provider) http.HandlerFunc {
 			return
 		}
 
-		challenged, err := p.GetChallengeStatus(ip)
+		difficulty, err := p.GetChallengeDifficulty(ip)
 		if err != nil {
 			jsonError(w, fmt.Sprintf("failed to check challenge: %v", err), http.StatusInternalServerError)
 			return
@@ -27,7 +28,7 @@ func challengeStatusHandler(p Provider) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"ip":         ip,
-			"challenged": challenged,
+			"difficulty": difficulty,
 		})
 	}
 }
@@ -52,18 +53,30 @@ func challengeIPHandler(p Provider) http.HandlerFunc {
 			duration = parsed
 		}
 
-		if err := p.ChallengeIP(ip, duration); err != nil {
+		// Parse optional difficulty from query param (default 0 = frontend decides)
+		difficulty := 0
+		if d := r.URL.Query().Get("difficulty"); d != "" {
+			parsed, err := strconv.Atoi(d)
+			if err != nil || parsed < 0 {
+				jsonError(w, fmt.Sprintf("invalid difficulty: %v", err), http.StatusBadRequest)
+				return
+			}
+			difficulty = parsed
+		}
+
+		if err := p.ChallengeIP(ip, duration, difficulty); err != nil {
 			jsonError(w, fmt.Sprintf("failed to challenge: %v", err), http.StatusInternalServerError)
 			return
 		}
 
-		p.Log(logging.LevelInfo, "API", "Manually challenged %s for %v", ip, duration)
+		p.Log(logging.LevelInfo, "API", "Manually challenged %s for %v (difficulty %d)", ip, duration, difficulty)
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"ip":       ip,
-			"duration": duration.String(),
-			"status":   "challenged",
+			"ip":         ip,
+			"duration":   duration.String(),
+			"difficulty": difficulty,
+			"status":     "challenged",
 		})
 	}
 }

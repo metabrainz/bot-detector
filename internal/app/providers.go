@@ -530,11 +530,18 @@ func (p *Processor) GetChallengeStatus(ip string) (bool, error) {
 	return p.Challenger.IsChallenged(ip)
 }
 
-func (p *Processor) ChallengeIP(ip string, duration time.Duration) error {
+func (p *Processor) GetChallengeDifficulty(ip string) (int, error) {
+	if p.Challenger == nil {
+		return -1, nil
+	}
+	return p.Challenger.GetChallengeDifficulty(ip)
+}
+
+func (p *Processor) ChallengeIP(ip string, duration time.Duration, difficulty int) error {
 	if p.Challenger == nil {
 		return fmt.Errorf("challenger not configured")
 	}
-	return p.Challenger.Challenge(ip, duration)
+	return p.Challenger.Challenge(ip, duration, difficulty)
 }
 
 func (p *Processor) UnchallengeIP(ip string) error {

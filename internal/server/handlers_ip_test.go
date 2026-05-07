@@ -264,11 +264,14 @@ func (m *mockIPProvider) GetRecentParseErrors() []string                        
 func (m *mockIPProvider) GetChallengeStatus(ip string) (bool, error) {
 	return false, nil
 }
-func (m *mockIPProvider) ChallengeIP(ip string, duration time.Duration) error {
+func (m *mockIPProvider) GetChallengeDifficulty(ip string) (int, error) {
+	return -1, nil
+}
+func (m *mockIPProvider) ChallengeIP(ip string, duration time.Duration, difficulty int) error {
 	return nil
 }
 func (m *mockIPProvider) UnchallengeIP(ip string) error { return nil }
-func (m *mockIPProvider) GetWebsiteNames() []string              { return nil }
+func (m *mockIPProvider) GetWebsiteNames() []string     { return nil }
 
 func TestAPIIPLookupHandler_JSON(t *testing.T) {
 	now := time.Now()

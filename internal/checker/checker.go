@@ -311,11 +311,11 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 			}
 		case "challenge":
 			if websiteName != "" {
-				p.LogFunc(logLevel, "CHALLENGE", "Chain: %s completed by IP %s on website '%s'. Challenging for %v%s",
-					formattedReason, entry.IPInfo.Address, websiteName, chain.ChallengeDuration, getOnMatchSuffix(chain))
+				p.LogFunc(logLevel, "CHALLENGE", "Chain: %s completed by IP %s on website '%s'. Challenging for %v (difficulty %d)%s",
+					formattedReason, entry.IPInfo.Address, websiteName, chain.ChallengeDuration, chain.ChallengeDifficulty, getOnMatchSuffix(chain))
 			} else {
-				p.LogFunc(logLevel, "CHALLENGE", "Chain: %s completed by IP %s. Challenging for %v%s",
-					formattedReason, entry.IPInfo.Address, chain.ChallengeDuration, getOnMatchSuffix(chain))
+				p.LogFunc(logLevel, "CHALLENGE", "Chain: %s completed by IP %s. Challenging for %v (difficulty %d)%s",
+					formattedReason, entry.IPInfo.Address, chain.ChallengeDuration, chain.ChallengeDifficulty, getOnMatchSuffix(chain))
 			}
 		}
 	}
@@ -440,7 +440,7 @@ func executeChallenge(p *app.Processor, entry *app.LogEntry, chain *config.Behav
 		return
 	}
 
-	if err := p.Challenger.Challenge(entry.IPInfo.Address, chain.ChallengeDuration); err != nil {
+	if err := p.Challenger.Challenge(entry.IPInfo.Address, chain.ChallengeDuration, chain.ChallengeDifficulty); err != nil {
 		p.LogFunc(logging.LevelError, "CHALLENGE_FAIL", "Failed to challenge %s: %v", entry.IPInfo.Address, err)
 	}
 
@@ -505,8 +505,8 @@ func logDryRunCompletion(p *app.Processor, chain *config.BehavioralChain, entry 
 		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK: Chain: %s completed by IP %s%s. Blocking for %v (DryRun)%s",
 			chain.Name, entry.IPInfo.Address, websiteContext, chain.BlockDuration, onMatchSuffix)
 	case "challenge":
-		p.LogFunc(logging.LevelInfo, "DRY_RUN", "CHALLENGE: Chain: %s completed by IP %s%s. Challenging for %v (DryRun)%s",
-			chain.Name, entry.IPInfo.Address, websiteContext, chain.ChallengeDuration, onMatchSuffix)
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "CHALLENGE: Chain: %s completed by IP %s%s. Challenging for %v (difficulty %d) (DryRun)%s",
+			chain.Name, entry.IPInfo.Address, websiteContext, chain.ChallengeDuration, chain.ChallengeDifficulty, onMatchSuffix)
 	case "log":
 		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG: Chain: %s completed by IP %s%s. Action set to 'log' (DryRun)%s",
 			chain.Name, entry.IPInfo.Address, websiteContext, onMatchSuffix)

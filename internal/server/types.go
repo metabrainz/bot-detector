@@ -140,8 +140,12 @@ type Provider interface {
 	// Returns (challenged bool, err error).
 	GetChallengeStatus(ip string) (bool, error)
 
-	// ChallengeIP manually challenges an IP.
-	ChallengeIP(ip string, duration time.Duration) error
+	// GetChallengeDifficulty returns the challenge difficulty for an IP.
+	// Returns -1 if not challenged, 0 if no specific difficulty, or N for a specific level.
+	GetChallengeDifficulty(ip string) (int, error)
+
+	// ChallengeIP manually challenges an IP with a difficulty level.
+	ChallengeIP(ip string, duration time.Duration, difficulty int) error
 
 	// UnchallengeIP removes a challenge for an IP.
 	UnchallengeIP(ip string) error

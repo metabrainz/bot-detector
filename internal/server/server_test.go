@@ -198,11 +198,14 @@ func (m *mockProvider) GetRecentParseErrors() []string                          
 func (m *mockProvider) GetChallengeStatus(ip string) (bool, error) {
 	return false, nil
 }
-func (m *mockProvider) ChallengeIP(ip string, duration time.Duration) error {
+func (m *mockProvider) GetChallengeDifficulty(ip string) (int, error) {
+	return -1, nil
+}
+func (m *mockProvider) ChallengeIP(ip string, duration time.Duration, difficulty int) error {
 	return nil
 }
 func (m *mockProvider) UnchallengeIP(ip string) error { return nil }
-func (m *mockProvider) GetWebsiteNames() []string              { return nil }
+func (m *mockProvider) GetWebsiteNames() []string     { return nil }
 
 // TestServer_StartAndShutdown verifies the full lifecycle of the stats server.
 func TestServer_StartAndShutdown(t *testing.T) {

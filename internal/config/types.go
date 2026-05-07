@@ -81,10 +81,11 @@ type BlockersConfig struct {
 
 // ChallengeConfig holds configuration for the challenge action (redis-compatible backends).
 type ChallengeConfig struct {
-	Backends        []string      `config:"compare" yaml:"backends"`
-	KeyPrefix       string        `config:"compare" yaml:"key_prefix"`
-	DefaultDuration time.Duration `config:"compare" yaml:"default_duration"`
-	DB              int           `config:"compare" yaml:"db"`
+	Backends          []string      `config:"compare" yaml:"backends"`
+	KeyPrefix         string        `config:"compare" yaml:"key_prefix"`
+	DefaultDuration   time.Duration `config:"compare" yaml:"default_duration"`
+	DefaultDifficulty int           `config:"compare" yaml:"default_difficulty"`
+	DB                int           `config:"compare" yaml:"db"`
 }
 
 type BlockerSettings struct {
@@ -226,10 +227,11 @@ type HAProxyConfigYAML struct {
 
 // ChallengeConfigYAML is the YAML representation of challenge action configuration.
 type ChallengeConfigYAML struct {
-	Backends        []string `yaml:"backends"`         // Redis-compatible backend addresses
-	KeyPrefix       string   `yaml:"key_prefix"`       // Key prefix (default: "antibot:challenge")
-	DefaultDuration string   `yaml:"default_duration"` // Default challenge TTL (e.g., "24h")
-	DB              int      `yaml:"db"`               // Redis database number (default: 0)
+	Backends          []string `yaml:"backends"`           // Redis-compatible backend addresses
+	KeyPrefix         string   `yaml:"key_prefix"`         // Key prefix (default: "antibot:challenge")
+	DefaultDuration   string   `yaml:"default_duration"`   // Default challenge TTL (e.g., "24h")
+	DefaultDifficulty int      `yaml:"default_difficulty"` // Default PoW difficulty (e.g., 4)
+	DB                int      `yaml:"db"`                 // Redis database number (default: 0)
 }
 
 // ClusterConfigYAML represents the cluster configuration in YAML format.
@@ -267,15 +269,16 @@ type StepDefYAML struct {
 }
 
 type BehavioralChainYAML struct {
-	Name              string        `yaml:"name"`
-	Action            string        `yaml:"action"`
-	BlockDuration     string        `yaml:"block_duration"`
-	ChallengeDuration string        `yaml:"challenge_duration"` // TTL for challenge action
-	MatchKey          string        `yaml:"match_key"`
-	OnMatch           string        `yaml:"on_match"`
-	Websites          []string      `yaml:"websites"`         // Optional: restrict chain to specific websites
-	BadActorWeight    *float64      `yaml:"bad_actor_weight"` // Optional: weight for bad actor scoring (default 1.0)
-	Steps             []StepDefYAML `yaml:"steps"`
+	Name                string        `yaml:"name"`
+	Action              string        `yaml:"action"`
+	BlockDuration       string        `yaml:"block_duration"`
+	ChallengeDuration   string        `yaml:"challenge_duration"`   // TTL for challenge action
+	ChallengeDifficulty int           `yaml:"challenge_difficulty"` // PoW difficulty for challenge action
+	MatchKey            string        `yaml:"match_key"`
+	OnMatch             string        `yaml:"on_match"`
+	Websites            []string      `yaml:"websites"`         // Optional: restrict chain to specific websites
+	BadActorWeight      *float64      `yaml:"bad_actor_weight"` // Optional: weight for bad actor scoring (default 1.0)
+	Steps               []StepDefYAML `yaml:"steps"`
 }
 
 // --- RUNTIME DATA STRUCTURES ---
@@ -298,6 +301,7 @@ type BehavioralChain struct {
 	BlockDurationStr         string        // The original string representation of the duration (e.g., "1w")
 	UsesDefaultBlockDuration bool          // True if the chain is using the global default_block_duration.
 	ChallengeDuration        time.Duration // Duration for challenge action (Redis TTL)
+	ChallengeDifficulty      int           // PoW difficulty for challenge action
 	MatchKey                 string        // (ip, ipv4, ipv6, ip_ua, ipv4_ua, ipv6_ua)
 	OnMatch                  string        // "stop" to halt processing of other chains on match.
 	Websites                 []string      // Optional: restrict chain to specific websites (empty = global)

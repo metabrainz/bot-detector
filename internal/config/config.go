@@ -1140,6 +1140,7 @@ func parseChains(config *TopLevelConfig, fileDeps map[string]*types.FileDependen
 
 		// Parse challenge_duration
 		var challengeDuration time.Duration
+		var challengeDifficulty int
 		if yamlChain.Action == "challenge" {
 			if yamlChain.ChallengeDuration != "" {
 				var cdErr error
@@ -1157,6 +1158,13 @@ func parseChains(config *TopLevelConfig, fileDeps map[string]*types.FileDependen
 			if challengeDuration == 0 {
 				return nil, fmt.Errorf("chain '%s' has action 'challenge' but no challenge_duration and no default configured", yamlChain.Name)
 			}
+			challengeDifficulty = yamlChain.ChallengeDifficulty
+			if challengeDifficulty == 0 && config.Challenge != nil {
+				challengeDifficulty = config.Challenge.DefaultDifficulty
+			}
+			if challengeDifficulty < 0 {
+				return nil, fmt.Errorf("chain '%s': challenge_difficulty must be >= 0, got %d", yamlChain.Name, challengeDifficulty)
+			}
 		}
 
 		if yamlChain.MatchKey == "" {
@@ -1170,6 +1178,7 @@ func parseChains(config *TopLevelConfig, fileDeps map[string]*types.FileDependen
 			BlockDurationStr:         blockDurationStr,
 			UsesDefaultBlockDuration: usesDefault,
 			ChallengeDuration:        challengeDuration,
+			ChallengeDifficulty:      challengeDifficulty,
 			MatchKey:                 yamlChain.MatchKey,
 			OnMatch:                  yamlChain.OnMatch,
 			Websites:                 yamlChain.Websites,
@@ -1688,10 +1697,11 @@ func buildChallengeConfig(yaml *ChallengeConfigYAML) ChallengeConfig {
 		keyPrefix = "ac"
 	}
 	return ChallengeConfig{
-		Backends:        yaml.Backends,
-		KeyPrefix:       keyPrefix,
-		DefaultDuration: defaultDuration,
-		DB:              yaml.DB,
+		Backends:          yaml.Backends,
+		KeyPrefix:         keyPrefix,
+		DefaultDuration:   defaultDuration,
+		DefaultDifficulty: yaml.DefaultDifficulty,
+		DB:                yaml.DB,
 	}
 }
 

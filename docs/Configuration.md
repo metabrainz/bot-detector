@@ -128,6 +128,7 @@ Optional configuration for the `challenge` action. When a chain with `action: "c
 | **backends** | list of strings | Redis-compatible backend addresses (e.g., `["10.2.3.254:6379"]`). Writes are fanned out to all backends. |
 | **key_prefix** | string | Prefix for challenge keys. Default: `ac`. Key format: `<prefix>:<ip>`. |
 | **default_duration** | string | Default TTL for challenge keys. Used when a chain does not specify `challenge_duration`. Format: Go duration string. |
+| **default_difficulty** | int | Default PoW difficulty for challenge keys. Used when a chain does not specify `challenge_difficulty`. Default: `0` (the challenge frontend uses its own default). |
 | **db** | int | Redis database number. Default: `0`. Use a separate DB to isolate from other keys. |
 
 ```yaml
@@ -136,6 +137,7 @@ challenge:
     - "10.2.3.254:6379"
   key_prefix: "ac"
   default_duration: "24h"
+  default_difficulty: 0
   db: 1
 ```
 
@@ -228,6 +230,7 @@ Chains are processed in the order they are defined. Each chain definition must i
 | **action** | string | Yes | The action to take when the chain is completed: `block`, `challenge`, or `log`. To temporarily disable a chain, prefix the action with `!` (e.g., `!block`). |
 | **block_duration** | string | No | The duration for which the IP should be blocked if `action` is `block`. Format: Go duration string (e.g., `5m`, `1h`, `30m`, `1h30m`). If not specified, uses `blockers.default_duration`. |
 | **challenge_duration** | string | No | The TTL for the challenge key if `action` is `challenge`. Format: Go duration string. If not specified, uses `challenge.default_duration`. |
+| **challenge_difficulty** | int | No | The PoW difficulty level stored in the challenge key. The challenge frontend reads this to determine how hard the challenge should be. If not specified, uses `challenge.default_difficulty` (default: `0` = frontend decides). |
 | **match_key** | string | Yes | The key used to track activity. Determines if behavior is tracked per IP, per IP version, or per unique client (IP + User-Agent). See [`match_key` values](#match_key-values) below. |
 | **on_match** | string | No | If set to `stop`, no further chains will be processed for the current log entry after this chain completes. Effective for `block` and `challenge` actions — log-only chains never stop further processing. |
 | **bad_actor_weight** | float | No | Weight added to the bad actor score when this chain blocks an IP (0.0–1.0). Default: `1.0`. Only relevant when `bad_actors` is enabled. See [BAD_ACTORS.md](BAD_ACTORS.md). |

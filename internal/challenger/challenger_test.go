@@ -32,7 +32,7 @@ func TestUpdateAddresses_Change(t *testing.T) {
 func TestChallenge_NoBackends(t *testing.T) {
 	c := New(nil, "test", 0)
 	// Should not panic with no backends
-	err := c.Challenge("1.2.3.4", 5*time.Minute)
+	err := c.Challenge("1.2.3.4", 5*time.Minute, 0)
 	assert.NoError(t, err)
 }
 

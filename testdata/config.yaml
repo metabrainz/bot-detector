@@ -217,6 +217,7 @@ chains:
   - name: "Test-Challenge-Chain"
     action: "challenge"
     challenge_duration: "5m"
+    challenge_difficulty: 6
     match_key: "ip"
     steps:
       - field_matches:

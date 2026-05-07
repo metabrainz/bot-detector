@@ -73,19 +73,24 @@ func (c *Challenger) UpdateAddresses(addresses []string) {
 	c.updateClients(addresses)
 }
 
-// challengeScript sets a key only if it doesn't exist or new TTL is longer than remaining.
+// challengeScript sets a challenge key with escalate-only semantics:
+// - Difficulty only increases (higher wins)
+// - TTL only extends (longer wins)
 var challengeScript = redis.NewScript(`
 local t = redis.call('TTL', KEYS[1])
-if t < tonumber(ARGV[1]) then
-    redis.call('SET', KEYS[1], '', 'EX', ARGV[1])
+local cur = tonumber(redis.call('GET', KEYS[1]) or "0") or 0
+local new_ttl = tonumber(ARGV[1])
+local new_d = tonumber(ARGV[2]) or 0
+if new_d > cur or new_ttl > t then
+    redis.call('SET', KEYS[1], tostring(math.max(cur, new_d)), 'EX', math.max(t, new_ttl))
 end
 return t
 `)
 
-// Challenge sets a challenge key for the given IP.
-// Only extends TTL, never shortens — a shorter chain can't shrink a longer challenge.
+// Challenge sets a challenge key for the given IP with a difficulty level.
+// Escalate-only: difficulty only increases, TTL only extends.
 // Writes to all backends (fan-out). Fails silently on individual backend errors.
-func (c *Challenger) Challenge(ip string, duration time.Duration) error {
+func (c *Challenger) Challenge(ip string, duration time.Duration, difficulty int) error {
 	key := c.key(ip)
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
@@ -97,7 +102,7 @@ func (c *Challenger) Challenge(ip string, duration time.Duration) error {
 	seconds := int64(duration.Seconds())
 	var lastErr error
 	for _, client := range clients {
-		if err := challengeScript.Run(ctx, client, []string{key}, seconds).Err(); err != nil {
+		if err := challengeScript.Run(ctx, client, []string{key}, seconds, difficulty).Err(); err != nil {
 			lastErr = err
 		}
 	}
@@ -124,8 +129,10 @@ func (c *Challenger) Unchallenge(ip string) error {
 	return lastErr
 }
 
-// IsChallenged checks if an IP is challenged.
-func (c *Challenger) IsChallenged(ip string) (bool, error) {
+// GetChallengeDifficulty returns the challenge difficulty for an IP.
+// Returns -1 if not challenged, 0 if challenged with no specific difficulty,
+// or a positive int for a specific difficulty level.
+func (c *Challenger) GetChallengeDifficulty(ip string) (int, error) {
 	key := c.key(ip)
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
@@ -135,14 +142,25 @@ func (c *Challenger) IsChallenged(ip string) (bool, error) {
 	c.mu.RUnlock()
 
 	if len(clients) == 0 {
-		return false, nil
+		return -1, nil
 	}
 
-	n, err := clients[0].Exists(ctx, key).Result()
-	if err != nil {
-		return false, err
+	res, err := clients[0].Get(ctx, key).Result()
+	if err == redis.Nil {
+		return -1, nil
 	}
-	return n > 0, nil
+	if err != nil {
+		return -1, err
+	}
+	d := 0
+	_, _ = fmt.Sscanf(res, "%d", &d)
+	return d, nil
+}
+
+// IsChallenged checks if an IP is challenged (key exists, regardless of value).
+func (c *Challenger) IsChallenged(ip string) (bool, error) {
+	d, err := c.GetChallengeDifficulty(ip)
+	return d >= 0, err
 }
 
 // Close closes all clients.
