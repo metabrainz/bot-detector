@@ -164,6 +164,9 @@ func renderClusterIPStatus(w http.ResponseWriter, p Provider, canonical string) 
 	// Format as plain text
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = fmt.Fprintf(w, "cluster_status: %s\n", response.ClusterStatus)
+	if response.ChallengeDifficulty >= 0 {
+		_, _ = fmt.Fprintf(w, "challenge_difficulty: %d\n", response.ChallengeDifficulty)
+	}
 	_, _ = fmt.Fprint(w, "nodes:\n")
 	for _, node := range response.Nodes {
 		if node.Address != "" {
@@ -1229,8 +1232,9 @@ func clusterIPLookupHandler(p Provider) http.HandlerFunc {
 
 // ClusterIPAggregateResponse is the aggregated IP status across all cluster nodes
 type ClusterIPAggregateResponse struct {
-	ClusterStatus string                 `json:"cluster_status"` // "blocked", "unblocked", "unknown", "mixed"
-	Nodes         []NodeIPStatusResponse `json:"nodes"`
+	ClusterStatus       string                 `json:"cluster_status"`       // "blocked", "unblocked", "unknown", "mixed"
+	ChallengeDifficulty int                    `json:"challenge_difficulty"` // -1 = not challenged, 0 = default, N = specific
+	Nodes               []NodeIPStatusResponse `json:"nodes"`
 }
 
 // NodeIPStatusResponse is the IP status for a single node
@@ -1299,6 +1303,13 @@ func queryAllNodes(p Provider, canonical string) ClusterIPAggregateResponse {
 		response.ClusterStatus = "unblocked"
 	} else {
 		response.ClusterStatus = "unknown"
+	}
+
+	// Add challenge difficulty (Redis is shared, not per-node)
+	if d, err := p.GetChallengeDifficulty(canonical); err == nil {
+		response.ChallengeDifficulty = d
+	} else {
+		response.ChallengeDifficulty = -1
 	}
 
 	return response
