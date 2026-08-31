@@ -1,5 +1,5 @@
 # Stage 1: Build the Go application
-FROM golang:1.25.9-alpine AS builder
+FROM golang:1.25.13-alpine AS builder
 
 # Install git for VCS info embedding
 RUN apk add --no-cache git
@@ -32,7 +32,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
     -o bot-detector ./cmd/bot-detector
 
 # Stage 2: Create the final minimal image
-FROM alpine:latest
+FROM alpine:3.24
 
 # Create a non-root user for security
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
