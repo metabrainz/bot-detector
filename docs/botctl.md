@@ -14,6 +14,31 @@ blocked IP (after confirmation).
 go build -o botctl ./cmd/botctl
 ```
 
+`botctl` is a pure-stdlib, static binary (`CGO_ENABLED=0`), so it can be freely
+copied between hosts of the same OS/arch.
+
+### In the Docker image
+
+The Docker image builds `botctl` alongside `bot-detector` and puts it on `PATH`
+(`/usr/local/bin/botctl`), so you can run it inside a running container:
+
+```sh
+# Inside the container the API listens on :8088 (the host maps it to :8090)
+docker exec bot-detector-multi botctl --url http://localhost:8088 ip check 1.2.3.4
+```
+
+To make it available in host shells, extract the binary from the image into a
+user bin directory (e.g. from `run.sh` after starting the container):
+
+```sh
+# Copy botctl out of the image to ~/.local/bin (no sudo required)
+install -d ~/.local/bin
+docker cp "$CONTAINER_NAME:/home/appuser/bot-detector/botctl" ~/.local/bin/botctl
+```
+
+On the host the default target (`http://localhost:8090`) already matches the
+published port, so `botctl ip check <ip>` works with no extra configuration.
+
 ## Target selection
 
 The target instance is chosen in this priority order:
