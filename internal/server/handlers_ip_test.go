@@ -258,6 +258,7 @@ func (m *mockIPProvider) GetBadActorsPromotedSince(since time.Time) ([]interface
 	return nil, nil
 }
 func (m *mockIPProvider) RemoveBadActorsByReason(reason string) ([]string, error) { return nil, nil }
+func (m *mockIPProvider) RemoveAllBadActors() ([]string, error)                   { return nil, nil }
 func (m *mockIPProvider) GetBlockedIPsByReason(reason string) ([]string, error)   { return nil, nil }
 func (m *mockIPProvider) GetBadActorsThreshold() float64                          { return 0 }
 func (m *mockIPProvider) GetRecentParseErrors() []string                          { return nil }

@@ -220,6 +220,65 @@ func cmdBadActorsRemove(ctx *cmdContext) int {
 	return exitOK
 }
 
+// cmdBadActorsClear removes ALL bad actors (SQLite + HAProxy).
+// Unblock is implied: clearing bad actors also unblocks them from HAProxy,
+// unless --no-unblock is given (removes DB records only).
+func cmdBadActorsClear(ctx *cmdContext) int {
+	noUnblock, rest := extractBoolFlag(ctx.args, "--no-unblock")
+	if len(rest) != 0 {
+		return usageErr("usage: botctl bad-actors clear [--no-unblock]")
+	}
+
+	// Show how many will be affected before the destructive prompt.
+	var actors []badActor
+	if _, err := ctx.c.doJSON("GET", "/api/v1/bad-actors", nil, &actors); err != nil {
+		return fail(err)
+	}
+	if len(actors) == 0 {
+		fmt.Println("No bad actors to clear.")
+		return exitOK
+	}
+
+	prompt := fmt.Sprintf("Clear ALL %d bad actor(s) and unblock them from HAProxy?", len(actors))
+	if noUnblock {
+		prompt = fmt.Sprintf("Clear ALL %d bad actor(s) from the database (leaving HAProxy blocks)?", len(actors))
+	}
+	if !confirm(ctx.opts, prompt) {
+		eprintln("aborted.")
+		return exitOK
+	}
+
+	q := url.Values{}
+	q.Set("all", "")
+	if !noUnblock {
+		q.Set("unblock", "")
+	}
+
+	var res struct {
+		All           bool     `json:"all"`
+		Removed       int      `json:"removed"`
+		IPs           []string `json:"ips"`
+		Unblocked     int      `json:"unblocked,omitempty"`
+		UnblockErrors []string `json:"unblock_errors,omitempty"`
+	}
+	body, err := ctx.c.doJSON("DELETE", "/api/v1/bad-actors", q, &res)
+	if err != nil {
+		return fail(err)
+	}
+	if ctx.opts.json {
+		printRaw(body)
+		return exitOK
+	}
+	fmt.Printf("Removed:   %d\n", res.Removed)
+	if !noUnblock {
+		fmt.Printf("Unblocked: %d\n", res.Unblocked)
+		if len(res.UnblockErrors) > 0 {
+			fmt.Printf("Unblock errors: %s\n", strings.Join(res.UnblockErrors, ", "))
+		}
+	}
+	return exitOK
+}
+
 // kv is a key/count pair for sorted output.
 type kv struct {
 	key   string

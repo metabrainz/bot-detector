@@ -130,6 +130,10 @@ type Provider interface {
 	// Returns the list of removed IPs.
 	RemoveBadActorsByReason(reason string) ([]string, error)
 
+	// RemoveAllBadActors removes every bad actor and its accumulated score.
+	// Returns the list of removed IPs (for unblocking).
+	RemoveAllBadActors() ([]string, error)
+
 	// GetBlockedIPsByReason returns IPs currently blocked with a reason containing the given substring.
 	GetBlockedIPsByReason(reason string) ([]string, error)
 

@@ -628,6 +628,45 @@ func TestIsPopulatedHistory(t *testing.T) {
 	}
 }
 
+func TestRemoveAllBadActors(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().Truncate(time.Second)
+
+	// Mix of history-bearing and null-history (peer-synced) bad actors.
+	require.NoError(t, InsertEvent(db, now, EventTypeBlock, "1.1.1.1", "chainA", time.Hour, ""))
+	require.NoError(t, PromoteToBadActor(db, "1.1.1.1", 5.0, 5, now))
+	require.NoError(t, PromoteToBadActorWithHistory(db, "2.2.2.2", 5.0, 5, now, "")) // null history, no events
+	require.NoError(t, PromoteToBadActorWithHistory(db, "3.3.3.3", 5.0, 5, now,
+		`[{"ts":"2026-08-31T09:00:00Z","r":"chainB"}]`))
+
+	// Give one of them a score row too.
+	_, _, _ = IncrementScore(db, "1.1.1.1", 1.0, now)
+
+	all, err := GetAllBadActors(db)
+	require.NoError(t, err)
+	require.Len(t, all, 3)
+
+	removed, err := RemoveAllBadActors(db)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"1.1.1.1", "2.2.2.2", "3.3.3.3"}, removed,
+		"clear-all must include null-history entries that no reason filter can match")
+
+	// bad_actors and ip_scores are both empty afterwards.
+	after, err := GetAllBadActors(db)
+	require.NoError(t, err)
+	assert.Empty(t, after)
+	s, err := GetScore(db, "1.1.1.1")
+	require.NoError(t, err)
+	assert.Nil(t, s, "scores should be cleared too")
+}
+
+func TestRemoveAllBadActors_Empty(t *testing.T) {
+	db := openTestDB(t)
+	removed, err := RemoveAllBadActors(db)
+	require.NoError(t, err)
+	assert.Empty(t, removed)
+}
+
 func TestIsBadActor(t *testing.T) {
 	db := openTestDB(t)
 	now := time.Now().Truncate(time.Second)

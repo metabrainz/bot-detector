@@ -33,6 +33,7 @@ var registry = []commandSpec{
 	{"bad-actors", "stats", "", "Show bad actor statistics (counts by reason and day)", cmdBadActorsStats},
 	{"bad-actors", "export", "", "Export bad actor IPs, one per line", cmdBadActorsExport},
 	{"bad-actors", "remove", "--reason <r> [--unblock]", "Remove bad actors by reason (prompts unless --yes)", cmdBadActorsRemove},
+	{"bad-actors", "clear", "[--no-unblock]", "Remove ALL bad actors and unblock them (prompts unless --yes)", cmdBadActorsClear},
 
 	{"config", "show", "", "Print the running YAML configuration", cmdConfigShow},
 	{"config", "archive", "[-o <file>]", "Download config + dependencies as a .tar.gz", cmdConfigArchive},
