@@ -105,8 +105,13 @@ not blocked.
 | `botctl bad-actors stats` | `GET /api/v1/bad-actors/stats` | Counts by reason and by day. |
 | `botctl bad-actors export` | `GET /api/v1/bad-actors/export` | Bad actor IPs, one per line. |
 | `botctl bad-actors remove --reason <r> [--unblock]` | `DELETE /api/v1/bad-actors?reason=` | Remove bad actors by reason; `--unblock` also unblocks them. |
+| `botctl bad-actors clear [--no-unblock]` | `DELETE /api/v1/bad-actors?all&unblock` | Remove **all** bad actors and unblock them from HAProxy. `--no-unblock` removes DB records only. |
 
 The `--reason` match is a **substring** match, consistent with the server.
+`clear` removes every bad actor — including entries with empty/`null` history
+(e.g. peer-synced) that `remove --reason` cannot match — and unblocks them from
+HAProxy by default. Both `remove` and `clear` prompt for confirmation unless
+`--yes`.
 
 ### Challenge
 

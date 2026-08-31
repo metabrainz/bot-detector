@@ -70,14 +70,22 @@ func badActorsExportHandler(p Provider) http.HandlerFunc {
 	}
 }
 
-// badActorsDeleteByReasonHandler removes bad actors whose history contains the given reason.
+// badActorsDeleteByReasonHandler removes bad actors whose history contains the given reason,
+// or ALL bad actors when the `all` parameter is present.
 // DELETE /api/v1/bad-actors?reason=chainName&unblock
+// DELETE /api/v1/bad-actors?all&unblock
 // Cluster-aware: followers forward to leader, leader broadcasts to followers.
 func badActorsDeleteByReasonHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reason := r.URL.Query().Get("reason")
-		if reason == "" {
-			jsonError(w, "reason query parameter is required", http.StatusBadRequest)
+		_, clearAll := r.URL.Query()["all"]
+
+		if !clearAll && reason == "" {
+			jsonError(w, "reason or all query parameter is required", http.StatusBadRequest)
+			return
+		}
+		if clearAll && reason != "" {
+			jsonError(w, "reason and all are mutually exclusive", http.StatusBadRequest)
 			return
 		}
 
@@ -97,16 +105,29 @@ func badActorsDeleteByReasonHandler(p Provider) http.HandlerFunc {
 		}
 
 		// Leader (or standalone): remove locally
-		removed, err := p.RemoveBadActorsByReason(reason)
+		var removed []string
+		var err error
+		if clearAll {
+			removed, err = p.RemoveAllBadActors()
+		} else {
+			removed, err = p.RemoveBadActorsByReason(reason)
+		}
 		if err != nil {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
+		_, doUnblock := r.URL.Query()["unblock"]
+
 		// Broadcast removal to followers
 		if p.GetNodeRole() == "leader" {
-			broadcastPath := fmt.Sprintf("/api/v1/cluster/internal/bad-actors?reason=%s", url.QueryEscape(reason))
-			if _, ok := r.URL.Query()["unblock"]; ok {
+			var broadcastPath string
+			if clearAll {
+				broadcastPath = "/api/v1/cluster/internal/bad-actors?all"
+			} else {
+				broadcastPath = fmt.Sprintf("/api/v1/cluster/internal/bad-actors?reason=%s", url.QueryEscape(reason))
+			}
+			if doUnblock {
 				broadcastPath += "&unblock"
 			}
 			go broadcastToFollowers(p, "DELETE", broadcastPath, nil)
@@ -115,7 +136,7 @@ func badActorsDeleteByReasonHandler(p Provider) http.HandlerFunc {
 		// If &unblock is present, also unblock the removed IPs from HAProxy
 		var unblocked []string
 		var unblockErrors []string
-		if _, ok := r.URL.Query()["unblock"]; ok {
+		if doUnblock {
 			for _, ip := range removed {
 				if err := unblockIP(p, ip); err != nil {
 					p.Log(logging.LevelError, "API", "Failed to unblock bad actor %s: %v", ip, err)
@@ -127,11 +148,15 @@ func badActorsDeleteByReasonHandler(p Provider) http.HandlerFunc {
 		}
 
 		resp := map[string]interface{}{
-			"reason":  reason,
 			"removed": len(removed),
 			"ips":     removed,
 		}
-		if _, ok := r.URL.Query()["unblock"]; ok {
+		if clearAll {
+			resp["all"] = true
+		} else {
+			resp["reason"] = reason
+		}
+		if doUnblock {
 			resp["unblocked"] = len(unblocked)
 			if len(unblockErrors) > 0 {
 				resp["unblock_errors"] = unblockErrors
@@ -145,17 +170,25 @@ func badActorsDeleteByReasonHandler(p Provider) http.HandlerFunc {
 
 // internalBadActorsDeleteHandler handles cluster-internal bad actor removal on followers.
 // DELETE /api/v1/cluster/internal/bad-actors?reason=chainName
+// DELETE /api/v1/cluster/internal/bad-actors?all
 func internalBadActorsDeleteHandler(p Provider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		reason := r.URL.Query().Get("reason")
-		if reason == "" {
-			jsonError(w, "reason query parameter is required", http.StatusBadRequest)
+		_, clearAll := r.URL.Query()["all"]
+		if !clearAll && reason == "" {
+			jsonError(w, "reason or all query parameter is required", http.StatusBadRequest)
 			return
 		}
 
-		removed, err := p.RemoveBadActorsByReason(reason)
+		var removed []string
+		var err error
+		if clearAll {
+			removed, err = p.RemoveAllBadActors()
+		} else {
+			removed, err = p.RemoveBadActorsByReason(reason)
+		}
 		if err != nil {
-			p.Log(logging.LevelError, "CLUSTER_BAD_ACTORS", "Failed to remove bad actors by reason %q: %v", reason, err)
+			p.Log(logging.LevelError, "CLUSTER_BAD_ACTORS", "Failed to remove bad actors (all=%v reason=%q): %v", clearAll, reason, err)
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -169,7 +202,11 @@ func internalBadActorsDeleteHandler(p Provider) http.HandlerFunc {
 			}
 		}
 
-		p.Log(logging.LevelInfo, "CLUSTER_BAD_ACTORS", "Removed %d bad actors by reason %q", len(removed), reason)
+		if clearAll {
+			p.Log(logging.LevelInfo, "CLUSTER_BAD_ACTORS", "Removed all %d bad actors", len(removed))
+		} else {
+			p.Log(logging.LevelInfo, "CLUSTER_BAD_ACTORS", "Removed %d bad actors by reason %q", len(removed), reason)
+		}
 		w.WriteHeader(http.StatusOK)
 	}
 }

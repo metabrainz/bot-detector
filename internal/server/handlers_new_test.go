@@ -17,6 +17,7 @@ type mockBadActorsProvider struct {
 	mockIPProvider
 	badActors       []interface{}
 	removedByReason []string
+	removedAll      []string
 }
 
 func (m *mockBadActorsProvider) GetAllBadActors() ([]interface{}, error) { return m.badActors, nil }
@@ -25,6 +26,9 @@ func (m *mockBadActorsProvider) GetBadActorsPromotedSince(since time.Time) ([]in
 }
 func (m *mockBadActorsProvider) RemoveBadActorsByReason(reason string) ([]string, error) {
 	return m.removedByReason, nil
+}
+func (m *mockBadActorsProvider) RemoveAllBadActors() ([]string, error) {
+	return m.removedAll, nil
 }
 
 func newBadActorsProvider(actors []persistence.BadActorInfo) *mockBadActorsProvider {
@@ -144,6 +148,44 @@ func TestBadActorsDeleteByReasonHandler_MissingReason(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("Expected 400, got %d", rr.Code)
+	}
+}
+
+func TestBadActorsDeleteAll(t *testing.T) {
+	p := newBadActorsProvider(nil)
+	p.removedAll = []string{"1.2.3.4", "5.6.7.8", "9.9.9.9"}
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("DELETE", "/api/v1/bad-actors?all", nil)
+	badActorsDeleteByReasonHandler(p).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", rr.Code)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("Invalid JSON: %v", err)
+	}
+	if result["all"] != true {
+		t.Errorf("Expected all=true, got %v", result["all"])
+	}
+	if result["removed"] != float64(3) {
+		t.Errorf("Expected removed=3, got %v", result["removed"])
+	}
+	if _, hasReason := result["reason"]; hasReason {
+		t.Errorf("clear-all response should not include a reason field")
+	}
+}
+
+func TestBadActorsDeleteAll_MutuallyExclusive(t *testing.T) {
+	p := newBadActorsProvider(nil)
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("DELETE", "/api/v1/bad-actors?all&reason=chain-a", nil)
+	badActorsDeleteByReasonHandler(p).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected 400 for all+reason, got %d", rr.Code)
 	}
 }
 

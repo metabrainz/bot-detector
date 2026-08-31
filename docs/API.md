@@ -205,14 +205,15 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
     *   An IP can appear under multiple reasons if it triggered different chains.
     *   `by_day` is keyed by the promotion date (not block date).
 
-### `DELETE /api/v1/bad-actors?reason=<reason>[&unblock]` (Cluster-Aware)
+### `DELETE /api/v1/bad-actors?reason=<reason>|all[&unblock]` (Cluster-Aware)
 
 *   **Method:** `DELETE`
 *   **Content-Type:** `application/json`
-*   **Description:** Removes all bad actors whose block history contains the given reason substring. This is useful when a chain was overzealous and has been modified or removed — IPs that were promoted to bad actor status because of that chain can be cleared in bulk. The match is performed against the `"r"` field in each bad actor's history JSON. Both the bad actor entry and its accumulated score are removed.
+*   **Description:** Removes bad actors — either those whose block history contains a given reason substring (`reason=`), or **all** of them (`all`). The reason variant is useful when a chain was overzealous; the `all` variant clears everything, including entries with empty/`"null"` history (e.g. bad actors synced from a cluster peer) that no reason filter can match. Both the bad actor entry and its accumulated score are removed.
 *   **Role:** `api`
 *   **Parameters:**
-    *   `reason` (query, required) - Substring to match against chain reasons in the bad actor history. Typically a chain name (e.g., `rate-limit-api`) or a vhost-qualified reason (e.g., `rate-limit-api@example.com`).
+    *   `reason` (query) - Substring to match against chain reasons in the bad actor history. Typically a chain name (e.g., `rate-limit-api`) or a vhost-qualified reason (e.g., `rate-limit-api@example.com`). Mutually exclusive with `all`.
+    *   `all` (query, no value) - Remove every bad actor. Mutually exclusive with `reason`. Exactly one of `reason` or `all` is required.
     *   `unblock` (query, optional, no value) - If present, also unblocks the removed IPs from HAProxy (sets `gpc0=0`), clears persistence state, and removes from the activity store.
 *   **Cluster Behavior:**
     *   **Follower nodes:** Forward the request to the leader and return the leader's response.
@@ -245,12 +246,23 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
       "unblock_errors": ["9.10.11.12"]
     }
     ```
+*   **Response Format (`all`):**
+    ```json
+    {
+      "all": true,
+      "removed": 128,
+      "ips": ["1.2.3.4", "5.6.7.8", "..."],
+      "unblocked": 128
+    }
+    ```
 *   **Error Response (400 Bad Request):**
     ```
-    reason query parameter is required
+    reason or all query parameter is required
     ```
+    (Also returned if both `reason` and `all` are supplied — they are mutually exclusive.)
 *   **Notes:**
     *   The match is a **substring match** — `reason=rate-limit` will match `rate-limit-api`, `rate-limit-static`, etc. Use the full chain name for precision.
+    *   The `all` variant removes **every** bad actor, including entries with empty/`"null"` history that no `reason` filter can match.
     *   In multi-website mode, reasons include the vhost or website suffix (e.g., `chainName@vhost` or `chainName[website]`). You can match on just the chain name to clear across all websites, or include the suffix to target a specific website.
     *   Without `&unblock`, this only removes the bad actor record and score from the database. The IPs may still be actively blocked in HAProxy until their block duration expires.
     *   With `&unblock`, each removed IP is also unblocked from HAProxy (sets `gpc0=0`), cleared from persistence, and removed from the activity store.
@@ -267,10 +279,13 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
 
     # Preview which bad actors would match (check history first)
     curl -s http://localhost:8080/api/v1/bad-actors | jq '.[].history' 
+
+    # Remove ALL bad actors and unblock them from HAProxy
+    curl -X DELETE 'http://localhost:8080/api/v1/bad-actors?all&unblock'
     ```
 *   **Responses:**
     *   `200 OK`: Successfully processed the request (even if no bad actors matched).
-    *   `400 Bad Request`: Missing `reason` query parameter.
+    *   `400 Bad Request`: Neither `reason` nor `all` supplied, or both supplied.
     *   `500 Internal Server Error`: Database error during removal.
     *   `502 Bad Gateway`: (Follower only) Failed to forward request to leader.
 

@@ -791,6 +791,40 @@ func RemoveBadActorsByReason(db *sql.DB, reason string) ([]string, error) {
 	return toRemove, nil
 }
 
+// RemoveAllBadActors removes every bad actor and its accumulated score.
+// Returns the list of IPs that were removed (so callers can unblock them).
+// Unlike RemoveBadActorsByReason, this also clears entries with empty/"null"
+// history (e.g. bad actors synced from a cluster peer), which no reason filter
+// can match.
+func RemoveAllBadActors(db *sql.DB) ([]string, error) {
+	rows, err := db.Query("SELECT ip FROM bad_actors")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query bad actors: %w", err)
+	}
+	var ips []string
+	for rows.Next() {
+		var ip string
+		if err := rows.Scan(&ip); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("failed to scan bad actor: %w", err)
+		}
+		ips = append(ips, ip)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("failed to iterate bad actors: %w", err)
+	}
+	_ = rows.Close()
+
+	if _, err := db.Exec("DELETE FROM bad_actors"); err != nil {
+		return ips, fmt.Errorf("failed to clear bad_actors: %w", err)
+	}
+	if _, err := db.Exec("DELETE FROM ip_scores"); err != nil {
+		return ips, fmt.Errorf("failed to clear ip_scores: %w", err)
+	}
+	return ips, nil
+}
+
 // CleanupLowScores removes old low-score entries from ip_scores.
 func CleanupLowScores(db *sql.DB, maxAge time.Duration, minScore float64) (int, error) {
 	cutoff := time.Now().Add(-maxAge)

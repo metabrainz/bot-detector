@@ -97,6 +97,27 @@ The difference is HAProxy behavior:
 
 Both endpoints are cluster-aware and broadcast to all nodes.
 
+### Bulk removal
+
+To remove many bad actors at once:
+
+```
+DELETE /api/v1/bad-actors?reason=<substring>[&unblock]   # by reason (chain name)
+DELETE /api/v1/bad-actors?all[&unblock]                  # every bad actor
+```
+
+- `reason=` matches the substring against each bad actor's block history — useful for undoing an overzealous chain. It cannot match entries with empty/`"null"` history (e.g. peer-synced ones).
+- `all` removes **every** bad actor, including null-history entries.
+- `&unblock` also unblocks the removed IPs from HAProxy, clears persistence, and removes them from the activity store.
+- Both are cluster-aware: the leader removes locally and broadcasts to followers.
+
+With the [`botctl`](botctl.md) CLI:
+
+```sh
+botctl bad-actors remove --reason aggressive-scraper --unblock
+botctl bad-actors clear            # remove ALL and unblock (prompts unless --yes)
+```
+
 ## API Endpoints
 
 ### GET /api/v1/bad-actors
