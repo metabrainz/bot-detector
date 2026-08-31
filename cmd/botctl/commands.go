@@ -25,6 +25,10 @@ var registry = []commandSpec{
 
 	{"blocks", "unblock", "--reason <r>", "Unblock all IPs blocked by a reason (prompts unless --yes)", cmdBlocksUnblock},
 
+	{"challenge", "check", "<ip>", "Show challenge status of an IP (exit 2 if challenged)", cmdChallengeCheck},
+	{"challenge", "set", "<ip> [--duration <d>] [--difficulty <n>]", "Challenge an IP (prompts unless --yes)", cmdChallengeSet},
+	{"challenge", "remove", "<ip>", "Remove the challenge for an IP (prompts unless --yes)", cmdChallengeRemove},
+
 	{"bad-actors", "list", "[--reason <r>]", "List bad actors, optionally filtered by reason substring", cmdBadActorsList},
 	{"bad-actors", "stats", "", "Show bad actor statistics (counts by reason and day)", cmdBadActorsStats},
 	{"bad-actors", "export", "", "Export bad actor IPs, one per line", cmdBadActorsExport},
@@ -102,6 +106,7 @@ Examples:
   BOT_DETECTOR_URL=http://gw1:8090 botctl ip unblock 1.2.3.4
   botctl bad-actors list --reason abusers-444
   botctl bad-actors remove --reason abusers-444 --unblock --yes
+  botctl challenge check 1.2.3.4
   botctl --json cluster status
 `)
 }
