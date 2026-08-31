@@ -149,6 +149,52 @@ func TestRunUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestLatestHistoryReason(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", ""},
+		{"null", ""},
+		{"[]", ""},
+		{"not json", ""},
+		{`[{"ts":"t2","r":"chain-b"},{"ts":"t1","r":"chain-a"}]`, "chain-b"}, // newest-first
+		{`[{"ts":"t","r":""},{"ts":"t","r":"chain-x"}]`, "chain-x"},          // skip empty reason
+	}
+	for _, c := range cases {
+		if got := latestHistoryReason(c.in); got != c.want {
+			t.Errorf("latestHistoryReason(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestClusterIPStatusDecodesReasonAndBadActor(t *testing.T) {
+	// Ensure the cluster node struct captures persistence_reason and bad_actor,
+	// which the renderer relies on (regression for the missing-reason display).
+	raw := `{"cluster_status":"blocked","nodes":[
+		{"name":"rex","status":"blocked","persistence":"blocked",
+		 "persistence_reason":"bad-actor (rudi)",
+		 "bad_actor":{"promoted_at":"t","total_score":10,"block_count":40,
+		   "history":"[{\"ts\":\"t\",\"r\":\"Bad-User-Agent@api.listenbrainz.org\"}]"}}]}`
+	var s ipStatus
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(s.Nodes))
+	}
+	n := s.Nodes[0]
+	if n.PersistenceReason != "bad-actor (rudi)" {
+		t.Errorf("persistence_reason: %q", n.PersistenceReason)
+	}
+	if n.BadActor == nil || n.BadActor.BlockCount != 40 {
+		t.Fatalf("bad_actor not decoded: %+v", n.BadActor)
+	}
+	if r := latestHistoryReason(n.BadActor.History); r != "Bad-User-Agent@api.listenbrainz.org" {
+		t.Errorf("latest reason: %q", r)
+	}
+}
+
 func TestLookupCommand(t *testing.T) {
 	if _, ok := lookupCommand("ip", "check"); !ok {
 		t.Error("ip check should resolve")

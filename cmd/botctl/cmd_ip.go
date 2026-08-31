@@ -43,6 +43,13 @@ type ipStatus struct {
 		Chains            map[string]string `json:"chains,omitempty"`
 		Persistence       string            `json:"persistence,omitempty"`
 		PersistenceExpiry string            `json:"persistence_expires,omitempty"`
+		PersistenceReason string            `json:"persistence_reason,omitempty"`
+		BadActor          *struct {
+			PromotedAt string  `json:"promoted_at"`
+			TotalScore float64 `json:"total_score"`
+			BlockCount int     `json:"block_count"`
+			History    string  `json:"history"`
+		} `json:"bad_actor,omitempty"`
 	} `json:"nodes,omitempty"`
 }
 
@@ -109,6 +116,16 @@ func renderIPStatus(ip string, s *ipStatus) {
 				}
 				fmt.Println()
 			}
+			if n.PersistenceReason != "" {
+				fmt.Printf("      reason: %s\n", n.PersistenceReason)
+			}
+			if n.BadActor != nil {
+				fmt.Printf("      bad actor: promoted %s, score %.1f, blocks %d\n",
+					n.BadActor.PromotedAt, n.BadActor.TotalScore, n.BadActor.BlockCount)
+				if r := latestHistoryReason(n.BadActor.History); r != "" {
+					fmt.Printf("      latest chain: %s\n", r)
+				}
+			}
 			for chain, exp := range n.Chains {
 				fmt.Printf("      chain: %s (expires %s)\n", chain, exp)
 			}
@@ -128,6 +145,9 @@ func renderIPStatus(ip string, s *ipStatus) {
 	if s.BadActor != nil {
 		fmt.Printf("Bad actor: promoted %s, score %.1f, blocks %d\n",
 			s.BadActor.PromotedAt, s.BadActor.TotalScore, s.BadActor.BlockCount)
+		if r := latestHistoryReason(s.BadActor.History); r != "" {
+			fmt.Printf("Latest chain: %s\n", r)
+		}
 	}
 	if s.Score != nil {
 		fmt.Printf("Score:  %.2f / %.2f (blocks %d)\n",
@@ -139,6 +159,27 @@ func renderIPStatus(ip string, s *ipStatus) {
 	if s.LastSeen != "" {
 		fmt.Printf("Last seen: %s\n", s.LastSeen)
 	}
+}
+
+// latestHistoryReason returns the most recent reason ("r") from a bad-actor
+// history JSON array. History is ordered newest-first. Returns "" for empty or
+// "null" history (e.g. peer-synced entries with no history).
+func latestHistoryReason(historyJSON string) string {
+	if historyJSON == "" || historyJSON == "null" {
+		return ""
+	}
+	var entries []struct {
+		Reason string `json:"r"`
+	}
+	if err := json.Unmarshal([]byte(historyJSON), &entries); err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if e.Reason != "" {
+			return e.Reason
+		}
+	}
+	return ""
 }
 
 // statusExitCode maps a block status to a process exit code for `ip check`.
