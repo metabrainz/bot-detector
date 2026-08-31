@@ -716,9 +716,12 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 	// Add bad actor / score info
 	populateBadActorInfo(p, &response, ip)
 
-	// Add challenge info (-1 = not challenged, 0 = default difficulty, N = specific)
+	// Add challenge info (-1 = not challenged, 0 = default difficulty, N = specific).
+	// Default to -1 on error, consistent with the cluster aggregate path.
 	if d, err := p.GetChallengeDifficulty(ip); err == nil {
 		response.ChallengeDifficulty = d
+	} else {
+		response.ChallengeDifficulty = -1
 	}
 
 	return response
