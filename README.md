@@ -253,5 +253,6 @@ graph TD;
 ### Advanced Features
 
 - [API.md](docs/API.md) - HTTP API endpoints for metrics, configuration inspection, and cluster management
+- [botctl.md](docs/botctl.md) - Command-line client for interacting with a running instance over the HTTP API
 - [Persistence.md](docs/Persistence.md) - State persistence configuration for maintaining blocks across restarts
 - [BAD_ACTORS.md](docs/BAD_ACTORS.md) - Bad actor tracking with weighted scoring and automatic promotion
