@@ -261,6 +261,17 @@ func (m *mockIPProvider) RemoveBadActorsByReason(reason string) ([]string, error
 func (m *mockIPProvider) GetBlockedIPsByReason(reason string) ([]string, error)   { return nil, nil }
 func (m *mockIPProvider) GetBadActorsThreshold() float64                          { return 0 }
 func (m *mockIPProvider) GetRecentParseErrors() []string                          { return nil }
+func (m *mockIPProvider) GetChallengeStatus(ip string) (bool, error) {
+	return false, nil
+}
+func (m *mockIPProvider) GetChallengeDifficulty(ip string) (int, error) {
+	return -1, nil
+}
+func (m *mockIPProvider) ChallengeIP(ip string, duration time.Duration, difficulty int) error {
+	return nil
+}
+func (m *mockIPProvider) UnchallengeIP(ip string) error { return nil }
+func (m *mockIPProvider) GetWebsiteNames() []string     { return nil }
 
 func TestAPIIPLookupHandler_JSON(t *testing.T) {
 	now := time.Now()

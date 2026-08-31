@@ -108,6 +108,21 @@ not blocked.
 
 The `--reason` match is a **substring** match, consistent with the server.
 
+### Challenge
+
+Challenges are global per-IP (a challenged IP is asked to solve a proof-of-work
+by the challenge frontend). Difficulty: `-1` not challenged, `0` challenged
+with the frontend's default, `N` a specific level.
+
+| Command | Endpoint | Description |
+| :--- | :--- | :--- |
+| `botctl challenge check <ip>` | `GET /api/v1/challenge/{ip}` | Show challenge status/difficulty (exit `2` if challenged). |
+| `botctl challenge set <ip> [--duration <d>] [--difficulty <n>]` | `POST /api/v1/challenge/{ip}` | Manually challenge an IP (default duration 24h). |
+| `botctl challenge remove <ip>` | `DELETE /api/v1/challenge/{ip}` | Remove the challenge for an IP. |
+
+`set` and `remove` prompt for confirmation unless `--yes`. Challenge writes are
+escalate-only server-side: higher difficulty wins and TTL only extends.
+
 ### Configuration
 
 | Command | Endpoint | Description |

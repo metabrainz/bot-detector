@@ -207,3 +207,4 @@ musicbrainz.org 192.0.2.1 - - [14/Nov/2025:18:05:50 +0000] "GET /ws/2/recording/
 musicbrainz.org 192.0.2.1 - - [14/Nov/2025:18:05:50 +0000] "GET /ws/2/recording/429-3 HTTP/2.0" 429 166 "-" "AnonymizedBot/1.0"
 musicbrainz.org 192.0.2.1 - - [14/Nov/2025:18:05:50 +0000] "GET /ws/2/recording/429-4 HTTP/2.0" 429 166 "-" "AnonymizedBot/1.0"
 musicbrainz.org 192.0.2.1 - - [14/Nov/2025:18:05:50 +0000] "GET /ws/2/recording/429-5 HTTP/2.0" 429 166 "-" "AnonymizedBot/1.0"
+musicbrainz.org 10.0.0.30 - - [14/Nov/2025:18:06:00 +0000] "GET /challenge-test HTTP/2.0" 200 500 "-" "ChallengeBot/1.0"

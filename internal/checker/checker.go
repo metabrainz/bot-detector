@@ -309,6 +309,14 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 				p.LogFunc(logLevel, "LOG", "Chain: %s completed by IP %s. Action set to 'log'%s",
 					formattedReason, entry.IPInfo.Address, getOnMatchSuffix(chain))
 			}
+		case "challenge":
+			if websiteName != "" {
+				p.LogFunc(logLevel, "CHALLENGE", "Chain: %s completed by IP %s on website '%s'. Challenging for %v (difficulty %d)%s",
+					formattedReason, entry.IPInfo.Address, websiteName, chain.ChallengeDuration, chain.ChallengeDifficulty, getOnMatchSuffix(chain))
+			} else {
+				p.LogFunc(logLevel, "CHALLENGE", "Chain: %s completed by IP %s. Challenging for %v (difficulty %d)%s",
+					formattedReason, entry.IPInfo.Address, chain.ChallengeDuration, chain.ChallengeDifficulty, getOnMatchSuffix(chain))
+			}
 		}
 	}
 
@@ -355,11 +363,16 @@ func handleChainCompletion(p *app.Processor, chain *config.BehavioralChain, entr
 		if p.EnableMetrics {
 			p.Metrics.LogActions.Add(1)
 		}
+	case "challenge":
+		if p.EnableMetrics {
+			p.Metrics.ChallengeActions.Add(1)
+		}
+		executeChallenge(p, entry, chain)
 	}
 
 	// Return true if OnMatch is "stop" to halt further chain processing.
 	// Log-only chains never stop processing — on_match is only effective for block actions.
-	return chain.OnMatch == "stop" && chain.Action == "block"
+	return chain.OnMatch == "stop" && (chain.Action == "block" || chain.Action == "challenge")
 }
 
 // executeBlock calls the external blocker unless in DryRun mode.
@@ -421,6 +434,25 @@ func executeBlock(p *app.Processor, entry *app.LogEntry, chain *config.Behaviora
 	}
 }
 
+// executeChallenge writes a challenge key to the redis-compatible backend.
+func executeChallenge(p *app.Processor, entry *app.LogEntry, chain *config.BehavioralChain) {
+	if p.Challenger == nil || p.DryRun {
+		return
+	}
+
+	if err := p.Challenger.Challenge(entry.IPInfo.Address, chain.ChallengeDuration, chain.ChallengeDifficulty); err != nil {
+		p.LogFunc(logging.LevelError, "CHALLENGE_FAIL", "Failed to challenge %s: %v", entry.IPInfo.Address, err)
+	}
+
+	reason := formatChainKey(chain.Name, entry)
+	if p.PersistenceEnabled {
+		p.PersistenceMutex.Lock()
+		now := p.NowFunc()
+		_ = persistence.InsertEvent(p.DB, now, persistence.EventTypeChallenge, entry.IPInfo.Address, reason, chain.ChallengeDuration, "")
+		p.PersistenceMutex.Unlock()
+	}
+}
+
 // flushEntryBufferUnsafe contains the core logic for processing all entries in the buffer.
 // It assumes the caller holds the ActivityMutex. This function is NOT thread-safe on its own.
 func flushEntryBufferUnsafe(p *app.Processor) {
@@ -472,6 +504,9 @@ func logDryRunCompletion(p *app.Processor, chain *config.BehavioralChain, entry 
 	case "block":
 		p.LogFunc(logging.LevelInfo, "DRY_RUN", "BLOCK: Chain: %s completed by IP %s%s. Blocking for %v (DryRun)%s",
 			chain.Name, entry.IPInfo.Address, websiteContext, chain.BlockDuration, onMatchSuffix)
+	case "challenge":
+		p.LogFunc(logging.LevelInfo, "DRY_RUN", "CHALLENGE: Chain: %s completed by IP %s%s. Challenging for %v (difficulty %d) (DryRun)%s",
+			chain.Name, entry.IPInfo.Address, websiteContext, chain.ChallengeDuration, chain.ChallengeDifficulty, onMatchSuffix)
 	case "log":
 		p.LogFunc(logging.LevelInfo, "DRY_RUN", "LOG: Chain: %s completed by IP %s%s. Action set to 'log' (DryRun)%s",
 			chain.Name, entry.IPInfo.Address, websiteContext, onMatchSuffix)

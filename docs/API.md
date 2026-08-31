@@ -950,6 +950,45 @@ These endpoints allow you to query the block/unblock status of specific IP addre
     *   `400 Bad Request`: Invalid IP address format.
 
 
+## Challenge API
+
+### `GET /api/v1/challenge/{ip}`
+
+Get the challenge difficulty for an IP.
+
+**Response:**
+```json
+{"ip": "1.2.3.4", "difficulty": 6}
+```
+
+Difficulty values:
+- `-1`: not challenged
+- `0`: challenged, the challenge frontend uses its default difficulty
+- `4`+: challenged at that specific PoW difficulty level
+
+### `POST /api/v1/challenge/{ip}`
+
+Manually challenge an IP.
+
+**Query parameters:**
+- `duration` (optional): Challenge TTL, e.g. `12h`. Default: `24h`.
+- `difficulty` (optional): PoW difficulty level (integer). Default: `0` (the challenge frontend uses its own default). Higher values = harder challenge (6 ≈ 3-5s, 7 ≈ 10-20s).
+
+**Response:**
+```json
+{"ip": "1.2.3.4", "duration": "24h0m0s", "difficulty": 6, "status": "challenged"}
+```
+
+### `DELETE /api/v1/challenge/{ip}`
+
+Remove a challenge for an IP.
+
+**Response:**
+```json
+{"ip": "1.2.3.4", "status": "unchallenged"}
+```
+
+
 ## Usage Examples
 
 ### Query IP status (cluster-aware)

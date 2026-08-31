@@ -466,21 +466,22 @@ func aggregateActorStatus(actors []*store.ActorActivity, persistState interface{
 // addFollowerHint adds a note about cluster endpoint if this is a follower
 // IPStatusResponse is the JSON response for IP status queries
 type IPStatusResponse struct {
-	Node               string            `json:"node,omitempty"`
-	Status             string            `json:"status"` // "blocked", "unblocked", "unknown"
-	Actors             int               `json:"actors,omitempty"`
-	Chains             map[string]string `json:"chains,omitempty"`         // chain -> expiry time (RFC3339)
-	EarliestBlock      string            `json:"earliest_block,omitempty"` // RFC3339
-	LatestExpiry       string            `json:"latest_expiry,omitempty"`  // RFC3339
-	LastSeen           string            `json:"last_seen,omitempty"`      // RFC3339
-	LastUnblock        string            `json:"last_unblock,omitempty"`   // RFC3339
-	UnblockReason      string            `json:"unblock_reason,omitempty"`
-	Backend            string            `json:"backend,omitempty"` // "present" if in HAProxy tables
-	Persistence        string            `json:"persistence,omitempty"`
-	PersistenceExpires string            `json:"persistence_expires,omitempty"`
-	PersistenceReason  string            `json:"persistence_reason,omitempty"`
-	BadActor           *BadActorStatus   `json:"bad_actor,omitempty"`
-	Score              *ScoreStatus      `json:"score,omitempty"`
+	Node                string            `json:"node,omitempty"`
+	Status              string            `json:"status"` // "blocked", "unblocked", "unknown"
+	Actors              int               `json:"actors,omitempty"`
+	Chains              map[string]string `json:"chains,omitempty"`         // chain -> expiry time (RFC3339)
+	EarliestBlock       string            `json:"earliest_block,omitempty"` // RFC3339
+	LatestExpiry        string            `json:"latest_expiry,omitempty"`  // RFC3339
+	LastSeen            string            `json:"last_seen,omitempty"`      // RFC3339
+	LastUnblock         string            `json:"last_unblock,omitempty"`   // RFC3339
+	UnblockReason       string            `json:"unblock_reason,omitempty"`
+	Backend             string            `json:"backend,omitempty"` // "present" if in HAProxy tables
+	Persistence         string            `json:"persistence,omitempty"`
+	PersistenceExpires  string            `json:"persistence_expires,omitempty"`
+	PersistenceReason   string            `json:"persistence_reason,omitempty"`
+	BadActor            *BadActorStatus   `json:"bad_actor,omitempty"`
+	Score               *ScoreStatus      `json:"score,omitempty"`
+	ChallengeDifficulty int               `json:"challenge_difficulty"`
 }
 
 // BadActorStatus is included in IP lookup when the IP is a bad actor.
@@ -711,6 +712,11 @@ func buildIPStatusResponse(p Provider, actors []*store.ActorActivity, ip string,
 
 	// Add bad actor / score info
 	populateBadActorInfo(p, &response, ip)
+
+	// Add challenge info (-1 = not challenged, 0 = default difficulty, N = specific)
+	if d, err := p.GetChallengeDifficulty(ip); err == nil {
+		response.ChallengeDifficulty = d
+	}
 
 	return response
 }

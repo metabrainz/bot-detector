@@ -166,6 +166,11 @@ func createRoleFilteredHandler(p Provider, allConfigs []ListenConfig, currentCon
 		mux.HandleFunc("DELETE /api/v1/cluster/internal/bad-actors", internalBadActorsDeleteHandler(p))
 	}
 
+	// Challenge API (v2)
+	mux.HandleFunc("GET /api/v1/challenge/{ip}", challengeStatusHandler(p))
+	mux.HandleFunc("POST /api/v1/challenge/{ip}", challengeIPHandler(p))
+	mux.HandleFunc("DELETE /api/v1/challenge/{ip}", unchallengeIPHandler(p))
+
 	// Wrap with logging middleware
 	return loggingMiddleware(p, mux)
 }

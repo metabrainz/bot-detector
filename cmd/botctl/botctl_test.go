@@ -159,4 +159,31 @@ func TestLookupCommand(t *testing.T) {
 	if _, ok := lookupCommand("ip", "nope"); ok {
 		t.Error("ip nope should not resolve")
 	}
+	if _, ok := lookupCommand("challenge", "check"); !ok {
+		t.Error("challenge check should resolve")
+	}
+}
+
+func TestChallengeCheckExitCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/challenge/1.1.1.1": // challenged
+			_, _ = w.Write([]byte(`{"ip":"1.1.1.1","difficulty":3}`))
+		case "/api/v1/challenge/2.2.2.2": // not challenged
+			_, _ = w.Write([]byte(`{"ip":"2.2.2.2","difficulty":-1}`))
+		}
+	}))
+	defer srv.Close()
+
+	base := newClient(srv.URL, 5*time.Second)
+
+	challenged := &cmdContext{c: base, opts: globalOpts{}, args: []string{"1.1.1.1"}}
+	if code := cmdChallengeCheck(challenged); code != exitBlocked {
+		t.Errorf("challenged IP: got exit %d, want %d", code, exitBlocked)
+	}
+	notChallenged := &cmdContext{c: base, opts: globalOpts{}, args: []string{"2.2.2.2"}}
+	if code := cmdChallengeCheck(notChallenged); code != exitOK {
+		t.Errorf("not-challenged IP: got exit %d, want %d", code, exitOK)
+	}
 }
