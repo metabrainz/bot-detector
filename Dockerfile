@@ -31,6 +31,10 @@ RUN git reset --hard HEAD
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
     -o bot-detector ./cmd/bot-detector
 
+# Build the botctl CLI client (static binary, same toolchain/flags)
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
+    -o botctl ./cmd/botctl
+
 # Stage 2: Create the final minimal image
 FROM alpine:latest
 
@@ -56,8 +60,14 @@ RUN chmod +x /entrypoint.sh
 # Copy the built binary from the builder stage
 COPY --from=builder /app/bot-detector .
 
+# Copy the botctl CLI client from the builder stage
+COPY --from=builder /app/botctl .
+
 # Add bot-detector to PATH by symlinking to /usr/local/bin
 RUN ln -s /home/appuser/bot-detector/bot-detector /usr/local/bin/bot-detector
+
+# Add botctl to PATH by symlinking to /usr/local/bin
+RUN ln -s /home/appuser/bot-detector/botctl /usr/local/bin/botctl
 
 
 # The entrypoint.sh script handles switching to the correct user (matching PUID/PGID from host)

@@ -55,6 +55,13 @@ For a running container:
 docker exec <container-name> bot-detector --version
 ```
 
+The image also bundles the [`botctl`](botctl.md) CLI client on `PATH`, so you
+can query or manage a running instance from inside its container (the API
+listens on `:8088` inside the container):
+```sh
+docker exec <container-name> botctl --url http://localhost:8088 ip check 1.2.3.4
+```
+
 ## Running the Container
 
 The recommended way to run the container is to use environment variables to define your paths and ports, which makes the command easier to read and manage.
