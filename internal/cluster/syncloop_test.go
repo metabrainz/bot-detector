@@ -887,7 +887,7 @@ func TestStateSyncManager_LeaderCollectsBadActorsFromFollower(t *testing.T) {
 			t.Logf("[%s] "+format, append([]interface{}{tag}, args...)...)
 		},
 	)
-	syncMgr.BadActorApplyFunc = func(ip string, score float64, blockCount int, promotedAt time.Time) error {
+	syncMgr.BadActorApplyFunc = func(ip string, score float64, blockCount int, promotedAt time.Time, historyJSON string) error {
 		mu.Lock()
 		applied = append(applied, ip)
 		mu.Unlock()
@@ -947,7 +947,7 @@ func TestStateSyncManager_FollowerReceivesBadActorsFromLeader(t *testing.T) {
 			t.Logf("[%s] "+format, append([]interface{}{tag}, args...)...)
 		},
 	)
-	syncMgr.BadActorApplyFunc = func(ip string, score float64, blockCount int, promotedAt time.Time) error {
+	syncMgr.BadActorApplyFunc = func(ip string, score float64, blockCount int, promotedAt time.Time, historyJSON string) error {
 		appliedIP = ip
 		appliedScore = score
 		return nil
@@ -1032,7 +1032,7 @@ func TestStateSyncManager_OldPeerWithoutBadActors(t *testing.T) {
 		testDB(t, nil), testDB(t, nil), &sync.Mutex{},
 		func(level logging.LogLevel, tag string, format string, args ...interface{}) {},
 	)
-	syncMgr.BadActorApplyFunc = func(ip string, score float64, blockCount int, promotedAt time.Time) error {
+	syncMgr.BadActorApplyFunc = func(ip string, score float64, blockCount int, promotedAt time.Time, historyJSON string) error {
 		applied = true
 		return nil
 	}

@@ -43,8 +43,10 @@ type StateSyncManager struct {
 	lastSyncMutex    sync.RWMutex
 	// BadActorApplyFunc is called when a new bad actor is received from a peer.
 	// It should insert into the local DB and issue a block to HAProxy.
+	// historyJSON carries the peer's block history so it can be preserved
+	// (block events are not synced and cannot be reconstructed locally).
 	// Set by the application layer after creating the manager.
-	BadActorApplyFunc func(ip string, score float64, blockCount int, promotedAt time.Time) error
+	BadActorApplyFunc func(ip string, score float64, blockCount int, promotedAt time.Time, historyJSON string) error
 }
 
 // FetchMetrics contains metrics about a state fetch operation
@@ -274,7 +276,7 @@ func (m *StateSyncManager) collectAndCacheMergedState() {
 		// Apply bad actors from peer
 		if m.BadActorApplyFunc != nil {
 			for _, ba := range nodeBadActors {
-				if err := m.BadActorApplyFunc(ba.IP, ba.TotalScore, ba.BlockCount, ba.PromotedAt); err != nil {
+				if err := m.BadActorApplyFunc(ba.IP, ba.TotalScore, ba.BlockCount, ba.PromotedAt, ba.HistoryJSON); err != nil {
 					m.log(logging.LevelWarning, "STATE_SYNC", "Failed to apply bad actor %s from %s: %v", ba.IP, node.Name, err)
 				}
 			}
@@ -377,7 +379,7 @@ func (m *StateSyncManager) fetchAndMergeFromLeader() {
 	// Apply bad actors from leader
 	if m.BadActorApplyFunc != nil {
 		for _, ba := range peerBadActors {
-			if err := m.BadActorApplyFunc(ba.IP, ba.TotalScore, ba.BlockCount, ba.PromotedAt); err != nil {
+			if err := m.BadActorApplyFunc(ba.IP, ba.TotalScore, ba.BlockCount, ba.PromotedAt, ba.HistoryJSON); err != nil {
 				m.log(logging.LevelWarning, "STATE_SYNC", "Failed to apply bad actor %s from leader: %v", ba.IP, err)
 			}
 		}

@@ -385,7 +385,7 @@ func TestApplyBadActorFromPeer(t *testing.T) {
 	promotedAt := time.Now().Add(-1 * time.Hour)
 
 	// Apply bad actor from peer
-	err := h.p.ApplyBadActorFromPeer("10.0.0.99", 6.0, 6, promotedAt)
+	err := h.p.ApplyBadActorFromPeer("10.0.0.99", 6.0, 6, promotedAt, "")
 	require.NoError(t, err)
 
 	// Verify it's in the database
@@ -411,6 +411,23 @@ func TestApplyBadActorFromPeer(t *testing.T) {
 	assert.True(t, found, "Expected cluster sync log message")
 }
 
+func TestApplyBadActorFromPeer_PreservesHistory(t *testing.T) {
+	h := newBAHarness(t, 5.0)
+
+	promotedAt := time.Now().Add(-1 * time.Hour)
+	// Peer supplies its own block history; the local node has no events for
+	// this IP, so without the fix the history would be regenerated as "null".
+	history := `[{"ts":"2026-08-31T09:00:00Z","r":"abusers-444@musicbrainz.org"}]`
+
+	err := h.p.ApplyBadActorFromPeer("10.0.0.42", 10.0, 20, promotedAt, history)
+	require.NoError(t, err)
+
+	ba, err := persistence.GetBadActor(h.db, "10.0.0.42")
+	require.NoError(t, err)
+	require.NotNil(t, ba)
+	assert.Equal(t, history, ba.HistoryJSON, "peer history should be preserved verbatim")
+}
+
 func TestApplyBadActorFromPeer_AlreadyExists(t *testing.T) {
 	h := newBAHarness(t, 5.0)
 
@@ -427,7 +444,7 @@ func TestApplyBadActorFromPeer_AlreadyExists(t *testing.T) {
 	countBefore := len(h.blockReasons)
 	h.blockReasonsMu.Unlock()
 
-	err = h.p.ApplyBadActorFromPeer("10.0.0.99", 6.0, 6, promotedAt)
+	err = h.p.ApplyBadActorFromPeer("10.0.0.99", 6.0, 6, promotedAt, "")
 	require.NoError(t, err)
 
 	h.blockReasonsMu.Lock()

@@ -533,7 +533,12 @@ func (p *Processor) GetRecentParseErrors() []string {
 
 // ApplyBadActorFromPeer inserts a bad actor received from a cluster peer
 // and issues a block to HAProxy. Skips if already a bad actor.
-func (p *Processor) ApplyBadActorFromPeer(ip string, score float64, blockCount int, promotedAt time.Time) error {
+//
+// historyJSON is the peer's block history. It is stored verbatim so the
+// originating node's history is preserved — block events themselves are not
+// synced between cluster nodes, so it cannot be reconstructed locally. When
+// empty, PromoteToBadActorWithHistory falls back to the local events table.
+func (p *Processor) ApplyBadActorFromPeer(ip string, score float64, blockCount int, promotedAt time.Time, historyJSON string) error {
 	if !p.PersistenceEnabled || p.DB == nil {
 		return nil
 	}
@@ -544,7 +549,7 @@ func (p *Processor) ApplyBadActorFromPeer(ip string, score float64, blockCount i
 	}
 
 	p.PersistenceMutex.Lock()
-	err := persistence.PromoteToBadActor(p.DB, ip, score, blockCount, promotedAt)
+	err := persistence.PromoteToBadActorWithHistory(p.DB, ip, score, blockCount, promotedAt, historyJSON)
 	p.PersistenceMutex.Unlock()
 	if err != nil {
 		return err
