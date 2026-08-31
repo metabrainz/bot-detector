@@ -229,6 +229,41 @@ func TestHelpHandler_JSON(t *testing.T) {
 	}
 }
 
+func TestHelpHandler_BotctlFilter(t *testing.T) {
+	rr := httptest.NewRecorder()
+	// ?botctl spans all roles but includes only botctl-marked endpoints.
+	req := httptest.NewRequest("GET", "/api/v1/help?botctl", nil)
+	helpHandler("api", true).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", rr.Code)
+	}
+	var result []map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("Invalid JSON: %v", err)
+	}
+	if len(result) == 0 {
+		t.Fatal("expected some botctl endpoints")
+	}
+	sawMetrics := false
+	for _, e := range result {
+		if e["botctl"] != true {
+			t.Errorf("non-botctl endpoint leaked: %v", e["path"])
+		}
+		// Internal cluster endpoints must never appear.
+		if p, _ := e["path"].(string); contains(p, "/cluster/internal/") {
+			t.Errorf("internal endpoint leaked into botctl view: %v", p)
+		}
+		if e["role"] == "metrics" {
+			sawMetrics = true
+		}
+	}
+	// The botctl view must span beyond role=api (e.g. metrics endpoints).
+	if !sawMetrics {
+		t.Error("expected botctl view to include metrics endpoints (spans roles)")
+	}
+}
+
 func TestAPIUnblockIPHandler_NoBlocker(t *testing.T) {
 	p := newBadActorsProvider(nil)
 
