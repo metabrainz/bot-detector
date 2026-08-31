@@ -546,41 +546,75 @@ func GetScore(db *sql.DB, ip string) (*ScoreInfo, error) {
 	return &s, nil
 }
 
-// PromoteToBadActor inserts an IP into the bad_actors table with history from recent events.
+// PromoteToBadActor inserts an IP into the bad_actors table with history
+// reconstructed from the local events table. Use this for locally-detected
+// bad actors, where the events table holds the block history.
 func PromoteToBadActor(db *sql.DB, ip string, score float64, blockCount int, timestamp time.Time) error {
-	// Build history from recent events
-	rows, err := db.Query(`
-		SELECT e.timestamp, r.reason
-		FROM events e LEFT JOIN reasons r ON r.id = e.reason_id
-		WHERE e.ip = ? AND e.event_type = 'block'
-		ORDER BY e.timestamp DESC LIMIT 50`, ip)
-	if err != nil {
-		return fmt.Errorf("failed to query event history: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
+	return PromoteToBadActorWithHistory(db, ip, score, blockCount, timestamp, "")
+}
 
-	type histEntry struct {
-		Timestamp string `json:"ts"`
-		Reason    string `json:"r"`
-	}
-	var history []histEntry
-	for rows.Next() {
-		var tsUnix int64
-		var reason sql.NullString
-		if err := rows.Scan(&tsUnix, &reason); err != nil {
-			continue
+// PromoteToBadActorWithHistory inserts an IP into the bad_actors table.
+//
+// If suppliedHistory is a non-empty, valid history JSON array (e.g. received
+// from a cluster peer), it is stored verbatim. This preserves the originating
+// node's block history, which cannot be reconstructed locally because block
+// events are not synced between cluster nodes.
+//
+// If suppliedHistory is empty (or the literal "null"/"[]"), history is rebuilt
+// from the local events table instead — the behavior used for locally-detected
+// bad actors.
+func PromoteToBadActorWithHistory(db *sql.DB, ip string, score float64, blockCount int, timestamp time.Time, suppliedHistory string) error {
+	historyJSON := suppliedHistory
+	if !isPopulatedHistory(historyJSON) {
+		// Build history from recent local events.
+		rows, err := db.Query(`
+			SELECT e.timestamp, r.reason
+			FROM events e LEFT JOIN reasons r ON r.id = e.reason_id
+			WHERE e.ip = ? AND e.event_type = 'block'
+			ORDER BY e.timestamp DESC LIMIT 50`, ip)
+		if err != nil {
+			return fmt.Errorf("failed to query event history: %w", err)
 		}
-		history = append(history, histEntry{Timestamp: unixToTime(tsUnix).Format(time.RFC3339), Reason: nullStringValue(reason)})
+		defer func() { _ = rows.Close() }()
+
+		type histEntry struct {
+			Timestamp string `json:"ts"`
+			Reason    string `json:"r"`
+		}
+		var history []histEntry
+		for rows.Next() {
+			var tsUnix int64
+			var reason sql.NullString
+			if err := rows.Scan(&tsUnix, &reason); err != nil {
+				continue
+			}
+			history = append(history, histEntry{Timestamp: unixToTime(tsUnix).Format(time.RFC3339), Reason: nullStringValue(reason)})
+		}
+
+		marshaled, _ := json.Marshal(history)
+		historyJSON = string(marshaled)
 	}
 
-	historyJSON, _ := json.Marshal(history)
-
-	_, err = db.Exec(`INSERT OR REPLACE INTO bad_actors (ip, promoted_at, total_score, block_count, history_json)
-		VALUES (?, ?, ?, ?, ?)`, ip, timeToUnix(timestamp), score, blockCount, string(historyJSON))
+	_, err := db.Exec(`INSERT OR REPLACE INTO bad_actors (ip, promoted_at, total_score, block_count, history_json)
+		VALUES (?, ?, ?, ?, ?)`, ip, timeToUnix(timestamp), score, blockCount, historyJSON)
 	if err != nil {
 		return fmt.Errorf("failed to promote to bad actor: %w", err)
 	}
 	return nil
+}
+
+// isPopulatedHistory reports whether a history JSON string carries at least one
+// entry. Empty strings and the JSON "null"/"[]" markers are treated as empty so
+// the caller falls back to reconstructing history from local events.
+func isPopulatedHistory(historyJSON string) bool {
+	if historyJSON == "" {
+		return false
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal([]byte(historyJSON), &entries); err != nil {
+		return false
+	}
+	return len(entries) > 0
 }
 
 // IsBadActor returns true if the IP is in the bad_actors table.

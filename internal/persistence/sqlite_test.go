@@ -558,6 +558,76 @@ func TestPromoteToBadActor(t *testing.T) {
 	assert.NotEmpty(t, ba.HistoryJSON)
 }
 
+func TestPromoteToBadActorWithHistory_PreservesSuppliedHistory(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().Truncate(time.Second)
+
+	// No local events exist for this IP (as when received from a cluster peer:
+	// block events are not synced). A populated history is supplied instead.
+	supplied := `[{"ts":"2026-08-31T09:00:00Z","r":"abusers-444@musicbrainz.org"}]`
+
+	err := PromoteToBadActorWithHistory(db, "9.9.9.9", 10.0, 20, now, supplied)
+	require.NoError(t, err)
+
+	ba, err := GetBadActor(db, "9.9.9.9")
+	require.NoError(t, err)
+	require.NotNil(t, ba)
+	// Supplied history must be stored verbatim, not regenerated (which would
+	// yield "null" because there are no local events).
+	assert.Equal(t, supplied, ba.HistoryJSON)
+}
+
+func TestPromoteToBadActorWithHistory_FallsBackToEventsWhenEmpty(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().Truncate(time.Second)
+
+	require.NoError(t, InsertEvent(db, now.Add(-1*time.Hour), EventTypeBlock, "1.2.3.4", "chainX", 1*time.Hour, ""))
+
+	// Empty supplied history → reconstruct from local events.
+	err := PromoteToBadActorWithHistory(db, "1.2.3.4", 5.0, 5, now, "")
+	require.NoError(t, err)
+
+	ba, err := GetBadActor(db, "1.2.3.4")
+	require.NoError(t, err)
+	require.NotNil(t, ba)
+	assert.Contains(t, ba.HistoryJSON, "chainX")
+}
+
+func TestPromoteToBadActorWithHistory_EmptyMarkersFallBack(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().Truncate(time.Second)
+
+	// "null" and "[]" are treated as empty: with no local events, history
+	// becomes the JSON "null" marker (nil slice), documenting the fallback.
+	for _, marker := range []string{"null", "[]"} {
+		ip := "5.5.5." + marker
+		err := PromoteToBadActorWithHistory(db, ip, 5.0, 5, now, marker)
+		require.NoError(t, err)
+
+		ba, err := GetBadActor(db, ip)
+		require.NoError(t, err)
+		require.NotNil(t, ba)
+		// No events and no usable supplied history → nil slice marshals to "null".
+		assert.Equal(t, "null", ba.HistoryJSON)
+	}
+}
+
+func TestIsPopulatedHistory(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"", false},
+		{"null", false},
+		{"[]", false},
+		{"not json", false},
+		{`[{"ts":"2026-08-31T09:00:00Z","r":"chain"}]`, true},
+	}
+	for _, c := range cases {
+		assert.Equalf(t, c.want, isPopulatedHistory(c.in), "isPopulatedHistory(%q)", c.in)
+	}
+}
+
 func TestIsBadActor(t *testing.T) {
 	db := openTestDB(t)
 	now := time.Now().Truncate(time.Second)

@@ -233,7 +233,7 @@ func fetchInitialStateFromCluster(p *app.Processor) (time.Time, error) {
 
 	// Apply bad actors from leader
 	for _, ba := range peerBadActors {
-		_ = p.ApplyBadActorFromPeer(ba.IP, ba.TotalScore, ba.BlockCount, ba.PromotedAt)
+		_ = p.ApplyBadActorFromPeer(ba.IP, ba.TotalScore, ba.BlockCount, ba.PromotedAt, ba.HistoryJSON)
 	}
 
 	modeStr := "gz,full"
