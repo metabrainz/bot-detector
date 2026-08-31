@@ -39,11 +39,14 @@ var registry = []commandSpec{
 	{"config", "archive", "[-o <file>]", "Download config + dependencies as a .tar.gz", cmdConfigArchive},
 
 	{"metrics", "show", "[--aggregate]", "Show node metrics (or cluster-wide with --aggregate)", cmdMetricsShow},
+	{"metrics", "steps", "", "Show step execution counts", cmdMetricsSteps},
+	{"metrics", "websites", "", "Show multi-website statistics", cmdMetricsWebsites},
+	{"metrics", "parse-errors", "", "Show recent log lines that failed to parse", cmdMetricsParseErrors},
 
 	{"cluster", "status", "", "Show this node's cluster status", cmdClusterStatus},
 	{"cluster", "state", "[--reason <r>]", "Show merged cluster block state", cmdClusterState},
 
-	{"endpoints", "", "", "List the instance's API endpoints", cmdEndpoints},
+	{"endpoints", "", "[--all]", "List botctl-exposed endpoints (--all shows every server endpoint)", cmdEndpoints},
 }
 
 // lookupCommand finds a handler for a group+command pair. Commands with an

@@ -12,64 +12,78 @@ type endpoint struct {
 	Description string `json:"description"`
 	ContentType string `json:"content_type"`
 	Role        string `json:"role"`
+	// Botctl marks endpoints exposed by the botctl CLI. This is the single
+	// source of truth for which endpoints botctl provides access to. Internal
+	// cluster (leader<->follower) endpoints are never marked.
+	Botctl bool `json:"botctl"`
 }
 
 var allEndpoints = []endpoint{
 	// Help
-	{"GET", "/help", "List all endpoints (plain text)", "text/plain", "all"},
-	{"GET", "/api/v1/help", "List API endpoints (JSON)", "application/json", "api"},
+	{"GET", "/help", "List all endpoints (plain text)", "text/plain", "all", false},
+	{"GET", "/api/v1/help", "List API endpoints (JSON)", "application/json", "api", true},
 
 	// Metrics
-	{"GET", "/stats", "Metrics dashboard", "text/plain", "metrics"},
-	{"GET", "/stats/steps", "Step execution counts", "text/plain", "metrics"},
-	{"GET", "/stats/websites", "Multi-website statistics", "text/plain", "metrics"},
-	{"GET", "/stats/bad-actors", "Bad actor statistics", "text/plain", "metrics"},
-	{"GET", "/stats/parse-errors", "Recent parse error log lines", "text/plain", "metrics"},
+	{"GET", "/stats", "Metrics dashboard", "text/plain", "metrics", true},
+	{"GET", "/stats/steps", "Step execution counts", "text/plain", "metrics", true},
+	{"GET", "/stats/websites", "Multi-website statistics", "text/plain", "metrics", true},
+	{"GET", "/stats/bad-actors", "Bad actor statistics", "text/plain", "metrics", false},
+	{"GET", "/stats/parse-errors", "Recent parse error log lines", "text/plain", "metrics", true},
 
 	// API
-	{"GET", "/config", "Raw YAML configuration", "application/yaml", "api"},
-	{"GET", "/config/archive", "Tar.gz archive of config + dependencies", "application/gzip", "api"},
-	{"GET", "/ip/{ip}", "IP block status (cluster-aware)", "text/plain", "api"},
-	{"DELETE", "/ip/{ip}/clear", "Clear IP from all state (cluster-aware)", "text/plain", "api"},
-	{"GET|POST", "/ip/{ip}/unblock", "Fast unblock IP (cluster-aware)", "text/plain", "api"},
-	{"GET", "/api/v1/ip/{ip}", "IP block status (cluster-aware)", "application/json", "api"},
-	{"POST", "/api/v1/ip/{ip}/clear", "Clear IP from all state (cluster-aware)", "application/json", "api"},
-	{"POST", "/api/v1/ip/{ip}/unblock", "Fast unblock IP (cluster-aware)", "application/json", "api"},
-	{"POST", "/api/v1/blocks/unblock?reason=<reason>", "Unblock all IPs blocked by reason (cluster-aware)", "application/json", "api"},
-	{"GET", "/api/v1/bad-actors", "List all bad actors", "application/json", "api"},
-	{"GET", "/api/v1/bad-actors/export", "Bad actor IPs, one per line", "text/plain", "api"},
-	{"GET", "/api/v1/bad-actors/stats", "Bad actor statistics", "application/json", "api"},
-	{"DELETE", "/api/v1/bad-actors?reason=<reason>|all[&unblock]", "Remove bad actors by reason or all (cluster-aware)", "application/json", "api"},
+	{"GET", "/config", "Raw YAML configuration", "application/yaml", "api", true},
+	{"GET", "/config/archive", "Tar.gz archive of config + dependencies", "application/gzip", "api", true},
+	{"GET", "/ip/{ip}", "IP block status (cluster-aware)", "text/plain", "api", false},
+	{"DELETE", "/ip/{ip}/clear", "Clear IP from all state (cluster-aware)", "text/plain", "api", false},
+	{"GET|POST", "/ip/{ip}/unblock", "Fast unblock IP (cluster-aware)", "text/plain", "api", false},
+	{"GET", "/api/v1/ip/{ip}", "IP block status (cluster-aware)", "application/json", "api", true},
+	{"POST", "/api/v1/ip/{ip}/clear", "Clear IP from all state (cluster-aware)", "application/json", "api", true},
+	{"POST", "/api/v1/ip/{ip}/unblock", "Fast unblock IP (cluster-aware)", "application/json", "api", true},
+	{"POST", "/api/v1/blocks/unblock?reason=<reason>", "Unblock all IPs blocked by reason (cluster-aware)", "application/json", "api", true},
+	{"GET", "/api/v1/bad-actors", "List all bad actors", "application/json", "api", true},
+	{"GET", "/api/v1/bad-actors/export", "Bad actor IPs, one per line", "text/plain", "api", true},
+	{"GET", "/api/v1/bad-actors/stats", "Bad actor statistics", "application/json", "api", true},
+	{"DELETE", "/api/v1/bad-actors?reason=<reason>|all[&unblock]", "Remove bad actors by reason or all (cluster-aware)", "application/json", "api", true},
 
 	// Cluster
-	{"GET", "/cluster/status", "Node cluster status", "text/plain", "cluster"},
-	{"GET", "/cluster/metrics", "Node metrics summary", "text/plain", "cluster"},
-	{"GET", "/cluster/metrics/aggregate", "Cluster-wide aggregated metrics (leader only)", "application/json", "cluster"},
-	{"GET", "/api/v1/cluster/status", "Node cluster status", "application/json", "cluster"},
-	{"GET", "/api/v1/cluster/metrics", "Node metrics snapshot", "application/json", "cluster"},
-	{"GET", "/api/v1/cluster/metrics/aggregate", "Cluster-wide aggregated metrics (leader only)", "application/json", "cluster"},
-	{"GET", "/api/v1/cluster/internal/ip/{ip}", "Internal: query follower IP status", "application/json", "cluster"},
-	{"DELETE", "/api/v1/cluster/internal/ip/{ip}/clear", "Internal: broadcast clear to follower", "text/plain", "cluster"},
-	{"GET|POST", "/api/v1/cluster/internal/ip/{ip}/unblock", "Internal: broadcast unblock to follower", "text/plain", "cluster"},
-	{"GET", "/api/v1/cluster/internal/persistence/state", "Internal: persistence state for sync", "application/json", "cluster"},
-	{"GET", "/api/v1/cluster/internal/blocks/by-reason", "Internal: blocked IPs by reason for sync", "application/json", "cluster"},
-	{"GET", "/api/v1/cluster/state/merged", "Merged cluster state", "application/json", "cluster"},
-	{"DELETE", "/api/v1/cluster/internal/bad-actors?reason=<reason>|all", "Internal: broadcast bad actor removal to follower", "text/plain", "cluster"},
-	{"GET", "/api/v1/challenge/{ip}", "Check if an IP is challenged (returns difficulty)", "application/json", "api"},
-	{"POST", "/api/v1/challenge/{ip}", "Manually challenge an IP", "application/json", "api"},
-	{"DELETE", "/api/v1/challenge/{ip}", "Remove the challenge for an IP", "application/json", "api"},
+	{"GET", "/cluster/status", "Node cluster status", "text/plain", "cluster", false},
+	{"GET", "/cluster/metrics", "Node metrics summary", "text/plain", "cluster", false},
+	{"GET", "/cluster/metrics/aggregate", "Cluster-wide aggregated metrics (leader only)", "application/json", "cluster", false},
+	{"GET", "/api/v1/cluster/status", "Node cluster status", "application/json", "cluster", true},
+	{"GET", "/api/v1/cluster/metrics", "Node metrics snapshot", "application/json", "cluster", true},
+	{"GET", "/api/v1/cluster/metrics/aggregate", "Cluster-wide aggregated metrics (leader only)", "application/json", "cluster", true},
+	{"GET", "/api/v1/cluster/internal/ip/{ip}", "Internal: query follower IP status", "application/json", "cluster", false},
+	{"DELETE", "/api/v1/cluster/internal/ip/{ip}/clear", "Internal: broadcast clear to follower", "text/plain", "cluster", false},
+	{"GET|POST", "/api/v1/cluster/internal/ip/{ip}/unblock", "Internal: broadcast unblock to follower", "text/plain", "cluster", false},
+	{"GET", "/api/v1/cluster/internal/persistence/state", "Internal: persistence state for sync", "application/json", "cluster", false},
+	{"GET", "/api/v1/cluster/internal/blocks/by-reason", "Internal: blocked IPs by reason for sync", "application/json", "cluster", false},
+	{"GET", "/api/v1/cluster/state/merged", "Merged cluster state", "application/json", "cluster", true},
+	{"DELETE", "/api/v1/cluster/internal/bad-actors?reason=<reason>|all", "Internal: broadcast bad actor removal to follower", "text/plain", "cluster", false},
+	{"GET", "/api/v1/challenge/{ip}", "Check if an IP is challenged (returns difficulty)", "application/json", "api", true},
+	{"POST", "/api/v1/challenge/{ip}", "Manually challenge an IP", "application/json", "api", true},
+	{"DELETE", "/api/v1/challenge/{ip}", "Remove the challenge for an IP", "application/json", "api", true},
 }
 
 // helpHandler returns endpoint listing.
-// filter selects which endpoints to include (empty string = all).
+// filter selects which endpoints to include by role (empty string = all).
 // If asJSON is true, returns JSON; otherwise plain text.
+// The `?botctl` query parameter further restricts output to endpoints exposed
+// by the botctl CLI (regardless of the role filter).
 func helpHandler(filter string, asJSON bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		_, botctlOnly := r.URL.Query()["botctl"]
+
 		var result []endpoint
 		for _, e := range allEndpoints {
-			if filter == "" || e.Role == filter {
-				result = append(result, e)
+			if botctlOnly {
+				// botctl view spans all roles; include only marked endpoints.
+				if !e.Botctl {
+					continue
+				}
+			} else if filter != "" && filter != "all" && e.Role != filter {
+				continue
 			}
+			result = append(result, e)
 		}
 
 		if asJSON {

@@ -30,7 +30,9 @@ See the main [README.md](../README.md) for complete `--listen` flag documentatio
 
 *   **Method:** `GET`
 *   **Content-Type:** `application/json`
-*   **Description:** Lists API endpoints as JSON. Each entry includes `method`, `path`, `description`, `content_type`, and `role`.
+*   **Description:** Lists API endpoints as JSON. Each entry includes `method`, `path`, `description`, `content_type`, `role`, and `botctl` (whether the [`botctl`](botctl.md) CLI exposes it).
+*   **Parameters:**
+    *   `botctl` (query, no value) - Restrict the listing to endpoints exposed by the botctl CLI. Spans all roles but excludes internal cluster (leader↔follower) endpoints.
 *   **Role:** `api`
 
 ### `/stats`

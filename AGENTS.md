@@ -42,7 +42,7 @@ This runs `gofmt`, `go vet`, `golangci-lint`, `go test -race`, `go build`, dry-r
 - Small, focused commits — one logical change per commit
 - Commit messages: `area: short description` (e.g., `parser: handle empty quoted request`)
 - Config fields: add to both `ApplicationConfig` (runtime) and `ApplicationConfigYAML` (parsing), plus the constant default in `constants.go`
-- New endpoints: register in `server.go`, add to `allEndpoints` in `handlers_help.go`, document in `docs/API.md`
+- New endpoints: register in `server.go`, add to `allEndpoints` in `handlers_help.go` (set the `Botctl` flag if the botctl CLI should expose it — never for internal cluster endpoints), document in `docs/API.md`. If `Botctl:true`, add a corresponding `cmd/botctl` command and document it in `docs/botctl.md`.
 - New config fields: document in `docs/Configuration.md`
 - New CLI flags: document in `README.md` (CLI flags table + relevant sections)
 

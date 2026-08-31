@@ -114,6 +114,34 @@ func cmdMetricsShow(ctx *cmdContext) int {
 	return exitOK
 }
 
+// plainStatsCmd returns a command that fetches a plain-text /stats/* endpoint
+// and prints it verbatim.
+func plainStatsCmd(path, usage string) commandFunc {
+	return func(ctx *cmdContext) int {
+		if len(ctx.args) != 0 {
+			return usageErr(usage)
+		}
+		body, err := ctx.c.do("GET", path, nil)
+		if err != nil {
+			return fail(err)
+		}
+		printRaw(body)
+		return exitOK
+	}
+}
+
+func cmdMetricsSteps(ctx *cmdContext) int {
+	return plainStatsCmd("/stats/steps", "usage: botctl metrics steps")(ctx)
+}
+
+func cmdMetricsWebsites(ctx *cmdContext) int {
+	return plainStatsCmd("/stats/websites", "usage: botctl metrics websites")(ctx)
+}
+
+func cmdMetricsParseErrors(ctx *cmdContext) int {
+	return plainStatsCmd("/stats/parse-errors", "usage: botctl metrics parse-errors")(ctx)
+}
+
 func cmdClusterStatus(ctx *cmdContext) int {
 	if len(ctx.args) != 0 {
 		return usageErr("usage: botctl cluster status")
@@ -198,10 +226,18 @@ func cmdClusterState(ctx *cmdContext) int {
 }
 
 func cmdEndpoints(ctx *cmdContext) int {
-	if len(ctx.args) != 0 {
-		return usageErr("usage: botctl endpoints")
+	all, rest := extractBoolFlag(ctx.args, "--all")
+	if len(rest) != 0 {
+		return usageErr("usage: botctl endpoints [--all]")
 	}
-	body, err := ctx.c.do("GET", "/api/v1/help", nil)
+
+	// By default, show only endpoints botctl exposes (?botctl). --all shows the
+	// full server endpoint table across all roles.
+	q := url.Values{}
+	if !all {
+		q.Set("botctl", "")
+	}
+	body, err := ctx.c.do("GET", "/api/v1/help", q)
 	if err != nil {
 		return fail(err)
 	}
@@ -214,13 +250,25 @@ func cmdEndpoints(ctx *cmdContext) int {
 		Path        string `json:"path"`
 		Description string `json:"description"`
 		Role        string `json:"role"`
+		Botctl      bool   `json:"botctl"`
 	}
 	if json.Unmarshal(body, &eps) != nil {
 		printRaw(body)
 		return exitOK
 	}
 	for _, e := range eps {
-		fmt.Printf("%-7s %-48s %s\n", e.Method, e.Path, e.Description)
+		if all {
+			mark := " "
+			if e.Botctl {
+				mark = "*"
+			}
+			fmt.Printf("%s %-7s %-48s %-8s %s\n", mark, e.Method, e.Path, e.Role, e.Description)
+		} else {
+			fmt.Printf("%-7s %-48s %s\n", e.Method, e.Path, e.Description)
+		}
+	}
+	if all {
+		fmt.Println("\n(* = exposed by botctl)")
 	}
 	return exitOK
 }

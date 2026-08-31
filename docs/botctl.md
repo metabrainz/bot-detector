@@ -140,14 +140,21 @@ escalate-only server-side: higher difficulty wins and TTL only extends.
 | Command | Endpoint | Description |
 | :--- | :--- | :--- |
 | `botctl metrics show [--aggregate]` | `GET /api/v1/cluster/metrics[/aggregate]` | Node metrics, or cluster-wide with `--aggregate` (leader only). |
+| `botctl metrics steps` | `GET /stats/steps` | Step execution counts. |
+| `botctl metrics websites` | `GET /stats/websites` | Multi-website statistics. |
+| `botctl metrics parse-errors` | `GET /stats/parse-errors` | Recent log lines that failed to parse. |
 | `botctl cluster status` | `GET /api/v1/cluster/status` | This node's role, name, and address. |
 | `botctl cluster state [--reason <r>]` | `GET /api/v1/cluster/state/merged` | Merged cluster block state, optionally filtered by reason. |
-| `botctl endpoints` | `GET /api/v1/help` | List the instance's API endpoints. |
+| `botctl endpoints [--all]` | `GET /api/v1/help?botctl` | List botctl-exposed endpoints. `--all` shows every server endpoint (marking which are botctl-exposed). |
 
 > The internal `/api/v1/cluster/internal/*` endpoints (leader↔follower
 > plumbing) are intentionally **not** exposed by `botctl`, because calling them
 > directly can desync cluster state. Use the cluster-aware public commands
 > above; the leader broadcasts changes to followers automatically.
+>
+> Which endpoints `botctl` exposes is tracked by a `botctl` flag on each entry
+> in the server's endpoint registry (the single source of truth); `botctl
+> endpoints` reflects it via the `?botctl` help filter.
 
 ## Examples
 
